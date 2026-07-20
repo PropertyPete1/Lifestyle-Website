@@ -103,3 +103,19 @@
 
 ## AI Search "How It Works" Tooltip (revision round 4)
 - [x] Add "How it works" tooltip/popover next to the AI search bar (homepage + /search) with plain-language explanation and 4 tappable example queries that run the search (verified in browser: popover opens, example click runs search → "3 homes match your search")
+
+## Convince Your Partner (AI-powered shareable tool)
+- [x] Add ANTHROPIC_API_KEY as server-side secret via secrets flow (never client-side)
+- [x] Schema: partner_pitches table (slug, answers, partnerName, city, generated text, createdAt) for cached shareable results
+- [x] Server: Anthropic Claude integration (server-side only) with scoped system prompt (warm persuasive real-estate voice, real market characteristics, no invented claims, no rates/numeric financial promises in AI text) + graceful fallback on API failure
+- [x] Vitest validating the Anthropic key + pitch generation module (live Claude call passes, compliance regex checks no %/$ in AI text)
+- [x] Page /convince: intro screen with exact explainer copy + Start button
+- [x] Quiz: multi-select dream-life options (8 specified) + optional partner first name
+- [x] Result screen: AI dream scene + supporting stats tied to selections + fixed compliance financing line ("Ask us about builder incentive buydowns — as low as 4.99% since 2021" with disclosure) kept outside AI generation
+- [x] Unique shareable URL per result (/convince/:slug) that reproduces the identical cached result — no regeneration on reload (verified: identical md5 across reads)
+- [x] One-tap share: native share / copy link / text (SMS)
+- [x] Optional soft CTA: "Want us to build your full moving plan?" email capture tagged "Website - Convince Your Partner" in FUB
+- [x] Placement: prominent "Convince Your Partner" card on /links + fun secondary placement on homepage
+- [x] End-to-end test: quiz → generation → share link reproduces same result (36/36 tests pass); checkpoint
+- [x] Harden AI compliance: system prompt forbids comparative affordability claims; violatesCompliance() guard rejects/regenerates non-compliant outputs; vitest coverage (39/39 pass); non-compliant cached test row deleted
+- [x] Full browser E2E: quiz (2 selections + name "Taylor") → AI result rendered → shared /convince/8soap7g9wn reproduces identical pitch; then checkpoint

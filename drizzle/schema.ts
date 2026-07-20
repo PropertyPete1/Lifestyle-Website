@@ -143,3 +143,21 @@ export const leads = mysqlTable("leads", {
 });
 export type Lead = typeof leads.$inferSelect;
 export type InsertLead = typeof leads.$inferInsert;
+
+/**
+ * Convince Your Partner: cached AI-generated dream-scene pitches.
+ * Each row is one generated result tied to a unique shareable slug so the same
+ * link always reproduces the identical pitch (consistency + API cost control).
+ */
+export const partnerPitches = mysqlTable("partner_pitches", {
+  id: int("id").autoincrement().primaryKey(),
+  slug: varchar("slug", { length: 24 }).notNull().unique(),
+  partnerName: varchar("partnerName", { length: 60 }),
+  selections: text("selections").notNull(), // JSON array of lifestyle picks
+  city: varchar("city", { length: 40 }).notNull(), // matched market
+  pitch: text("pitch").notNull(), // AI-generated dream scene (no rates/financial promises)
+  stats: text("stats").notNull(), // JSON array of supporting stat strings
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type PartnerPitch = typeof partnerPitches.$inferSelect;
+export type InsertPartnerPitch = typeof partnerPitches.$inferInsert;

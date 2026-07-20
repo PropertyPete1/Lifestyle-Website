@@ -8,6 +8,14 @@ import * as db from "./db";
 import { computeIntent, sendToFub } from "./fub";
 import { extractCriteria, matchListings } from "./aiSearch";
 import { notifyOwner } from "./_core/notification";
+import { nanoid } from "nanoid";
+import {
+  LIFESTYLE_OPTIONS,
+  fallbackPitch,
+  generatePitch,
+  matchCity,
+  pickStats,
+} from "./partnerPitch";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
@@ -52,6 +60,57 @@ const leadInput = z.object({
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
+
+  /** Convince Your Partner — AI dream-scene pitches, cached per shareable slug. */
+  partnerPitch: router({
+    generate: publicProcedure
+      .input(
+        z.object({
+          selections: z.array(z.enum(LIFESTYLE_OPTIONS)).min(1).max(8),
+          partnerName: z.string().trim().max(60).optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const partnerName = input.partnerName?.split(/\s+/)[0] || undefined; // first name only
+        const city = matchCity(input.selections);
+        const stats = pickStats(input.selections, city);
+        let pitch: string;
+        let aiGenerated = true;
+        try {
+          pitch = await generatePitch({ selections: input.selections, partnerName, city });
+        } catch (err) {
+          // Graceful fallback — never a broken page
+          console.error("[partnerPitch] Claude generation failed:", err);
+          pitch = fallbackPitch({ selections: input.selections, partnerName, city });
+          aiGenerated = false;
+        }
+        const slug = nanoid(10);
+        await db.createPartnerPitch({
+          slug,
+          partnerName: partnerName ?? null,
+          selections: JSON.stringify(input.selections),
+          city,
+          pitch,
+          stats: JSON.stringify(stats),
+        });
+        return { slug, city, pitch, stats, partnerName, aiGenerated } as const;
+      }),
+    /** Shared links reproduce the identical cached result — never regenerate. */
+    getBySlug: publicProcedure
+      .input(z.object({ slug: z.string().min(1).max(24) }))
+      .query(async ({ input }) => {
+        const row = await db.getPartnerPitchBySlug(input.slug);
+        if (!row) return null;
+        return {
+          slug: row.slug,
+          city: row.city,
+          pitch: row.pitch,
+          stats: JSON.parse(row.stats) as string[],
+          partnerName: row.partnerName ?? undefined,
+          selections: JSON.parse(row.selections) as string[],
+        };
+      }),
+  }),
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {

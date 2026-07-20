@@ -19,6 +19,7 @@ import Contact from "./pages/Contact";
 import Sell from "./pages/Sell";
 import Join from "./pages/Join";
 import Links from "./pages/Links";
+import Convince, { ConvinceShared } from "./pages/Convince";
 import Privacy from "./pages/Privacy";
 import Admin from "./pages/Admin";
 
@@ -63,6 +64,8 @@ function Router() {
       <Route path={"/sell"} component={Sell} />
       <Route path={"/join"} component={Join} />
       <Route path={"/links"} component={Links} />
+      <Route path={"/convince"} component={Convince} />
+      <Route path={"/convince/:slug"} component={ConvinceShared} />
       <Route path={"/privacy"} component={Privacy} />
       <Route path={"/admin"} component={Admin} />
       <Route path={"/admin/:tab"} component={Admin} />

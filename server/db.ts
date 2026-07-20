@@ -3,11 +3,13 @@ import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertLead,
   InsertListing,
+  InsertPartnerPitch,
   bioLinks,
   InsertUser,
   leads,
   listings,
   neighborhoods,
+  partnerPitches,
   siteStats,
   teamMembers,
   testimonials,
@@ -295,4 +297,18 @@ export async function getLeads() {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(leads).orderBy(desc(leads.createdAt));
+}
+
+/* ---------------- Partner pitches (Convince Your Partner) ---------------- */
+export async function createPartnerPitch(data: InsertPartnerPitch) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.insert(partnerPitches).values(data);
+}
+
+export async function getPartnerPitchBySlug(slug: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(partnerPitches).where(eq(partnerPitches.slug, slug)).limit(1);
+  return rows[0];
 }

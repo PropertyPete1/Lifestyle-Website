@@ -163,6 +163,25 @@ export default function Home() {
         </div>
       </section>
 
+      {/* ============ CONVINCE YOUR PARTNER (fun secondary placement) ============ */}
+      <section className="border-b border-border/60">
+        <div className="mx-auto max-w-[1400px] px-5 lg:px-8 py-14 lg:py-16">
+          <div className="reveal flex flex-col sm:flex-row items-center justify-between gap-6 border border-gold/30 bg-gold/[0.04] px-8 py-8">
+            <div className="text-center sm:text-left">
+              <p className="eyebrow text-gold">One of you is already sold on Texas?</p>
+              <p className="mt-2 font-serif text-2xl md:text-3xl">
+                Let us write the case for the other one.
+              </p>
+            </div>
+            <Link
+              href="/convince"
+              className="shrink-0 inline-flex items-center gap-3 border border-gold text-gold px-8 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:bg-gold hover:text-primary-foreground transition-colors">
+              Convince Your Partner <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {/* ============ NEW CONSTRUCTION ============ */}
       <section className="mx-auto max-w-[1400px] px-5 lg:px-8 py-20 lg:py-28 grid lg:grid-cols-2 gap-12 items-center">
         <div className="reveal">

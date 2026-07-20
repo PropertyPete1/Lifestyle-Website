@@ -36,15 +36,30 @@ export default function Team() {
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 lg:gap-8 mt-12">
             {(team ?? []).map((m) => (
-              <button key={m.id} onClick={() => setSelected(m)} className="text-left group">
-                <div className="aspect-[3/4] bg-secondary overflow-hidden flex items-center justify-center">
+              <button
+                key={m.id}
+                onClick={() => setSelected(m)}
+                className="text-left group focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] hover:-translate-y-1.5">
+                <div className="relative aspect-[3/4] bg-secondary overflow-hidden flex items-center justify-center">
                   {m.photo ? (
-                    <img src={m.photo} alt={m.name} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                    <img src={m.photo} alt={m.name} className="h-full w-full object-cover transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] group-hover:scale-[1.06] group-hover:brightness-[1.08]" />
                   ) : (
-                    <span className="font-serif text-6xl text-gold/60">{m.name.charAt(0)}</span>
+                    <span className="font-serif text-6xl text-gold/60 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] group-hover:scale-110 group-hover:text-gold">
+                      {m.name.charAt(0)}
+                    </span>
                   )}
+                  {/* Inset gold frame, drawn on hover */}
+                  <span aria-hidden className="pointer-events-none absolute inset-3 border border-gold/0 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] group-hover:border-gold/60" />
+                  {/* Bottom gradient + view-profile cue */}
+                  <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/70 to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+                  <span className="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 translate-y-2 text-[10px] uppercase tracking-[0.25em] text-gold opacity-0 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] group-hover:opacity-100 group-hover:translate-y-0">
+                    View Profile
+                  </span>
                 </div>
-                <h2 className="font-sans text-base md:text-lg uppercase tracking-[0.12em] mt-4">{m.name}</h2>
+                <h2 className="relative inline-block font-sans text-base md:text-lg uppercase tracking-[0.12em] mt-4">
+                  {m.name}
+                  <span aria-hidden className="absolute -bottom-0.5 left-0 h-px w-full origin-left scale-x-0 bg-gold transition-transform duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] group-hover:scale-x-100" />
+                </h2>
                 <p className="text-[11px] uppercase tracking-[0.15em] text-gold mt-1">{m.title}</p>
                 {m.license && (
                   <p className="text-[10px] text-muted-foreground mt-1">License #{m.license}</p>

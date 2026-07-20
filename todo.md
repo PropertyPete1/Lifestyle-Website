@@ -74,3 +74,6 @@
 - [x] Peter Allen = "REALTOR® / Owner" and Steven Van Orden = "Broker/Owner" everywhere: team DB records, /join Broker Support card, page copy, code comments, and seed script
 - [x] Steven's title = "Broker/Owner · Designated Broker"; update TREC comment references naming Peter as broker
 - [x] Remove "You responded to a post on Lead Overflow. I have gotten a large response." from /join screening message; start at "In an effort to find the best fit..."
+
+## UX Enhancements
+- [x] Team card hover effect on /team: card lift, photo zoom + brighten, inset gold frame reveal, bottom gradient with "View Profile" cue, gold underline on name, initial-letter glow for placeholder cards

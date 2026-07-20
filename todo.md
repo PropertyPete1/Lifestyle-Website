@@ -119,3 +119,8 @@
 - [x] End-to-end test: quiz → generation → share link reproduces same result (36/36 tests pass); checkpoint
 - [x] Harden AI compliance: system prompt forbids comparative affordability claims; violatesCompliance() guard rejects/regenerates non-compliant outputs; vitest coverage (39/39 pass); non-compliant cached test row deleted
 - [x] Full browser E2E: quiz (2 selections + name "Taylor") → AI result rendered → shared /convince/8soap7g9wn reproduces identical pitch; then checkpoint
+
+## Open Graph preview for shared Convince links
+- [x] Generate a branded OG image (dark/gold, "A letter written for you about your life in Texas") and upload as static asset
+- [x] Server-side OG meta tag injection for /convince/:slug (and /convince) so texts/DMs/social show a rich card (intercepts send/end/sendFile, personalized per slug, HTML-escaped, 42/42 tests pass)
+- [x] Verify OG tags with curl (slug page shows "A letter written for Taylor about life in San Antonio, Texas" + image; other routes untouched); checkpoint

@@ -78,12 +78,8 @@
 ## UX Enhancements
 - [x] Team card hover effect on /team: card lift, photo zoom + brighten, inset gold frame reveal, bottom gradient with "View Profile" cue, gold underline on name, initial-letter glow for placeholder cards
 
-## New Construction Handoff Screen
-- [ ] Secondary CTA "Also Check Live New Construction Inventory" shown with AI search results
-- [ ] Luxury transition dialog: restates parsed criteria (e.g. "4 Bedrooms · Under $600,000 · New Construction")
-- [ ] "Here's what to select" guide mapping criteria to New Home Buddy filter fields (Beds / Price / Build Status etc.)
-- [ ] Optional skippable phone capture tagged "Website - New Construction Handoff" (suppressed if visitor already submitted a form this session)
-- [ ] "Continue to New Construction Search" button opens https://a.nhb.app/u/peter-allen in new tab (no URL params — tool doesn't support them)
+## New Construction Handoff Screen (CANCELLED — superseded)
+- [x] ~~Handoff screen feature~~ CANCELLED by user (Jul 20): AI search and New Construction Search must remain fully independent; the built handoff was removed in the following revision
 
 > CANCELLED (user request Jul 20): AI search and New Construction Search must stay fully independent — no handoff, pre-fill, or bridge.
 

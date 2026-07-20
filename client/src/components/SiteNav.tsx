@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { label: "Home Search", href: "/search" },
   { label: "Home Valuation", href: "/valuation" },
   { label: "Schedule a Consultation", href: "/contact" },
+  { label: "Now Hiring", href: "/join" },
 ];
 
 const SECONDARY_ITEMS = [
@@ -23,14 +24,24 @@ const SECONDARY_ITEMS = [
   { label: "Meet the Team", href: "/team" },
   { label: "Testimonials", href: "/testimonials" },
   { label: "Sell With Us", href: "/sell" },
-  { label: "Join Our Team", href: "/join" },
+  { label: "Now Hiring — Join Our Team", href: "/join" },
   { label: "Links", href: "/links" },
 ];
 
 export default function SiteNav({ solid = false }: { solid?: boolean }) {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
+
+  /** Jump to the Get Started form: scroll if on homepage, otherwise navigate. */
+  const goGetStarted = () => {
+    setOpen(false);
+    if (location === "/") {
+      document.getElementById("get-started")?.scrollIntoView({ behavior: "smooth" });
+    } else {
+      navigate("/get-started");
+    }
+  };
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
@@ -55,7 +66,7 @@ export default function SiteNav({ solid = false }: { solid?: boolean }) {
         <div className="flex h-16 lg:h-20 items-center justify-between gap-4">
           {/* Brokerage wordmark — TREC: brokerage name always prominent */}
           <Link href="/" className="shrink-0">
-            <span className="font-serif text-lg lg:text-xl tracking-[0.14em] text-foreground whitespace-nowrap">
+            <span className="font-serif text-base sm:text-lg lg:text-xl tracking-[0.1em] sm:tracking-[0.14em] text-foreground whitespace-nowrap">
               LIFESTYLE DESIGN <span className="text-gold">REALTY</span>
             </span>
           </Link>
@@ -78,10 +89,21 @@ export default function SiteNav({ solid = false }: { solid?: boolean }) {
             <a href={SITE.phoneHref} className="nav-link text-gold whitespace-nowrap">
               {SITE.phone}
             </a>
+            {/* Persistent high-intent CTA — visible on every page */}
+            <button
+              onClick={goGetStarted}
+              className="nav-link bg-gold text-primary-foreground px-5 py-2.5 hover:bg-gold/90 transition-colors whitespace-nowrap">
+              Get Started
+            </button>
           </nav>
 
           {/* Mobile: phone + hamburger */}
           <div className="flex xl:hidden items-center gap-4">
+            <button
+              onClick={goGetStarted}
+              className="nav-link bg-gold text-primary-foreground px-3.5 py-2 hover:bg-gold/90 transition-colors whitespace-nowrap text-[10px]">
+              Get Started
+            </button>
             <a href={SITE.phoneHref} aria-label={`Call ${SITE.phone}`} className="text-gold">
               <Phone className="h-4 w-4" />
             </a>
@@ -99,6 +121,11 @@ export default function SiteNav({ solid = false }: { solid?: boolean }) {
       {open && (
         <div className="xl:hidden bg-background border-b border-border max-h-[calc(100dvh-4rem)] overflow-y-auto">
           <nav className="px-6 py-6 flex flex-col gap-4">
+            <button
+              onClick={goGetStarted}
+              className="nav-link bg-gold text-primary-foreground px-5 py-3 hover:bg-gold/90 transition-colors text-center">
+              Ready to Buy or Sell? Get Started
+            </button>
             {NAV_ITEMS.map((item, i) => (
               <Link key={`m-${item.label}-${i}`} href={item.href} className="nav-link text-foreground/90 hover:text-gold py-1">
                 {item.label}

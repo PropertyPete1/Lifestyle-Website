@@ -288,11 +288,11 @@ export default function CityFinder() {
                   <p className="mt-4 font-serif italic text-foreground/90">{c.vibe}</p>
                   <p className="mt-3 text-sm text-muted-foreground leading-relaxed">{c.why(answers)}</p>
                   <a
-                    href={SITE.newHomeBuddyUrl}
+                    href={SITE.newConstructionUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="text-cta mt-6 inline-flex items-center gap-2">
-                    Search New Builds in {c.name} <ArrowRight className="h-3.5 w-3.5" />
+                    Find New Builds in {c.name} <ArrowRight className="h-3.5 w-3.5" />
                   </a>
                 </div>
               </div>

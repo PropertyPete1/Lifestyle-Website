@@ -6,6 +6,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
 import { computeIntent, sendToFub } from "./fub";
+import { extractCriteria, matchListings } from "./aiSearch";
 import { notifyOwner } from "./_core/notification";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -32,6 +33,8 @@ const listingInput = z.object({
   hasPool: z.boolean().default(false),
   isNewConstruction: z.boolean().default(false),
   propertyType: z.enum(["Residential", "Multi-Family", "Townhome/Condo", "Land"]).default("Residential"),
+  lat: z.string().optional(),
+  lng: z.string().optional(),
 });
 
 const leadInput = z.object({
@@ -61,6 +64,16 @@ export const appRouter = router({
   listings: router({
     featured: publicProcedure.query(() => db.getFeaturedListings()),
     all: publicProcedure.query(() => db.getAllListings()),
+    /** AI natural-language search: extract criteria via LLM, match against listing data */
+    aiSearch: publicProcedure
+      .input(z.object({ query: z.string().min(2).max(400) }))
+      .query(async ({ input }) => {
+        const [criteria, listings] = await Promise.all([
+          extractCriteria(input.query),
+          db.getAllListings(),
+        ]);
+        return { criteria, results: matchListings(listings, criteria) };
+      }),
     bySlug: publicProcedure
       .input(z.object({ slug: z.string() }))
       .query(({ input }) => db.getListingBySlug(input.slug)),

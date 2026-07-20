@@ -51,6 +51,9 @@ export const listings = mysqlTable("listings", {
   hasPool: boolean("hasPool").default(false).notNull(),
   isNewConstruction: boolean("isNewConstruction").default(false).notNull(),
   propertyType: mysqlEnum("propertyType", ["Residential", "Multi-Family", "Townhome/Condo", "Land"]).default("Residential").notNull(),
+  /** Coordinates for map view (Phase 2 IDX feeds populate automatically) */
+  lat: varchar("lat", { length: 32 }),
+  lng: varchar("lng", { length: 32 }),
   source: mysqlEnum("source", ["cms", "idx"]).default("cms").notNull(),
   brokerAttribution: text("brokerAttribution"),
   mlsDisclaimer: text("mlsDisclaimer"),

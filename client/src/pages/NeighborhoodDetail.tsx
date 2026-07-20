@@ -78,7 +78,7 @@ export default function NeighborhoodDetail() {
             )}
           </div>
           <a
-            href={SITE.newHomeBuddyUrl}
+            href={SITE.newConstructionUrl}
             target="_blank"
             rel="noreferrer"
             className="mt-10 inline-flex items-center gap-3 bg-gold text-primary-foreground px-8 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:bg-gold/90 transition-colors reveal">

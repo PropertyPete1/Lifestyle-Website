@@ -58,3 +58,14 @@
 - [x] End-to-end lead test: submitted via API → stored in DB → synced to FUB with tags (then cleaned up)
 - [x] Admin user provisioned (owner promoted to admin role)
 - [x] Bio links aligned to required set (Home Search, Home Valuation, City Finder, Consultation, New Home Buddy, Contact, Join)
+
+## Revision Round 2 (user request)
+- [x] 1. Hero/featured listings redesign: compact auto-rotating single-listing showcase (5-10s auto-advance, arrows, photo+price+beds/baths/sqft+city+View Details); above-the-fold order: hero headline+CTAs, Get Started form/button, rotating showcase
+- [x] 2. Persistent "Get Started" button in sticky nav on every page, jumping to short buyer/seller intent form (name, phone, email, buy/sell, timeline)
+- [x] 3. Remove visible "New Home Buddy" branding; rebrand as "New Construction Search"/"Find New Builds" (keep link https://a.nhb.app/u/peter-allen)
+- [x] 4. Footer socials → brokerage accounts only: IG lifestyledesignrealtytexas, FB Lifestyle-Design-Realty-Texas-61578742983077
+- [x] 5. Separate "Get New Listings in Your Inbox" newsletter (name+email, tag "Website - Newsletter") from "Ready to Buy or Sell? Let's Get Started" form (tag "Website - Get Started" + intent)
+- [x] 6. "Now Hiring"/"Join Our Team" visible in nav + footer; recruiting screening form with Stefanie's exact message and 5 questions; FUB tag "Recruit - Website", answers as notes, intent rules (active license + full-time + closed transactions = Hot); confirmation "Thank you! Our broker will be reaching out."
+- [x] 7. AI natural-language property search bar (homepage + /search) returning matches from listing data (data-source-agnostic)
+- [x] 8. Interactive map view toggle (list/map with pins) for search results
+- [x] 9. General UX pass: stronger luxury direction (editorial type, whitespace, restrained color); Get Started, City Finder, New Construction Search most prominent

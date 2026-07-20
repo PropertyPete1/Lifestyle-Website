@@ -1,9 +1,11 @@
 import { Link } from "wouter";
 import { ArrowRight } from "lucide-react";
 import PageShell from "@/components/PageShell";
-import ListingCard from "@/components/ListingCard";
 import StatCounter from "@/components/StatCounter";
-import LeadForm from "@/components/LeadForm";
+import GetStartedForm from "@/components/GetStartedForm";
+import NewsletterForm from "@/components/NewsletterForm";
+import ListingShowcase from "@/components/ListingShowcase";
+import AISearchBar from "@/components/AISearchBar";
 import TestimonialCarousel from "@/components/TestimonialCarousel";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
@@ -17,40 +19,112 @@ const CITY_CARDS = [
   { name: "Houston", slug: "houston", img: IMG.cityHouston },
 ];
 
+/**
+ * Above-the-fold priority (per brief):
+ * 1. Hero headline + primary CTAs
+ * 2. "Ready to Buy or Sell?" Get Started CTA (jump to form)
+ * 3. Compact rotating listing showcase (light visual accent)
+ * Everything else follows below the fold.
+ */
 export default function Home() {
-  const { data: listings } = trpc.listings.featured.useQuery();
   const { data: stats } = trpc.stats.list.useQuery();
   const { data: team } = trpc.team.list.useQuery();
 
   return (
     <PageShell>
       {/* ============ HERO ============ */}
-      <section className="relative min-h-[100svh] flex items-end">
+      <section className="relative min-h-[88svh] flex items-center">
         <div className="absolute inset-0">
           <img
             src={IMG.heroDarkInterior}
             alt="Luxury interior with sculptural chandelier"
             className="h-full w-full object-cover"
           />
-          <div className="absolute inset-0 bg-black/60" />
+          <div className="absolute inset-0 bg-black/65" />
           <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-black/40" />
         </div>
-        <div className="relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pb-24 lg:pb-32 pt-40">
+        <div className="relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pt-32 pb-16">
           <p className="eyebrow text-foreground/90">{SITE.eyebrow}</p>
-          <h1 className="display-serif text-[11vw] sm:text-6xl md:text-7xl lg:text-[5.5rem] uppercase mt-5 text-foreground">
+          <h1 className="display-serif text-[10.5vw] sm:text-6xl md:text-7xl lg:text-[5.5rem] uppercase mt-5 text-foreground">
             {SITE.headline}
           </h1>
           <div className="hairline w-40 my-7" />
           <p className="eyebrow text-foreground/80">{SITE.subheadline}</p>
-          <div className="mt-10 flex flex-wrap gap-10">
+
+          {/* Primary CTAs — the three core actions */}
+          <div className="mt-12 flex flex-wrap items-center gap-5">
+            <a
+              href="#get-started"
+              className="inline-flex items-center gap-3 bg-gold text-primary-foreground px-9 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:bg-gold/90 transition-colors">
+              Ready to Buy or Sell? Get Started <ArrowRight className="h-4 w-4" />
+            </a>
+            <Link
+              href="/city-finder"
+              className="inline-flex items-center gap-3 border border-foreground/40 px-9 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:border-gold hover:text-gold transition-colors">
+              Find Your Texas City
+            </Link>
+            <a
+              href={SITE.newConstructionUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-3 border border-foreground/40 px-9 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:border-gold hover:text-gold transition-colors">
+              New Construction Search
+            </a>
+          </div>
+          <div className="mt-8 flex flex-wrap gap-10">
             <Link href="/search" className="text-cta text-foreground">Browse Properties</Link>
             <Link href="/valuation" className="text-cta text-foreground">Home Valuation</Link>
           </div>
         </div>
       </section>
 
-      {/* ============ STATS BAR ============ */}
+      {/* ============ GET STARTED (high-intent form) ============ */}
+      <section id="get-started" className="mx-auto max-w-[1400px] px-5 lg:px-8 py-20 lg:py-28 scroll-mt-24">
+        <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          <div className="reveal">
+            <p className="eyebrow text-gold">Work With Us</p>
+            <h2 className="display-serif text-4xl md:text-5xl mt-3 leading-tight">
+              Ready to Buy or Sell?<br />Let's Get Started.
+            </h2>
+            <p className="mt-6 text-muted-foreground leading-relaxed max-w-md">
+              Tell us what you're planning and a Lifestyle Design Realty professional will reach
+              out with a strategy tailored to your goals — no pressure, no obligation.
+            </p>
+            <div className="mt-8 space-y-3 text-sm text-muted-foreground">
+              <p className="flex items-center gap-3"><span className="h-px w-8 bg-gold inline-block" /> Local expertise across five Texas markets</p>
+              <p className="flex items-center gap-3"><span className="h-px w-8 bg-gold inline-block" /> Data-driven pricing and negotiation</p>
+              <p className="flex items-center gap-3"><span className="h-px w-8 bg-gold inline-block" /> A response within one business day</p>
+            </div>
+          </div>
+          <div className="reveal border border-gold/40 bg-card p-6 lg:p-10">
+            <GetStartedForm />
+          </div>
+        </div>
+      </section>
+
+      {/* ============ ROTATING LISTING SHOWCASE (light accent) ============ */}
+      <section className="mx-auto max-w-[1400px] px-5 lg:px-8 pb-16 lg:pb-20">
+        <div className="flex items-end justify-between gap-6 mb-6 reveal">
+          <p className="eyebrow text-gold">Featured Property</p>
+          <Link href="/portfolio" className="text-cta hidden sm:inline-block">View All Listings</Link>
+        </div>
+        <div className="reveal">
+          <ListingShowcase />
+        </div>
+        <div className="mt-6 sm:hidden">
+          <Link href="/portfolio" className="text-cta">View All Listings</Link>
+        </div>
+      </section>
+
+      {/* ============ AI SEARCH ============ */}
       <section className="border-y border-border/60 bg-[oklch(0.165_0.005_285)]">
+        <div className="mx-auto max-w-3xl px-5 lg:px-8 py-12">
+          <AISearchBar />
+        </div>
+      </section>
+
+      {/* ============ STATS BAR ============ */}
+      <section className="border-b border-border/60 bg-[oklch(0.165_0.005_285)]">
         <div className="mx-auto max-w-[1400px] px-5 lg:px-8 py-14 lg:py-16 grid grid-cols-2 lg:grid-cols-4 gap-10">
           {(stats && stats.length > 0
             ? stats
@@ -66,32 +140,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ============ FEATURED LISTINGS ============ */}
-      <section className="mx-auto max-w-[1400px] px-5 lg:px-8 py-20 lg:py-28">
-        <div className="flex items-end justify-between gap-6 mb-10 reveal">
-          <div>
-            <p className="eyebrow text-gold">Actively Marketed</p>
-            <h2 className="display-serif text-4xl md:text-5xl mt-3">Featured Listings</h2>
-          </div>
-          <Link href="/portfolio" className="text-cta hidden sm:inline-block">View All</Link>
-        </div>
-        {listings && listings.length > 0 ? (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8 lg:gap-10">
-            {listings.slice(0, 6).map((l, i) => (
-              <div key={l.id} className="reveal" style={{ transitionDelay: `${i * 60}ms` }}>
-                <ListingCard listing={l} />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-muted-foreground text-sm">New listings coming soon — check back shortly.</p>
-        )}
-        <div className="mt-10 sm:hidden">
-          <Link href="/portfolio" className="text-cta">View All Listings</Link>
-        </div>
-      </section>
-
-      {/* ============ CITY FINDER CTA (primary lead engine) ============ */}
+      {/* ============ CITY FINDER CTA ============ */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0">
           <img src={IMG.areaBoerne} alt="Texas Hill Country" className="h-full w-full object-cover" />
@@ -125,11 +174,11 @@ export default function Home() {
             negotiation handled by professionals who represent you, not the builder.
           </p>
           <a
-            href={SITE.newHomeBuddyUrl}
+            href={SITE.newConstructionUrl}
             target="_blank"
             rel="noreferrer"
-            className="text-cta mt-8 inline-block">
-            Search New Builds Across Texas
+            className="mt-8 inline-flex items-center gap-3 bg-gold text-primary-foreground px-9 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:bg-gold/90 transition-colors">
+            Find New Builds <ArrowRight className="h-4 w-4" />
           </a>
         </div>
         <div className="reveal overflow-hidden aspect-[4/3]">
@@ -234,15 +283,15 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ============ NEWSLETTER ============ */}
-      <section className="mx-auto max-w-2xl px-5 lg:px-8 py-20 lg:py-28 text-center">
+      {/* ============ NEWSLETTER (lightweight, distinct from Get Started) ============ */}
+      <section className="mx-auto max-w-2xl px-5 lg:px-8 py-20 lg:py-24 text-center">
         <p className="eyebrow text-gold reveal">Stay Informed</p>
-        <h2 className="display-serif text-3xl md:text-4xl mt-3 reveal">Receive Exclusive Listings in Your Inbox</h2>
+        <h2 className="display-serif text-3xl md:text-4xl mt-3 reveal">Get New Listings in Your Inbox</h2>
         <p className="mt-4 text-sm text-muted-foreground reveal">
-          Interested in buying a home? Work with Central Texas real estate experts.
+          A curated selection of new Central Texas listings, delivered occasionally. No spam.
         </p>
-        <div className="mt-10 text-left reveal">
-          <LeadForm sourceTag="Website - Newsletter" submitLabel="Subscribe" compact />
+        <div className="mt-10 reveal">
+          <NewsletterForm />
         </div>
       </section>
     </PageShell>

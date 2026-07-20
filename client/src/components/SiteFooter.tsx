@@ -48,7 +48,7 @@ export default function SiteFooter() {
               <li><Link href="/team" className="text-muted-foreground hover:text-gold">Meet the Team</Link></li>
               <li><Link href="/testimonials" className="text-muted-foreground hover:text-gold">Testimonials</Link></li>
               <li><Link href="/contact" className="text-muted-foreground hover:text-gold">Schedule a Consultation</Link></li>
-              <li><Link href="/join" className="text-muted-foreground hover:text-gold">Join Our Team</Link></li>
+              <li><Link href="/join" className="text-gold hover:text-gold/80">Now Hiring — Join Our Team</Link></li>
               <li><Link href="/links" className="text-muted-foreground hover:text-gold">Links</Link></li>
             </ul>
           </div>

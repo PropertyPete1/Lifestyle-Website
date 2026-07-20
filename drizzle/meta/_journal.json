@@ -15,6 +15,13 @@
       "when": 1784571014804,
       "tag": "0001_illegal_norrin_radd",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1784584303830,
+      "tag": "0002_panoramic_ricochet",
+      "breakpoints": true
     }
   ]
 }

@@ -31,9 +31,17 @@ export function computeIntent(answers: Record<string, unknown> | undefined): Int
   const preApproved = String(answers.preApproved ?? "").toLowerCase();
   const licenseStatus = String(answers.licenseStatus ?? "").toLowerCase();
 
-  // Recruiting logic
+  // Recruiting logic: active license + full-time + closed transactions = Hot
   if (licenseStatus) {
-    if (licenseStatus.includes("licensed active")) return "Hot";
+    if (licenseStatus.includes("licensed active")) {
+      const fullTime = String(answers.fullTime ?? answers.fullTimeAgent ?? "").toLowerCase();
+      const closed = Number(answers.transactionsClosed ?? NaN);
+      // If screening answers present, require full-time + at least one closed deal for Hot
+      if ("fullTime" in answers || "fullTimeAgent" in answers || "transactionsClosed" in answers) {
+        return fullTime.startsWith("yes") && closed > 0 ? "Hot" : "Warm";
+      }
+      return "Hot";
+    }
     if (licenseStatus.includes("licensed inactive") || licenseStatus.includes("in progress")) return "Warm";
     return "Cold";
   }

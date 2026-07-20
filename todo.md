@@ -77,3 +77,20 @@
 
 ## UX Enhancements
 - [x] Team card hover effect on /team: card lift, photo zoom + brighten, inset gold frame reveal, bottom gradient with "View Profile" cue, gold underline on name, initial-letter glow for placeholder cards
+
+## New Construction Handoff Screen
+- [ ] Secondary CTA "Also Check Live New Construction Inventory" shown with AI search results
+- [ ] Luxury transition dialog: restates parsed criteria (e.g. "4 Bedrooms · Under $600,000 · New Construction")
+- [ ] "Here's what to select" guide mapping criteria to New Home Buddy filter fields (Beds / Price / Build Status etc.)
+- [ ] Optional skippable phone capture tagged "Website - New Construction Handoff" (suppressed if visitor already submitted a form this session)
+- [ ] "Continue to New Construction Search" button opens https://a.nhb.app/u/peter-allen in new tab (no URL params — tool doesn't support them)
+
+> CANCELLED (user request Jul 20): AI search and New Construction Search must stay fully independent — no handoff, pre-fill, or bridge.
+
+## Independence + Mock Data Expansion (user request)
+- [x] Remove NewConstructionHandoff component, its CTA in Search.tsx, and the placeholder-email FUB carve-out
+- [x] Keep AI search fully self-contained; keep New Construction Search as plain external link only
+- [x] Add floor-plan fields to listings (stories, primaryBedDown) in schema + admin + AI criteria
+- [x] Expand placeholder listings to ~40 with variety (cities × price bands × beds/baths × pool × new construction × floor plans) so realistic searches return 5-10 matches
+- [x] Verify representative queries return 5-10 results (7/9/12/8/7 across five test queries); clean up test leads
+- [x] Fix FUB CloudFront 403: all FUB API calls now send a User-Agent header

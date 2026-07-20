@@ -105,6 +105,9 @@ export async function sendToFub(input: FubLeadInput): Promise<FubResult> {
       headers: {
         Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
         "Content-Type": "application/json",
+        // FUB's CloudFront edge rejects requests without a User-Agent (403)
+        "User-Agent": "LifestyleDesignRealty-Website/1.0",
+        "X-System": "lifestyle-design-realty",
       },
       body: JSON.stringify(body),
     });

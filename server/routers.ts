@@ -32,6 +32,8 @@ const listingInput = z.object({
   featured: z.boolean().default(true),
   hasPool: z.boolean().default(false),
   isNewConstruction: z.boolean().default(false),
+  stories: z.number().int().min(1).max(4).default(1),
+  primaryBedDown: z.boolean().default(true),
   propertyType: z.enum(["Residential", "Multi-Family", "Townhome/Condo", "Land"]).default("Residential"),
   lat: z.string().optional(),
   lng: z.string().optional(),

@@ -50,6 +50,10 @@ export const listings = mysqlTable("listings", {
   featured: boolean("featured").default(true).notNull(),
   hasPool: boolean("hasPool").default(false).notNull(),
   isNewConstruction: boolean("isNewConstruction").default(false).notNull(),
+  /** Floor plan: number of stories. */
+  stories: int("stories").default(1).notNull(),
+  /** Floor plan: primary bedroom on the first floor. */
+  primaryBedDown: boolean("primaryBedDown").default(true).notNull(),
   propertyType: mysqlEnum("propertyType", ["Residential", "Multi-Family", "Townhome/Condo", "Land"]).default("Residential").notNull(),
   /** Coordinates for map view (Phase 2 IDX feeds populate automatically) */
   lat: varchar("lat", { length: 32 }),
@@ -78,7 +82,7 @@ export type Testimonial = typeof testimonials.$inferSelect;
 export const teamMembers = mysqlTable("team_members", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 120 }).notNull(),
-  /** TREC: only Peter Allen may be titled "Broker/Owner"; others REALTOR® etc. */
+  /** TREC: only Steven Van Orden (Designated Broker) may be titled "Broker/Owner". */
   title: varchar("title", { length: 120 }).notNull(),
   license: varchar("license", { length: 60 }),
   bio: text("bio"),

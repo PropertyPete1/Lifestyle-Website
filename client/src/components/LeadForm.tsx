@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
+import { markLeadCaptured } from "@/lib/leadSession";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -62,6 +63,7 @@ export default function LeadForm({
   const submit = trpc.leads.submit.useMutation({
     onSuccess: () => {
       setDone(true);
+      markLeadCaptured();
       toast.success("Thank you — we'll be in touch shortly.");
       onSuccess?.();
     },

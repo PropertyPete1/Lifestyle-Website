@@ -17,6 +17,10 @@ export interface SearchCriteria {
   minSqft?: number;
   hasPool?: boolean;
   isNewConstruction?: boolean;
+  /** 1 = single-story only; 2 = two-story or more */
+  stories?: number;
+  /** primary/master bedroom on first floor */
+  primaryBedDown?: boolean;
   propertyType?: string;
   keywords?: string[];
 }
@@ -35,6 +39,8 @@ export async function extractCriteria(query: string): Promise<SearchCriteria> {
             `Known market cities: ${CITIES.join(", ")}. ` +
             "Map neighborhood/suburb mentions to the nearest known city when obvious (e.g. Boerne→Boerne, 'near Austin'→Austin). " +
             "Prices like '400k' mean 400000. 'under X' sets maxPrice, 'over X' sets minPrice. " +
+            "'single story/one story' → stories=1; 'two story' → stories=2. " +
+            "'primary/master bedroom downstairs/on first/main floor' or 'primary down' → primaryBedDown=true. " +
             "Return only fields the user actually implied.",
         },
         { role: "user", content: query },
@@ -55,6 +61,8 @@ export async function extractCriteria(query: string): Promise<SearchCriteria> {
               minSqft: { type: ["number", "null"] },
               hasPool: { type: ["boolean", "null"] },
               isNewConstruction: { type: ["boolean", "null"] },
+              stories: { type: ["number", "null"], description: "1 for single-story, 2 for two-story+" },
+              primaryBedDown: { type: ["boolean", "null"], description: "primary bedroom on first floor" },
               propertyType: {
                 type: ["string", "null"],
                 description: "Residential, Multi-Family, Townhome/Condo, or Land — or null",
@@ -63,7 +71,7 @@ export async function extractCriteria(query: string): Promise<SearchCriteria> {
             },
             required: [
               "city", "minPrice", "maxPrice", "minBeds", "minBaths", "minSqft",
-              "hasPool", "isNewConstruction", "propertyType", "keywords",
+              "hasPool", "isNewConstruction", "stories", "primaryBedDown", "propertyType", "keywords",
             ],
             additionalProperties: false,
           },
@@ -81,6 +89,8 @@ export async function extractCriteria(query: string): Promise<SearchCriteria> {
     if (typeof parsed.minSqft === "number") out.minSqft = parsed.minSqft;
     if (typeof parsed.hasPool === "boolean") out.hasPool = parsed.hasPool;
     if (typeof parsed.isNewConstruction === "boolean") out.isNewConstruction = parsed.isNewConstruction;
+    if (typeof parsed.stories === "number") out.stories = parsed.stories;
+    if (typeof parsed.primaryBedDown === "boolean") out.primaryBedDown = parsed.primaryBedDown;
     if (typeof parsed.propertyType === "string" && parsed.propertyType) out.propertyType = parsed.propertyType;
     if (Array.isArray(parsed.keywords)) out.keywords = parsed.keywords.filter((k): k is string => typeof k === "string");
     return out;
@@ -111,6 +121,9 @@ export function extractCriteriaFallback(query: string): SearchCriteria {
   if (baths) out.minBaths = parseFloat(baths[1]);
   if (/pool/.test(q)) out.hasPool = true;
   if (/new\s*(?:construction|build)/.test(q)) out.isNewConstruction = true;
+  if (/single[- ]?story|one[- ]?story/.test(q)) out.stories = 1;
+  else if (/two[- ]?story|2[- ]?story/.test(q)) out.stories = 2;
+  if (/(?:primary|master)\s*(?:bed(?:room)?)?\s*(?:down(?:stairs)?|on\s*(?:the\s*)?(?:first|main|1st)\s*floor)/.test(q)) out.primaryBedDown = true;
   if (/multi[- ]?family|duplex|fourplex/.test(q)) out.propertyType = "Multi-Family";
   else if (/townhome|townhouse|condo/.test(q)) out.propertyType = "Townhome/Condo";
   return out;
@@ -131,6 +144,9 @@ export function matchListings(listings: Listing[], c: SearchCriteria): Listing[]
     if (c.minSqft !== undefined && l.sqft < c.minSqft) return false;
     if (c.hasPool && !l.hasPool) return false;
     if (c.isNewConstruction && !l.isNewConstruction) return false;
+    if (c.stories === 1 && l.stories !== 1) return false;
+    if (c.stories !== undefined && c.stories >= 2 && l.stories < 2) return false;
+    if (c.primaryBedDown && !l.primaryBedDown) return false;
     if (c.propertyType && l.propertyType !== c.propertyType) return false;
     return true;
   });

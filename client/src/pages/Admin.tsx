@@ -137,6 +137,7 @@ const emptyListing = {
   slug: "", address: "", city: "San Antonio", state: "TX", zip: "", price: 0, beds: 3,
   baths: "2", sqft: 0, status: "Active" as const, description: "", heroImage: "", photos: "",
   agentName: "", featured: true, hasPool: false, isNewConstruction: false,
+  stories: 1, primaryBedDown: true,
   propertyType: "Residential" as const,
 };
 
@@ -164,7 +165,8 @@ function ListingsManager() {
       price: l.price, beds: l.beds, baths: l.baths, sqft: l.sqft, status: l.status as "Active",
       description: l.description ?? "", heroImage: l.heroImage ?? "", photos: l.photos ?? "",
       agentName: l.agentName ?? "", featured: l.featured, hasPool: l.hasPool,
-      isNewConstruction: l.isNewConstruction, propertyType: l.propertyType as "Residential",
+      isNewConstruction: l.isNewConstruction, stories: l.stories, primaryBedDown: l.primaryBedDown,
+      propertyType: l.propertyType as "Residential",
     });
 
   return (
@@ -237,6 +239,8 @@ function ListingsManager() {
               <div className="flex items-center gap-2"><Switch checked={editing.featured} onCheckedChange={(v) => setEditing({ ...editing, featured: v })} /><Label>Featured</Label></div>
               <div className="flex items-center gap-2"><Switch checked={editing.hasPool} onCheckedChange={(v) => setEditing({ ...editing, hasPool: v })} /><Label>Has Pool</Label></div>
               <div className="flex items-center gap-2"><Switch checked={editing.isNewConstruction} onCheckedChange={(v) => setEditing({ ...editing, isNewConstruction: v })} /><Label>New Construction</Label></div>
+              <div className="flex items-center gap-2"><Switch checked={editing.primaryBedDown} onCheckedChange={(v) => setEditing({ ...editing, primaryBedDown: v })} /><Label>Primary Bed Down</Label></div>
+              <div className="space-y-1.5"><Label>Stories</Label><Input type="number" min={1} max={4} value={editing.stories} onChange={(e) => setEditing({ ...editing, stories: Number(e.target.value) || 1 })} /></div>
               <div className="sm:col-span-2">
                 <Button onClick={save} disabled={create.isPending || update.isPending} className="bg-gold text-primary-foreground hover:bg-gold/90 rounded-none w-full">
                   {create.isPending || update.isPending ? "Saving..." : "Save Listing"}

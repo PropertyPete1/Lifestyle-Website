@@ -50,6 +50,8 @@ describe("FUB API key validation", () => {
       const res = await fetch("https://api.followupboss.com/v1/identity", {
         headers: {
           Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
+          // FUB's CloudFront edge rejects requests without a User-Agent (403)
+          "User-Agent": "LifestyleDesignRealty-Website/1.0",
         },
         signal: AbortSignal.timeout(25000),
       });

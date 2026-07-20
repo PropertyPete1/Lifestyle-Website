@@ -5,7 +5,7 @@ import { IMG } from "@/lib/assets";
 const PILLARS = [
   { title: "Warm & Hot Transfer Leads", body: "Our City Finder, valuation engine, and Get Started pipeline deliver qualified buyers and sellers directly to the team." },
   { title: "Brokerage-First Brand", body: "Plug into a luxury brand with real marketing infrastructure — not a logo you have to build alone." },
-  { title: "Broker Support", body: "Direct access to Broker/Owner Peter Allen — deal structuring, negotiation help, and mentorship on demand." },
+  { title: "Broker Support", body: "Direct access to Broker/Owner Steven Van Orden and REALTOR®/Owner Peter Allen — deal structuring, negotiation help, and mentorship on demand." },
 ];
 
 export default function Join() {
@@ -38,7 +38,7 @@ export default function Join() {
         {/* Screening message — exact copy per brief */}
         <div className="border-l-2 border-gold pl-6 mb-10 reveal">
           <p className="text-muted-foreground leading-relaxed whitespace-pre-line">
-            {"You responded to a post on Lead Overflow. I have gotten a large response. In an effort to find the best fit, can you please tell me the following:\n1. License number\n2. # of transactions closed this year\n3. Are you a full time agent?\n4. Do you currently use a CRM? If yes which one?\n5. What brokerage are you with?\nThanks!"}
+            {"In an effort to find the best fit, can you please tell me the following:\n1. License number\n2. # of transactions closed this year\n3. Are you a full time agent?\n4. Do you currently use a CRM? If yes which one?\n5. What brokerage are you with?\nThanks!"}
           </p>
           <p className="mt-3 font-serif italic text-lg text-foreground/90">— Stefanie</p>
         </div>

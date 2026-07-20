@@ -52,11 +52,11 @@ async function run() {
     });
   }
 
-  // ---- Team (per brief roster; TREC: only Peter Allen titled Broker/Owner) ----
+  // ---- Team (TREC: only Steven Van Orden, Designated Broker, titled Broker/Owner) ----
   await db.execute(`DELETE FROM team_members`);
   const team = [
-    ["Peter Allen", "Broker/Owner", "792381", "Peter leads Lifestyle Design Realty with a builder's mindset and a client-first philosophy. From first-time buyers to portfolio investors, he pairs deep Central Texas market knowledge with modern marketing to deliver results across San Antonio, New Braunfels, Austin, DFW, and Houston.", "(210) 981-3830", "peter@lifestyledesignrealty.com"],
-    ["Steven", "REALTOR®", "", "Steven is passionate about real estate and advocating for his clients. Having started his real estate career in 2005 in corporate relocation, he is well versed in navigating the stressful process of relocating to a new city. With his vast knowledge of Austin neighborhoods, he excels at helping his clients find their dream home.", "", "steven@lifestyledesignrealty.com"],
+    ["Peter Allen", "REALTOR® / Owner", "792381", "Peter leads Lifestyle Design Realty with a builder's mindset and a client-first philosophy. From first-time buyers to portfolio investors, he pairs deep Central Texas market knowledge with modern marketing to deliver results across San Antonio, New Braunfels, Austin, DFW, and Houston.", "(210) 981-3830", "peter@lifestyledesignrealty.com"],
+    ["Steven Van Orden", "Broker/Owner · Designated Broker", "", "Steven is passionate about real estate and advocating for his clients. Having started his real estate career in 2005 in corporate relocation, he is well versed in navigating the stressful process of relocating to a new city. With his vast knowledge of Austin neighborhoods, he excels at helping his clients find their dream home.", "", "steven@lifestyledesignrealty.com"],
     ["Stefanie", "REALTOR®", "", "Stefanie brings warmth and precision to every transaction, guiding buyers and sellers through each milestone with clear communication and relentless attention to detail.", "", "stefanie@lifestyledesignrealty.com"],
     ["Abby", "REALTOR®", "", "Abby specializes in helping growing families find the right community — pairing school research, commute planning, and new-construction expertise into a seamless search.", "", "abby@lifestyledesignrealty.com"],
     ["Irma", "REALTOR®", "", "Bilingual and deeply connected in San Antonio, Irma helps clients navigate every step of the process with confidence — from first showing to final signature.", "", "irma@lifestyledesignrealty.com"],

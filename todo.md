@@ -11,7 +11,7 @@
 - [x] tRPC routers: listings, testimonials, team, neighborhoods, stats, links, leads, admin
 - [x] Follow Up Boss integration (server-side, FUB_API_KEY env) with graceful DB fallback
 - [x] Lead intent tagging (Hot/Warm/Cold) + source tags
-- [x] Seed data: 6 testimonials, team (Peter Allen Broker/Owner, Steven, Stefanie, Abby, Irma, Laila, Tiffany), stats (63 sales, $26M, $200K–$1.7M, $424.4K), neighborhoods (Alamo Ranch, Kyle, Boerne + cities), bio links, sample listings
+- [x] Seed data: 6 testimonials, team (Peter Allen REALTOR®/Owner, Steven Van Orden Broker/Owner, Stefanie, Abby, Irma, Laila, Tiffany), stats (63 sales, $26M, $200K–$1.7M, $424.4K), neighborhoods (Alamo Ranch, Kyle, Boerne + cities), bio links, sample listings
 
 ## Public Pages
 - [x] Homepage: full-screen dark hero with exact eyebrow "EXPERTISE. KNOWLEDGE. EXPERIENCE." and headline "LIFESTYLE DESIGN REALTY", CTAs "Browse Properties" + "Home Valuation"
@@ -69,3 +69,8 @@
 - [x] 7. AI natural-language property search bar (homepage + /search) returning matches from listing data (data-source-agnostic)
 - [x] 8. Interactive map view toggle (list/map with pins) for search results
 - [x] 9. General UX pass: stronger luxury direction (editorial type, whitespace, restrained color); Get Started, City Finder, New Construction Search most prominent
+
+## Broker of Record Correction (TREC compliance)
+- [x] Peter Allen = "REALTOR® / Owner" and Steven Van Orden = "Broker/Owner" everywhere: team DB records, /join Broker Support card, page copy, code comments, and seed script
+- [x] Steven's title = "Broker/Owner · Designated Broker"; update TREC comment references naming Peter as broker
+- [x] Remove "You responded to a post on Lead Overflow. I have gotten a large response." from /join screening message; start at "In an effort to find the best fit..."

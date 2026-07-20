@@ -332,7 +332,7 @@ function TeamManager() {
         title="Team Members"
         action={<Button onClick={() => setEditing({ name: "", title: "REALTOR®", license: "", bio: "", photo: "", phone: "", email: "", sortOrder: (items?.length ?? 0) + 1, active: true })} className="bg-gold text-primary-foreground hover:bg-gold/90 rounded-none text-xs uppercase tracking-widest"><Plus className="h-4 w-4 mr-1" /> Add</Button>}
       />
-      {/* TREC: only Peter Allen may hold the "Broker/Owner" title */}
+      {/* TREC: only Steven Van Orden (Designated Broker) may hold the "Broker/Owner" title */}
       <Table>
         <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Title</TableHead><TableHead>License</TableHead><TableHead>Contact</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
         <TableBody>

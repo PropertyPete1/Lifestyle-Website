@@ -4,7 +4,8 @@ import LeadForm from "@/components/LeadForm";
 import { SITE } from "@shared/site";
 import { IMG } from "@/lib/assets";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, ArrowRight, MapPin } from "lucide-react";
+import { Link } from "wouter";
+import { ArrowLeft, ArrowRight, ExternalLink, MapPin, Sparkles } from "lucide-react";
 
 /* ---------- Quiz definition ---------- */
 interface Question {
@@ -269,6 +270,19 @@ export default function CityFinder() {
         {/* Results */}
         {atGate && unlocked && (
           <div className="mt-12 space-y-8">
+            {/* Completion payoff: dedicated on-site results screen */}
+            <div className="text-center">
+              <p className="inline-flex items-center gap-2 eyebrow text-gold">
+                <Sparkles className="h-3.5 w-3.5" /> Here's what we found for you
+              </p>
+              <h2 className="font-serif text-3xl md:text-4xl mt-3">
+                Your Texas City Report
+              </h2>
+              <p className="mt-3 text-sm text-muted-foreground max-w-md mx-auto">
+                Based on your budget, lifestyle, and timeline, these are your top three
+                matches — ranked for you.
+              </p>
+            </div>
             {matches.map((c, i) => (
               <div key={c.slug} className="border border-border bg-card overflow-hidden md:flex">
                 <div className="md:w-2/5 aspect-[4/3] md:aspect-auto relative">
@@ -287,13 +301,26 @@ export default function CityFinder() {
                   </p>
                   <p className="mt-4 font-serif italic text-foreground/90">{c.vibe}</p>
                   <p className="mt-3 text-sm text-muted-foreground leading-relaxed">{c.why(answers)}</p>
-                  <a
-                    href={SITE.newConstructionUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-cta mt-6 inline-flex items-center gap-2">
-                    Find New Builds in {c.name} <ArrowRight className="h-3.5 w-3.5" />
-                  </a>
+                  {/* Primary next steps stay on-site; external tool is optional and clearly marked */}
+                  <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
+                    <Link
+                      href={`/search?city=${encodeURIComponent(c.name)}`}
+                      className="text-cta inline-flex items-center gap-2">
+                      Browse {c.name} Listings <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
+                    <Link
+                      href={`/${c.slug}`}
+                      className="text-cta inline-flex items-center gap-2">
+                      Explore {c.name} <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
+                    <a
+                      href={SITE.newConstructionUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.15em] text-muted-foreground hover:text-gold transition-colors">
+                      See New Construction in {c.name} <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
                 </div>
               </div>
             ))}

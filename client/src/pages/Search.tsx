@@ -33,6 +33,11 @@ function SearchInner({ portfolio }: { portfolio: boolean }) {
   );
 
   const [city, setCity] = useState("All Cities");
+  // Support /search?city=Austin deep links (e.g. from City Finder results)
+  useEffect(() => {
+    const cityParam = new URLSearchParams(searchString).get("city");
+    if (cityParam && CITY_FILTERS.includes(cityParam)) setCity(cityParam);
+  }, [searchString]);
   const [type, setType] = useState("all");
   const [view, setView] = useState<"list" | "map">("list");
 
@@ -189,6 +194,14 @@ function SearchInner({ portfolio }: { portfolio: boolean }) {
 
         {/* Results */}
         <div className="mt-12">
+          {/* AI search endpoint: clear results headline so the flow never ends silently */}
+          {aiActive && !showLoading && (
+            <h2 className="font-serif text-2xl md:text-3xl mb-8">
+              {filtered.length > 0
+                ? `${filtered.length} home${filtered.length === 1 ? "" : "s"} match your search`
+                : "Here's what we found for you"}
+            </h2>
+          )}
           {showLoading ? (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8">
               {[...Array(6)].map((_, i) => (

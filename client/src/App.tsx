@@ -1,7 +1,8 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { Route, Switch, useLocation } from "wouter";
+import { useLayoutEffect } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
@@ -21,9 +22,33 @@ import Links from "./pages/Links";
 import Privacy from "./pages/Privacy";
 import Admin from "./pages/Admin";
 
+/**
+ * GLOBAL RULE: every internal navigation resets scroll to the top of the new
+ * page. Keyed off the wouter location, so it covers all current and future
+ * routes automatically. If the target URL carries a #hash, scroll to that
+ * element instead (used by in-page anchors like /#get-started).
+ */
+function ScrollToTop() {
+  const [location] = useLocation();
+  useLayoutEffect(() => {
+    const hash = window.location.hash;
+    if (hash) {
+      const el = document.querySelector(hash);
+      if (el) {
+        el.scrollIntoView({ behavior: "auto", block: "start" });
+        return;
+      }
+    }
+    window.scrollTo(0, 0);
+  }, [location]);
+  return null;
+}
+
 function Router() {
   return (
-    <Switch>
+    <>
+      <ScrollToTop />
+      <Switch>
       <Route path={"/"} component={Home} />
       <Route path={"/get-started"} component={GetStarted} />
       <Route path={"/search"} component={Search} />
@@ -46,7 +71,8 @@ function Router() {
       <Route path={"/:slug"} component={NeighborhoodDetail} />
       {/* Final fallback route */}
       <Route component={NotFound} />
-    </Switch>
+      </Switch>
+    </>
   );
 }
 

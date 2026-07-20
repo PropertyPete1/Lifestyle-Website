@@ -90,3 +90,13 @@
 - [x] Expand placeholder listings to ~40 with variety (cities × price bands × beds/baths × pool × new construction × floor plans) so realistic searches return 5-10 matches
 - [x] Verify representative queries return 5-10 results (7/9/12/8/7 across five test queries); clean up test leads
 - [x] Fix FUB CloudFront 403: all FUB API calls now send a User-Agent header
+
+## Site-Wide UX Rules (revision round 3)
+- [x] 1. Scroll-to-top on every internal navigation, site-wide: global ScrollToTop in App.tsx keyed to wouter location, hash-aware, covers all current & future routes
+- [x] 2. City Finder quiz: dedicated on-site results screen ("Here's what we found for you" / "Your Texas City Report") with ranked match cards (median price, vibe, why it fits); primary CTAs stay on-site (Browse Listings / Explore City), external New Construction link is optional, clearly marked, never automatic
+- [x] 2b. Flow endpoint audit: Get Started ✓ (Thank You screen), Recruiting ✓ ("Thank you! Our broker will be reaching out."), Newsletter ✓ (subscribed state), LeadForm ✓ (Thank You state), AI search ✓ (new "X homes match your search" results headline + empty state)
+- [x] 3. Re-confirmed: AI search and New Construction Search fully independent — no handoff/pre-fill/bridge exists in the codebase
+- [x] 4. Plain-language AI search architecture explanation prepared for delivery
+- [x] 5. Re-verified expanded dataset: single story under 500k → 9, SA 3-bed → 8, townhome under 500k → 7 results
+- [x] Fix: /search?city= deep links from City Finder results pre-select the matching city filter
+- [x] Fix: FUB live-key test now detects CloudFront geo-block of sandbox egress IP and skips with warning (production US hosting unaffected)

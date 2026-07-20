@@ -1,6 +1,18 @@
-import { eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import {
+  InsertLead,
+  InsertListing,
+  bioLinks,
+  InsertUser,
+  leads,
+  listings,
+  neighborhoods,
+  siteStats,
+  teamMembers,
+  testimonials,
+  users,
+} from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +101,198 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+/* ---------------- Listings ---------------- */
+const statusOrder = sql`CASE ${listings.status} WHEN 'Active' THEN 0 WHEN 'Pending' THEN 1 ELSE 2 END`;
+
+export async function getFeaturedListings() {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(listings)
+    .where(eq(listings.featured, true))
+    .orderBy(statusOrder, desc(listings.createdAt));
+}
+
+export async function getAllListings() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(listings).orderBy(statusOrder, desc(listings.createdAt));
+}
+
+export async function getListingBySlug(slug: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(listings).where(eq(listings.slug, slug)).limit(1);
+  return rows[0];
+}
+
+export async function createListing(data: InsertListing) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.insert(listings).values(data);
+}
+
+export async function updateListing(id: number, data: Partial<InsertListing>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.update(listings).set(data).where(eq(listings.id, id));
+}
+
+export async function deleteListing(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.delete(listings).where(eq(listings.id, id));
+}
+
+/* ---------------- Testimonials ---------------- */
+export async function getTestimonials(includeUnpublished = false) {
+  const db = await getDb();
+  if (!db) return [];
+  const q = db.select().from(testimonials);
+  if (!includeUnpublished) q.where(eq(testimonials.published, true));
+  return q.orderBy(asc(testimonials.sortOrder), asc(testimonials.id));
+}
+
+export async function createTestimonial(data: typeof testimonials.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.insert(testimonials).values(data);
+}
+
+export async function updateTestimonial(id: number, data: Partial<typeof testimonials.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.update(testimonials).set(data).where(eq(testimonials.id, id));
+}
+
+export async function deleteTestimonial(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.delete(testimonials).where(eq(testimonials.id, id));
+}
+
+/* ---------------- Team ---------------- */
+export async function getTeamMembers(includeInactive = false) {
+  const db = await getDb();
+  if (!db) return [];
+  const q = db.select().from(teamMembers);
+  if (!includeInactive) q.where(eq(teamMembers.active, true));
+  return q.orderBy(asc(teamMembers.sortOrder), asc(teamMembers.id));
+}
+
+export async function createTeamMember(data: typeof teamMembers.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.insert(teamMembers).values(data);
+}
+
+export async function updateTeamMember(id: number, data: Partial<typeof teamMembers.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.update(teamMembers).set(data).where(eq(teamMembers.id, id));
+}
+
+export async function deleteTeamMember(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.delete(teamMembers).where(eq(teamMembers.id, id));
+}
+
+/* ---------------- Neighborhoods ---------------- */
+export async function getNeighborhoods(includeUnpublished = false) {
+  const db = await getDb();
+  if (!db) return [];
+  const q = db.select().from(neighborhoods);
+  if (!includeUnpublished) q.where(eq(neighborhoods.published, true));
+  return q.orderBy(asc(neighborhoods.sortOrder), asc(neighborhoods.id));
+}
+
+export async function getNeighborhoodBySlug(slug: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db
+    .select()
+    .from(neighborhoods)
+    .where(and(eq(neighborhoods.slug, slug), eq(neighborhoods.published, true)))
+    .limit(1);
+  return rows[0];
+}
+
+export async function createNeighborhood(data: typeof neighborhoods.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.insert(neighborhoods).values(data);
+}
+
+export async function updateNeighborhood(id: number, data: Partial<typeof neighborhoods.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.update(neighborhoods).set(data).where(eq(neighborhoods.id, id));
+}
+
+export async function deleteNeighborhood(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.delete(neighborhoods).where(eq(neighborhoods.id, id));
+}
+
+/* ---------------- Site stats ---------------- */
+export async function getSiteStats() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(siteStats).orderBy(asc(siteStats.sortOrder), asc(siteStats.id));
+}
+
+export async function updateSiteStat(id: number, data: Partial<typeof siteStats.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.update(siteStats).set(data).where(eq(siteStats.id, id));
+}
+
+/* ---------------- Bio links ---------------- */
+export async function getBioLinks(includeInactive = false) {
+  const db = await getDb();
+  if (!db) return [];
+  const q = db.select().from(bioLinks);
+  if (!includeInactive) q.where(eq(bioLinks.active, true));
+  return q.orderBy(asc(bioLinks.sortOrder), asc(bioLinks.id));
+}
+
+export async function createBioLink(data: typeof bioLinks.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.insert(bioLinks).values(data);
+}
+
+export async function updateBioLink(id: number, data: Partial<typeof bioLinks.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.update(bioLinks).set(data).where(eq(bioLinks.id, id));
+}
+
+export async function deleteBioLink(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.delete(bioLinks).where(eq(bioLinks.id, id));
+}
+
+/* ---------------- Leads ---------------- */
+export async function createLead(data: InsertLead): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  const result = await db.insert(leads).values(data);
+  return (result as unknown as [{ insertId: number }])[0].insertId;
+}
+
+export async function updateLead(id: number, data: Partial<InsertLead>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.update(leads).set(data).where(eq(leads.id, id));
+}
+
+export async function getLeads() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(leads).orderBy(desc(leads.createdAt));
+}

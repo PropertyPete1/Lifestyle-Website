@@ -100,3 +100,6 @@
 - [x] 5. Re-verified expanded dataset: single story under 500k → 9, SA 3-bed → 8, townhome under 500k → 7 results
 - [x] Fix: /search?city= deep links from City Finder results pre-select the matching city filter
 - [x] Fix: FUB live-key test now detects CloudFront geo-block of sandbox egress IP and skips with warning (production US hosting unaffected)
+
+## AI Search "How It Works" Tooltip (revision round 4)
+- [x] Add "How it works" tooltip/popover next to the AI search bar (homepage + /search) with plain-language explanation and 4 tappable example queries that run the search (verified in browser: popover opens, example click runs search → "3 homes match your search")

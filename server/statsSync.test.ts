@@ -26,9 +26,10 @@ describe("statsSync.computeStats", () => {
     expect(s!.avgPrice).toBe(437_000);
   });
 
-  it("excludes sub-$50k artifacts from price range but counts them in sales/total", () => {
+  it("excludes sub-$150k outliers from price range but counts them in sales/total", () => {
     const deals = [
       deal(25, 1_465), // referral-fee artifact
+      deal(25, 52_000), // real deal, but an outlier vs. positioning
       deal(25, 300_000),
       deal(25, 400_000),
       deal(25, 500_000),
@@ -37,8 +38,10 @@ describe("statsSync.computeStats", () => {
     ];
     const s = computeStats(deals, stageIds);
     expect(s).not.toBeNull();
-    expect(s!.closedSales).toBe(6); // artifact still counts as a closed transaction
-    expect(s!.minPrice).toBe(300_000); // but not in the price range
+    expect(s!.closedSales).toBe(7); // artifact + outlier still count as closed transactions
+    expect(s!.minPrice).toBe(300_000); // but neither appears in the price range
+    // avg is computed over >= $150k prices only
+    expect(s!.avgPrice).toBe(500_000);
   });
 
   it("returns null on thin data so last-known values are preserved", () => {

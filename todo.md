@@ -183,3 +183,8 @@
 - [x] Lead submit: compile visitor activity into formatted FUB note attached to the contact (visitorId on all 5 forms); no data sent if no form ever submitted
 - [x] Multi-visit persistence via localStorage visitor id (survives browser restarts); E2E test: favorite + AI search + city finder → form submit → FUB note verified on person 6184 ("Site activity before inquiry" with all three bullets); local copy kept on lead record; test data cleaned up
 - [x] Tests (72/72 incl. new activityNote suite), checkpoint, GitHub push
+
+## Stats outlier fix (user request Jul 20)
+- [x] Raise price-range outlier floor from $50K to $150K in statsSync (range/avg exclude sub-$150K; sales count + total volume still include everything)
+- [x] Update statsSync tests for the new floor, re-run sync against FUB — new values: 67 closed | $16.5M | $161K–$885K | $363K avg (verified in site_stats)
+- [x] Tests pass (72/72), checkpoint, GitHub push

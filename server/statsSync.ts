@@ -8,15 +8,16 @@
  * existing site_stats rows untouched — the site keeps showing the last
  * successfully synced values. We never write zeros or partial data.
  *
- * Sanity floor: deals under $50k are excluded from price-range/average math
- * (they are typically referral fees or data-entry artifacts, e.g. $1,465),
- * but still count toward closed-sale count/total when >= $1k.
+ * Sanity floor: deals under $150k are excluded from price-range/average math
+ * (referral fees, data-entry artifacts, or clear outliers that would skew the
+ * displayed positioning, e.g. a $52k deal), but still count toward
+ * closed-sale count/total when >= $1k.
  */
 import { fubHeaders } from "./fub";
 import * as db from "./db";
 
 const FUB_BASE = "https://api.followupboss.com/v1";
-const PRICE_FLOOR = 50_000; // below this: not a home sale price
+const PRICE_FLOOR = 150_000; // below this: excluded from range/avg (outlier, not representative of positioning)
 
 type FubDeal = { id: number; stageId: number; price: number };
 

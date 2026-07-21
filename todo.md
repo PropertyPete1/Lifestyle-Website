@@ -203,3 +203,8 @@
 - [x] Report every location found and corrected to user
 - [x] Testimonials bias remediated honestly: all 6 real Google/Zillow reviews lightly edited to brokerage-focused wording ("our agent" / "this team"), no fabricated content, authors/sources preserved; seed-db.mjs synced; flagged need to collect reviews for other agents
 - [x] Tests (72/72), checkpoint, GitHub push
+
+## Footer "Website by" credit + inquiry link (user request Jul 20)
+- [x] Global footer credit line: "Website crafted by Lifestyle Design Technologies — Click here to inquire about your own custom website."
+- [x] "Click here" is a mailto to peter@lifestyledesignrealty.com with subject "Custom Website Inquiry" and prefilled body; gold accent, underline/hover state, understated styling
+- [x] Appears at bottom of footer on every page (SiteFooter is global); verified visually on / and /team; tests 72/72, checkpoint, GitHub push

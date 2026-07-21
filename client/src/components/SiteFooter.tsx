@@ -1,6 +1,13 @@
 import { Link } from "wouter";
 import { SITE } from "@shared/site";
 
+/** Mailto for the "Website by" credit — prefilled custom-website inquiry to Peter. */
+const CRAFTED_BY_MAILTO = `mailto:peter@lifestyledesignrealty.com?subject=${encodeURIComponent(
+  "Custom Website Inquiry"
+)}&body=${encodeURIComponent(
+  "Hi Peter, I saw your website and I'd love to talk about getting something similar built for my business. Can you tell me more?"
+)}`;
+
 /**
  * TREC-compliant global footer. Present on EVERY page:
  * - IABS + Consumer Protection Notice labeled links
@@ -95,6 +102,20 @@ export default function SiteFooter() {
               <span className="uppercase tracking-widest text-[10px]">Equal Housing Opportunity</span>
             </div>
           </div>
+        </div>
+
+        {/* Website-by credit — understated, but the inquiry link is clearly interactive */}
+        <div className="mt-8 pt-5 border-t border-border/40 text-center">
+          <p className="text-[11px] tracking-[0.08em] text-muted-foreground/80">
+            Website crafted by <span className="text-foreground/70">Lifestyle Design Technologies</span>
+            {" — "}
+            <a
+              href={CRAFTED_BY_MAILTO}
+              className="text-gold underline underline-offset-4 decoration-gold/40 hover:decoration-gold hover:text-gold/90 transition-colors">
+              Click here
+            </a>{" "}
+            to inquire about your own custom website.
+          </p>
         </div>
       </div>
     </footer>

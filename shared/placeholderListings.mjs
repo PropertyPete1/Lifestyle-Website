@@ -45,6 +45,10 @@ export const PLACEHOLDER_LISTINGS = [
   ["4212 Zilker Bungalow", "Austin", "78704", 1150000, 3, "2", 1880, "Pending", 0, 0, 1, 1, "Residential", "Steven Van Orden", "78704 bungalow four blocks from Zilker Park — chef's kitchen, studio ADU, alley access."],
   ["15221 Lake Travis Vista", "Austin", "78734", 1690000, 5, "4.5", 4600, "Active", 1, 0, 2, 1, "Residential", "Peter Allen", "Lake Travis estate with infinity pool, boat slip, and panoramic water views from every level."],
   ["9010 Mueller Row", "Austin", "78723", 559000, 3, "2.5", 1820, "Active", 0, 1, 2, 0, "Townhome/Condo", "Steven Van Orden", "New Mueller-district row home — energy-star build, park views, two-car garage."],
+  // affordable Austin townhomes/condos (< $450K)
+  ["2604 East Sixth Flat", "Austin", "78702", 389000, 2, "2", 1120, "Active", 0, 0, 1, 1, "Townhome/Condo", "Laila", "East Sixth condo with a private balcony and gated parking — walk to Lady Bird Lake and live music."],
+  ["5117 Menchaca Commons", "Austin", "78745", 419000, 3, "2.5", 1490, "Active", 0, 1, 2, 0, "Townhome/Condo", "Laila", "New-construction South Austin townhome — three beds, fenced yard, minutes to St. Elmo district."],
+  ["1811 Wells Branch Villa", "Austin", "78728", 339000, 2, "2", 1180, "Active", 0, 0, 1, 1, "Townhome/Condo", "Steven Van Orden", "Single-story north Austin condo with an attached garage, community pool, and easy MoPac access."],
   ["6816 Riverside Duplex", "Austin", "78741", 749000, 6, "4", 2900, "Active", 0, 0, 2, 1, "Multi-Family", "Peter Allen", "East Riverside duplex minutes to Oracle and the airport — two 3/2 units, house-hack ready."],
   // Austin pool homes under $700K
   ["8901 Circle C Pool Home", "Austin", "78739", 649000, 4, "3", 2680, "Active", 1, 0, 2, 1, "Residential", "Steven Van Orden", "Circle C family home with a sparkling pool, greenbelt backdrop, and top-rated schools."],

@@ -141,3 +141,11 @@
 - [x] /join animated 3-step lead-flow diagram (sequential light-up, gold connector fill, Hot/Warm/Cold badges cascade) — verified rendering
 - [x] No "high-tech"/"cutting-edge" copy anywhere — grep verified (only a code comment)
 - [x] Tests (42/42), visual verification (desktop full-page / + /join, live search), checkpoint, GitHub push
+
+## Production sync: GitHub pull + DB re-seed + FUB key
+- [x] Pulled latest GitHub main — audit-fix commit already merged locally (054a5df); no newer commits on remote
+- [x] Re-seeded production listings DB via seed-listings.mjs — 55 listings confirmed via SQL count
+- [x] Set FUB_X_SYSTEM_KEY in deployment environment (dev + production secrets)
+- [x] Re-tested FUB lead sync: test lead status=synced, fubId=6182 (no 403) — cleaned up after
+- [x] Rebalanced dataset: +3 affordable Austin townhomes/condos (58 total listings re-seeded); AI search counts now: SA pool <$400K → 5, 4bd new-construction <$600K → 7, single story <$500K → 20, Austin townhome <$450K → 4 (all queries return healthy result sets)
+- [x] All 60 tests pass; checkpoint + GitHub push + confirm to user

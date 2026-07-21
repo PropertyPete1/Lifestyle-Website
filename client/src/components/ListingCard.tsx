@@ -20,7 +20,7 @@ const statusStyles: Record<string, string> = {
 export default function ListingCard({ listing, large = false }: { listing: Listing; large?: boolean }) {
   return (
     <Link href={`/listing/${listing.slug}`}>
-      <article className={cn("group cursor-pointer", large ? "" : "")}>
+      <article className={cn("group cursor-pointer lux-lift", large ? "" : "")}>
         <div className="relative overflow-hidden aspect-[4/3] bg-secondary">
           {listing.heroImage && (
             <img

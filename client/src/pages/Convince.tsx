@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import PageShell from "@/components/PageShell";
 import LeadForm from "@/components/LeadForm";
+import AIStatusSequence from "@/components/AIStatusSequence";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -251,7 +252,25 @@ export default function Convince() {
           </div>
         )}
 
-        {stage === "quiz" && (
+        {stage === "quiz" && generate.isPending && (
+          <div className="py-24 text-center">
+            <p className="eyebrow text-gold">One moment</p>
+            <h2 className="font-serif text-3xl md:text-4xl mt-3 mb-8">
+              {partnerName.trim() ? `Writing to ${partnerName.trim()}…` : "Writing your letter…"}
+            </h2>
+            <AIStatusSequence
+              stages={[
+                "Reading your picks…",
+                "Choosing your best-fit city…",
+                "Writing the letter…",
+                "Polishing every line…",
+              ]}
+              interval={1600}
+            />
+          </div>
+        )}
+
+        {stage === "quiz" && !generate.isPending && (
           <div className="text-center">
             <p className="eyebrow text-gold">Step 1 of 1 — no typing required</p>
             <h2 className="font-serif text-3xl md:text-4xl mt-3">What's your dream life?</h2>

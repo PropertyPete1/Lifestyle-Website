@@ -1,5 +1,6 @@
 import PageShell from "@/components/PageShell";
 import RecruitForm from "@/components/RecruitForm";
+import LeadFlowDiagram from "@/components/LeadFlowDiagram";
 import { IMG } from "@/lib/assets";
 
 const PILLARS = [
@@ -34,7 +35,19 @@ export default function Join() {
         ))}
       </section>
 
+      {/* How leads actually move through the system — visual proof, not claims */}
+      <section className="border-y border-border/60 bg-[oklch(0.165_0.005_285)]">
+        <div className="mx-auto max-w-[1200px] px-5 lg:px-8 py-20">
+          <div className="text-center mb-14 reveal">
+            <p className="eyebrow text-gold">The Lead System</p>
+            <h2 className="display-serif text-3xl md:text-4xl mt-3">Where Your Next Client Comes From</h2>
+          </div>
+          <LeadFlowDiagram />
+        </div>
+      </section>
+
       <section className="mx-auto max-w-3xl px-5 lg:px-8 pb-24">
+        <div className="pt-4" />
         {/* Screening message — exact copy per brief */}
         <div className="border-l-2 border-gold pl-6 mb-10 reveal">
           <p className="text-muted-foreground leading-relaxed whitespace-pre-line">

@@ -8,6 +8,7 @@ import ListingShowcase from "@/components/ListingShowcase";
 import AISearchBar from "@/components/AISearchBar";
 import TestimonialCarousel from "@/components/TestimonialCarousel";
 import VeteranBadge from "@/components/VeteranBadge";
+import TechShowcase from "@/components/TechShowcase";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
 import { IMG } from "@/lib/assets";
@@ -150,6 +151,9 @@ export default function Home() {
         </div>
       </section>
 
+      {/* ============ TECHNOLOGY SHOWCASE (show, don't tell) ============ */}
+      <TechShowcase />
+
       {/* ============ CITY FINDER CTA ============ */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0">
@@ -225,7 +229,7 @@ export default function Home() {
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {CITY_CARDS.map((c, i) => (
               <Link key={c.slug} href={`/${c.slug}`}>
-                <div className="group relative aspect-[3/4] overflow-hidden reveal" style={{ transitionDelay: `${i * 50}ms` }}>
+                <div className="group lux-lift relative aspect-[3/4] overflow-hidden reveal" style={{ transitionDelay: `${i * 50}ms` }}>
                   <img src={c.img} alt={c.name} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" />
                   <div className="absolute inset-0 bg-black/50 group-hover:bg-black/35 transition-colors" />
                   <div className="absolute inset-x-0 bottom-0 p-5">

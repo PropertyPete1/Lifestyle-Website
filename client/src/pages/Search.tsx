@@ -4,6 +4,7 @@ import PageShell from "@/components/PageShell";
 import ListingCard from "@/components/ListingCard";
 import AISearchBar from "@/components/AISearchBar";
 import ListingsMap from "@/components/ListingsMap";
+import AIStatusSequence from "@/components/AIStatusSequence";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
 import { cn } from "@/lib/utils";
@@ -115,7 +116,7 @@ function SearchInner({ portfolio }: { portfolio: boolean }) {
                   <Sparkles className="h-3.5 w-3.5" /> AI matched:
                 </span>
                 {aiLoading ? (
-                  <span className="text-xs text-muted-foreground animate-pulse">Interpreting your search…</span>
+                  <span className="text-xs text-muted-foreground animate-pulse">Analyzing your criteria…</span>
                 ) : criteriaChips.length > 0 ? (
                   criteriaChips.map((chip) => (
                     <span key={chip} className="px-3 py-1 text-[11px] uppercase tracking-[0.15em] border border-gold/50 text-gold">
@@ -198,20 +199,28 @@ function SearchInner({ portfolio }: { portfolio: boolean }) {
           {aiActive && !showLoading && (
             <h2 className="font-serif text-2xl md:text-3xl mb-8">
               {filtered.length > 0
-                ? `${filtered.length} home${filtered.length === 1 ? "" : "s"} match your search`
+                ? `${filtered.length} home${filtered.length === 1 ? " matches" : "s match"} your search`
                 : "Here's what we found for you"}
             </h2>
           )}
           {showLoading ? (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8">
-              {[...Array(6)].map((_, i) => (
-                <div key={i} className="space-y-3">
-                  <Skeleton className="aspect-[4/3] w-full" />
-                  <Skeleton className="h-6 w-1/2" />
-                  <Skeleton className="h-4 w-3/4" />
-                </div>
-              ))}
-            </div>
+            <>
+              {aiLoading && (
+                <AIStatusSequence
+                  className="mb-10"
+                  stages={["Analyzing your criteria…", "Matching listings…", "Ranking your results…"]}
+                />
+              )}
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="space-y-3">
+                    <Skeleton className="aspect-[4/3] w-full" />
+                    <Skeleton className="h-6 w-1/2" />
+                    <Skeleton className="h-4 w-3/4" />
+                  </div>
+                ))}
+              </div>
+            </>
           ) : filtered.length > 0 ? (
             view === "map" ? (
               <ListingsMap listings={filtered} />

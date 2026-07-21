@@ -131,3 +131,13 @@
 - [x] Veteran-owned mention in /join Broker Support section
 - [x] Short veteran-owned trust line on homepage under the stats bar ("service, discipline, and integrity in every transaction")
 - [x] Visual verification (desktop /, /join, /team + mobile 375px full-page) — 42/42 tests pass; checkpoint
+
+## High-tech feel through visible interactions (no claims)
+- [x] AI status sequence component (gold sweep hairline + staged serif messages "Analyzing your criteria…" → "Matching listings…" → "Ranking your results…") wired into search loading — verified live in browser
+- [x] Same status treatment for Convince Your Partner generation (full-screen "Reading your picks…" → "Choosing your best-fit city…" → "Writing the letter…" → "Polishing every line…")
+- [x] Homepage stats already count up on scroll (StatCounter IntersectionObserver, eased 1.4s) — verified implementation
+- [x] Site-wide micro-interactions: global button press scale (already present), new .lux-lift (lift + gold-tinged shadow) applied to listing cards, links-in-bio cards, tech showcase cards
+- [x] Homepage technology showcase: 3 animated capability cards (scanning magnifier, floating pin, growing chart bars) linking to live features — visual, minimal copy
+- [x] /join animated 3-step lead-flow diagram (sequential light-up, gold connector fill, Hot/Warm/Cold badges cascade) — verified rendering
+- [x] No "high-tech"/"cutting-edge" copy anywhere — grep verified (only a code comment)
+- [x] Tests (42/42), visual verification (desktop full-page / + /join, live search), checkpoint, GitHub push

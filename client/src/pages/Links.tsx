@@ -27,7 +27,7 @@ export default function Links() {
           {(links ?? []).map((l) => {
             const isInternal = l.url.startsWith("/");
             const cls =
-              "group flex items-center justify-between w-full border border-border bg-card px-6 py-4 text-xs uppercase tracking-[0.2em] hover:border-gold hover:text-gold transition-colors";
+              "group lux-lift flex items-center justify-between w-full border border-border bg-card px-6 py-4 text-xs uppercase tracking-[0.2em] hover:border-gold hover:text-gold transition-colors";
             return isInternal ? (
               <Link key={l.id} href={l.url} className={cls}>
                 {l.label}

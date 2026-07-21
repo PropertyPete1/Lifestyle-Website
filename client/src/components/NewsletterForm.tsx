@@ -76,7 +76,7 @@ export default function NewsletterForm() {
           type="submit"
           disabled={submit.isPending}
           variant="outline"
-          className="border-gold/60 text-gold hover:bg-gold hover:text-primary-foreground uppercase tracking-[0.2em] text-[11px] rounded-none px-8 shrink-0">
+          className="glow-gold glow-cool border-gold/60 text-gold hover:bg-gold hover:text-primary-foreground uppercase tracking-[0.2em] text-[11px] rounded-none px-8 shrink-0">
           {submit.isPending ? "..." : "Subscribe"}
         </Button>
       </div>

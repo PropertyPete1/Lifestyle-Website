@@ -36,7 +36,7 @@ export default function Home() {
   return (
     <PageShell>
       {/* ============ HERO ============ */}
-      <section className="relative min-h-[88svh] flex items-center">
+      <section className="ambient-section ambient-lines relative min-h-[88svh] flex items-center overflow-hidden">
         <div className="absolute inset-0">
           <img
             src={IMG.heroDarkInterior}
@@ -48,7 +48,7 @@ export default function Home() {
         </div>
         <div className="relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pt-32 pb-16">
           <p className="eyebrow text-foreground/90">{SITE.eyebrow}</p>
-          <h1 className="display-serif text-[10.5vw] sm:text-6xl md:text-7xl lg:text-[5.5rem] uppercase mt-5 text-foreground">
+          <h1 className="display-serif hero-glow text-[10.5vw] sm:text-6xl md:text-7xl lg:text-[5.5rem] uppercase mt-5 text-foreground">
             {SITE.headline}
           </h1>
           <div className="hairline w-40 my-7" />
@@ -58,7 +58,7 @@ export default function Home() {
           <div className="mt-12 flex flex-wrap items-center gap-5">
             <a
               href="#get-started"
-              className="inline-flex items-center gap-3 bg-gold text-primary-foreground px-9 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:bg-gold/90 transition-colors">
+              className="glow-gold inline-flex items-center gap-3 bg-gold text-primary-foreground px-9 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:bg-gold/90 transition-colors">
               Ready to Buy or Sell? Get Started <ArrowRight className="h-4 w-4" />
             </a>
             <Link
@@ -85,7 +85,7 @@ export default function Home() {
       </section>
 
       {/* ============ GET STARTED (high-intent form) ============ */}
-      <section id="get-started" className="mx-auto max-w-[1400px] px-5 lg:px-8 py-20 lg:py-28 scroll-mt-24">
+      <section id="get-started" className="ambient-section mx-auto max-w-[1400px] px-5 lg:px-8 py-20 lg:py-28 scroll-mt-24">
         <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
           <div className="reveal">
             <p className="eyebrow text-gold">Work With Us</p>
@@ -102,7 +102,7 @@ export default function Home() {
               <p className="flex items-center gap-3"><span className="h-px w-8 bg-gold inline-block" /> A response within one business day</p>
             </div>
           </div>
-          <div className="reveal border border-gold/40 bg-card p-6 lg:p-10">
+          <div className="reveal glass-card border border-gold/40 p-6 lg:p-10">
             <GetStartedForm />
           </div>
         </div>
@@ -123,7 +123,7 @@ export default function Home() {
       </section>
 
       {/* ============ AI SEARCH ============ */}
-      <section className="border-y border-border/60 bg-[oklch(0.165_0.005_285)]">
+      <section className="ambient-section border-y border-border/60 bg-[oklch(0.165_0.005_285)]">
         <div className="mx-auto max-w-3xl px-5 lg:px-8 py-12">
           <AISearchBar />
         </div>
@@ -225,7 +225,7 @@ export default function Home() {
       </section>
 
       {/* ============ TRACK RECORD — slim live-data strip (relocated below the fold) ============ */}
-      <section className="border-b border-border/60">
+      <section className="glass-strip border-b border-border/60">
         <div className="mx-auto max-w-[1400px] px-5 lg:px-8 py-10 lg:py-12">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-10">
             {(stats && stats.length > 0

@@ -78,19 +78,19 @@ export default function AISearchBar({ autoFocus = false }: { autoFocus?: boolean
         </Popover>
       </div>
       <div className="flex gap-2">
-        <div className="relative flex-1">
+        <div className="ai-input-glow relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             autoFocus={autoFocus}
             placeholder={'Try "3 bedroom home under $400K with a pool in San Antonio"'}
-            className="bg-secondary/60 border-border pl-11 h-12 text-sm rounded-none"
+            className="bg-secondary/60 border-transparent pl-11 h-12 text-sm rounded-none focus-visible:ring-0"
           />
         </div>
         <Button
           type="submit"
-          className="bg-gold text-primary-foreground hover:bg-gold/90 uppercase tracking-[0.18em] text-[11px] h-12 px-6 rounded-none shrink-0">
+          className="glow-gold bg-gold text-primary-foreground hover:bg-gold/90 uppercase tracking-[0.18em] text-[11px] h-12 px-6 rounded-none shrink-0">
           Search
         </Button>
       </div>

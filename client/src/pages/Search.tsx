@@ -120,9 +120,9 @@ function SearchInner({ portfolio }: { portfolio: boolean }) {
 
   return (
     <PageShell solidNav>
-      <div className="mx-auto max-w-[1400px] px-5 lg:px-8 pt-28 lg:pt-36 pb-20">
+      <div className="ambient-section mx-auto max-w-[1400px] px-5 lg:px-8 pt-28 lg:pt-36 pb-20">
         <p className="eyebrow text-gold">{portfolio ? "Our Work" : "Home Search"}</p>
-        <h1 className="display-serif text-4xl md:text-6xl mt-3">
+        <h1 className="display-serif hero-glow text-4xl md:text-6xl mt-3">
           {portfolio ? "Portfolio" : "Search Properties"}
         </h1>
         <p className="mt-4 text-muted-foreground max-w-2xl">

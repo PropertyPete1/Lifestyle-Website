@@ -188,3 +188,10 @@
 - [x] Raise price-range outlier floor from $50K to $150K in statsSync (range/avg exclude sub-$150K; sales count + total volume still include everything)
 - [x] Update statsSync tests for the new floor, re-run sync against FUB — new values: 67 closed | $16.5M | $161K–$885K | $363K avg (verified in site_stats)
 - [x] Tests pass (72/72), checkpoint, GitHub push
+
+## Visual polish: tech-forward depth (user request Jul 20)
+- [x] Soft glow accents: restrained gold (occasionally cool blue) blurred glow behind key CTAs (Get Started, Search, Subscribe) + hero headline text glow
+- [x] Subtle background motion: slow ambient gradient shift / faint drifting texture in hero & dark sections (respects prefers-reduced-motion)
+- [x] Glassmorphism: frosted translucent treatment (blur + slight transparency + thin light border) on listing cards, stats strip, testimonial cards
+- [x] AI search bar emphasis: gentle pulsing gold glow distinct from ordinary inputs (homepage + /search)
+- [x] Applied consistently on /, /search, /convince + key pages; visual verification desktop/mobile (72/72 tests); checkpoint; GitHub push

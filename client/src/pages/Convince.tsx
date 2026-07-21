@@ -227,13 +227,13 @@ export default function Convince() {
 
   return (
     <PageShell solidNav>
-      <div className="mx-auto max-w-3xl px-5 lg:px-8 pt-28 lg:pt-36 pb-24">
+      <div className="ambient-section mx-auto max-w-3xl px-5 lg:px-8 pt-28 lg:pt-36 pb-24">
         {stage === "intro" && (
           <div className="text-center">
             <p className="inline-flex items-center gap-2 eyebrow text-gold">
               <Heart className="h-3.5 w-3.5" /> Convince Your Partner
             </p>
-            <h1 className="display-serif text-4xl md:text-5xl mt-4">
+            <h1 className="display-serif hero-glow text-4xl md:text-5xl mt-4">
               Moving to Texas, Together
             </h1>
             <p className="mt-8 text-base md:text-lg text-muted-foreground leading-relaxed max-w-xl mx-auto">
@@ -244,7 +244,7 @@ export default function Convince() {
             </p>
             <button
               onClick={() => setStage("quiz")}
-              className="mt-10 inline-flex items-center gap-2 bg-gold text-primary-foreground px-10 py-4 text-[11px] uppercase tracking-[0.2em] hover:bg-gold/90 transition-colors active:scale-[0.97]">
+              className="glow-gold mt-10 inline-flex items-center gap-2 bg-gold text-primary-foreground px-10 py-4 text-[11px] uppercase tracking-[0.2em] hover:bg-gold/90 transition-colors active:scale-[0.97]">
               Start <ArrowRight className="h-4 w-4" />
             </button>
           </div>

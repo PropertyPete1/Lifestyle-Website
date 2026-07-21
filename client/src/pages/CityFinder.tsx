@@ -191,9 +191,9 @@ export default function CityFinder() {
 
   return (
     <PageShell solidNav>
-      <div className="mx-auto max-w-3xl px-5 lg:px-8 pt-28 lg:pt-36 pb-24">
+      <div className="ambient-section mx-auto max-w-3xl px-5 lg:px-8 pt-28 lg:pt-36 pb-24">
         <p className="eyebrow text-gold text-center">Signature Tool</p>
-        <h1 className="display-serif text-4xl md:text-5xl mt-3 text-center">Find Your Texas City</h1>
+        <h1 className="display-serif hero-glow text-4xl md:text-5xl mt-3 text-center">Find Your Texas City</h1>
 
         {/* Progress */}
         <div className="mt-10 h-px bg-border relative">

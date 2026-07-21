@@ -119,7 +119,7 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
       <Button
         type="submit"
         disabled={submit.isPending}
-        className="w-full bg-gold text-primary-foreground hover:bg-gold/90 uppercase tracking-[0.2em] text-xs px-8 py-6 rounded-none">
+        className="glow-gold w-full bg-gold text-primary-foreground hover:bg-gold/90 uppercase tracking-[0.2em] text-xs px-8 py-6 rounded-none">
         {submit.isPending ? "Submitting..." : "Get Started"}
       </Button>
     </form>

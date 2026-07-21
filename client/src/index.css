@@ -312,3 +312,146 @@ button:active, [role="button"]:active {
 ::selection {
   background: color-mix(in oklch, var(--gold) 40%, transparent);
 }
+
+/* =========================================================
+   TECH-FORWARD DEPTH LAYER (restrained, premium)
+   Soft ambient glows, subtle motion, glassmorphism.
+   All effects are barely-there by design — ambient depth,
+   never neon. Motion respects prefers-reduced-motion.
+   ========================================================= */
+
+/* ---- 1. Soft glow accents ---- */
+
+/* Ambient gold glow behind key CTAs: a blurred light source, not an outline */
+.glow-gold {
+  position: relative;
+}
+.glow-gold::before {
+  content: "";
+  position: absolute;
+  inset: -14px -20px;
+  z-index: -1;
+  border-radius: 9999px;
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in oklch, var(--gold) 22%, transparent) 0%,
+    transparent 70%
+  );
+  filter: blur(14px);
+  opacity: 0.8;
+  pointer-events: none;
+  transition: opacity 300ms var(--ease-out);
+}
+.glow-gold:hover::before {
+  opacity: 1;
+}
+
+/* Cool blue variant for occasional variety (e.g. Subscribe) */
+.glow-cool::before {
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in oklch, oklch(0.6 0.1 250) 20%, transparent) 0%,
+    transparent 70%
+  );
+}
+
+/* Hero headline: soft blurred light behind the display text */
+.hero-glow {
+  text-shadow:
+    0 0 60px color-mix(in oklch, var(--gold) 18%, transparent),
+    0 0 120px color-mix(in oklch, var(--foreground) 8%, transparent);
+}
+
+/* ---- 2. Subtle background motion (hero/dark sections) ---- */
+.ambient-section {
+  position: relative;
+  isolation: isolate;
+}
+.ambient-section::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(38rem 26rem at 18% 22%, color-mix(in oklch, var(--gold) 5%, transparent), transparent 65%),
+    radial-gradient(44rem 30rem at 82% 78%, color-mix(in oklch, oklch(0.6 0.1 250) 4%, transparent), transparent 65%);
+  opacity: 0.9;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ambient-section::before {
+    animation: ambient-drift 26s var(--ease-in-out) infinite alternate;
+  }
+  @keyframes ambient-drift {
+    0% { transform: translate3d(-1.5%, -1%, 0) scale(1); opacity: 0.7; }
+    50% { opacity: 1; }
+    100% { transform: translate3d(1.5%, 1%, 0) scale(1.04); opacity: 0.8; }
+  }
+}
+
+/* Faint drifting hairline grid, for hero sections only — barely perceptible */
+.ambient-lines::after {
+  content: "";
+  position: absolute;
+  inset: -10%;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(color-mix(in oklch, var(--foreground) 3.5%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--foreground) 3.5%, transparent) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(60% 60% at 50% 45%, black 0%, transparent 100%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ambient-lines::after {
+    animation: lines-drift 60s linear infinite;
+  }
+  @keyframes lines-drift {
+    from { transform: translate3d(0, 0, 0); }
+    to { transform: translate3d(72px, 72px, 0); }
+  }
+}
+
+/* ---- 3. Glassmorphism for card surfaces ---- */
+.glass-card {
+  background: color-mix(in oklch, var(--card) 62%, transparent);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, var(--foreground) 6%, transparent),
+    0 10px 30px -18px rgb(0 0 0 / 0.55);
+}
+
+/* Slightly darker glass for strips/bands over imagery */
+.glass-strip {
+  background: color-mix(in oklch, var(--background) 55%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+  border-bottom: 1px solid color-mix(in oklch, var(--foreground) 8%, transparent);
+}
+
+/* ---- 4. AI search bar emphasis: the "smart" input ---- */
+.ai-input-glow {
+  position: relative;
+  border-color: color-mix(in oklch, var(--gold) 35%, var(--border)) !important;
+  box-shadow: 0 0 22px -6px color-mix(in oklch, var(--gold) 28%, transparent);
+  transition: box-shadow 300ms var(--ease-out), border-color 300ms var(--ease-out);
+}
+.ai-input-glow:focus-within {
+  border-color: color-mix(in oklch, var(--gold) 65%, var(--border)) !important;
+  box-shadow: 0 0 30px -6px color-mix(in oklch, var(--gold) 45%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ai-input-glow {
+    animation: ai-breathe 3.8s var(--ease-in-out) infinite;
+  }
+  .ai-input-glow:focus-within {
+    animation: none;
+  }
+  @keyframes ai-breathe {
+    0%, 100% { box-shadow: 0 0 18px -7px color-mix(in oklch, var(--gold) 22%, transparent); }
+    50% { box-shadow: 0 0 30px -5px color-mix(in oklch, var(--gold) 40%, transparent); }
+  }
+}

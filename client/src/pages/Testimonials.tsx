@@ -21,7 +21,7 @@ export default function Testimonials() {
 
         <div className="grid md:grid-cols-2 gap-6">
           {(items ?? []).map((t, i) => (
-            <figure key={t.id} className="bg-card border border-border p-8 reveal" style={{ transitionDelay: `${(i % 2) * 60}ms` }}>
+            <figure key={t.id} className="glass-card p-8 reveal" style={{ transitionDelay: `${(i % 2) * 60}ms` }}>
               <Quote className="h-5 w-5 text-gold/70 mb-4" />
               <blockquote className="text-sm text-muted-foreground leading-relaxed">
                 {t.quote}

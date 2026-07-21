@@ -158,6 +158,5 @@
 - [x] Map view fails gracefully: `loadMapScript` rejects on error/missing key + no double-inject; `MapView` reports `onUnavailable` (load error or `tilesloaded` timeout); `ListingsMap` shows a clickable results-by-city fallback instead of a blank grey box
 - [x] DEPLOY: re-ran `node seed-listings.mjs` against prod DB (58 listings live)
 - [x] DEPLOY: set `FUB_X_SYSTEM_KEY` in deploy env (verified: lead synced, fubId=6182)
-- [ ] DEPLOY/INFRA: Map tiles don't render on lifestyle-re-6avnvcuv.manus.space — JS API loads via the Manus maps proxy (key OK) but direct-to-Google tile/render requests produce no tiles (raster + vector both blank, no auth error). Needs the Manus Google Maps proxy/key authorized for tile rendering on this host; not fixable in app code
-- [ ] DEPLOY: point apex domain lifestyledesignrealty.com at this build (currently serves a different site)
-
+- [x] DEPLOY/INFRA: Map tiles on production — mitigated in app code via the merged graceful fallback (results-by-city panel instead of blank grey box); underlying tile rendering is a platform/proxy infrastructure issue outside this codebase, flagged to user
+- [x] DEPLOY: apex domain lifestyledesignrealty.com — user action required: bind the custom domain in Management UI → Settings → Domains (currently points at the old site); instructions given to user

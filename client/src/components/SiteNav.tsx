@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { Menu, X, Phone } from "lucide-react";
 import { SITE } from "@shared/site";
 import { cn } from "@/lib/utils";
+import VeteranBadge from "@/components/VeteranBadge";
 
 /**
  * Transparent top navigation matching the reference design.
@@ -65,7 +66,8 @@ export default function SiteNav({ solid = false }: { solid?: boolean }) {
       <div className="mx-auto max-w-[1400px] px-5 lg:px-8">
         <div className="flex h-16 lg:h-20 items-center justify-between gap-4">
           {/* Brokerage wordmark — TREC: brokerage name always prominent */}
-          <Link href="/" className="shrink-0">
+          <Link href="/" className="shrink-0 flex flex-col items-start gap-0.5">
+            <VeteranBadge compact className="hidden sm:inline-flex" />
             <span className="font-serif text-base sm:text-lg lg:text-xl tracking-[0.1em] sm:tracking-[0.14em] text-foreground whitespace-nowrap">
               LIFESTYLE DESIGN <span className="text-gold">REALTY</span>
             </span>
@@ -137,6 +139,9 @@ export default function SiteNav({ solid = false }: { solid?: boolean }) {
                 {item.label}
               </Link>
             ))}
+            <div className="py-1">
+              <VeteranBadge />
+            </div>
             <a href={SITE.phoneHref} className="nav-link text-gold py-1">
               {SITE.phone}
             </a>

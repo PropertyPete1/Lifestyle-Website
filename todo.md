@@ -124,3 +124,10 @@
 - [x] Generate a branded OG image (dark/gold, "A letter written for you about your life in Texas") and upload as static asset
 - [x] Server-side OG meta tag injection for /convince/:slug (and /convince) so texts/DMs/social show a rich card (intercepts send/end/sendFile, personalized per slug, HTML-escaped, 42/42 tests pass)
 - [x] Verify OG tags with curl (slug page shows "A letter written for Taylor about life in San Antonio, Texas" + image; other routes untouched); checkpoint
+
+## Veteran-Owned badge
+- [x] Custom gold/charcoal flag SVG icon component (waving stripes + star, stroke-based, brand gold) matching luxury design language
+- [x] "Veteran-Owned & Operated" badge above the wordmark in SiteNav (desktop/tablet; also in mobile menu), small/understated, consistent across all pages
+- [x] Veteran-owned mention in /join Broker Support section
+- [x] Short veteran-owned trust line on homepage under the stats bar ("service, discipline, and integrity in every transaction")
+- [x] Visual verification (desktop /, /join, /team + mobile 375px full-page) — 42/42 tests pass; checkpoint

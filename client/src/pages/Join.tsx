@@ -5,7 +5,7 @@ import { IMG } from "@/lib/assets";
 const PILLARS = [
   { title: "Warm & Hot Transfer Leads", body: "Our City Finder, valuation engine, and Get Started pipeline deliver qualified buyers and sellers directly to the team." },
   { title: "Brokerage-First Brand", body: "Plug into a luxury brand with real marketing infrastructure — not a logo you have to build alone." },
-  { title: "Broker Support", body: "Direct access to Broker/Owner Steven Van Orden and REALTOR®/Owner Peter Allen — deal structuring, negotiation help, and mentorship on demand." },
+  { title: "Broker Support", body: "Direct access to Broker/Owner Steven Van Orden and REALTOR®/Owner Peter Allen — deal structuring, negotiation help, and mentorship on demand. Proudly veteran-owned and operated, we run our brokerage with the same discipline and accountability." },
 ];
 
 export default function Join() {

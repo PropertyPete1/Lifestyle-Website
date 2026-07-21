@@ -7,6 +7,7 @@ import NewsletterForm from "@/components/NewsletterForm";
 import ListingShowcase from "@/components/ListingShowcase";
 import AISearchBar from "@/components/AISearchBar";
 import TestimonialCarousel from "@/components/TestimonialCarousel";
+import VeteranBadge from "@/components/VeteranBadge";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
 import { IMG } from "@/lib/assets";
@@ -137,6 +138,15 @@ export default function Home() {
           ).map((s) => (
             <StatCounter key={s.id} value={s.value} label={s.label} />
           ))}
+        </div>
+        {/* Veteran-owned trust line — part of the "why work with us" story */}
+        <div className="mx-auto max-w-[1400px] px-5 lg:px-8 pb-10 -mt-2">
+          <div className="reveal flex items-center justify-center gap-3 border-t border-border/40 pt-8">
+            <VeteranBadge className="text-[10px]" />
+            <span className="hidden sm:inline text-muted-foreground text-xs tracking-wide">
+              — service, discipline, and integrity in every transaction.
+            </span>
+          </div>
         </div>
       </section>
 

@@ -7,6 +7,15 @@ import { SITE } from "@shared/site";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowRight } from "lucide-react";
 
+/** Real nearby towns per core-market corridor — visual reinforcement of coverage breadth. */
+const NEARBY_COMMUNITIES: Record<string, string[]> = {
+  Austin: ["San Marcos", "Kyle", "Buda", "Round Rock", "Cedar Park"],
+  "San Antonio": ["New Braunfels", "Boerne", "Schertz", "Converse"],
+  Houston: ["Sugar Land", "Katy", "The Woodlands", "Pearland"],
+  DFW: ["Frisco", "Plano", "McKinney", "Arlington"],
+  "New Braunfels": ["San Marcos", "Seguin", "Canyon Lake"],
+};
+
 export default function NeighborhoodDetail() {
   const params = useParams<{ slug: string }>();
   const slug = params.slug ?? "";
@@ -57,6 +66,22 @@ export default function NeighborhoodDetail() {
             <p className="eyebrow text-foreground/70 mt-3">& Surrounding Areas</p>
           )}
           {hood.tagline && <p className="mt-4 text-muted-foreground max-w-xl">{hood.tagline}</p>}
+          {NEARBY_COMMUNITIES[hood.name] && (
+            <div className="mt-6">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground mb-2.5">
+                Nearby Communities We Serve
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {NEARBY_COMMUNITIES[hood.name].map((town) => (
+                  <span
+                    key={town}
+                    className="border border-gold/35 bg-black/30 backdrop-blur-sm text-foreground/85 px-3.5 py-1.5 text-[11px] uppercase tracking-[0.14em]">
+                    {town}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 

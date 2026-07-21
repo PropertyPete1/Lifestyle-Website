@@ -7,6 +7,7 @@ import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { registerOgMeta } from "../ogMeta";
 import { appRouter } from "../routers";
+import { syncStatsHandler } from "../scheduledStatsHandler";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -38,6 +39,8 @@ async function startServer() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   registerOgMeta(app);
+  // Heartbeat cron callbacks — must be mounted before the Vite/static fallthrough
+  app.post("/api/scheduled/syncStats", syncStatsHandler);
   // tRPC API
   app.use(
     "/api/trpc",

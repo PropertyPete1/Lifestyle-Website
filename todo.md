@@ -166,3 +166,11 @@
 - [x] "& Surrounding Areas" added: Markets We Serve city cards (subtitle), footer serving line ("...Houston, and surrounding areas"), city landing page heroes (5 core markets)
 - [x] Rate updated 4.99% → 3.99% in FinancingBanner (single source of truth used by homepage hero + Convince); exact disclosure unchanged and adjacent; AI compliance guard untouched (still blocks all AI-generated rates)
 - [x] Typecheck clean, 60/60 tests pass, full-page visual verification done
+
+## Revision round: nearby communities, FUB stats sync, pre-cutover status
+- [x] Nearby Communities chip row on the five core-market landing pages (Austin, San Antonio, Houston, DFW, New Braunfels) with the specified town lists — verified visually
+- [x] Daily FUB stats sync module: pulls closed-stage deals via FUB Deals API (67 closed deals, $16.5M verified live), computes 4 stats, upserts site_stats; graceful fallback (never writes zeros/partial; thin-data guard); sub-$50k artifacts excluded from range/avg
+- [ ] /api/scheduled/syncStats handler mounted, checkpoint + deploy, then register the Heartbeat cron
+- [ ] Verify production listings re-seed + AI search counts on the LIVE site (not dev)
+- [ ] Re-check Google Maps tile rendering status on production; report to user
+- [ ] Tests, checkpoint, GitHub push, status report to user

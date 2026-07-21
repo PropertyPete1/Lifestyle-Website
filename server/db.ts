@@ -252,6 +252,12 @@ export async function updateSiteStat(id: number, data: Partial<typeof siteStats.
   await db.update(siteStats).set(data).where(eq(siteStats.id, id));
 }
 
+export async function createSiteStat(data: typeof siteStats.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.insert(siteStats).values(data);
+}
+
 /* ---------------- Bio links ---------------- */
 export async function getBioLinks(includeInactive = false) {
   const db = await getDb();

@@ -6,6 +6,7 @@ import GetStartedForm from "@/components/GetStartedForm";
 import NewsletterForm from "@/components/NewsletterForm";
 import ListingShowcase from "@/components/ListingShowcase";
 import AISearchBar from "@/components/AISearchBar";
+import FinancingBanner from "@/components/FinancingBanner";
 import TestimonialCarousel from "@/components/TestimonialCarousel";
 import VeteranBadge from "@/components/VeteranBadge";
 import TechShowcase from "@/components/TechShowcase";
@@ -77,6 +78,9 @@ export default function Home() {
             <Link href="/search" className="text-cta text-foreground">Browse Properties</Link>
             <Link href="/valuation" className="text-cta text-foreground">Home Valuation</Link>
           </div>
+
+          {/* Builder-buydown claim + required disclosure (adjacent, never buried) */}
+          <FinancingBanner className="mt-10 max-w-xl bg-background/70 backdrop-blur-sm" />
         </div>
       </section>
 

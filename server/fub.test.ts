@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { buildTag, computeIntent } from "./fub";
+import { afterEach, describe, expect, it } from "vitest";
+import { buildTag, computeIntent, fubHeaders } from "./fub";
 
 describe("computeIntent", () => {
   it("returns Hot for ASAP + pre-approved buyer", () => {
@@ -40,6 +40,31 @@ describe("buildTag", () => {
   });
 });
 
+describe("fubHeaders", () => {
+  const prev = process.env.FUB_X_SYSTEM_KEY;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.FUB_X_SYSTEM_KEY;
+    else process.env.FUB_X_SYSTEM_KEY = prev;
+  });
+
+  it("always sends Basic auth, User-Agent, and X-System", () => {
+    const h = fubHeaders("test-key");
+    expect(h.Authorization).toBe(`Basic ${Buffer.from("test-key:").toString("base64")}`);
+    expect(h["User-Agent"]).toBeTruthy();
+    expect(h["X-System"]).toBeTruthy();
+  });
+
+  it("includes X-System-Key when FUB_X_SYSTEM_KEY is configured", () => {
+    process.env.FUB_X_SYSTEM_KEY = "sys-key-123";
+    expect(fubHeaders("test-key")["X-System-Key"]).toBe("sys-key-123");
+  });
+
+  it("omits X-System-Key when not configured (no empty header)", () => {
+    delete process.env.FUB_X_SYSTEM_KEY;
+    expect(fubHeaders("test-key")["X-System-Key"]).toBeUndefined();
+  });
+});
+
 describe("FUB API key validation", () => {
   it(
     "authenticates against the FUB identity endpoint",
@@ -48,11 +73,7 @@ describe("FUB API key validation", () => {
       const apiKey = process.env.FUB_API_KEY;
       expect(apiKey, "FUB_API_KEY must be set").toBeTruthy();
       const res = await fetch("https://api.followupboss.com/v1/identity", {
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
-          // FUB's CloudFront edge rejects requests without a User-Agent (403)
-          "User-Agent": "LifestyleDesignRealty-Website/1.0",
-        },
+        headers: fubHeaders(apiKey as string),
         signal: AbortSignal.timeout(25000),
       });
       // FUB's CloudFront geo-blocks non-US egress IPs. The dev sandbox can

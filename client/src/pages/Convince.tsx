@@ -3,6 +3,7 @@ import { useLocation, useRoute } from "wouter";
 import PageShell from "@/components/PageShell";
 import LeadForm from "@/components/LeadForm";
 import AIStatusSequence from "@/components/AIStatusSequence";
+import FinancingBanner from "@/components/FinancingBanner";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -31,20 +32,7 @@ const LIFESTYLE_OPTIONS = [
 
 /** Fixed, compliance-reviewed financing copy — NEVER AI-generated. */
 function FinancingLine() {
-  return (
-    <div className="border border-gold/40 bg-gold/5 px-6 py-5 text-left">
-      <p className="text-sm text-foreground/90">
-        Ask us about builder incentive buydowns — we've gotten clients as low as{" "}
-        <span className="text-gold font-medium">4.99%</span> since 2021.
-      </p>
-      <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-        Rate shown reflects past builder-incentive buydowns obtained for specific clients and is
-        not an offer of credit or a guarantee of current availability. Rates, terms, and incentives
-        vary by builder, lender, and market conditions and are subject to qualification. Lifestyle
-        Design Realty is not a lender.
-      </p>
-    </div>
-  );
+  return <FinancingBanner />;
 }
 
 /** Result screen — used both right after generation and for shared links. */

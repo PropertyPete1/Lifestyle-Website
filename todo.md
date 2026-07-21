@@ -170,7 +170,7 @@
 ## Revision round: nearby communities, FUB stats sync, pre-cutover status
 - [x] Nearby Communities chip row on the five core-market landing pages (Austin, San Antonio, Houston, DFW, New Braunfels) with the specified town lists — verified visually
 - [x] Daily FUB stats sync module: pulls closed-stage deals via FUB Deals API (67 closed deals, $16.5M verified live), computes 4 stats, upserts site_stats; graceful fallback (never writes zeros/partial; thin-data guard); sub-$50k artifacts excluded from range/avg
-- [ ] /api/scheduled/syncStats handler mounted, checkpoint + deploy, then register the Heartbeat cron
-- [ ] Verify production listings re-seed + AI search counts on the LIVE site (not dev)
-- [ ] Re-check Google Maps tile rendering status on production; report to user
-- [ ] Tests, checkpoint, GitHub push, status report to user
+- [x] /api/scheduled/syncStats handler mounted, deployed (403 for non-cron verified on prod), Heartbeat cron registered (daily-fub-stats-sync, 10:00 UTC daily, task_uid GJ7kxgtPwwknnKqbJFutNi); manual first sync ran: 67 closed | $16.5M | $52K–$885K | $351K
+- [x] Verified production AI search counts on the LIVE site: SA pool <400k → 5, 4bd new-construction <600k → 7, single story <500k → 20, Austin townhome <450k → 4
+- [x] Re-checked Google Maps on production: maps proxy returns 403 "Your IP address is not allowed" — platform-level allowlist issue; graceful by-city fallback shows instead of blank map. User to provide own Google Maps API key or await platform fix
+- [x] Tests (65/65), checkpoint, GitHub push, status report to user

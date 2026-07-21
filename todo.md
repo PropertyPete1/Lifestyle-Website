@@ -208,3 +208,10 @@
 - [x] Global footer credit line: "Website crafted by Lifestyle Design Technologies — Click here to inquire about your own custom website."
 - [x] "Click here" is a mailto to peter@lifestyledesignrealty.com with subject "Custom Website Inquiry" and prefilled body; gold accent, underline/hover state, understated styling
 - [x] Appears at bottom of footer on every page (SiteFooter is global); verified visually on / and /team; tests 72/72, checkpoint, GitHub push
+
+## Footer credit v2: real inquiry form instead of mailto (user request Jul 20)
+- [x] Replace mailto with modal inquiry form: Name, Email, Phone, Business Name/Type (optional), short message (WebsiteInquiryModal opened from footer credit)
+- [x] Backend: websiteInquiry.submit tRPC procedure → FUB lead tagged "Wants Us to Build Their Website" + source "Website - Custom Website Inquiry" (verified live: FUB person created with exactly that tag/source/phone, then cleaned up)
+- [x] Email copy of every inquiry to peter@lifestyledesignrealty.com via owner-notification service (email-style formatted copy; failure fallback alerts owner; inquiry always saved in admin Lead Log)
+- [x] "Thanks! I'll be in touch soon." confirmation state in the modal — no email-client dependency (verified in browser E2E)
+- [x] Vitest coverage (7 new tests, 79/79 total); visual verification; checkpoint; GitHub push

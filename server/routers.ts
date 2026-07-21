@@ -5,7 +5,8 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
-import { computeIntent, sendFubNote, sendToFub } from "./fub";
+import { computeIntent, sendFubNote, sendToFub, sendWebsiteInquiryToFub, WEBSITE_INQUIRY_SOURCE, WEBSITE_INQUIRY_TAG } from "./fub";
+import { emailWebsiteInquiryCopy } from "./inquiryEmail";
 import { buildActivityNote } from "./activityNote";
 import { extractCriteria, matchListings } from "./aiSearch";
 import { notifyOwner } from "./_core/notification";
@@ -276,6 +277,61 @@ export const appRouter = router({
       return { success: true, intent } as const;
     }),
     list: adminProcedure.query(() => db.getLeads()),
+  }),
+
+  /**
+   * Custom-website inquiry (web design services — NOT a real estate lead).
+   * Pipeline: store locally → FUB contact tagged "Wants Us to Build Their
+   * Website" → email copy to Peter. Confirmation is returned to the client;
+   * no email-client dependency for the visitor.
+   */
+  websiteInquiry: router({
+    submit: publicProcedure
+      .input(
+        z.object({
+          name: z.string().trim().min(1).max(190),
+          email: z.string().trim().email().max(320),
+          phone: z.string().trim().min(7).max(40),
+          business: z.string().trim().max(190).optional(),
+          message: z.string().trim().min(1).max(3000),
+        })
+      )
+      .mutation(async ({ input }) => {
+        // Store locally first — never lose an inquiry (reuses leads table with
+        // the distinct web-design source tag so it shows in the admin Lead Log).
+        const leadId = await db.createLead({
+          name: input.name,
+          email: input.email,
+          phone: input.phone,
+          message: [input.business ? `Business: ${input.business}` : undefined, input.message]
+            .filter(Boolean)
+            .join("\n"),
+          sourceTag: WEBSITE_INQUIRY_SOURCE,
+          intent: "Unknown",
+          answers: JSON.stringify({ inquiryType: "web design services", business: input.business ?? "" }),
+          tcpaConsent: true,
+          fubStatus: "pending",
+          visitorId: null,
+        });
+
+        const fub = await sendWebsiteInquiryToFub(input);
+        await db.updateLead(leadId, {
+          fubStatus: fub.ok ? "synced" : "failed",
+          fubId: fub.fubId,
+        });
+
+        // Email a copy to Peter — independent of FUB result so he always hears about it.
+        const emailed = await emailWebsiteInquiryCopy(input).catch(() => ({ ok: false as const }));
+
+        if (!fub.ok || !emailed.ok) {
+          notifyOwner({
+            title: `Custom Website Inquiry: ${input.name}`,
+            content: `Tag: ${WEBSITE_INQUIRY_TAG}\nEmail: ${input.email}\nPhone: ${input.phone}\nBusiness: ${input.business ?? "—"}\nMessage: ${input.message}\nFUB sync: ${fub.ok ? "ok" : `FAILED (${fub.error ?? "unknown"})`}\nEmail copy to Peter: ${emailed.ok ? "sent" : "FAILED"}\nSaved in admin Lead Log.`,
+          }).catch(() => undefined);
+        }
+
+        return { success: true } as const;
+      }),
   }),
 
   activity: router({

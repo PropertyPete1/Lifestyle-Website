@@ -176,3 +176,78 @@ export async function sendFubNote(
     return { ok: false, error: err instanceof Error ? err.message : "Unknown FUB error" };
   }
 }
+
+/**
+ * Website-design inquiry pipeline (separate from real-estate leads).
+ * Creates a FUB contact tagged unmistakably as a web-design prospect —
+ * "Wants Us to Build Their Website" — so it is never confused with a
+ * property/buyer/seller lead. Source string also names the service.
+ */
+export const WEBSITE_INQUIRY_TAG = "Wants Us to Build Their Website";
+export const WEBSITE_INQUIRY_SOURCE = "Website - Custom Website Inquiry";
+
+export interface WebsiteInquiryInput {
+  name: string;
+  email: string;
+  phone?: string;
+  business?: string;
+  message?: string;
+}
+
+/** Build the FUB note body for a website inquiry (exported for tests). */
+export function buildWebsiteInquiryNote(input: WebsiteInquiryInput): string {
+  return [
+    "WEB DESIGN SERVICES INQUIRY (not a real estate lead)",
+    input.business ? `Business: ${input.business}` : undefined,
+    input.message ? `Message: ${input.message}` : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export async function sendWebsiteInquiryToFub(input: WebsiteInquiryInput): Promise<FubResult> {
+  const apiKey = process.env.FUB_API_KEY;
+  if (!apiKey) return { ok: false, error: "FUB_API_KEY not configured" };
+
+  const [firstName, ...rest] = input.name.trim().split(/\s+/);
+  const lastName = rest.join(" ");
+
+  const body = {
+    source: WEBSITE_INQUIRY_SOURCE,
+    system: FUB_SYSTEM,
+    type: "General Inquiry",
+    message: buildWebsiteInquiryNote(input),
+    person: {
+      firstName,
+      lastName: lastName || undefined,
+      emails: [{ value: input.email }],
+      phones: input.phone ? [{ value: input.phone }] : undefined,
+      tags: [WEBSITE_INQUIRY_TAG],
+    },
+  };
+
+  try {
+    const res = await fetch(`${FUB_API_URL}/events`, {
+      method: "POST",
+      headers: fubHeaders(apiKey),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ok: false, error: `FUB ${res.status}: ${text.slice(0, 300)}` };
+    }
+    const data = (await res.json().catch(() => ({}))) as {
+      id?: number | string;
+      personId?: number | string;
+      person?: { id?: number | string };
+    };
+    const personId = data?.person?.id ?? data?.personId ?? data?.id;
+    return {
+      ok: true,
+      fubId: data?.id ? String(data.id) : undefined,
+      personId: personId ? String(personId) : undefined,
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unknown FUB error" };
+  }
+}

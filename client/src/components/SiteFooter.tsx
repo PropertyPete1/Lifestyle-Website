@@ -1,12 +1,7 @@
 import { Link } from "wouter";
 import { SITE } from "@shared/site";
-
-/** Mailto for the "Website by" credit — prefilled custom-website inquiry to Peter. */
-const CRAFTED_BY_MAILTO = `mailto:peter@lifestyledesignrealty.com?subject=${encodeURIComponent(
-  "Custom Website Inquiry"
-)}&body=${encodeURIComponent(
-  "Hi Peter, I saw your website and I'd love to talk about getting something similar built for my business. Can you tell me more?"
-)}`;
+import { useState } from "react";
+import WebsiteInquiryModal from "./WebsiteInquiryModal";
 
 /**
  * TREC-compliant global footer. Present on EVERY page:
@@ -16,6 +11,7 @@ const CRAFTED_BY_MAILTO = `mailto:peter@lifestyledesignrealty.com?subject=${enco
  * - Brokerage address & phone
  */
 export default function SiteFooter() {
+  const [inquiryOpen, setInquiryOpen] = useState(false);
   return (
     <footer className="bg-[oklch(0.11_0.005_285)] border-t border-border/60 text-foreground">
       <div className="mx-auto max-w-[1400px] px-5 lg:px-8 py-14 lg:py-20">
@@ -109,14 +105,16 @@ export default function SiteFooter() {
           <p className="text-[11px] tracking-[0.08em] text-muted-foreground/80">
             Website crafted by <span className="text-foreground/70">Lifestyle Design Technologies</span>
             {" — "}
-            <a
-              href={CRAFTED_BY_MAILTO}
+            <button
+              type="button"
+              onClick={() => setInquiryOpen(true)}
               className="text-gold underline underline-offset-4 decoration-gold/40 hover:decoration-gold hover:text-gold/90 transition-colors">
               Click here
-            </a>{" "}
+            </button>{" "}
             to inquire about your own custom website.
           </p>
         </div>
+        <WebsiteInquiryModal open={inquiryOpen} onOpenChange={setInquiryOpen} />
       </div>
     </footer>
   );

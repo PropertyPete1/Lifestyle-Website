@@ -8,6 +8,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { registerOgMeta } from "../ogMeta";
 import { appRouter } from "../routers";
 import { syncStatsHandler } from "../scheduledStatsHandler";
+import { ensureStatsSyncCron } from "../registerCron";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -65,6 +66,11 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    // Register scheduled jobs (daily stats sync). Production only so local dev
+    // never touches the shared cron registry; idempotent and non-blocking.
+    if (process.env.NODE_ENV === "production") {
+      void ensureStatsSyncCron();
+    }
   });
 }
 

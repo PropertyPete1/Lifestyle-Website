@@ -86,6 +86,11 @@ export default function SiteFooter() {
               className="underline underline-offset-4 hover:text-gold">
               Texas Real Estate Commission Consumer Protection Notice
             </a>
+            <Link
+              href="/privacy"
+              className="underline underline-offset-4 hover:text-gold">
+              Privacy Policy
+            </Link>
           </div>
           <p>{SITE.disclaimer}</p>
           <div className="flex items-center justify-between flex-wrap gap-4 pt-2">

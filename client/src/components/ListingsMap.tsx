@@ -1,109 +1,64 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import { MapPin } from "lucide-react";
-import { MapView } from "@/components/Map";
 import { formatPrice } from "@/components/ListingCard";
 import type { Listing } from "../../../drizzle/schema";
 
 /**
- * Interactive map of search results. Gold price-pill markers; clicking a
- * marker opens the listing detail page. Fits bounds to visible results.
+ * "Map" view for search results — a location overview.
  *
- * If the map can't load or render tiles for this host, we fall back to a
- * clickable location list instead of a silent blank map.
+ * This site deliberately does not embed a third-party map tile service. Instead
+ * the map toggle presents matches grouped by market/city: a clean, instant,
+ * at-a-glance breakdown of where the results are, with every listing one tap
+ * from its detail page. Interactive MLS maps will arrive later through the IDX
+ * vendor's own map widget (Phase 2); this location overview is the intended,
+ * permanent experience until then — not a fallback or error state.
  */
 export default function ListingsMap({ listings }: { listings: Listing[] }) {
-  const mapRef = useRef<google.maps.Map | null>(null);
-  const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
-  const [unavailable, setUnavailable] = useState(false);
-  const [, navigate] = useLocation();
+  const byCity = Object.entries(
+    listings.reduce<Record<string, Listing[]>>((acc, l) => {
+      (acc[l.city] ??= []).push(l);
+      return acc;
+    }, {})
+  ).sort((a, b) => b[1].length - a[1].length);
 
-  if (unavailable) return <MapUnavailable listings={listings} />;
-
-  const renderMarkers = (map: google.maps.Map) => {
-    markersRef.current.forEach((m) => (m.map = null));
-    markersRef.current = [];
-    const bounds = new google.maps.LatLngBounds();
-    let count = 0;
-
-    for (const l of listings) {
-      const lat = parseFloat(l.lat ?? "");
-      const lng = parseFloat(l.lng ?? "");
-      if (isNaN(lat) || isNaN(lng)) continue;
-
-      const pill = document.createElement("div");
-      pill.style.cssText =
-        "background:#0f0f11;color:#c9a961;border:1px solid #c9a961;padding:5px 12px;" +
-        "font-size:12px;font-weight:600;letter-spacing:0.05em;border-radius:999px;" +
-        "box-shadow:0 2px 10px rgba(0,0,0,.5);cursor:pointer;white-space:nowrap;";
-      pill.textContent = formatPrice(l.price);
-
-      const marker = new google.maps.marker.AdvancedMarkerElement({
-        map,
-        position: { lat, lng },
-        content: pill,
-        title: l.address,
-      });
-      marker.addListener("click", () => navigate(`/listing/${l.slug}`));
-      markersRef.current.push(marker);
-      bounds.extend({ lat, lng });
-      count++;
-    }
-
-    if (count > 1) map.fitBounds(bounds, 60);
-    else if (count === 1) {
-      map.setCenter(bounds.getCenter());
-      map.setZoom(12);
-    }
-  };
+  if (byCity.length === 0) return null;
 
   return (
-    <div className="border border-border overflow-hidden">
-      <MapView
-        className="h-[560px]"
-        initialCenter={{ lat: 29.9, lng: -97.9 }}
-        initialZoom={7}
-        onMapReady={(map) => {
-          mapRef.current = map;
-          renderMarkers(map);
-        }}
-        onUnavailable={() => setUnavailable(true)}
-      />
-      {/* re-render markers when the result set changes */}
-      <MarkerSync listings={listings} render={() => mapRef.current && renderMarkers(mapRef.current)} />
-    </div>
-  );
-}
-
-/**
- * Graceful fallback when the interactive map can't render (missing key, script
- * failure, or a host that the maps proxy can't serve tiles for). Keeps every
- * result reachable as a clickable, grouped-by-city list.
- */
-function MapUnavailable({ listings }: { listings: Listing[] }) {
-  const byCity = listings.reduce<Record<string, Listing[]>>((acc, l) => {
-    (acc[l.city] ??= []).push(l);
-    return acc;
-  }, {});
-
-  return (
-    <div className="border border-border p-6 lg:p-8">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+    <div className="glass-card border border-border overflow-hidden">
+      <div className="flex items-center gap-2.5 border-b border-border/60 px-6 py-4">
         <MapPin className="h-4 w-4 text-gold" />
-        Interactive map is unavailable right now — here are your results by location.
+        <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+          {listings.length} {listings.length === 1 ? "home" : "homes"} across {byCity.length}{" "}
+          {byCity.length === 1 ? "market" : "markets"}
+        </p>
       </div>
-      <div className="mt-6 grid gap-8 sm:grid-cols-2">
-        {Object.entries(byCity).map(([city, group]) => (
+
+      <div className="grid gap-x-10 gap-y-8 p-6 lg:p-8 sm:grid-cols-2">
+        {byCity.map(([city, group]) => (
           <div key={city}>
-            <p className="eyebrow text-gold">{city}</p>
-            <ul className="mt-3 space-y-2">
+            <div className="flex items-baseline justify-between border-b border-gold/30 pb-2">
+              <p className="eyebrow text-gold">{city}</p>
+              <span className="text-[11px] uppercase tracking-widest text-muted-foreground">
+                {group.length} {group.length === 1 ? "listing" : "listings"}
+              </span>
+            </div>
+            <ul className="mt-3 divide-y divide-border/50">
               {group.map((l) => (
                 <li key={l.id}>
                   <Link
                     href={`/listing/${l.slug}`}
-                    className="flex items-baseline justify-between gap-4 border-b border-border/60 py-2 hover:text-gold transition-colors">
-                    <span className="text-sm">{l.address}</span>
-                    <span className="text-sm text-gold whitespace-nowrap">{formatPrice(l.price)}</span>
+                    className="group flex items-center justify-between gap-4 py-3 transition-colors">
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm text-foreground/90 group-hover:text-gold transition-colors">
+                        {l.address}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] uppercase tracking-wider text-muted-foreground">
+                        {l.beds} bd · {l.baths} ba · {l.sqft.toLocaleString()} sqft
+                      </span>
+                    </span>
+                    <span className="whitespace-nowrap text-sm font-medium text-gold">
+                      {formatPrice(l.price)}
+                    </span>
                   </Link>
                 </li>
               ))}
@@ -113,13 +68,4 @@ function MapUnavailable({ listings }: { listings: Listing[] }) {
       </div>
     </div>
   );
-}
-
-/** Invisible helper: triggers marker refresh when listings change. */
-function MarkerSync({ listings, render }: { listings: Listing[]; render: () => void }) {
-  useEffect(() => {
-    render();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listings]);
-  return null;
 }

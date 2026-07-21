@@ -150,36 +150,48 @@ export function MapView({
   const map = useRef<google.maps.Map | null>(null);
 
   const init = usePersistFn(async () => {
+    // Arm the fallback FIRST, independent of everything below. It fires unless
+    // real tiles actually render — no matter the failure mode (script never
+    // loads, map constructor throws, container missing, or tiles never paint).
+    // The caller then shows its own fallback UI.
+    let settled = false;
+    const showFallback = (reason: string) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      onUnavailable?.(reason);
+    };
+    const timer = window.setTimeout(
+      () => showFallback("Map tiles did not render"),
+      TILES_TIMEOUT_MS
+    );
+
     try {
       await loadMapScript();
+      if (settled) return; // timed out while the script was loading
+      if (!mapContainer.current) {
+        showFallback("Map container unavailable");
+        return;
+      }
+      map.current = new window.google.maps.Map(mapContainer.current, {
+        zoom: initialZoom,
+        center: initialCenter,
+        mapTypeControl: true,
+        fullscreenControl: true,
+        zoomControl: true,
+        streetViewControl: true,
+        mapId: "DEMO_MAP_ID",
+      });
+      // Success is confirmed only when tiles actually paint.
+      window.google.maps.event.addListenerOnce(map.current, "tilesloaded", () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        onMapReady?.(map.current!);
+      });
     } catch (err) {
-      onUnavailable?.(err instanceof Error ? err.message : "Google Maps failed to load");
-      return;
+      showFallback(err instanceof Error ? err.message : "Map failed to initialize");
     }
-    if (!mapContainer.current) return;
-
-    map.current = new window.google.maps.Map(mapContainer.current, {
-      zoom: initialZoom,
-      center: initialCenter,
-      mapTypeControl: true,
-      fullscreenControl: true,
-      zoomControl: true,
-      streetViewControl: true,
-      mapId: "DEMO_MAP_ID",
-    });
-
-    // If tiles never render (e.g. the maps proxy/key can't serve tiles for this
-    // host), surface that as "unavailable" instead of a silent blank map.
-    let rendered = false;
-    const timer = window.setTimeout(() => {
-      if (!rendered) onUnavailable?.("Map tiles did not render");
-    }, TILES_TIMEOUT_MS);
-    window.google.maps.event.addListenerOnce(map.current, "tilesloaded", () => {
-      rendered = true;
-      window.clearTimeout(timer);
-    });
-
-    onMapReady?.(map.current);
   });
 
   useEffect(() => {

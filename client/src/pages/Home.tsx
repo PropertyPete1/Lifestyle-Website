@@ -129,32 +129,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ============ STATS BAR ============ */}
-      <section className="border-b border-border/60 bg-[oklch(0.165_0.005_285)]">
-        <div className="mx-auto max-w-[1400px] px-5 lg:px-8 py-14 lg:py-16 grid grid-cols-2 lg:grid-cols-4 gap-10">
-          {(stats && stats.length > 0
-            ? stats
-            : [
-                { id: 1, label: "Closed Sales", value: "63" },
-                { id: 2, label: "Total Value", value: "$26M" },
-                { id: 3, label: "Price Range", value: "$200K–$1.7M" },
-                { id: 4, label: "Average Price", value: "$424.4K" },
-              ]
-          ).map((s) => (
-            <StatCounter key={s.id} value={s.value} label={s.label} />
-          ))}
-        </div>
-        {/* Veteran-owned trust line — part of the "why work with us" story */}
-        <div className="mx-auto max-w-[1400px] px-5 lg:px-8 pb-10 -mt-2">
-          <div className="reveal flex items-center justify-center gap-3 border-t border-border/40 pt-8">
-            <VeteranBadge className="text-[10px]" />
-            <span className="hidden sm:inline text-muted-foreground text-xs tracking-wide">
-              — service, discipline, and integrity in every transaction.
-            </span>
-          </div>
-        </div>
-      </section>
-
       {/* ============ TECHNOLOGY SHOWCASE (show, don't tell) ============ */}
       <TechShowcase />
 
@@ -238,6 +212,7 @@ export default function Home() {
                   <div className="absolute inset-0 bg-black/50 group-hover:bg-black/35 transition-colors" />
                   <div className="absolute inset-x-0 bottom-0 p-5">
                     <h3 className="font-serif text-xl text-white">{c.name}</h3>
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-white/70 mt-0.5">& Surrounding Areas</p>
                     <span className="text-[10px] uppercase tracking-[0.2em] text-gold opacity-0 group-hover:opacity-100 transition-opacity">
                       Explore →
                     </span>
@@ -245,6 +220,32 @@ export default function Home() {
                 </div>
               </Link>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ============ TRACK RECORD — slim live-data strip (relocated below the fold) ============ */}
+      <section className="border-b border-border/60">
+        <div className="mx-auto max-w-[1400px] px-5 lg:px-8 py-10 lg:py-12">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-10">
+            {(stats && stats.length > 0
+              ? stats
+              : [
+                  { id: 1, label: "Closed Sales", value: "63" },
+                  { id: 2, label: "Total Value", value: "$26M" },
+                  { id: 3, label: "Price Range", value: "$200K–$1.7M" },
+                  { id: 4, label: "Average Price", value: "$424.4K" },
+                ]
+            ).map((s) => (
+              <StatCounter key={s.id} value={s.value} label={s.label} compact />
+            ))}
+          </div>
+          {/* Veteran-owned trust line — part of the "why work with us" story */}
+          <div className="reveal flex items-center justify-center gap-3 border-t border-border/40 mt-8 pt-6">
+            <VeteranBadge className="text-[10px]" />
+            <span className="hidden sm:inline text-muted-foreground text-xs tracking-wide">
+              — service, discipline, and integrity in every transaction.
+            </span>
           </div>
         </div>
       </section>

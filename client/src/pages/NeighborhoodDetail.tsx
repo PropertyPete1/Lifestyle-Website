@@ -53,6 +53,9 @@ export default function NeighborhoodDetail() {
         <div className="relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pb-16 pt-40">
           <p className="eyebrow text-gold">{hood.region ?? "Texas"}</p>
           <h1 className="display-serif text-5xl md:text-7xl mt-3">{hood.name}</h1>
+          {["San Antonio", "New Braunfels", "Austin", "DFW", "Houston"].includes(hood.name) && (
+            <p className="eyebrow text-foreground/70 mt-3">& Surrounding Areas</p>
+          )}
           {hood.tagline && <p className="mt-4 text-muted-foreground max-w-xl">{hood.tagline}</p>}
         </div>
       </section>

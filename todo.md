@@ -160,3 +160,9 @@
 - [x] DEPLOY: set `FUB_X_SYSTEM_KEY` in deploy env (verified: lead synced, fubId=6182)
 - [x] DEPLOY/INFRA: Map tiles on production — mitigated in app code via the merged graceful fallback (results-by-city panel instead of blank grey box); underlying tile rendering is a platform/proxy infrastructure issue outside this codebase, flagged to user
 - [x] DEPLOY: apex domain lifestyledesignrealty.com — user action required: bind the custom domain in Management UI → Settings → Domains (currently points at the old site); instructions given to user
+
+## Revision round: stats relocation, surrounding areas, 3.99% rate
+- [x] Relocated stats bar: removed from above-the-fold area, now a slim "Track Record" strip after Markets We Serve with compact StatCounter (count-up on scroll preserved) + veteran trust line
+- [x] "& Surrounding Areas" added: Markets We Serve city cards (subtitle), footer serving line ("...Houston, and surrounding areas"), city landing page heroes (5 core markets)
+- [x] Rate updated 4.99% → 3.99% in FinancingBanner (single source of truth used by homepage hero + Convince); exact disclosure unchanged and adjacent; AI compliance guard untouched (still blocks all AI-generated rates)
+- [x] Typecheck clean, 60/60 tests pass, full-page visual verification done

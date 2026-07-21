@@ -20,7 +20,7 @@ export default function SiteFooter() {
             </div>
             <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
               Central Texas real estate professionals serving San Antonio, New Braunfels, Austin,
-              DFW, and Houston.
+              DFW, Houston, and surrounding areas.
             </p>
             <div className="mt-5 flex gap-4">
               <a href={SITE.instagram} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-gold text-xs uppercase tracking-widest">Instagram</a>

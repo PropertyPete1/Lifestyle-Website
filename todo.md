@@ -219,3 +219,10 @@
 ## Rate banner clarity fix (user request Jul 20)
 - [x] Make "mortgage rates" explicit next to 3.99% everywhere it appears — single-source FinancingBanner (used by homepage banner + Convince financing line) now reads "we've gotten clients mortgage rates as low as 3.99%"; disclosure updated to "Mortgage rate shown reflects…"; grep sweep confirms no other 3.99% occurrence exists
 - [x] Verify visually (homepage banner), tests 79/79 (one flaky live-network test passed on re-run), checkpoint, GitHub push
+
+## Pull external GitHub changes + verification (user request Jul 20)
+- [x] Pull latest GitHub main (commit 7996c6b): ListingsMap by-city location overview, registerCron.ts stats-sync registration on production boot, footer Privacy Policy link + /privacy page
+- [x] Verify Map toggle on search results shows by-city grouped list (58 homes across 7 markets rendered, no blank box) — verified interactively in browser
+- [x] Stats strip: cron registers on production boot (09:00 UTC daily, idempotent); strip itself has no visible timestamp — cron activity confirmable via Settings → Schedules and boot logs (noted to user)
+- [x] DECISION RECORDED: NO Google Maps API key will be purchased. Map toggle permanently uses the by-city location overview; live property maps arrive via the IDX/MLS vendor widget in Phase 2. Maps question CLOSED.
+- [x] Tests 81/81 (incl. 2 new registerCron tests), checkpoint (auto-publish), confirmed live

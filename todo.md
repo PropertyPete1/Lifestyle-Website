@@ -141,3 +141,14 @@
 - [x] /join animated 3-step lead-flow diagram (sequential light-up, gold connector fill, Hot/Warm/Cold badges cascade) — verified rendering
 - [x] No "high-tech"/"cutting-edge" copy anywhere — grep verified (only a code comment)
 - [x] Tests (42/42), visual verification (desktop full-page / + /join, live search), checkpoint, GitHub push
+
+## Audit fixes (2026-07-20)
+- [x] FUB `X-System` + `X-System-Key` registered-integration headers via shared `fubHeaders()` (key from `FUB_X_SYSTEM_KEY` env, omitted when unset) + unit tests
+- [x] Homepage builder-buydown banner (4.99% + disclosure) via shared `FinancingBanner` (single source of truth, reused by Convince)
+- [x] Richer seed data in `shared/placeholderListings.mjs` so common constrained AI searches return 5-10 (incl. the search box's own example) + `aiSearch.coverage.test.ts`
+- [x] Mocked AI-path tests: `extractCriteria` (LLM) + `generatePitch` (Anthropic) run in CI without keys
+- [x] Map view fails gracefully: `loadMapScript` rejects on error/missing key + no double-inject; `MapView` reports `onUnavailable` (load error or `tilesloaded` timeout); `ListingsMap` shows a clickable results-by-city fallback instead of a blank grey box
+- [ ] DEPLOY: re-run `node seed-listings.mjs` against prod DB so the new listings go live
+- [ ] DEPLOY: set `FUB_X_SYSTEM_KEY` in the deploy env (registered FUB system key)
+- [ ] DEPLOY/INFRA: Map tiles don't render on lifestyle-re-6avnvcuv.manus.space — JS API loads via the Manus maps proxy (key OK) but direct-to-Google tile/render requests produce no tiles (raster + vector both blank, no auth error). Needs the Manus Google Maps proxy/key authorized for tile rendering on this host; not fixable in app code
+- [ ] DEPLOY: point apex domain lifestyledesignrealty.com at this build (currently serves a different site)

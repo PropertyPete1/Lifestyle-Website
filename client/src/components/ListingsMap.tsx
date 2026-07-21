@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
-import { useLocation } from "wouter";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "wouter";
+import { MapPin } from "lucide-react";
 import { MapView } from "@/components/Map";
 import { formatPrice } from "@/components/ListingCard";
 import type { Listing } from "../../../drizzle/schema";
@@ -7,11 +8,17 @@ import type { Listing } from "../../../drizzle/schema";
 /**
  * Interactive map of search results. Gold price-pill markers; clicking a
  * marker opens the listing detail page. Fits bounds to visible results.
+ *
+ * If the map can't load or render tiles for this host, we fall back to a
+ * clickable location list instead of a silent blank map.
  */
 export default function ListingsMap({ listings }: { listings: Listing[] }) {
   const mapRef = useRef<google.maps.Map | null>(null);
   const markersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
+  const [unavailable, setUnavailable] = useState(false);
   const [, navigate] = useLocation();
+
+  if (unavailable) return <MapUnavailable listings={listings} />;
 
   const renderMarkers = (map: google.maps.Map) => {
     markersRef.current.forEach((m) => (m.map = null));
@@ -60,9 +67,50 @@ export default function ListingsMap({ listings }: { listings: Listing[] }) {
           mapRef.current = map;
           renderMarkers(map);
         }}
+        onUnavailable={() => setUnavailable(true)}
       />
       {/* re-render markers when the result set changes */}
       <MarkerSync listings={listings} render={() => mapRef.current && renderMarkers(mapRef.current)} />
+    </div>
+  );
+}
+
+/**
+ * Graceful fallback when the interactive map can't render (missing key, script
+ * failure, or a host that the maps proxy can't serve tiles for). Keeps every
+ * result reachable as a clickable, grouped-by-city list.
+ */
+function MapUnavailable({ listings }: { listings: Listing[] }) {
+  const byCity = listings.reduce<Record<string, Listing[]>>((acc, l) => {
+    (acc[l.city] ??= []).push(l);
+    return acc;
+  }, {});
+
+  return (
+    <div className="border border-border p-6 lg:p-8">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <MapPin className="h-4 w-4 text-gold" />
+        Interactive map is unavailable right now — here are your results by location.
+      </div>
+      <div className="mt-6 grid gap-8 sm:grid-cols-2">
+        {Object.entries(byCity).map(([city, group]) => (
+          <div key={city}>
+            <p className="eyebrow text-gold">{city}</p>
+            <ul className="mt-3 space-y-2">
+              {group.map((l) => (
+                <li key={l.id}>
+                  <Link
+                    href={`/listing/${l.slug}`}
+                    className="flex items-baseline justify-between gap-4 border-b border-border/60 py-2 hover:text-gold transition-colors">
+                    <span className="text-sm">{l.address}</span>
+                    <span className="text-sm text-gold whitespace-nowrap">{formatPrice(l.price)}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -215,3 +215,7 @@
 - [x] Email copy of every inquiry to peter@lifestyledesignrealty.com via owner-notification service (email-style formatted copy; failure fallback alerts owner; inquiry always saved in admin Lead Log)
 - [x] "Thanks! I'll be in touch soon." confirmation state in the modal — no email-client dependency (verified in browser E2E)
 - [x] Vitest coverage (7 new tests, 79/79 total); visual verification; checkpoint; GitHub push
+
+## Rate banner clarity fix (user request Jul 20)
+- [x] Make "mortgage rates" explicit next to 3.99% everywhere it appears — single-source FinancingBanner (used by homepage banner + Convince financing line) now reads "we've gotten clients mortgage rates as low as 3.99%"; disclosure updated to "Mortgage rate shown reflects…"; grep sweep confirms no other 3.99% occurrence exists
+- [x] Verify visually (homepage banner), tests 79/79 (one flaky live-network test passed on re-run), checkpoint, GitHub push

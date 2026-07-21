@@ -8,6 +8,28 @@ import type { IntentLevel } from "../shared/site";
 
 const FUB_API_URL = "https://api.followupboss.com/v1";
 
+/** Registered system name for FUB integration attribution (X-System / body.system). */
+const FUB_SYSTEM = "Lifestyle Design Realty Website";
+
+/**
+ * Standard headers for every FUB request, including registered-integration
+ * attribution. FUB identifies an integration by the X-System + X-System-Key
+ * pair; the key is read from env and never hardcoded. Without it, FUB may
+ * throttle or reject requests. The User-Agent is required or FUB's CloudFront
+ * edge returns 403.
+ */
+export function fubHeaders(apiKey: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
+    "Content-Type": "application/json",
+    "User-Agent": "LifestyleDesignRealty-Website/1.0",
+    "X-System": FUB_SYSTEM,
+  };
+  const systemKey = process.env.FUB_X_SYSTEM_KEY;
+  if (systemKey) headers["X-System-Key"] = systemKey;
+  return headers;
+}
+
 export interface FubLeadInput {
   name: string;
   email: string;
@@ -87,7 +109,7 @@ export async function sendToFub(input: FubLeadInput): Promise<FubResult> {
 
   const body = {
     source: "lifestyledesignrealty.com",
-    system: "lifestyle design realty",
+    system: FUB_SYSTEM,
     type: "General Inquiry",
     message: answersToNote(input.answers, input.message) || undefined,
     person: {
@@ -102,13 +124,7 @@ export async function sendToFub(input: FubLeadInput): Promise<FubResult> {
   try {
     const res = await fetch(`${FUB_API_URL}/events`, {
       method: "POST",
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`,
-        "Content-Type": "application/json",
-        // FUB's CloudFront edge rejects requests without a User-Agent (403)
-        "User-Agent": "LifestyleDesignRealty-Website/1.0",
-        "X-System": "lifestyle-design-realty",
-      },
+      headers: fubHeaders(apiKey),
       body: JSON.stringify(body),
     });
     if (!res.ok) {

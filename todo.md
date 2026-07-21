@@ -174,3 +174,12 @@
 - [x] Verified production AI search counts on the LIVE site: SA pool <400k → 5, 4bd new-construction <600k → 7, single story <500k → 20, Austin townhome <450k → 4
 - [x] Re-checked Google Maps on production: maps proxy returns 403 "Your IP address is not allowed" — platform-level allowlist issue; graceful by-city fallback shows instead of blank map. User to provide own Google Maps API key or await platform fix
 - [x] Tests (65/65), checkpoint, GitHub push, status report to user
+
+## Feature: cross-session activity tracking into FUB
+- [x] visitor_activity table + visitorId column on leads; migration applied
+- [x] First-party visitor ID helper (localStorage, no third-party) + activity.log tRPC endpoint
+- [x] Listing favorites (heart) feature on listing cards/detail, stored per visitor — verified visually on /search and listing detail
+- [x] Instrument Convince quiz (selections + result city), AI search (query + criteria), City Finder (matched city) to log activity
+- [x] Lead submit: compile visitor activity into formatted FUB note attached to the contact (visitorId on all 5 forms); no data sent if no form ever submitted
+- [x] Multi-visit persistence via localStorage visitor id (survives browser restarts); E2E test: favorite + AI search + city finder → form submit → FUB note verified on person 6184 ("Site activity before inquiry" with all three bullets); local copy kept on lead record; test data cleaned up
+- [x] Tests (72/72 incl. new activityNote suite), checkpoint, GitHub push

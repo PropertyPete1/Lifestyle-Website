@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
+import { getVisitorId } from "@/lib/visitor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -42,7 +43,13 @@ export default function NewsletterForm() {
       toast.error("Please agree to the consent terms to continue.");
       return;
     }
-    submit.mutate({ name, email, sourceTag: "Website - Newsletter", tcpaConsent: true });
+    submit.mutate({
+      name,
+      email,
+      sourceTag: "Website - Newsletter",
+      tcpaConsent: true,
+      visitorId: getVisitorId() || undefined,
+    });
   };
 
   return (

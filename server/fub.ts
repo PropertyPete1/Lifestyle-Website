@@ -43,6 +43,8 @@ export interface FubLeadInput {
 export interface FubResult {
   ok: boolean;
   fubId?: string;
+  /** FUB person id (the contact) — needed for follow-up API calls like notes. */
+  personId?: string;
   error?: string;
 }
 
@@ -131,8 +133,45 @@ export async function sendToFub(input: FubLeadInput): Promise<FubResult> {
       const text = await res.text().catch(() => "");
       return { ok: false, error: `FUB ${res.status}: ${text.slice(0, 300)}` };
     }
-    const data = (await res.json().catch(() => ({}))) as { id?: number | string };
-    return { ok: true, fubId: data?.id ? String(data.id) : undefined };
+    const data = (await res.json().catch(() => ({}))) as {
+      id?: number | string;
+      // /v1/events responds with the affected person record
+      personId?: number | string;
+      person?: { id?: number | string };
+    };
+    const personId = data?.person?.id ?? data?.personId ?? data?.id;
+    return {
+      ok: true,
+      fubId: data?.id ? String(data.id) : undefined,
+      personId: personId ? String(personId) : undefined,
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unknown FUB error" };
+  }
+}
+
+/**
+ * Attach a note to an existing FUB person. Used to add the "site activity
+ * before inquiry" history when a tracked visitor becomes an identified lead.
+ */
+export async function sendFubNote(
+  personId: string,
+  subject: string,
+  body: string
+): Promise<{ ok: boolean; error?: string }> {
+  const apiKey = process.env.FUB_API_KEY;
+  if (!apiKey) return { ok: false, error: "FUB_API_KEY not configured" };
+  try {
+    const res = await fetch(`${FUB_API_URL}/notes`, {
+      method: "POST",
+      headers: fubHeaders(apiKey),
+      body: JSON.stringify({ personId: Number(personId), subject, body }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ok: false, error: `FUB notes ${res.status}: ${text.slice(0, 300)}` };
+    }
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Unknown FUB error" };
   }

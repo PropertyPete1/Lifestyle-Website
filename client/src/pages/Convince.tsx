@@ -4,6 +4,7 @@ import PageShell from "@/components/PageShell";
 import LeadForm from "@/components/LeadForm";
 import AIStatusSequence from "@/components/AIStatusSequence";
 import FinancingBanner from "@/components/FinancingBanner";
+import { useActivity } from "@/hooks/useActivity";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -191,8 +192,17 @@ export default function Convince() {
   const [stage, setStage] = useState<"intro" | "quiz" | "result">("intro");
   const [selections, setSelections] = useState<string[]>([]);
   const [partnerName, setPartnerName] = useState("");
+  const logActivity = useActivity();
   const generate = trpc.partnerPitch.generate.useMutation({
-    onSuccess: () => setStage("result"),
+    onSuccess: (data) => {
+      setStage("result");
+      // Anonymous activity: remember quiz picks + matched city for FUB context
+      logActivity("convince_quiz", {
+        selections,
+        partnerName: partnerName.trim() || undefined,
+        city: data.city,
+      });
+    },
     onError: () =>
       toast.error("Something went wrong writing your letter. Please try again in a moment."),
   });

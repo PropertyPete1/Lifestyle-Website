@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
+import { getVisitorId } from "@/lib/visitor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -58,6 +59,7 @@ export default function RecruitForm() {
       email,
       phone,
       sourceTag: "Recruit - Website",
+      visitorId: getVisitorId() || undefined,
       answers: {
         licenseNumber,
         transactionsClosed,

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
 import { markLeadCaptured } from "@/lib/leadSession";
+import { getVisitorId } from "@/lib/visitor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -96,6 +97,7 @@ export default function LeadForm({
       sourceTag,
       answers: { ...answers, ...extraAnswers },
       tcpaConsent: true,
+      visitorId: getVisitorId() || undefined,
     });
   };
 

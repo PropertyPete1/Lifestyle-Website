@@ -4,6 +4,7 @@ import {
   InsertLead,
   InsertListing,
   InsertPartnerPitch,
+  InsertVisitorActivity,
   bioLinks,
   InsertUser,
   leads,
@@ -14,6 +15,7 @@ import {
   teamMembers,
   testimonials,
   users,
+  visitorActivity,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -317,4 +319,36 @@ export async function getPartnerPitchBySlug(slug: string) {
   if (!db) return undefined;
   const rows = await db.select().from(partnerPitches).where(eq(partnerPitches.slug, slug)).limit(1);
   return rows[0];
+}
+
+/* ---------------- Visitor activity (anonymous, first-party) ---------------- */
+
+const ACTIVITY_KINDS = ["favorite", "unfavorite", "ai_search", "convince_quiz", "city_finder"] as const;
+export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
+
+export function isActivityKind(k: string): k is ActivityKind {
+  return (ACTIVITY_KINDS as readonly string[]).includes(k);
+}
+
+/** Log one anonymous activity event. Caps stored events per visitor at 200. */
+export async function logVisitorActivity(data: InsertVisitorActivity) {
+  const db = await getDb();
+  if (!db) return;
+  const countRows = (await db
+    .select({ n: sql<number>`count(*)` })
+    .from(visitorActivity)
+    .where(eq(visitorActivity.visitorId, data.visitorId))) as { n: number }[];
+  if (Number(countRows[0]?.n ?? 0) >= 200) return; // abuse guard: stop logging, never error
+  await db.insert(visitorActivity).values(data);
+}
+
+/** All activity for a visitor, oldest first (chronological story). */
+export async function getVisitorActivity(visitorId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(visitorActivity)
+    .where(eq(visitorActivity.visitorId, visitorId))
+    .orderBy(asc(visitorActivity.createdAt));
 }

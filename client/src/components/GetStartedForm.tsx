@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
+import { getVisitorId } from "@/lib/visitor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -63,6 +64,7 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
       sourceTag: "Website - Get Started",
       answers: { goal, timeline },
       tcpaConsent: true,
+      visitorId: getVisitorId() || undefined,
     });
   };
 

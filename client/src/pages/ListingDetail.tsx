@@ -3,6 +3,7 @@ import { useParams, Link } from "wouter";
 import PageShell from "@/components/PageShell";
 import LeadForm from "@/components/LeadForm";
 import { formatPrice } from "@/components/ListingCard";
+import FavoriteButton from "@/components/FavoriteButton";
 import { trpc } from "@/lib/trpc";
 import { BedDouble, Bath, Ruler, MapPin, ChevronLeft, ChevronRight, ArrowLeft } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -62,6 +63,7 @@ export default function ListingDetail() {
           <span className="absolute top-5 left-5 bg-gold text-primary-foreground px-3 py-1 text-[10px] uppercase tracking-[0.2em]">
             {listing.status}
           </span>
+          <FavoriteButton listing={listing} className="absolute top-4 right-4 h-10 w-10" />
           {photos.length > 1 && (
             <>
               <button

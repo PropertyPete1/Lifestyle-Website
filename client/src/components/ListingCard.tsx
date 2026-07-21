@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import type { Listing } from "../../../drizzle/schema";
 import { BedDouble, Bath, Ruler } from "lucide-react";
 import { cn } from "@/lib/utils";
+import FavoriteButton from "@/components/FavoriteButton";
 
 export function formatPrice(price: number) {
   return price.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -37,6 +38,7 @@ export default function ListingCard({ listing, large = false }: { listing: Listi
             )}>
             {listing.status}
           </span>
+          <FavoriteButton listing={listing} className="absolute top-3 right-3" />
         </div>
         <div className="pt-4 space-y-1.5">
           <div className="flex items-baseline justify-between gap-3">

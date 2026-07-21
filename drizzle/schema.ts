@@ -139,10 +139,31 @@ export const leads = mysqlTable("leads", {
   tcpaConsent: boolean("tcpaConsent").default(false).notNull(),
   fubStatus: mysqlEnum("fubStatus", ["synced", "failed", "pending"]).default("pending").notNull(),
   fubId: varchar("fubId", { length: 60 }),
+  /** First-party anonymous visitor id — correlates pre-inquiry site activity. */
+  visitorId: varchar("visitorId", { length: 40 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type Lead = typeof leads.$inferSelect;
 export type InsertLead = typeof leads.$inferInsert;
+
+/**
+ * Anonymous first-party visitor activity log. No personal info is stored —
+ * only a random visitor id (persisted in the visitor's own localStorage) and
+ * what they did on-site (favorites, AI searches, quiz results). This data is
+ * only ever forwarded to Follow Up Boss when the same visitor later submits a
+ * lead form; if they never do, it stays here and is never sent anywhere.
+ */
+export const visitorActivity = mysqlTable("visitor_activity", {
+  id: int("id").autoincrement().primaryKey(),
+  visitorId: varchar("visitorId", { length: 40 }).notNull(),
+  /** favorite | unfavorite | ai_search | convince_quiz | city_finder */
+  kind: varchar("kind", { length: 40 }).notNull(),
+  /** JSON payload — shape depends on kind (listing info, query, quiz answers…) */
+  data: text("data").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type VisitorActivity = typeof visitorActivity.$inferSelect;
+export type InsertVisitorActivity = typeof visitorActivity.$inferInsert;
 
 /**
  * Convince Your Partner: cached AI-generated dream-scene pitches.

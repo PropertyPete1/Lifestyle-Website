@@ -5,7 +5,8 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
-import { computeIntent, sendToFub } from "./fub";
+import { computeIntent, sendFubNote, sendToFub } from "./fub";
+import { buildActivityNote } from "./activityNote";
 import { extractCriteria, matchListings } from "./aiSearch";
 import { notifyOwner } from "./_core/notification";
 import { nanoid } from "nanoid";
@@ -55,6 +56,8 @@ const leadInput = z.object({
   sourceTag: z.string().min(1).max(190),
   answers: z.record(z.string(), z.unknown()).optional(),
   tcpaConsent: z.literal(true, { message: "TCPA consent is required" }),
+  /** Anonymous first-party visitor id — links pre-inquiry site activity. */
+  visitorId: z.string().max(40).optional(),
 });
 
 export const appRouter = router({
@@ -221,6 +224,7 @@ export const appRouter = router({
         answers: input.answers ? JSON.stringify(input.answers) : null,
         tcpaConsent: true,
         fubStatus: "pending",
+        visitorId: input.visitorId || null,
       });
 
       const fub = await sendToFub({
@@ -238,6 +242,29 @@ export const appRouter = router({
         fubId: fub.fubId,
       });
 
+      // Cross-session activity: if this visitor has tracked on-site activity
+      // (favorites, AI searches, quiz results), attach it as a formatted note
+      // on the FUB contact. Fires only at the moment the visitor voluntarily
+      // identifies themselves via this form — never before.
+      if (input.visitorId) {
+        try {
+          const activity = await db.getVisitorActivity(input.visitorId);
+          const note = buildActivityNote(activity);
+          if (note) {
+            if (fub.ok && fub.personId) {
+              const sent = await sendFubNote(fub.personId, "Site activity before inquiry", note);
+              if (!sent.ok) console.error("[activity] FUB note failed:", sent.error);
+            }
+            // Keep a local copy on the lead record either way so context is never lost.
+            await db.updateLead(leadId, {
+              message: [input.message, note].filter(Boolean).join("\n\n"),
+            });
+          }
+        } catch (err) {
+          console.error("[activity] attach failed:", err); // never block the lead
+        }
+      }
+
       if (!fub.ok) {
         // Graceful fallback: notify owner so no lead slips through
         notifyOwner({
@@ -249,6 +276,30 @@ export const appRouter = router({
       return { success: true, intent } as const;
     }),
     list: adminProcedure.query(() => db.getLeads()),
+  }),
+
+  activity: router({
+    /**
+     * Anonymous first-party activity logging. No personal info accepted here —
+     * only the random visitor id and what happened on-site. Forwarded to FUB
+     * only if the visitor later submits a lead form.
+     */
+    log: publicProcedure
+      .input(
+        z.object({
+          visitorId: z.string().min(6).max(40),
+          kind: z.enum(["favorite", "unfavorite", "ai_search", "convince_quiz", "city_finder"]),
+          data: z.record(z.string(), z.unknown()),
+        })
+      )
+      .mutation(async ({ input }) => {
+        await db.logVisitorActivity({
+          visitorId: input.visitorId,
+          kind: input.kind,
+          data: JSON.stringify(input.data).slice(0, 4000),
+        });
+        return { ok: true } as const;
+      }),
   }),
 });
 

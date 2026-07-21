@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import PageShell from "@/components/PageShell";
 import LeadForm from "@/components/LeadForm";
+import { useActivity } from "@/hooks/useActivity";
 import { SITE } from "@shared/site";
 import { IMG } from "@/lib/assets";
 import { cn } from "@/lib/utils";
@@ -171,6 +172,7 @@ export default function CityFinder() {
   const [step, setStep] = useState(0); // 0..QUESTIONS.length-1, then gate, then results
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [unlocked, setUnlocked] = useState(false);
+  const logActivity = useActivity();
 
   const total = QUESTIONS.length;
   const atGate = step >= total;
@@ -256,7 +258,15 @@ export default function CityFinder() {
                 submitLabel="Unlock My Matches"
                 compact
                 extraAnswers={answers}
-                onSuccess={() => setUnlocked(true)}
+                onSuccess={() => {
+                  // Anonymous activity: remember the matched city so future
+                  // form submissions carry it into the FUB activity note.
+                  logActivity("city_finder", {
+                    city: matches[0]?.name,
+                    runnerUp: matches[1]?.name,
+                  });
+                  setUnlocked(true);
+                }}
               />
             </div>
             <button

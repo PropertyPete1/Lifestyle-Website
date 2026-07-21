@@ -5,6 +5,7 @@ import ListingCard from "@/components/ListingCard";
 import AISearchBar from "@/components/AISearchBar";
 import ListingsMap from "@/components/ListingsMap";
 import AIStatusSequence from "@/components/AIStatusSequence";
+import { useActivity } from "@/hooks/useActivity";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
 import { cn } from "@/lib/utils";
@@ -32,6 +33,30 @@ function SearchInner({ portfolio }: { portfolio: boolean }) {
     { query: urlQuery },
     { enabled: urlQuery.length >= 2 }
   );
+
+  // Anonymous activity: log each AI search once per query (with parsed criteria)
+  const logActivity = useActivity();
+  const [loggedQuery, setLoggedQuery] = useState("");
+  useEffect(() => {
+    if (!urlQuery || !ai.data || urlQuery === loggedQuery) return;
+    setLoggedQuery(urlQuery);
+    const c = ai.data.criteria as Record<string, unknown> | undefined;
+    const bits: string[] = [];
+    if (c) {
+      if (c.city) bits.push(String(c.city));
+      if (c.minBeds) bits.push(`${c.minBeds}+ beds`);
+      if (c.maxPrice) bits.push(`under $${Math.round(Number(c.maxPrice) / 1000)}K`);
+      if (c.hasPool) bits.push("pool");
+      if (c.isNewConstruction) bits.push("new construction");
+      if (c.primaryBedDown) bits.push("primary bed down");
+    }
+    logActivity("ai_search", {
+      query: urlQuery,
+      criteria: bits.join(", "),
+      resultCount: ai.data.results?.length ?? 0,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlQuery, ai.data]);
 
   const [city, setCity] = useState("All Cities");
   // Support /search?city=Austin deep links (e.g. from City Finder results)

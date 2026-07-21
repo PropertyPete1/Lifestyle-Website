@@ -82,7 +82,7 @@ export type Testimonial = typeof testimonials.$inferSelect;
 export const teamMembers = mysqlTable("team_members", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 120 }).notNull(),
-  /** TREC: only Steven Van Orden (Designated Broker) may be titled "Broker/Owner". */
+  /** TREC: only Steven Van Orden (Designated Broker) may be titled "Broker & Owner"; Peter Allen is "Owner · REALTOR®". */
   title: varchar("title", { length: 120 }).notNull(),
   license: varchar("license", { length: 60 }),
   bio: text("bio"),

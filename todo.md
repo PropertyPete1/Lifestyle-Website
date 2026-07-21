@@ -195,3 +195,11 @@
 - [x] Glassmorphism: frosted translucent treatment (blur + slight transparency + thin light border) on listing cards, stats strip, testimonial cards
 - [x] AI search bar emphasis: gentle pulsing gold glow distinct from ordinary inputs (homepage + /search)
 - [x] Applied consistently on /, /search, /convince + key pages; visual verification desktop/mobile (72/72 tests); checkpoint; GitHub push
+
+## Broker/Owner title correction v2 + testimonials bias fix (user request Jul 20, final)
+- [x] Steven Van Orden = "Broker & Owner · Designated Broker" everywhere (DB team_members, seed-db.mjs, Join.tsx Broker Support card, Admin.tsx + schema.ts TREC comments)
+- [x] Peter Allen = "Owner · REALTOR®" (DB team_members + seed-db.mjs; /team and /admin render from DB)
+- [x] Sweep every title location: grep across client/server/shared/drizzle/seed scripts for Broker/Owner, REALTOR® / Owner, Designated Broker — only corrected wording remains; footer/nav/homepage carry no personal titles
+- [x] Report every location found and corrected to user
+- [x] Testimonials bias remediated honestly: all 6 real Google/Zillow reviews lightly edited to brokerage-focused wording ("our agent" / "this team"), no fabricated content, authors/sources preserved; seed-db.mjs synced; flagged need to collect reviews for other agents
+- [x] Tests (72/72), checkpoint, GitHub push

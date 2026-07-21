@@ -149,3 +149,15 @@
 - [x] Re-tested FUB lead sync: test lead status=synced, fubId=6182 (no 403) — cleaned up after
 - [x] Rebalanced dataset: +3 affordable Austin townhomes/condos (58 total listings re-seeded); AI search counts now: SA pool <$400K → 5, 4bd new-construction <$600K → 7, single story <$500K → 20, Austin townhome <$450K → 4 (all queries return healthy result sets)
 - [x] All 60 tests pass; checkpoint + GitHub push + confirm to user
+
+## Audit fixes (2026-07-20)
+- [x] FUB `X-System` + `X-System-Key` registered-integration headers via shared `fubHeaders()` (key from `FUB_X_SYSTEM_KEY` env, omitted when unset) + unit tests
+- [x] Homepage builder-buydown banner (4.99% + disclosure) via shared `FinancingBanner` (single source of truth, reused by Convince)
+- [x] Richer seed data in `shared/placeholderListings.mjs` so common constrained AI searches return 5-10 (incl. the search box's own example) + `aiSearch.coverage.test.ts`
+- [x] Mocked AI-path tests: `extractCriteria` (LLM) + `generatePitch` (Anthropic) run in CI without keys
+- [x] Map view fails gracefully: `loadMapScript` rejects on error/missing key + no double-inject; `MapView` reports `onUnavailable` (load error or `tilesloaded` timeout); `ListingsMap` shows a clickable results-by-city fallback instead of a blank grey box
+- [x] DEPLOY: re-ran `node seed-listings.mjs` against prod DB (58 listings live)
+- [x] DEPLOY: set `FUB_X_SYSTEM_KEY` in deploy env (verified: lead synced, fubId=6182)
+- [ ] DEPLOY/INFRA: Map tiles don't render on lifestyle-re-6avnvcuv.manus.space — JS API loads via the Manus maps proxy (key OK) but direct-to-Google tile/render requests produce no tiles (raster + vector both blank, no auth error). Needs the Manus Google Maps proxy/key authorized for tile rendering on this host; not fixable in app code
+- [ ] DEPLOY: point apex domain lifestyledesignrealty.com at this build (currently serves a different site)
+

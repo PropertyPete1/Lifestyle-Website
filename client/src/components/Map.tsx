@@ -92,21 +92,39 @@ const FORGE_BASE_URL =
   "https://forge.butterfly-effect.dev";
 const MAPS_PROXY_URL = `${FORGE_BASE_URL}/v1/maps/proxy`;
 
-function loadMapScript() {
-  return new Promise(resolve => {
+// Load the Google Maps JS API exactly once. Resolves when ready; rejects (so
+// callers can render a fallback) if the key is missing or the script fails.
+let mapScriptPromise: Promise<void> | null = null;
+
+function loadMapScript(): Promise<void> {
+  if (typeof window !== "undefined" && window.google?.maps) return Promise.resolve();
+  if (mapScriptPromise) return mapScriptPromise;
+
+  mapScriptPromise = new Promise<void>((resolve, reject) => {
+    if (!API_KEY) {
+      reject(new Error("Google Maps API key (VITE_FRONTEND_FORGE_API_KEY) is not configured"));
+      return;
+    }
+    const existing = document.querySelector<HTMLScriptElement>("script[data-google-maps]");
+    if (existing) {
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () => reject(new Error("Failed to load Google Maps script")));
+      return;
+    }
     const script = document.createElement("script");
-    script.src = `${MAPS_PROXY_URL}/maps/api/js?key=${API_KEY}&v=weekly&libraries=marker,places,geocoding,geometry`;
+    script.src = `${MAPS_PROXY_URL}/maps/api/js?key=${API_KEY}&v=weekly&libraries=marker,places,geocoding,geometry&loading=async`;
     script.async = true;
+    script.defer = true;
     script.crossOrigin = "anonymous";
-    script.onload = () => {
-      resolve(null);
-      script.remove(); // Clean up immediately
-    };
+    script.dataset.googleMaps = "true";
+    script.onload = () => resolve();
     script.onerror = () => {
-      console.error("Failed to load Google Maps script");
+      mapScriptPromise = null; // allow a later retry
+      reject(new Error("Failed to load Google Maps script"));
     };
     document.head.appendChild(script);
   });
+  return mapScriptPromise;
 }
 
 interface MapViewProps {
@@ -114,23 +132,32 @@ interface MapViewProps {
   initialCenter?: google.maps.LatLngLiteral;
   initialZoom?: number;
   onMapReady?: (map: google.maps.Map) => void;
+  /** Called if the map can't load or tiles never render, so the caller can show a fallback. */
+  onUnavailable?: (reason: string) => void;
 }
+
+/** How long to wait for tiles before treating the map as unavailable. */
+const TILES_TIMEOUT_MS = 8000;
 
 export function MapView({
   className,
   initialCenter = { lat: 37.7749, lng: -122.4194 },
   initialZoom = 12,
   onMapReady,
+  onUnavailable,
 }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map | null>(null);
 
   const init = usePersistFn(async () => {
-    await loadMapScript();
-    if (!mapContainer.current) {
-      console.error("Map container not found");
+    try {
+      await loadMapScript();
+    } catch (err) {
+      onUnavailable?.(err instanceof Error ? err.message : "Google Maps failed to load");
       return;
     }
+    if (!mapContainer.current) return;
+
     map.current = new window.google.maps.Map(mapContainer.current, {
       zoom: initialZoom,
       center: initialCenter,
@@ -140,9 +167,19 @@ export function MapView({
       streetViewControl: true,
       mapId: "DEMO_MAP_ID",
     });
-    if (onMapReady) {
-      onMapReady(map.current);
-    }
+
+    // If tiles never render (e.g. the maps proxy/key can't serve tiles for this
+    // host), surface that as "unavailable" instead of a silent blank map.
+    let rendered = false;
+    const timer = window.setTimeout(() => {
+      if (!rendered) onUnavailable?.("Map tiles did not render");
+    }, TILES_TIMEOUT_MS);
+    window.google.maps.event.addListenerOnce(map.current, "tilesloaded", () => {
+      rendered = true;
+      window.clearTimeout(timer);
+    });
+
+    onMapReady?.(map.current);
   });
 
   useEffect(() => {

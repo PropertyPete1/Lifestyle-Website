@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertLead,
   InsertListing,
+  InsertPageEvent,
   InsertPartnerPitch,
   InsertVisitorActivity,
   bioLinks,
@@ -10,6 +11,7 @@ import {
   leads,
   listings,
   neighborhoods,
+  pageEvents,
   partnerPitches,
   siteStats,
   teamMembers,
@@ -351,4 +353,109 @@ export async function getVisitorActivity(visitorId: string) {
     .from(visitorActivity)
     .where(eq(visitorActivity.visitorId, visitorId))
     .orderBy(asc(visitorActivity.createdAt));
+}
+
+/* ---------------- First-party site analytics ---------------- */
+
+/** Record one page view or tracked UI event. Fire-and-forget; never throws. */
+export async function logPageEvent(data: InsertPageEvent) {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    await db.insert(pageEvents).values(data);
+  } catch (err) {
+    console.error("[analytics] logPageEvent failed:", err); // never block a page
+  }
+}
+
+/**
+ * Aggregate analytics for the admin dashboard over the last `days` days.
+ * Computed in SQL against the indexed page_events table. Privacy-simple:
+ * only paths, anonymous visitor ids, kinds, and timestamps exist to query.
+ */
+export async function getAnalyticsSummary(days = 30) {
+  const empty = {
+    totals: { views: 0, uniques: 0, bannerClicks: 0 },
+    perPage: [] as { path: string; views: number; uniques: number }[],
+    daily: [] as { day: string; views: number; uniques: number; bannerClicks: number }[],
+    funnel: { homeViews: 0, bannerClicks: 0, joinViews: 0, recruitSubmissions: 0 },
+  };
+  const db = await getDb();
+  if (!db) return empty;
+
+  const windowDays = Math.max(1, Math.min(365, Math.floor(days)));
+  const since = sql`${pageEvents.createdAt} >= (NOW() - INTERVAL ${sql.raw(String(windowDays))} DAY)`;
+
+  const [totalsRows, perPage, daily, funnelRows, recruitRows] = await Promise.all([
+    db
+      .select({
+        views: sql<number>`SUM(${pageEvents.kind} = 'view')`,
+        uniques: sql<number>`COUNT(DISTINCT CASE WHEN ${pageEvents.kind} = 'view' AND ${pageEvents.visitorId} <> '' THEN ${pageEvents.visitorId} END)`,
+        bannerClicks: sql<number>`SUM(${pageEvents.kind} = 'banner_click')`,
+      })
+      .from(pageEvents)
+      .where(since),
+    db
+      .select({
+        path: pageEvents.path,
+        views: sql<number>`COUNT(*)`,
+        uniques: sql<number>`COUNT(DISTINCT CASE WHEN ${pageEvents.visitorId} <> '' THEN ${pageEvents.visitorId} END)`,
+      })
+      .from(pageEvents)
+      .where(and(since, eq(pageEvents.kind, "view")))
+      .groupBy(pageEvents.path)
+      .orderBy(desc(sql`COUNT(*)`))
+      .limit(50),
+    db
+      .select({
+        day: sql<string>`DATE_FORMAT(${pageEvents.createdAt}, '%Y-%m-%d')`.as("day"),
+        views: sql<number>`SUM(${pageEvents.kind} = 'view')`,
+        uniques: sql<number>`COUNT(DISTINCT CASE WHEN ${pageEvents.kind} = 'view' AND ${pageEvents.visitorId} <> '' THEN ${pageEvents.visitorId} END)`,
+        bannerClicks: sql<number>`SUM(${pageEvents.kind} = 'banner_click')`,
+      })
+      .from(pageEvents)
+      .where(since)
+      .groupBy(sql`day`)
+      .orderBy(desc(sql`day`)),
+    db
+      .select({
+        homeViews: sql<number>`SUM(${pageEvents.kind} = 'view' AND ${pageEvents.path} = '/')`,
+        bannerClicks: sql<number>`SUM(${pageEvents.kind} = 'banner_click')`,
+        joinViews: sql<number>`SUM(${pageEvents.kind} = 'view' AND ${pageEvents.path} = '/join')`,
+      })
+      .from(pageEvents)
+      .where(since),
+    db
+      .select({ n: sql<number>`COUNT(*)` })
+      .from(leads)
+      .where(
+        and(
+          eq(leads.sourceTag, "Recruit - Website"),
+          sql`${leads.createdAt} >= (NOW() - INTERVAL ${sql.raw(String(windowDays))} DAY)`
+        )
+      ),
+  ]);
+
+  const t = totalsRows[0];
+  const f = funnelRows[0];
+  return {
+    totals: {
+      views: Number(t?.views ?? 0),
+      uniques: Number(t?.uniques ?? 0),
+      bannerClicks: Number(t?.bannerClicks ?? 0),
+    },
+    perPage: perPage.map((r) => ({ path: r.path, views: Number(r.views), uniques: Number(r.uniques) })),
+    daily: daily.map((r) => ({
+      day: r.day,
+      views: Number(r.views ?? 0),
+      uniques: Number(r.uniques ?? 0),
+      bannerClicks: Number(r.bannerClicks ?? 0),
+    })),
+    funnel: {
+      homeViews: Number(f?.homeViews ?? 0),
+      bannerClicks: Number(f?.bannerClicks ?? 0),
+      joinViews: Number(f?.joinViews ?? 0),
+      recruitSubmissions: Number(recruitRows[0]?.n ?? 0),
+    },
+  };
 }

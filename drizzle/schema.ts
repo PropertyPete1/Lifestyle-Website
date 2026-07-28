@@ -1,4 +1,4 @@
-import { boolean, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { boolean, index, int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -164,6 +164,34 @@ export const visitorActivity = mysqlTable("visitor_activity", {
 });
 export type VisitorActivity = typeof visitorActivity.$inferSelect;
 export type InsertVisitorActivity = typeof visitorActivity.$inferInsert;
+
+/**
+ * First-party site analytics — privacy-simple by design.
+ * One row per page view or tracked UI event (e.g. Now Hiring banner click).
+ * Only stores: normalized path, the same anonymous ldr_visitor_id used by
+ * visitor_activity (random localStorage string), event kind, and timestamp.
+ * NO IP addresses, NO user agents, NO fingerprinting, NO personal data,
+ * NO third-party analytics services.
+ */
+export const pageEvents = mysqlTable(
+  "page_events",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    /** "view" = page view; "banner_click" = Now Hiring banner click */
+    kind: varchar("kind", { length: 24 }).notNull().default("view"),
+    /** Normalized path, e.g. "/", "/join", "/convince" (no query strings) */
+    path: varchar("path", { length: 190 }).notNull(),
+    /** Anonymous first-party visitor id ("" when localStorage is blocked) */
+    visitorId: varchar("visitorId", { length: 40 }).notNull().default(""),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_page_events_kind_created").on(t.kind, t.createdAt),
+    index("idx_page_events_path").on(t.path),
+  ]
+);
+export type PageEvent = typeof pageEvents.$inferSelect;
+export type InsertPageEvent = typeof pageEvents.$inferInsert;
 
 /**
  * Convince Your Partner: cached AI-generated dream-scene pitches.

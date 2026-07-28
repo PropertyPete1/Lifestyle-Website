@@ -2,6 +2,18 @@ import PageShell from "@/components/PageShell";
 import RecruitForm from "@/components/RecruitForm";
 import LeadFlowDiagram from "@/components/LeadFlowDiagram";
 import { IMG } from "@/lib/assets";
+import { Flame, HandCoins, Landmark } from "lucide-react";
+
+/**
+ * Instant payoff for the homepage Now Hiring banner: the three strongest
+ * hooks, visible on the first screen before scrolling. The detailed pitch
+ * below stays unchanged.
+ */
+const TOP_HOOKS = [
+  { icon: Flame, text: "Warm & hot buyer and seller leads supplied to you" },
+  { icon: HandCoins, text: "Lease commissions up to $6,000 on a single deal" },
+  { icon: Landmark, text: "Direct broker mentorship — veteran-owned & operated" },
+] as const;
 
 const PILLARS = [
   { title: "Warm & Hot Transfer Leads", body: "Our City Finder, valuation engine, and Get Started pipeline deliver qualified buyers and sellers directly to the team. Lease commissions have run up to $6,000 on a single deal." },
@@ -23,6 +35,19 @@ export default function Join() {
           <h1 className="display-serif text-4xl md:text-6xl mt-3 max-w-4xl leading-tight">
             Ready to join a team that helps you boost your sales with warm &amp; hot transfer leads?
           </h1>
+          {/* Why Agents Join Us — 3-hook strip, visible on first screen */}
+          <div className="mt-8 grid gap-2.5 sm:grid-cols-3 max-w-4xl">
+            {TOP_HOOKS.map(({ icon: Icon, text }) => (
+              <div
+                key={text}
+                className="flex items-center gap-3 border border-gold/35 bg-black/35 backdrop-blur-sm px-4 py-3">
+                <Icon className="h-4 w-4 shrink-0 text-gold" aria-hidden />
+                <span className="text-[11px] uppercase tracking-[0.12em] text-foreground/90 leading-snug">
+                  {text}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 

@@ -22,6 +22,7 @@ import Links from "./pages/Links";
 import Convince, { ConvinceShared } from "./pages/Convince";
 import Privacy from "./pages/Privacy";
 import Admin from "./pages/Admin";
+import { usePageTracking } from "./hooks/usePageTracking";
 
 /**
  * GLOBAL RULE: every internal navigation resets scroll to the top of the new
@@ -46,6 +47,7 @@ function ScrollToTop() {
 }
 
 function Router() {
+  usePageTracking(); // first-party page-view analytics (anonymous; admin paths excluded)
   return (
     <>
       <ScrollToTop />

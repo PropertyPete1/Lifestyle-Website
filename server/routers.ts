@@ -376,6 +376,40 @@ export const appRouter = router({
         return { ok: true } as const;
       }),
   }),
+
+  /**
+   * First-party site analytics. Privacy-simple: only a normalized path, the
+   * anonymous localStorage visitor id, event kind, and timestamp are stored.
+   * No IPs, no user agents, no fingerprinting, no third-party services.
+   */
+  analytics: router({
+    /** Public: record a page view or Now Hiring banner click. Never throws. */
+    track: publicProcedure
+      .input(
+        z.object({
+          kind: z.enum(["view", "banner_click"]),
+          path: z
+            .string()
+            .min(1)
+            .max(190)
+            .regex(/^\//, "path must start with /"),
+          visitorId: z.string().max(40).optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        // Normalize: strip query/hash, collapse trailing slash (except root)
+        let path = input.path.split(/[?#]/)[0] || "/";
+        if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
+        // Never track the admin area itself
+        if (path.startsWith("/admin")) return { ok: true } as const;
+        await db.logPageEvent({ kind: input.kind, path, visitorId: input.visitorId ?? "" });
+        return { ok: true } as const;
+      }),
+    /** Admin: aggregated traffic summary for the dashboard. */
+    summary: adminProcedure
+      .input(z.object({ days: z.number().int().min(1).max(365).default(30) }).optional())
+      .query(({ input }) => db.getAnalyticsSummary(input?.days ?? 30)),
+  }),
 });
 
 export type AppRouter = typeof appRouter;

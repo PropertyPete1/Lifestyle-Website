@@ -241,3 +241,12 @@
 ## Banner copy update — remove dollar figure (user request Jul 28)
 - [x] Homepage Now Hiring banner: removed "$6,000" figure; new copy "Now Hiring: Licensed Agents · Real leads. Real support. Real growth. · See what we offer →"; placement/styling/clickability/mobile fit unchanged; $6,000 stays on /join only
 - [x] Verified 375px + desktop (banner fits fully, no cut-off), 87/87 tests pass, checkpoint (auto-publish), pushed GitHub
+
+## Admin analytics + /join improvements (user request Jul 28)
+- [x] Audit: NO page-view/visit tracking existed anywhere — only visitor_activity (favorites/searches/quizzes for FUB context). Analytics built fresh, reusing the same anonymous ldr_visitor_id
+- [x] /join "Why Agents Join Us" strip: 3 hooks (leads supplied, $6,000 lease commissions, broker mentorship/veteran-owned) in gold/glass cards inside the hero, visible on first screen at 375px and desktop; full pitch below unchanged
+- [x] Track Now Hiring banner clicks as first-party "banner_click" events (anonymous ldr_visitor_id, no IP/fingerprint/personal data)
+- [x] Site-wide first-party page-view tracking via usePageTracking in Router (normalized path + visitor id + timestamp; admin paths never counted; fire-and-forget)
+- [x] Admin "Analytics" tab: totals (views/uniques/banner clicks/CTR), Now Hiring funnel (saw → clicked → visited /join → applied), views per page, daily table with trend bars, weekly rollup, 7/30/90-day ranges
+- [x] Verify: analytics tab renders with live data (7 views / 3 uniques / 1 banner click / 50% CTR), live browser visit + banner click incremented counts correctly in DB, 94/94 tests pass (7 new analytics tests); test rows cleaned up
+- [ ] Checkpoint (auto-publish), push GitHub, report

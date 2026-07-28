@@ -19,13 +19,14 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Home, Building2, Quote, Users, Map as MapIcon, BarChart3, Link2, Inbox, Loader2, Plus, Pencil, Trash2, LogOut } from "lucide-react";
+import { Home, Building2, Quote, Users, Map as MapIcon, BarChart3, Link2, Inbox, Loader2, Plus, Pencil, Trash2, LogOut, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Listing } from "../../../drizzle/schema";
 
 /* ================= Admin shell (role-protected) ================= */
 
 const TABS = [
+  { key: "analytics", label: "Analytics", icon: TrendingUp },
   { key: "listings", label: "Listings", icon: Building2 },
   { key: "testimonials", label: "Testimonials", icon: Quote },
   { key: "team", label: "Team", icon: Users },
@@ -110,6 +111,7 @@ export default function Admin() {
 
       {/* Content */}
       <main className="flex-1 p-5 lg:p-10 overflow-x-auto">
+        {tab === "analytics" && <AnalyticsViewer />}
         {tab === "listings" && <ListingsManager />}
         {tab === "testimonials" && <TestimonialsManager />}
         {tab === "team" && <TeamManager />}
@@ -127,6 +129,202 @@ function SectionHeader({ title, action }: { title: string; action?: React.ReactN
     <div className="flex items-center justify-between mb-6">
       <h1 className="font-serif text-3xl">{title}</h1>
       {action}
+    </div>
+  );
+}
+
+/* ================= Analytics (first-party, privacy-simple) ================= */
+
+const RANGE_OPTIONS = [
+  { days: 7, label: "7 days" },
+  { days: 30, label: "30 days" },
+  { days: 90, label: "90 days" },
+] as const;
+
+function AnalyticsViewer() {
+  const [days, setDays] = useState<number>(30);
+  const { data, isLoading } = trpc.analytics.summary.useQuery({ days });
+
+  const pct = (num: number, den: number) => (den > 0 ? `${((num / den) * 100).toFixed(1)}%` : "—");
+
+  /** Roll daily rows into weeks starting Monday for the weekly table. */
+  const weekly = (() => {
+    if (!data) return [] as { week: string; views: number; uniques: number; bannerClicks: number }[];
+    const map = new Map<string, { week: string; views: number; uniques: number; bannerClicks: number }>();
+    for (const d of data.daily) {
+      const date = new Date(`${d.day}T00:00:00Z`);
+      const monday = new Date(date);
+      monday.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+      const key = monday.toISOString().slice(0, 10);
+      const row = map.get(key) ?? { week: key, views: 0, uniques: 0, bannerClicks: 0 };
+      row.views += d.views;
+      row.uniques += d.uniques; // approx: sum of daily uniques
+      row.bannerClicks += d.bannerClicks;
+      map.set(key, row);
+    }
+    return Array.from(map.values()).sort((a, b) => (a.week < b.week ? 1 : -1));
+  })();
+
+  const maxDailyViews = Math.max(1, ...(data?.daily.map((d) => d.views) ?? [1]));
+
+  return (
+    <div>
+      <SectionHeader
+        title="Analytics"
+        action={
+          <div className="flex gap-1.5">
+            {RANGE_OPTIONS.map((r) => (
+              <Button
+                key={r.days}
+                size="sm"
+                variant={days === r.days ? "default" : "outline"}
+                className={cn(
+                  "rounded-none text-xs uppercase tracking-[0.12em]",
+                  days === r.days && "bg-gold text-primary-foreground hover:bg-gold/90"
+                )}
+                onClick={() => setDays(r.days)}>
+                {r.label}
+              </Button>
+            ))}
+          </div>
+        }
+      />
+      <p className="text-xs text-muted-foreground -mt-4 mb-6 max-w-2xl">
+        First-party only: anonymous visitor id stored in this site's localStorage — no cookies, no IP
+        logging, no fingerprinting, no third-party analytics. Admin pages are never counted.
+      </p>
+
+      {isLoading || !data ? (
+        <div className="flex items-center gap-2 text-muted-foreground text-sm py-10">
+          <Loader2 className="h-4 w-4 animate-spin text-gold" /> Loading traffic…
+        </div>
+      ) : (
+        <div className="space-y-10">
+          {/* Totals */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              { label: "Page Views", value: String(data.totals.views) },
+              { label: "Unique Visitors", value: String(data.totals.uniques) },
+              { label: "Banner Clicks", value: String(data.totals.bannerClicks) },
+              { label: "Banner CTR (of homepage views)", value: pct(data.funnel.bannerClicks, data.funnel.homeViews) },
+            ].map((c) => (
+              <div key={c.label} className="border border-border bg-card p-5">
+                <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{c.label}</p>
+                <p className="font-serif text-3xl mt-2 text-foreground">{c.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Recruiting funnel */}
+          <div>
+            <h2 className="font-serif text-xl mb-4">Now Hiring Funnel</h2>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                { label: "Saw homepage", value: data.funnel.homeViews, sub: "views of /" },
+                { label: "Clicked banner", value: data.funnel.bannerClicks, sub: `${pct(data.funnel.bannerClicks, data.funnel.homeViews)} of homepage views` },
+                { label: "Visited /join", value: data.funnel.joinViews, sub: "all sources incl. banner" },
+                { label: "Applied", value: data.funnel.recruitSubmissions, sub: `${pct(data.funnel.recruitSubmissions, data.funnel.joinViews)} of /join views` },
+              ].map((s, i) => (
+                <div key={s.label} className="border border-border bg-card p-5 relative">
+                  <span className="absolute top-2 right-3 text-[10px] text-gold/70 font-medium">{i + 1}</span>
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{s.label}</p>
+                  <p className="font-serif text-3xl mt-2">{s.value}</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">{s.sub}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Views per page */}
+          <div>
+            <h2 className="font-serif text-xl mb-4">Views per Page</h2>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Page</TableHead>
+                  <TableHead className="text-right">Views</TableHead>
+                  <TableHead className="text-right">Unique Visitors</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.perPage.length === 0 && (
+                  <TableRow><TableCell colSpan={3} className="text-muted-foreground text-sm">No traffic recorded yet in this window.</TableCell></TableRow>
+                )}
+                {data.perPage.map((p) => (
+                  <TableRow key={p.path}>
+                    <TableCell className="font-mono text-xs">{p.path}</TableCell>
+                    <TableCell className="text-right">{p.views}</TableCell>
+                    <TableCell className="text-right">{p.uniques}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Daily trend */}
+          <div>
+            <h2 className="font-serif text-xl mb-4">Daily</h2>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Day</TableHead>
+                  <TableHead className="w-[38%]">Trend</TableHead>
+                  <TableHead className="text-right">Views</TableHead>
+                  <TableHead className="text-right">Uniques</TableHead>
+                  <TableHead className="text-right">Banner Clicks</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.daily.length === 0 && (
+                  <TableRow><TableCell colSpan={5} className="text-muted-foreground text-sm">No traffic recorded yet in this window.</TableCell></TableRow>
+                )}
+                {data.daily.map((d) => (
+                  <TableRow key={d.day}>
+                    <TableCell className="font-mono text-xs">{d.day}</TableCell>
+                    <TableCell>
+                      <div className="h-2 bg-gold/80" style={{ width: `${Math.max(2, (d.views / maxDailyViews) * 100)}%` }} />
+                    </TableCell>
+                    <TableCell className="text-right">{d.views}</TableCell>
+                    <TableCell className="text-right">{d.uniques}</TableCell>
+                    <TableCell className="text-right">{d.bannerClicks}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Weekly rollup */}
+          <div>
+            <h2 className="font-serif text-xl mb-4">Weekly</h2>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Week of</TableHead>
+                  <TableHead className="text-right">Views</TableHead>
+                  <TableHead className="text-right">Uniques (approx)</TableHead>
+                  <TableHead className="text-right">Banner Clicks</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {weekly.length === 0 && (
+                  <TableRow><TableCell colSpan={4} className="text-muted-foreground text-sm">No traffic recorded yet in this window.</TableCell></TableRow>
+                )}
+                {weekly.map((w) => (
+                  <TableRow key={w.week}>
+                    <TableCell className="font-mono text-xs">{w.week}</TableCell>
+                    <TableCell className="text-right">{w.views}</TableCell>
+                    <TableCell className="text-right">{w.uniques}</TableCell>
+                    <TableCell className="text-right">{w.bannerClicks}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <p className="text-[11px] text-muted-foreground mt-2">
+              Weekly uniques sum daily uniques — a visitor active on multiple days counts once per day.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

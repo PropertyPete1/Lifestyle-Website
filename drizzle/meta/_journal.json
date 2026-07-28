@@ -43,6 +43,13 @@
       "when": 1784597626182,
       "tag": "0005_clear_killraven",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1785275310990,
+      "tag": "0006_lively_onslaught",
+      "breakpoints": true
     }
   ]
 }

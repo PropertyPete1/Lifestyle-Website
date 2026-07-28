@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { ArrowRight, Rocket } from "lucide-react";
+import { useBannerClickTracking } from "@/hooks/usePageTracking";
 
 /**
  * Eye-catching recruiting banner — the very first element on the homepage,
@@ -17,6 +18,7 @@ import { ArrowRight, Rocket } from "lucide-react";
  */
 export default function NowHiringBanner() {
   const ref = useRef<HTMLDivElement>(null);
+  const logBannerClick = useBannerClickTracking();
 
   useEffect(() => {
     const el = ref.current;
@@ -36,6 +38,7 @@ export default function NowHiringBanner() {
     <Link href="/join">
       <div
         ref={ref}
+        onClick={logBannerClick}
         className="group fixed top-0 left-0 right-0 z-[60] block w-full cursor-pointer overflow-hidden border-b border-gold/40 bg-[oklch(0.14_0.01_285)]"
         role="banner"
         aria-label="Now hiring licensed agents — see what we offer">

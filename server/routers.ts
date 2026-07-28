@@ -383,17 +383,21 @@ export const appRouter = router({
    * No IPs, no user agents, no fingerprinting, no third-party services.
    */
   analytics: router({
-    /** Public: record a page view or Now Hiring banner click. Never throws. */
+    /** Public: record a page view, banner click, or New Construction outbound click. */
     track: publicProcedure
       .input(
         z.object({
-          kind: z.enum(["view", "banner_click"]),
+          kind: z.enum(["view", "banner_click", "nc_click"]),
           path: z
             .string()
             .min(1)
             .max(190)
             .regex(/^\//, "path must start with /"),
           visitorId: z.string().max(40).optional(),
+          /** Session traffic source: utm_source, referrer domain, or "direct". */
+          source: z.string().max(120).optional(),
+          utmMedium: z.string().max(120).optional(),
+          utmCampaign: z.string().max(190).optional(),
         })
       )
       .mutation(async ({ input }) => {
@@ -402,7 +406,14 @@ export const appRouter = router({
         if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
         // Never track the admin area itself
         if (path.startsWith("/admin")) return { ok: true } as const;
-        await db.logPageEvent({ kind: input.kind, path, visitorId: input.visitorId ?? "" });
+        await db.logPageEvent({
+          kind: input.kind,
+          path,
+          visitorId: input.visitorId ?? "",
+          source: (input.source ?? "").toLowerCase().slice(0, 120),
+          utmMedium: (input.utmMedium ?? "").toLowerCase().slice(0, 120),
+          utmCampaign: (input.utmCampaign ?? "").slice(0, 190),
+        });
         return { ok: true } as const;
       }),
     /** Admin: aggregated traffic summary for the dashboard. */

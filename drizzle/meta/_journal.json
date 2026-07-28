@@ -50,6 +50,13 @@
       "when": 1785275310990,
       "tag": "0006_lively_onslaught",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1785276981055,
+      "tag": "0007_cold_the_fallen",
+      "breakpoints": true
     }
   ]
 }

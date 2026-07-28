@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
 import { Instagram, Facebook, ArrowUpRight } from "lucide-react";
+import { useNcClickTracking } from "@/hooks/usePageTracking";
 
 /**
  * /links — link-in-bio page replacing Linktree. Mobile-first, on-brand.
@@ -9,6 +10,7 @@ import { Instagram, Facebook, ArrowUpRight } from "lucide-react";
  */
 export default function Links() {
   const { data: links } = trpc.links.list.useQuery();
+  const logNcClick = useNcClickTracking();
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col items-center px-5 py-12">
@@ -34,7 +36,13 @@ export default function Links() {
                 <ArrowUpRight className="h-4 w-4 opacity-40 group-hover:opacity-100" />
               </Link>
             ) : (
-              <a key={l.id} href={l.url} target="_blank" rel="noreferrer" className={cls}>
+              <a
+                key={l.id}
+                href={l.url}
+                target="_blank"
+                rel="noreferrer"
+                className={cls}
+                onClick={l.url === SITE.newConstructionUrl ? logNcClick : undefined}>
                 {l.label}
                 <ArrowUpRight className="h-4 w-4 opacity-40 group-hover:opacity-100" />
               </a>

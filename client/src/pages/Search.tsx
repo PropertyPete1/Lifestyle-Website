@@ -6,6 +6,7 @@ import AISearchBar from "@/components/AISearchBar";
 import ListingsMap from "@/components/ListingsMap";
 import AIStatusSequence from "@/components/AIStatusSequence";
 import { useActivity } from "@/hooks/useActivity";
+import { useNcClickTracking } from "@/hooks/usePageTracking";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ function SearchInner({ portfolio }: { portfolio: boolean }) {
 
   // Anonymous activity: log each AI search once per query (with parsed criteria)
   const logActivity = useActivity();
+  const logNcClick = useNcClickTracking();
   const [loggedQuery, setLoggedQuery] = useState("");
   useEffect(() => {
     if (!urlQuery || !ai.data || urlQuery === loggedQuery) return;
@@ -263,7 +265,7 @@ function SearchInner({ portfolio }: { portfolio: boolean }) {
                 Our inventory changes weekly. Try a different filter, or explore new construction
                 across Texas through our builder network.
               </p>
-              <a href={SITE.newConstructionUrl} target="_blank" rel="noreferrer" className="text-cta mt-6 inline-block">
+              <a href={SITE.newConstructionUrl} target="_blank" rel="noreferrer" onClick={logNcClick} className="text-cta mt-6 inline-block">
                 Find New Builds Across Texas
               </a>
             </div>

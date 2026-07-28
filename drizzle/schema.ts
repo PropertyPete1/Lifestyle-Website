@@ -177,12 +177,20 @@ export const pageEvents = mysqlTable(
   "page_events",
   {
     id: int("id").autoincrement().primaryKey(),
-    /** "view" = page view; "banner_click" = Now Hiring banner click */
+    /** "view" = page view; "banner_click" = Now Hiring banner click; "nc_click" = New Construction Search outbound click */
     kind: varchar("kind", { length: 24 }).notNull().default("view"),
     /** Normalized path, e.g. "/", "/join", "/convince" (no query strings) */
     path: varchar("path", { length: 190 }).notNull(),
     /** Anonymous first-party visitor id ("" when localStorage is blocked) */
     visitorId: varchar("visitorId", { length: 40 }).notNull().default(""),
+    /**
+     * Traffic source for the session this event belongs to, captured once on
+     * entry and reused for the session (sessionStorage): utm_source when
+     * present, else the referrer domain ("instagram.com"), else "direct".
+     */
+    source: varchar("source", { length: 120 }).notNull().default(""),
+    utmMedium: varchar("utmMedium", { length: 120 }).notNull().default(""),
+    utmCampaign: varchar("utmCampaign", { length: 190 }).notNull().default(""),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   (t) => [

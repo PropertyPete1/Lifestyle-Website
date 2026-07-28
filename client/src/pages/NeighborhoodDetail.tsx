@@ -3,6 +3,7 @@ import PageShell from "@/components/PageShell";
 import ListingCard from "@/components/ListingCard";
 import LeadForm from "@/components/LeadForm";
 import { trpc } from "@/lib/trpc";
+import { useNcClickTracking } from "@/hooks/usePageTracking";
 import { SITE, FEATURES } from "@shared/site";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowRight } from "lucide-react";
@@ -21,6 +22,7 @@ export default function NeighborhoodDetail() {
   const slug = params.slug ?? "";
   const { data: hood, isLoading } = trpc.neighborhoods.bySlug.useQuery({ slug });
   const { data: listings } = trpc.listings.all.useQuery();
+  const logNcClick = useNcClickTracking();
 
   if (isLoading) {
     return (
@@ -109,6 +111,7 @@ export default function NeighborhoodDetail() {
             href={SITE.newConstructionUrl}
             target="_blank"
             rel="noreferrer"
+            onClick={logNcClick}
             className="mt-10 inline-flex items-center gap-3 bg-gold text-primary-foreground px-8 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:bg-gold/90 transition-colors reveal">
             New Construction in {hood.name} <ArrowRight className="h-4 w-4" />
           </a>

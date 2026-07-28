@@ -11,6 +11,7 @@ import TestimonialCarousel from "@/components/TestimonialCarousel";
 import VeteranBadge from "@/components/VeteranBadge";
 import TechShowcase from "@/components/TechShowcase";
 import { trpc } from "@/lib/trpc";
+import { useNcClickTracking } from "@/hooks/usePageTracking";
 import { SITE, FEATURES } from "@shared/site";
 import { IMG } from "@/lib/assets";
 
@@ -37,6 +38,7 @@ const CITY_CARDS = [
 export default function Home() {
   const { data: stats } = trpc.stats.list.useQuery();
   const { data: team } = trpc.team.list.useQuery();
+  const logNcClick = useNcClickTracking();
 
   return (
     <PageShell hiringBanner>
@@ -75,6 +77,7 @@ export default function Home() {
               href={SITE.newConstructionUrl}
               target="_blank"
               rel="noreferrer"
+              onClick={logNcClick}
               className="inline-flex items-center gap-3 border border-foreground/40 px-9 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:border-gold hover:text-gold transition-colors">
               New Construction Search
             </a>
@@ -195,6 +198,7 @@ export default function Home() {
             href={SITE.newConstructionUrl}
             target="_blank"
             rel="noreferrer"
+            onClick={logNcClick}
             className="mt-8 inline-flex items-center gap-3 bg-gold text-primary-foreground px-9 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:bg-gold/90 transition-colors">
             Find New Builds <ArrowRight className="h-4 w-4" />
           </a>

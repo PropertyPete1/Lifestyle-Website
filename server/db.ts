@@ -375,10 +375,12 @@ export async function logPageEvent(data: InsertPageEvent) {
  */
 export async function getAnalyticsSummary(days = 30) {
   const empty = {
-    totals: { views: 0, uniques: 0, bannerClicks: 0 },
+    totals: { views: 0, uniques: 0, bannerClicks: 0, ncClicks: 0 },
     perPage: [] as { path: string; views: number; uniques: number }[],
-    daily: [] as { day: string; views: number; uniques: number; bannerClicks: number }[],
+    daily: [] as { day: string; views: number; uniques: number; bannerClicks: number; ncClicks: number }[],
     funnel: { homeViews: 0, bannerClicks: 0, joinViews: 0, recruitSubmissions: 0 },
+    sources: [] as { source: string; medium: string; campaign: string; views: number; uniques: number }[],
+    ncByPath: [] as { path: string; clicks: number }[],
   };
   const db = await getDb();
   if (!db) return empty;
@@ -386,12 +388,13 @@ export async function getAnalyticsSummary(days = 30) {
   const windowDays = Math.max(1, Math.min(365, Math.floor(days)));
   const since = sql`${pageEvents.createdAt} >= (NOW() - INTERVAL ${sql.raw(String(windowDays))} DAY)`;
 
-  const [totalsRows, perPage, daily, funnelRows, recruitRows] = await Promise.all([
+  const [totalsRows, perPage, daily, funnelRows, recruitRows, sources, ncByPath] = await Promise.all([
     db
       .select({
         views: sql<number>`SUM(${pageEvents.kind} = 'view')`,
         uniques: sql<number>`COUNT(DISTINCT CASE WHEN ${pageEvents.kind} = 'view' AND ${pageEvents.visitorId} <> '' THEN ${pageEvents.visitorId} END)`,
         bannerClicks: sql<number>`SUM(${pageEvents.kind} = 'banner_click')`,
+        ncClicks: sql<number>`SUM(${pageEvents.kind} = 'nc_click')`,
       })
       .from(pageEvents)
       .where(since),
@@ -412,6 +415,7 @@ export async function getAnalyticsSummary(days = 30) {
         views: sql<number>`SUM(${pageEvents.kind} = 'view')`,
         uniques: sql<number>`COUNT(DISTINCT CASE WHEN ${pageEvents.kind} = 'view' AND ${pageEvents.visitorId} <> '' THEN ${pageEvents.visitorId} END)`,
         bannerClicks: sql<number>`SUM(${pageEvents.kind} = 'banner_click')`,
+        ncClicks: sql<number>`SUM(${pageEvents.kind} = 'nc_click')`,
       })
       .from(pageEvents)
       .where(since)
@@ -434,6 +438,26 @@ export async function getAnalyticsSummary(days = 30) {
           sql`${leads.createdAt} >= (NOW() - INTERVAL ${sql.raw(String(windowDays))} DAY)`
         )
       ),
+    db
+      .select({
+        source: sql<string>`IF(${pageEvents.source} = '', 'direct', ${pageEvents.source})`.as("src"),
+        medium: pageEvents.utmMedium,
+        campaign: pageEvents.utmCampaign,
+        views: sql<number>`COUNT(*)`,
+        uniques: sql<number>`COUNT(DISTINCT CASE WHEN ${pageEvents.visitorId} <> '' THEN ${pageEvents.visitorId} END)`,
+      })
+      .from(pageEvents)
+      .where(and(since, eq(pageEvents.kind, "view")))
+      .groupBy(sql`src`, pageEvents.utmMedium, pageEvents.utmCampaign)
+      .orderBy(desc(sql`COUNT(*)`))
+      .limit(50),
+    db
+      .select({ path: pageEvents.path, clicks: sql<number>`COUNT(*)` })
+      .from(pageEvents)
+      .where(and(since, eq(pageEvents.kind, "nc_click")))
+      .groupBy(pageEvents.path)
+      .orderBy(desc(sql`COUNT(*)`))
+      .limit(20),
   ]);
 
   const t = totalsRows[0];
@@ -443,6 +467,7 @@ export async function getAnalyticsSummary(days = 30) {
       views: Number(t?.views ?? 0),
       uniques: Number(t?.uniques ?? 0),
       bannerClicks: Number(t?.bannerClicks ?? 0),
+      ncClicks: Number(t?.ncClicks ?? 0),
     },
     perPage: perPage.map((r) => ({ path: r.path, views: Number(r.views), uniques: Number(r.uniques) })),
     daily: daily.map((r) => ({
@@ -450,6 +475,7 @@ export async function getAnalyticsSummary(days = 30) {
       views: Number(r.views ?? 0),
       uniques: Number(r.uniques ?? 0),
       bannerClicks: Number(r.bannerClicks ?? 0),
+      ncClicks: Number(r.ncClicks ?? 0),
     })),
     funnel: {
       homeViews: Number(f?.homeViews ?? 0),
@@ -457,5 +483,13 @@ export async function getAnalyticsSummary(days = 30) {
       joinViews: Number(f?.joinViews ?? 0),
       recruitSubmissions: Number(recruitRows[0]?.n ?? 0),
     },
+    sources: sources.map((r) => ({
+      source: r.source,
+      medium: r.medium,
+      campaign: r.campaign,
+      views: Number(r.views),
+      uniques: Number(r.uniques),
+    })),
+    ncByPath: ncByPath.map((r) => ({ path: r.path, clicks: Number(r.clicks) })),
   };
 }

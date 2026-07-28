@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import PageShell from "@/components/PageShell";
 import LeadForm from "@/components/LeadForm";
 import { useActivity } from "@/hooks/useActivity";
+import { useNcClickTracking } from "@/hooks/usePageTracking";
 import { SITE } from "@shared/site";
 import { IMG } from "@/lib/assets";
 import { cn } from "@/lib/utils";
@@ -173,6 +174,7 @@ export default function CityFinder() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [unlocked, setUnlocked] = useState(false);
   const logActivity = useActivity();
+  const logNcClick = useNcClickTracking();
 
   const total = QUESTIONS.length;
   const atGate = step >= total;
@@ -327,6 +329,7 @@ export default function CityFinder() {
                       href={SITE.newConstructionUrl}
                       target="_blank"
                       rel="noreferrer"
+                      onClick={logNcClick}
                       className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.15em] text-muted-foreground hover:text-gold transition-colors">
                       See New Construction in {c.name} <ExternalLink className="h-3 w-3" />
                     </a>

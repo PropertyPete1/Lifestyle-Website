@@ -1,13 +1,60 @@
 /**
- * First-party page-view tracking. Fires one "view" event per route change,
- * keyed by the same anonymous ldr_visitor_id used elsewhere (localStorage
- * only — no cookies, no IPs, no fingerprinting, no third-party analytics).
- * Fire-and-forget: tracking must never block or break the visitor experience.
+ * First-party page-view + event tracking. Fires one "view" event per route
+ * change, keyed by the same anonymous ldr_visitor_id used elsewhere
+ * (localStorage only — no cookies, no IPs, no fingerprinting, no third-party
+ * analytics). Fire-and-forget: tracking must never block the visitor.
+ *
+ * Traffic source is captured ONCE per browser session (sessionStorage):
+ * - utm_source / utm_medium / utm_campaign from the entry URL when present
+ * - otherwise the referrer's hostname (e.g. "instagram.com")
+ * - otherwise "direct"
+ * Every event in the session carries that source so the admin "Traffic
+ * Sources" breakdown reflects where the visit originated.
  */
 import { useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { getVisitorId } from "@/lib/visitor";
+
+const SRC_KEY = "ldr_traffic_source";
+
+type TrafficSource = { source: string; utmMedium: string; utmCampaign: string };
+
+/** Resolve (and cache for the session) where this visit came from. */
+export function getTrafficSource(): TrafficSource {
+  const fallback: TrafficSource = { source: "", utmMedium: "", utmCampaign: "" };
+  try {
+    const cached = sessionStorage.getItem(SRC_KEY);
+    if (cached) return JSON.parse(cached) as TrafficSource;
+
+    const params = new URLSearchParams(window.location.search);
+    let source = (params.get("utm_source") ?? "").trim().toLowerCase();
+    const utmMedium = (params.get("utm_medium") ?? "").trim().toLowerCase();
+    const utmCampaign = (params.get("utm_campaign") ?? "").trim();
+
+    if (!source) {
+      const ref = document.referrer;
+      if (ref) {
+        try {
+          const host = new URL(ref).hostname.replace(/^www\./, "").toLowerCase();
+          // Same-site navigation isn't an external source
+          if (host && host !== window.location.hostname.replace(/^www\./, "").toLowerCase()) {
+            source = host;
+          }
+        } catch {
+          /* unparseable referrer — ignore */
+        }
+      }
+    }
+    if (!source) source = "direct";
+
+    const resolved: TrafficSource = { source, utmMedium, utmCampaign };
+    sessionStorage.setItem(SRC_KEY, JSON.stringify(resolved));
+    return resolved;
+  } catch {
+    return fallback; // storage blocked — tracking silently degrades
+  }
+}
 
 export function usePageTracking() {
   const [location] = useLocation();
@@ -19,8 +66,9 @@ export function usePageTracking() {
     if (path.startsWith("/admin")) return; // never track the admin area
     if (lastPath.current === path) return; // dedupe re-renders of same route
     lastPath.current = path;
+    const src = getTrafficSource();
     track.mutate(
-      { kind: "view", path, visitorId: getVisitorId() || undefined },
+      { kind: "view", path, visitorId: getVisitorId() || undefined, ...src },
       { onError: () => undefined }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -32,7 +80,23 @@ export function useBannerClickTracking() {
   const track = trpc.analytics.track.useMutation();
   return () =>
     track.mutate(
-      { kind: "banner_click", path: "/", visitorId: getVisitorId() || undefined },
+      { kind: "banner_click", path: "/", visitorId: getVisitorId() || undefined, ...getTrafficSource() },
       { onError: () => undefined }
     );
+}
+
+/**
+ * Returns a fire-and-forget logger for New Construction Search outbound
+ * clicks. `path` records WHERE the CTA was clicked (e.g. "/", "/links",
+ * "/san-antonio") so Analytics can compare placements.
+ */
+export function useNcClickTracking() {
+  const track = trpc.analytics.track.useMutation();
+  return () => {
+    const path = (window.location.pathname.split(/[?#]/)[0] || "/").replace(/(.)\/$/, "$1");
+    track.mutate(
+      { kind: "nc_click", path, visitorId: getVisitorId() || undefined, ...getTrafficSource() },
+      { onError: () => undefined }
+    );
+  };
 }

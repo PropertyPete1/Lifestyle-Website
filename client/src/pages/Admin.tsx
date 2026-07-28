@@ -149,17 +149,18 @@ function AnalyticsViewer() {
 
   /** Roll daily rows into weeks starting Monday for the weekly table. */
   const weekly = (() => {
-    if (!data) return [] as { week: string; views: number; uniques: number; bannerClicks: number }[];
-    const map = new Map<string, { week: string; views: number; uniques: number; bannerClicks: number }>();
+    if (!data) return [] as { week: string; views: number; uniques: number; bannerClicks: number; ncClicks: number }[];
+    const map = new Map<string, { week: string; views: number; uniques: number; bannerClicks: number; ncClicks: number }>();
     for (const d of data.daily) {
       const date = new Date(`${d.day}T00:00:00Z`);
       const monday = new Date(date);
       monday.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
       const key = monday.toISOString().slice(0, 10);
-      const row = map.get(key) ?? { week: key, views: 0, uniques: 0, bannerClicks: 0 };
+      const row = map.get(key) ?? { week: key, views: 0, uniques: 0, bannerClicks: 0, ncClicks: 0 };
       row.views += d.views;
       row.uniques += d.uniques; // approx: sum of daily uniques
       row.bannerClicks += d.bannerClicks;
+      row.ncClicks += d.ncClicks;
       map.set(key, row);
     }
     return Array.from(map.values()).sort((a, b) => (a.week < b.week ? 1 : -1));
@@ -201,11 +202,12 @@ function AnalyticsViewer() {
       ) : (
         <div className="space-y-10">
           {/* Totals */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {[
               { label: "Page Views", value: String(data.totals.views) },
               { label: "Unique Visitors", value: String(data.totals.uniques) },
               { label: "Banner Clicks", value: String(data.totals.bannerClicks) },
+              { label: "New Construction Clicks", value: String(data.totals.ncClicks) },
               { label: "Banner CTR (of homepage views)", value: pct(data.funnel.bannerClicks, data.funnel.homeViews) },
             ].map((c) => (
               <div key={c.label} className="border border-border bg-card p-5">
@@ -233,6 +235,70 @@ function AnalyticsViewer() {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Traffic sources */}
+          <div>
+            <h2 className="font-serif text-xl mb-1">Traffic Sources</h2>
+            <p className="text-xs text-muted-foreground mb-4">
+              Where visits originate: utm_source when present, otherwise the referring site's
+              domain, otherwise "direct". Tag campaign links like
+              <span className="font-mono text-[11px]"> ?utm_source=instagram&utm_medium=bio&utm_campaign=july-reel</span> to
+              see exactly which posts drive traffic.
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Medium</TableHead>
+                  <TableHead>Campaign</TableHead>
+                  <TableHead className="text-right">Views</TableHead>
+                  <TableHead className="text-right">Unique Visitors</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.sources.length === 0 && (
+                  <TableRow><TableCell colSpan={5} className="text-muted-foreground text-sm">No traffic recorded yet in this window.</TableCell></TableRow>
+                )}
+                {data.sources.map((s, i) => (
+                  <TableRow key={`${s.source}-${s.medium}-${s.campaign}-${i}`}>
+                    <TableCell className="font-mono text-xs">{s.source}</TableCell>
+                    <TableCell className="font-mono text-xs">{s.medium || "—"}</TableCell>
+                    <TableCell className="font-mono text-xs">{s.campaign || "—"}</TableCell>
+                    <TableCell className="text-right">{s.views}</TableCell>
+                    <TableCell className="text-right">{s.uniques}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* New Construction outbound clicks by placement */}
+          <div>
+            <h2 className="font-serif text-xl mb-1">New Construction Search Clicks</h2>
+            <p className="text-xs text-muted-foreground mb-4">
+              Outbound clicks to the builder network, by the page where the CTA was clicked —
+              the primary sales CTA until IDX connects.
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Clicked From</TableHead>
+                  <TableHead className="text-right">Clicks</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.ncByPath.length === 0 && (
+                  <TableRow><TableCell colSpan={2} className="text-muted-foreground text-sm">No clicks recorded yet in this window.</TableCell></TableRow>
+                )}
+                {data.ncByPath.map((p) => (
+                  <TableRow key={p.path}>
+                    <TableCell className="font-mono text-xs">{p.path}</TableCell>
+                    <TableCell className="text-right">{p.clicks}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
 
           {/* Views per page */}
@@ -272,11 +338,12 @@ function AnalyticsViewer() {
                   <TableHead className="text-right">Views</TableHead>
                   <TableHead className="text-right">Uniques</TableHead>
                   <TableHead className="text-right">Banner Clicks</TableHead>
+                  <TableHead className="text-right">NC Clicks</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.daily.length === 0 && (
-                  <TableRow><TableCell colSpan={5} className="text-muted-foreground text-sm">No traffic recorded yet in this window.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={6} className="text-muted-foreground text-sm">No traffic recorded yet in this window.</TableCell></TableRow>
                 )}
                 {data.daily.map((d) => (
                   <TableRow key={d.day}>
@@ -287,6 +354,7 @@ function AnalyticsViewer() {
                     <TableCell className="text-right">{d.views}</TableCell>
                     <TableCell className="text-right">{d.uniques}</TableCell>
                     <TableCell className="text-right">{d.bannerClicks}</TableCell>
+                    <TableCell className="text-right">{d.ncClicks}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -303,11 +371,12 @@ function AnalyticsViewer() {
                   <TableHead className="text-right">Views</TableHead>
                   <TableHead className="text-right">Uniques (approx)</TableHead>
                   <TableHead className="text-right">Banner Clicks</TableHead>
+                  <TableHead className="text-right">NC Clicks</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {weekly.length === 0 && (
-                  <TableRow><TableCell colSpan={4} className="text-muted-foreground text-sm">No traffic recorded yet in this window.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={5} className="text-muted-foreground text-sm">No traffic recorded yet in this window.</TableCell></TableRow>
                 )}
                 {weekly.map((w) => (
                   <TableRow key={w.week}>
@@ -315,6 +384,7 @@ function AnalyticsViewer() {
                     <TableCell className="text-right">{w.views}</TableCell>
                     <TableCell className="text-right">{w.uniques}</TableCell>
                     <TableCell className="text-right">{w.bannerClicks}</TableCell>
+                    <TableCell className="text-right">{w.ncClicks}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -249,4 +249,11 @@
 - [x] Site-wide first-party page-view tracking via usePageTracking in Router (normalized path + visitor id + timestamp; admin paths never counted; fire-and-forget)
 - [x] Admin "Analytics" tab: totals (views/uniques/banner clicks/CTR), Now Hiring funnel (saw → clicked → visited /join → applied), views per page, daily table with trend bars, weekly rollup, 7/30/90-day ranges
 - [x] Verify: analytics tab renders with live data (7 views / 3 uniques / 1 banner click / 50% CTR), live browser visit + banner click incremented counts correctly in DB, 94/94 tests pass (7 new analytics tests); test rows cleaned up
-- [ ] Checkpoint (auto-publish), push GitHub, report
+- [x] Checkpoint 9a4ef424 (auto-published), pushed to GitHub Lifestyle-Website main
+
+## Traffic sources + New Construction outbound tracking (user request Jul 28)
+- [x] First-party UTM/referrer tracking: source captured once per session (sessionStorage) — utm_source > referrer domain (www stripped, same-site ignored) > "direct"; utm_medium/utm_campaign kept; no third-party services
+- [x] Analytics tab: "Traffic Sources" table (source/medium/campaign/views/uniques) with UTM tagging tip for campaign links
+- [x] New Construction Search outbound clicks tracked at every placement: homepage hero CTA + New Construction section, city/neighborhood pages, /search empty state, City Finder results, /links bio link — each logs the page it was clicked from
+- [x] NC clicks in Analytics: totals card, clicks-by-placement table, NC Clicks columns in Daily and Weekly
+- [x] Verified live: visit with ?utm_source=instagram&utm_medium=bio&utm_campaign=test-verify recorded source correctly, NC CTA click logged nc_click with instagram attribution, Analytics tab rendered both new sections; synthetic test rows cleaned up; 96/96 tests pass

@@ -1,8 +1,9 @@
 import PageShell from "@/components/PageShell";
 import RecruitForm from "@/components/RecruitForm";
 import LeadFlowDiagram from "@/components/LeadFlowDiagram";
+import { SITE } from "@shared/site";
 import { IMG } from "@/lib/assets";
-import { Flame, HandCoins, Landmark } from "lucide-react";
+import { Flame, HandCoins, Landmark, Mail } from "lucide-react";
 
 /**
  * Instant payoff for the homepage Now Hiring banner: the three strongest
@@ -82,6 +83,24 @@ export default function Join() {
         </div>
         <div className="bg-card border border-border p-6 lg:p-10">
           <RecruitForm />
+        </div>
+
+        {/* Closing tagline + email contact for agents who prefer email.
+            The screening form above remains the primary application path. */}
+        <div className="mt-16 text-center reveal">
+          <p className="display-serif text-2xl md:text-3xl leading-snug">
+            Lifestyle Design Realty.
+            <br />
+            <span className="text-gold">We built the brokerage we never had.</span>
+          </p>
+          <p className="mt-6 text-sm text-muted-foreground">
+            Prefer email?{" "}
+            <a
+              href={`mailto:${SITE.email}`}
+              className="inline-flex items-center gap-1.5 text-gold hover:underline underline-offset-4">
+              <Mail className="h-3.5 w-3.5" /> Team@lifestyledesignrealty.com
+            </a>
+          </p>
         </div>
       </section>
     </PageShell>

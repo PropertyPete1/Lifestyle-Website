@@ -10,6 +10,9 @@
  */
 export const FEATURES = {
   SHOW_PLACEHOLDER_LISTINGS: false,
+  /** Newsletter promises "new listings in your inbox" — hidden pre-IDX.
+      Re-enable alongside SHOW_PLACEHOLDER_LISTINGS when IDX connects. */
+  SHOW_NEWSLETTER: false,
 } as const;
 
 export const SITE = {
@@ -19,7 +22,7 @@ export const SITE = {
   subheadline: "CENTRAL TEXAS REAL ESTATE PROFESSIONALS",
   phone: "(210) 981-3830",
   phoneHref: "tel:+12109813830",
-  email: "peter@lifestyledesignrealty.com",
+  email: "team@lifestyledesignrealty.com",
   address: "1209 S Saint Marys St #232, San Antonio TX 78210",
   /** New Construction Search — external builder-network tool (vendor name never shown in UI) */
   newConstructionUrl: "https://a.nhb.app/u/peter-allen",

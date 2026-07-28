@@ -75,7 +75,7 @@ describe("sendWebsiteInquiryToFub payload", () => {
   });
 });
 
-describe("email copy to Peter", () => {
+describe("email copy to the team inbox", () => {
   it("formats subject and body with all fields including phone", () => {
     const { subject, body } = formatInquiryEmail(SAMPLE);
     expect(subject).toBe("Custom Website Inquiry — Jane Business");
@@ -87,7 +87,7 @@ describe("email copy to Peter", () => {
     expect(body).toContain("Wants Us to Build Their Website");
   });
 
-  it("targets Peter's address", () => {
-    expect(INQUIRY_COPY_RECIPIENT).toBe("peter@lifestyledesignrealty.com");
+  it("targets the team address", () => {
+    expect(INQUIRY_COPY_RECIPIENT).toBe("team@lifestyledesignrealty.com");
   });
 });

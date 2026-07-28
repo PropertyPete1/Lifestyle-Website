@@ -1,5 +1,5 @@
 /**
- * Email copy of custom-website inquiries to Peter.
+ * Email copy of custom-website inquiries to the team inbox.
  *
  * The production runtime has no SMTP relay, so we deliver the copy through the
  * Manus owner-notification service (which reaches the project owner — Peter —
@@ -10,7 +10,7 @@
 import { notifyOwner } from "./_core/notification";
 import type { WebsiteInquiryInput } from "./fub";
 
-export const INQUIRY_COPY_RECIPIENT = "peter@lifestyledesignrealty.com";
+export const INQUIRY_COPY_RECIPIENT = "team@lifestyledesignrealty.com";
 
 /** Format the inquiry as an email-style body (exported for tests). */
 export function formatInquiryEmail(input: WebsiteInquiryInput): { subject: string; body: string } {

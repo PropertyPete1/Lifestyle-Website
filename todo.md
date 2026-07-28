@@ -269,3 +269,8 @@
 ## Two quick updates (user request Jul 28)
 - [x] Added "Sell With Us" to the Properties dropdown (5 items); nav overflow regression tests pass (dropdown items don't consume top-level width)
 - [x] Updated ALL response-time messaging to "typically respond within 30 minutes": GetStartedForm (toast + confirmation), LeadForm (toast + confirmation — covers City Finder, Valuation, Contact, all lead forms), RecruitForm confirmation (/join), WebsiteInquiryModal confirmation, GetStarted page + Home trust bullets ("within one business day" → "within 30 minutes"), CityFinder results follow-up line. Newsletter unchanged (no response promise — just "You're subscribed"). Convince result screen untouched. 101/101 tests pass
+
+## Three updates (user request Jul 28, batch 2)
+- [x] /join closing: tagline "Lifestyle Design Realty. We built the brokerage we never had." + Team@lifestyledesignrealty.com email link added after the recruiting content; no DM language; form remains primary path
+- [x] Public email swapped via SITE.email (single source): footer, /contact, /privacy → team@lifestyledesignrealty.com. Notification recipient updated: INQUIRY_COPY_RECIPIENT (website-inquiry email copy) → team@. Other lead forms notify via FUB assignment + owner notification (no hardcoded peter@). Peter's personal bio email on /team card left as-is (personal contact, not brokerage contact)
+- [x] Homepage newsletter section hidden behind FEATURES.SHOW_NEWSLETTER=false (same pattern as listings flag); NewsletterForm code, FUB "Website - Newsletter" tagging, and subscriber data untouched. 101/101 tests pass

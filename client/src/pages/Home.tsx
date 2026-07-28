@@ -332,17 +332,19 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ============ NEWSLETTER (lightweight, distinct from Get Started) ============ */}
-      <section className="mx-auto max-w-2xl px-5 lg:px-8 py-20 lg:py-24 text-center">
-        <p className="eyebrow text-gold reveal">Stay Informed</p>
-        <h2 className="display-serif text-3xl md:text-4xl mt-3 reveal">Get New Listings in Your Inbox</h2>
-        <p className="mt-4 text-sm text-muted-foreground reveal">
-          A curated selection of new Central Texas listings, delivered occasionally. No spam.
-        </p>
-        <div className="mt-10 reveal">
-          <NewsletterForm />
-        </div>
-      </section>
+      {/* ============ NEWSLETTER — PAUSED until IDX (flip FEATURES.SHOW_NEWSLETTER) ============ */}
+      {FEATURES.SHOW_NEWSLETTER && (
+        <section className="mx-auto max-w-2xl px-5 lg:px-8 py-20 lg:py-24 text-center">
+          <p className="eyebrow text-gold reveal">Stay Informed</p>
+          <h2 className="display-serif text-3xl md:text-4xl mt-3 reveal">Get New Listings in Your Inbox</h2>
+          <p className="mt-4 text-sm text-muted-foreground reveal">
+            A curated selection of new Central Texas listings, delivered occasionally. No spam.
+          </p>
+          <div className="mt-10 reveal">
+            <NewsletterForm />
+          </div>
+        </section>
+      )}
     </PageShell>
   );
 }

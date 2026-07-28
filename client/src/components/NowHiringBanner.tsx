@@ -50,8 +50,10 @@ export default function NowHiringBanner() {
             </span>
           </span>
           <span className="hidden sm:inline h-3.5 w-px bg-gold/40" aria-hidden />
+          {/* No dollar figures here — all visitors see this banner; the $6,000
+              detail lives on /join as the payoff for clicking. */}
           <span className="text-[10px] sm:text-[11px] uppercase tracking-[0.14em] text-foreground/90">
-            Lease commissions up to $6,000/deal
+            Real leads. Real support. Real growth.
           </span>
           <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.16em] text-gold underline underline-offset-4 decoration-gold/50 group-hover:decoration-gold transition-colors">
             See what we offer

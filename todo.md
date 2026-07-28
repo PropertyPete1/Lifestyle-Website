@@ -236,4 +236,8 @@
 - [x] Convince Your Partner quiz: 3-step flow with "What's their biggest hesitation?" (6 multi-select) and "What do you do for work?" (4 quick-select) questions
 - [x] AI pitch prompt factors in hesitation + work situation tactfully (buildUserPrompt); compliance guard unchanged; back-compat for old cached share links
 - [x] Verify: 375px + desktop screenshots, /join unchanged except wording, listing model/CMS/AI search intact, browser E2E of full quiz → AI letter (hesitation + remote work reflected in output), 87/87 tests pass
-- [ ] Checkpoint (auto-publish), confirm live tonight
+- [x] Checkpoint 362a3da4 (auto-published); production bundle verified serving banner + hesitation quiz + $6,000 wording; pushed to GitHub Lifestyle-Website main
+
+## Banner copy update — remove dollar figure (user request Jul 28)
+- [x] Homepage Now Hiring banner: removed "$6,000" figure; new copy "Now Hiring: Licensed Agents · Real leads. Real support. Real growth. · See what we offer →"; placement/styling/clickability/mobile fit unchanged; $6,000 stays on /join only
+- [x] Verified 375px + desktop (banner fits fully, no cut-off), 87/87 tests pass, checkpoint (auto-publish), pushed GitHub

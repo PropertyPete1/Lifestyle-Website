@@ -65,7 +65,7 @@ export default function LeadForm({
     onSuccess: () => {
       setDone(true);
       markLeadCaptured();
-      toast.success("Thank you — we'll be in touch shortly.");
+      toast.success("Thank you — we typically respond within 30 minutes.");
       onSuccess?.();
     },
     onError: (err) => toast.error(err.message || "Something went wrong. Please try again."),
@@ -77,7 +77,7 @@ export default function LeadForm({
         <CheckCircle2 className="h-10 w-10 text-gold" />
         <h3 className="font-serif text-2xl">Thank You</h3>
         <p className="text-sm text-muted-foreground max-w-sm">
-          Your request has been received. A member of Lifestyle Design Realty will reach out shortly.
+          Your request has been received. A member of Lifestyle Design Realty will reach out — we typically respond within 30 minutes.
         </p>
       </div>
     );

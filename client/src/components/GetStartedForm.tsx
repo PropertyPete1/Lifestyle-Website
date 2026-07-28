@@ -30,7 +30,7 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
   const submit = trpc.leads.submit.useMutation({
     onSuccess: () => {
       setDone(true);
-      toast.success("Thank you — we'll be in touch shortly.");
+      toast.success("Thank you — we typically respond within 30 minutes.");
     },
     onError: (err) => toast.error(err.message || "Something went wrong. Please try again."),
   });
@@ -41,7 +41,7 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
         <CheckCircle2 className="h-10 w-10 text-gold" />
         <h3 className="font-serif text-2xl">Thank You</h3>
         <p className="text-sm text-muted-foreground max-w-sm">
-          You're on our radar. A Lifestyle Design Realty professional will reach out shortly.
+          You're on our radar. A Lifestyle Design Realty professional will reach out — we typically respond within 30 minutes.
         </p>
       </div>
     );

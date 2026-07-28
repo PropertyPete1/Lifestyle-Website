@@ -53,7 +53,7 @@ export default function WebsiteInquiryModal({
       <DialogContent className="max-w-md bg-card border-border">
         {done ? (
           <div className="py-10 text-center">
-            <p className="font-serif text-2xl">Thanks! I'll be in touch soon.</p>
+            <p className="font-serif text-2xl">Thanks! I'll be in touch soon — typically within 30 minutes.</p>
             <p className="mt-3 text-sm text-muted-foreground">
               Your inquiry is on its way to Peter at Lifestyle Design Technologies.
             </p>

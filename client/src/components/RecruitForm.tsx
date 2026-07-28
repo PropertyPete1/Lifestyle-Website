@@ -39,7 +39,7 @@ export default function RecruitForm() {
       <div className="flex flex-col items-center text-center py-12 gap-3">
         <CheckCircle2 className="h-10 w-10 text-gold" />
         <h3 className="font-serif text-2xl">Thank you!</h3>
-        <p className="text-sm text-muted-foreground max-w-sm">Our broker will be reaching out.</p>
+        <p className="text-sm text-muted-foreground max-w-sm">Our broker will be reaching out — we typically respond within 30 minutes.</p>
       </div>
     );
   }

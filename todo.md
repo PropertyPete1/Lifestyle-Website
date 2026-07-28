@@ -265,3 +265,7 @@
 - [x] Regression tests: server/navOverflow.test.ts — width-budget estimate at 1024px and 1280px (fails before overflow ships), top-level item count cap, Now Hiring presence, no lost links
 - [x] Also fixed 375px overlap found during audit: wordmark now stacks two lines on small screens (full TREC brokerage name always visible), mobile controls tightened
 - [x] Verified via screenshots at 375 / 1024 / 1280 / 1440 / 1512px + dropdown interaction; 101/101 tests pass
+
+## Two quick updates (user request Jul 28)
+- [x] Added "Sell With Us" to the Properties dropdown (5 items); nav overflow regression tests pass (dropdown items don't consume top-level width)
+- [x] Updated ALL response-time messaging to "typically respond within 30 minutes": GetStartedForm (toast + confirmation), LeadForm (toast + confirmation — covers City Finder, Valuation, Contact, all lead forms), RecruitForm confirmation (/join), WebsiteInquiryModal confirmation, GetStarted page + Home trust bullets ("within one business day" → "within 30 minutes"), CityFinder results follow-up line. Newsletter unchanged (no response promise — just "You're subscribed"). Convince result screen untouched. 101/101 tests pass

@@ -22,6 +22,7 @@ export const PROPERTIES_MENU = [
   { label: "Search by Property Type", href: "/search" },
   { label: "Portfolio", href: "/portfolio" },
   { label: "Neighborhoods", href: "/neighborhoods" },
+  { label: "Sell With Us", href: "/sell" },
 ];
 
 /** Top-level desktop items. Kept short so the row always fits at >=1024px. */

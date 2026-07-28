@@ -107,7 +107,7 @@ export default function Home() {
             <div className="mt-8 space-y-3 text-sm text-muted-foreground">
               <p className="flex items-center gap-3"><span className="h-px w-8 bg-gold inline-block" /> Local expertise across five Texas markets</p>
               <p className="flex items-center gap-3"><span className="h-px w-8 bg-gold inline-block" /> Data-driven pricing and negotiation</p>
-              <p className="flex items-center gap-3"><span className="h-px w-8 bg-gold inline-block" /> A response within one business day</p>
+              <p className="flex items-center gap-3"><span className="h-px w-8 bg-gold inline-block" /> We typically respond within 30 minutes</p>
             </div>
           </div>
           <div className="reveal glass-card border border-gold/40 p-6 lg:p-10">

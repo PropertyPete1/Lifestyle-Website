@@ -338,7 +338,7 @@ export default function CityFinder() {
               </div>
             ))}
             <p className="text-center text-xs text-muted-foreground pt-4">
-              A Lifestyle Design Realty professional will follow up with your full report.
+              A Lifestyle Design Realty professional will follow up with your full report — we typically respond within 30 minutes.
             </p>
           </div>
         )}

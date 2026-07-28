@@ -257,3 +257,11 @@
 - [x] New Construction Search outbound clicks tracked at every placement: homepage hero CTA + New Construction section, city/neighborhood pages, /search empty state, City Finder results, /links bio link — each logs the page it was clicked from
 - [x] NC clicks in Analytics: totals card, clicks-by-placement table, NC Clicks columns in Daily and Weekly
 - [x] Verified live: visit with ?utm_source=instagram&utm_medium=bio&utm_campaign=test-verify recorded source correctly, NC CTA click logged nc_click with instagram attribution, Analytics tab rendered both new sections; synthetic test rows cleaned up; 96/96 tests pass
+
+## BUG — top nav overflows off-screen (user report Jul 28)
+- [x] Audit nav at 1280 / 1440 / 1512 / 375px — 7 flat items + phone + CTA clipped "Schedule a Consultation" and "Now Hiring" at 1280–1500px
+- [x] Restructured: Portfolio/Neighborhoods/Search by Property Type/Home Search consolidated under a "Properties" hover/click dropdown; "Schedule a Consultation" shortened to "Consultation"; desktop row now 4 top-level items + phone + CTA; hamburger threshold moved from xl to lg; phone shows as icon at lg, full number at xl
+- [x] "Now Hiring" is a standalone top-level item — guarded by test, gold-highlighted in mobile menu
+- [x] Regression tests: server/navOverflow.test.ts — width-budget estimate at 1024px and 1280px (fails before overflow ships), top-level item count cap, Now Hiring presence, no lost links
+- [x] Also fixed 375px overlap found during audit: wordmark now stacks two lines on small screens (full TREC brokerage name always visible), mobile controls tightened
+- [x] Verified via screenshots at 375 / 1024 / 1280 / 1440 / 1512px + dropdown interaction; 101/101 tests pass

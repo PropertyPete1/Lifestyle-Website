@@ -226,3 +226,14 @@
 - [x] Stats strip: cron registers on production boot (09:00 UTC daily, idempotent); strip itself has no visible timestamp — cron activity confirmable via Settings → Schedules and boot logs (noted to user)
 - [x] DECISION RECORDED: NO Google Maps API key will be purchased. Map toggle permanently uses the by-city location overview; live property maps arrive via the IDX/MLS vendor widget in Phase 2. Maps question CLOSED.
 - [x] Tests 81/81 (incl. 2 new registerCron tests), checkpoint (auto-publish), confirmed live
+
+## Urgent homepage pivot — recruiting + new construction first (user request Jul 21)
+- [x] Hide featured listings showcase from homepage via a simple re-enable-able visibility toggle (FEATURES.SHOW_PLACEHOLDER_LISTINGS in shared/site.ts; components, data model, admin CMS fully intact)
+- [x] Add eye-catching Now Hiring top banner above the hero, whole banner clickable → /join; fits fully at 375px and desktop (self-measuring fixed banner + nav offset via --hiring-banner-h CSS var, ResizeObserver-safe)
+- [x] Update wording to "up to $6,000" — banner ("Lease commissions up to $6,000/deal") + /join Warm & Hot Transfer Leads pillar
+- [x] Homepage order: banner → hero + CTAs (Get Started, New Construction Search) → City Finder → Convince Your Partner teaser → AI search/tech → New Construction → markets → stats strip → team/testimonials → footer
+- [x] City pages: placeholder listings hidden behind the same flag; New Construction CTA + area content lead the page
+- [x] Convince Your Partner quiz: 3-step flow with "What's their biggest hesitation?" (6 multi-select) and "What do you do for work?" (4 quick-select) questions
+- [x] AI pitch prompt factors in hesitation + work situation tactfully (buildUserPrompt); compliance guard unchanged; back-compat for old cached share links
+- [x] Verify: 375px + desktop screenshots, /join unchanged except wording, listing model/CMS/AI search intact, browser E2E of full quiz → AI letter (hesitation + remote work reflected in output), 87/87 tests pass
+- [ ] Checkpoint (auto-publish), confirm live tonight

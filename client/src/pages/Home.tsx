@@ -11,7 +11,7 @@ import TestimonialCarousel from "@/components/TestimonialCarousel";
 import VeteranBadge from "@/components/VeteranBadge";
 import TechShowcase from "@/components/TechShowcase";
 import { trpc } from "@/lib/trpc";
-import { SITE } from "@shared/site";
+import { SITE, FEATURES } from "@shared/site";
 import { IMG } from "@/lib/assets";
 
 const CITY_CARDS = [
@@ -23,20 +23,25 @@ const CITY_CARDS = [
 ];
 
 /**
- * Above-the-fold priority (per brief):
- * 1. Hero headline + primary CTAs
- * 2. "Ready to Buy or Sell?" Get Started CTA (jump to form)
- * 3. Compact rotating listing showcase (light visual accent)
- * Everything else follows below the fold.
+ * Homepage priority order (per urgent pivot brief, Jul 21):
+ * 1. Now Hiring recruiting banner (very top, above hero, clickable → /join)
+ * 2. Hero + primary CTAs (Get Started, New Construction Search)
+ * 3. City Finder quiz
+ * 4. Convince Your Partner teaser
+ * 5. Stats strip
+ * 6. Team / testimonials
+ * 7. Footer
+ * The featured-listings showcase is PAUSED (not deleted) until IDX connects —
+ * gated behind FEATURES.SHOW_PLACEHOLDER_LISTINGS in shared/site.ts.
  */
 export default function Home() {
   const { data: stats } = trpc.stats.list.useQuery();
   const { data: team } = trpc.team.list.useQuery();
 
   return (
-    <PageShell>
+    <PageShell hiringBanner>
       {/* ============ HERO ============ */}
-      <section className="ambient-section ambient-lines relative min-h-[88svh] flex items-center overflow-hidden">
+      <section className="ambient-section ambient-lines relative min-h-[88svh] flex items-center overflow-hidden pt-[var(--hiring-banner-h,0px)]">
         <div className="absolute inset-0">
           <img
             src={IMG.heroDarkInterior}
@@ -108,29 +113,21 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ============ ROTATING LISTING SHOWCASE (light accent) ============ */}
-      <section className="mx-auto max-w-[1400px] px-5 lg:px-8 pb-16 lg:pb-20">
-        <div className="flex items-end justify-between gap-6 mb-6 reveal">
-          <p className="eyebrow text-gold">Featured Property</p>
-          <Link href="/portfolio" className="text-cta hidden sm:inline-block">View All Listings</Link>
-        </div>
-        <div className="reveal">
-          <ListingShowcase />
-        </div>
-        <div className="mt-6 sm:hidden">
-          <Link href="/portfolio" className="text-cta">View All Listings</Link>
-        </div>
-      </section>
-
-      {/* ============ AI SEARCH ============ */}
-      <section className="ambient-section border-y border-border/60 bg-[oklch(0.165_0.005_285)]">
-        <div className="mx-auto max-w-3xl px-5 lg:px-8 py-12">
-          <AISearchBar />
-        </div>
-      </section>
-
-      {/* ============ TECHNOLOGY SHOWCASE (show, don't tell) ============ */}
-      <TechShowcase />
+      {/* ============ ROTATING LISTING SHOWCASE — PAUSED until IDX (flip FEATURES.SHOW_PLACEHOLDER_LISTINGS) ============ */}
+      {FEATURES.SHOW_PLACEHOLDER_LISTINGS && (
+        <section className="mx-auto max-w-[1400px] px-5 lg:px-8 pb-16 lg:pb-20">
+          <div className="flex items-end justify-between gap-6 mb-6 reveal">
+            <p className="eyebrow text-gold">Featured Property</p>
+            <Link href="/portfolio" className="text-cta hidden sm:inline-block">View All Listings</Link>
+          </div>
+          <div className="reveal">
+            <ListingShowcase />
+          </div>
+          <div className="mt-6 sm:hidden">
+            <Link href="/portfolio" className="text-cta">View All Listings</Link>
+          </div>
+        </section>
+      )}
 
       {/* ============ CITY FINDER CTA ============ */}
       <section className="relative overflow-hidden">
@@ -173,6 +170,16 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* ============ AI SEARCH ============ */}
+      <section className="ambient-section border-y border-border/60 bg-[oklch(0.165_0.005_285)]">
+        <div className="mx-auto max-w-3xl px-5 lg:px-8 py-12">
+          <AISearchBar />
+        </div>
+      </section>
+
+      {/* ============ TECHNOLOGY SHOWCASE (show, don't tell) ============ */}
+      <TechShowcase />
 
       {/* ============ NEW CONSTRUCTION ============ */}
       <section className="mx-auto max-w-[1400px] px-5 lg:px-8 py-20 lg:py-28 grid lg:grid-cols-2 gap-12 items-center">

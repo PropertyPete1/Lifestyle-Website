@@ -24,6 +24,26 @@ export const LIFESTYLE_OPTIONS = [
 ] as const;
 export type LifestyleOption = (typeof LIFESTYLE_OPTIONS)[number];
 
+/** "What's their biggest hesitation?" — multi-select quiz question. */
+export const HESITATION_OPTIONS = [
+  "Leaving family/friends",
+  "Cold weather where we are now",
+  "Job/career concerns",
+  "Cost of moving",
+  "Never lived somewhere new",
+  'Not sure Texas is "us"',
+] as const;
+export type HesitationOption = (typeof HESITATION_OPTIONS)[number];
+
+/** "What do you do for work?" — quick-select quiz question. */
+export const WORK_OPTIONS = [
+  "Remote/Work From Home",
+  "Hybrid",
+  "Would need to find a new job",
+  "Business owner",
+] as const;
+export type WorkOption = (typeof WORK_OPTIONS)[number];
+
 /** Deterministic market match from selections (mirrors City Finder spirit). */
 export function matchCity(selections: string[]): string {
   const s = new Set(selections);
@@ -126,6 +146,7 @@ Rules:
 - NEVER mention interest rates, percentages, prices, or any numeric financial promises. Financial copy is handled separately outside your text.
 - NEVER make comparative affordability or savings claims (e.g. "costs half what you'd pay elsewhere", "for a fraction of the price", "twice the house for the money"). You may evoke value softly ("your money goes further") but never quantify or compare prices, costs, or savings.
 - 2 to 4 sentences. Vivid, specific, sensory. Every result must feel uniquely written for this person's exact combination of preferences — never generic or template-like.
+- When the partner's hesitations are provided, address them directly and tactfully inside the scene — acknowledge the concern with empathy, then resolve it with a real, specific quality of the matched market. When a work situation is provided, make the move feel practical for it — but never promise jobs, income, or business outcomes.
 - Do not use em dashes excessively, do not start with "Imagine". Vary your openings.
 - Return ONLY the narrative text, no preamble, no quotes.`;
 
@@ -133,6 +154,33 @@ export interface PitchInput {
   selections: string[];
   partnerName?: string;
   city: string;
+  /** Partner's stated hesitations — the pitch should tactfully address these. */
+  hesitations?: string[];
+  /** The mover's work situation — the pitch should acknowledge it naturally. */
+  workSituation?: string;
+}
+
+/** Builds the user-turn prompt content shared by the first call and the compliance retry. */
+export function buildUserPrompt(input: PitchInput, nameLine: string, retrySuffix = ""): string {
+  const lines = [
+    `Their dream-life picks: ${input.selections.join(", ")}.`,
+    `Matched Texas market: ${input.city}.`,
+  ];
+  if (input.hesitations && input.hesitations.length > 0) {
+    lines.push(
+      `The partner's biggest hesitations about moving: ${input.hesitations.join(", ")}. ` +
+        "Tactfully and directly ease these specific concerns within the scene — acknowledge the feeling, then show how life in this market answers it. Never dismiss or belittle the hesitation."
+    );
+  }
+  if (input.workSituation) {
+    lines.push(
+      `Their work situation: ${input.workSituation}. ` +
+        "Weave this in naturally so the move feels practical for how they actually work (e.g. remote work travels with them; a business owner finds a business-friendly climate; a job seeker finds thriving job markets). Do not cite statistics or make guarantees about employment."
+    );
+  }
+  lines.push(nameLine);
+  lines.push(`\nWrite the dream scene now.${retrySuffix}`);
+  return lines.join("\n");
 }
 
 /** Calls Claude to generate the dream scene. Throws on failure (caller handles fallback). */
@@ -158,7 +206,7 @@ export async function generatePitch(input: PitchInput): Promise<string> {
       messages: [
         {
           role: "user",
-          content: `Their dream-life picks: ${input.selections.join(", ")}.\nMatched Texas market: ${input.city}.\n${nameLine}\n\nWrite the dream scene now.`,
+          content: buildUserPrompt(input, nameLine),
         },
       ],
     }),
@@ -188,7 +236,7 @@ export async function generatePitch(input: PitchInput): Promise<string> {
         messages: [
           {
             role: "user",
-            content: `Their dream-life picks: ${input.selections.join(", ")}.\nMatched Texas market: ${input.city}.\n${nameLine}\n\nWrite the dream scene now. IMPORTANT: absolutely no numbers, no price/cost/savings comparisons of any kind.`,
+            content: buildUserPrompt(input, nameLine, " IMPORTANT: absolutely no numbers, no price/cost/savings comparisons of any kind."),
           },
         ],
       }),

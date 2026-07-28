@@ -29,7 +29,13 @@ const SECONDARY_ITEMS = [
   { label: "Links", href: "/links" },
 ];
 
-export default function SiteNav({ solid = false }: { solid?: boolean }) {
+export default function SiteNav({
+  solid = false,
+  offsetForBanner = false,
+}: {
+  solid?: boolean;
+  offsetForBanner?: boolean;
+}) {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const [location, navigate] = useLocation();
@@ -60,7 +66,8 @@ export default function SiteNav({ solid = false }: { solid?: boolean }) {
   return (
     <header
       className={cn(
-        "fixed top-0 left-0 right-0 z-50 transition-colors duration-300",
+        "fixed left-0 right-0 z-50 transition-colors duration-300",
+        offsetForBanner ? "top-[var(--hiring-banner-h,0px)]" : "top-0",
         isSolid ? "bg-background/95 backdrop-blur-sm border-b border-border/60" : "bg-transparent"
       )}>
       <div className="mx-auto max-w-[1400px] px-5 lg:px-8">

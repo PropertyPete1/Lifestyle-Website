@@ -13,6 +13,8 @@ import { notifyOwner } from "./_core/notification";
 import { nanoid } from "nanoid";
 import {
   LIFESTYLE_OPTIONS,
+  HESITATION_OPTIONS,
+  WORK_OPTIONS,
   fallbackPitch,
   generatePitch,
   matchCity,
@@ -72,6 +74,8 @@ export const appRouter = router({
         z.object({
           selections: z.array(z.enum(LIFESTYLE_OPTIONS)).min(1).max(8),
           partnerName: z.string().trim().max(60).optional(),
+          hesitations: z.array(z.enum(HESITATION_OPTIONS)).max(6).optional(),
+          workSituation: z.enum(WORK_OPTIONS).optional(),
         })
       )
       .mutation(async ({ input }) => {
@@ -81,7 +85,13 @@ export const appRouter = router({
         let pitch: string;
         let aiGenerated = true;
         try {
-          pitch = await generatePitch({ selections: input.selections, partnerName, city });
+          pitch = await generatePitch({
+            selections: input.selections,
+            partnerName,
+            city,
+            hesitations: input.hesitations,
+            workSituation: input.workSituation,
+          });
         } catch (err) {
           // Graceful fallback — never a broken page
           console.error("[partnerPitch] Claude generation failed:", err);
@@ -92,7 +102,11 @@ export const appRouter = router({
         await db.createPartnerPitch({
           slug,
           partnerName: partnerName ?? null,
-          selections: JSON.stringify(input.selections),
+          selections: JSON.stringify({
+            picks: input.selections,
+            hesitations: input.hesitations ?? [],
+            workSituation: input.workSituation ?? null,
+          }),
           city,
           pitch,
           stats: JSON.stringify(stats),
@@ -105,13 +119,18 @@ export const appRouter = router({
       .query(async ({ input }) => {
         const row = await db.getPartnerPitchBySlug(input.slug);
         if (!row) return null;
+        // selections was stored as a plain array before Jul 2026; new rows store
+        // { picks, hesitations, workSituation }. Normalize to the picks array.
+        const parsedSelections = JSON.parse(row.selections) as
+          | string[]
+          | { picks: string[]; hesitations?: string[]; workSituation?: string | null };
         return {
           slug: row.slug,
           city: row.city,
           pitch: row.pitch,
           stats: JSON.parse(row.stats) as string[],
           partnerName: row.partnerName ?? undefined,
-          selections: JSON.parse(row.selections) as string[],
+          selections: Array.isArray(parsedSelections) ? parsedSelections : parsedSelections.picks,
         };
       }),
   }),

@@ -1,4 +1,17 @@
 /** Shared site-wide constants — single source of truth for exact strings. */
+
+/**
+ * FEATURE FLAGS — flip these to re-enable paused features.
+ *
+ * SHOW_PLACEHOLDER_LISTINGS: while we wait for IDX/MLS data (~1 month), the
+ * homepage featured-listings showcase and city-page listing grids are hidden.
+ * The listing components, data model, admin CMS, and AI search backend remain
+ * fully intact — set this to `true` to restore all listing displays instantly.
+ */
+export const FEATURES = {
+  SHOW_PLACEHOLDER_LISTINGS: false,
+} as const;
+
 export const SITE = {
   name: "Lifestyle Design Realty",
   eyebrow: "EXPERTISE. KNOWLEDGE. EXPERIENCE.",

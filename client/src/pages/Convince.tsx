@@ -31,6 +31,45 @@ const LIFESTYLE_OPTIONS = [
   "Family-Friendly Community",
 ] as const;
 
+const HESITATION_OPTIONS = [
+  "Leaving family/friends",
+  "Cold weather where we are now",
+  "Job/career concerns",
+  "Cost of moving",
+  "Never lived somewhere new",
+  'Not sure Texas is "us"',
+] as const;
+
+const WORK_OPTIONS = [
+  "Remote/Work From Home",
+  "Hybrid",
+  "Would need to find a new job",
+  "Business owner",
+] as const;
+
+/** Shared option-button styling for all quiz selects. */
+function OptionButton({
+  label,
+  on,
+  onClick,
+}: {
+  label: string;
+  on: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "flex items-center justify-between border px-6 py-5 text-sm uppercase tracking-[0.12em] transition-colors text-left",
+        on ? "border-gold text-gold bg-gold/5" : "border-border hover:border-gold/70 hover:text-gold"
+      )}>
+      {label}
+      {on && <Check className="h-4 w-4 shrink-0" />}
+    </button>
+  );
+}
+
 /** Fixed, compliance-reviewed financing copy — NEVER AI-generated. */
 function FinancingLine() {
   return <FinancingBanner />;
@@ -187,10 +226,13 @@ export function ConvinceShared() {
   );
 }
 
-/** Main flow: intro → quiz (multi-select + optional name) → AI result. */
+/** Main flow: intro → 3-step quiz (dream life → hesitations → work + name) → AI result. */
 export default function Convince() {
   const [stage, setStage] = useState<"intro" | "quiz" | "result">("intro");
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selections, setSelections] = useState<string[]>([]);
+  const [hesitations, setHesitations] = useState<string[]>([]);
+  const [workSituation, setWorkSituation] = useState<string | null>(null);
   const [partnerName, setPartnerName] = useState("");
   const logActivity = useActivity();
   const generate = trpc.partnerPitch.generate.useMutation({
@@ -199,6 +241,8 @@ export default function Convince() {
       // Anonymous activity: remember quiz picks + matched city for FUB context
       logActivity("convince_quiz", {
         selections,
+        hesitations,
+        workSituation: workSituation ?? undefined,
         partnerName: partnerName.trim() || undefined,
         city: data.city,
       });
@@ -212,6 +256,11 @@ export default function Convince() {
       prev.includes(opt) ? prev.filter((o) => o !== opt) : [...prev, opt]
     );
 
+  const toggleHesitation = (opt: string) =>
+    setHesitations((prev) =>
+      prev.includes(opt) ? prev.filter((o) => o !== opt) : [...prev, opt]
+    );
+
   const submit = () => {
     if (selections.length === 0) {
       toast.error("Pick at least one — what's the dream?");
@@ -219,8 +268,18 @@ export default function Convince() {
     }
     generate.mutate({
       selections: selections as (typeof LIFESTYLE_OPTIONS)[number][],
+      hesitations: hesitations as unknown as (typeof HESITATION_OPTIONS)[number][],
+      workSituation: (workSituation ?? undefined) as (typeof WORK_OPTIONS)[number] | undefined,
       partnerName: partnerName.trim() || undefined,
     });
+  };
+
+  const nextFromStep1 = () => {
+    if (selections.length === 0) {
+      toast.error("Pick at least one — what's the dream?");
+      return;
+    }
+    setStep(2);
   };
 
   const result = generate.data;
@@ -270,59 +329,110 @@ export default function Convince() {
 
         {stage === "quiz" && !generate.isPending && (
           <div className="text-center">
-            <p className="eyebrow text-gold">Step 1 of 1 — no typing required</p>
-            <h2 className="font-serif text-3xl md:text-4xl mt-3">What's your dream life?</h2>
-            <p className="mt-3 text-sm text-muted-foreground">Pick everything that applies.</p>
-            <div className="mt-8 grid sm:grid-cols-2 gap-3">
-              {LIFESTYLE_OPTIONS.map((opt) => {
-                const on = selections.includes(opt);
-                return (
+            {step === 1 && (
+              <>
+                <p className="eyebrow text-gold">Step 1 of 3 — no typing required</p>
+                <h2 className="font-serif text-3xl md:text-4xl mt-3">What's your dream life?</h2>
+                <p className="mt-3 text-sm text-muted-foreground">Pick everything that applies.</p>
+                <div className="mt-8 grid sm:grid-cols-2 gap-3">
+                  {LIFESTYLE_OPTIONS.map((opt) => (
+                    <OptionButton key={opt} label={opt} on={selections.includes(opt)} onClick={() => toggle(opt)} />
+                  ))}
+                </div>
+                <div className="mt-10 flex items-center justify-center gap-6">
                   <button
-                    key={opt}
-                    onClick={() => toggle(opt)}
-                    className={cn(
-                      "flex items-center justify-between border px-6 py-5 text-sm uppercase tracking-[0.12em] transition-colors text-left",
-                      on ? "border-gold text-gold bg-gold/5" : "border-border hover:border-gold/70 hover:text-gold"
-                    )}>
-                    {opt}
-                    {on && <Check className="h-4 w-4 shrink-0" />}
+                    onClick={() => setStage("intro")}
+                    className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground hover:text-gold">
+                    <ArrowLeft className="h-3.5 w-3.5" /> Back
                   </button>
-                );
-              })}
-            </div>
-            <div className="mt-8 max-w-sm mx-auto text-left">
-              <label className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
-                What's their name? <span className="normal-case tracking-normal">(optional, first name only)</span>
-              </label>
-              <input
-                value={partnerName}
-                onChange={(e) => setPartnerName(e.target.value)}
-                maxLength={30}
-                placeholder="e.g. Jordan"
-                className="mt-2 w-full bg-secondary/60 border border-border px-4 py-3 text-sm outline-none focus:border-gold transition-colors"
-              />
-            </div>
-            <div className="mt-10 flex items-center justify-center gap-6">
-              <button
-                onClick={() => setStage("intro")}
-                className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground hover:text-gold">
-                <ArrowLeft className="h-3.5 w-3.5" /> Back
-              </button>
-              <button
-                onClick={submit}
-                disabled={generate.isPending}
-                className="inline-flex items-center gap-2 bg-gold text-primary-foreground px-10 py-4 text-[11px] uppercase tracking-[0.2em] hover:bg-gold/90 transition-colors active:scale-[0.97] disabled:opacity-60">
-                {generate.isPending ? (
-                  <>
-                    <Sparkles className="h-4 w-4 animate-pulse" /> Writing your letter…
-                  </>
-                ) : (
-                  <>
-                    Write the Case <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
-              </button>
-            </div>
+                  <button
+                    onClick={nextFromStep1}
+                    className="inline-flex items-center gap-2 bg-gold text-primary-foreground px-10 py-4 text-[11px] uppercase tracking-[0.2em] hover:bg-gold/90 transition-colors active:scale-[0.97]">
+                    Next <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </>
+            )}
+
+            {step === 2 && (
+              <>
+                <p className="eyebrow text-gold">Step 2 of 3 — optional but powerful</p>
+                <h2 className="font-serif text-3xl md:text-4xl mt-3">What's their biggest hesitation?</h2>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Pick any that apply — we'll speak to them directly. Or skip ahead.
+                </p>
+                <div className="mt-8 grid sm:grid-cols-2 gap-3">
+                  {HESITATION_OPTIONS.map((opt) => (
+                    <OptionButton key={opt} label={opt} on={hesitations.includes(opt)} onClick={() => toggleHesitation(opt)} />
+                  ))}
+                </div>
+                <div className="mt-10 flex items-center justify-center gap-6">
+                  <button
+                    onClick={() => setStep(1)}
+                    className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground hover:text-gold">
+                    <ArrowLeft className="h-3.5 w-3.5" /> Back
+                  </button>
+                  <button
+                    onClick={() => setStep(3)}
+                    className="inline-flex items-center gap-2 bg-gold text-primary-foreground px-10 py-4 text-[11px] uppercase tracking-[0.2em] hover:bg-gold/90 transition-colors active:scale-[0.97]">
+                    {hesitations.length > 0 ? "Next" : "Skip"} <ArrowRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </>
+            )}
+
+            {step === 3 && (
+              <>
+                <p className="eyebrow text-gold">Step 3 of 3 — almost there</p>
+                <h2 className="font-serif text-3xl md:text-4xl mt-3">What do you do for work?</h2>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Optional — helps us make the move feel practical, not just dreamy.
+                </p>
+                <div className="mt-8 grid sm:grid-cols-2 gap-3">
+                  {WORK_OPTIONS.map((opt) => (
+                    <OptionButton
+                      key={opt}
+                      label={opt}
+                      on={workSituation === opt}
+                      onClick={() => setWorkSituation((prev) => (prev === opt ? null : opt))}
+                    />
+                  ))}
+                </div>
+                <div className="mt-8 max-w-sm mx-auto text-left">
+                  <label className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+                    What's their name? <span className="normal-case tracking-normal">(optional, first name only)</span>
+                  </label>
+                  <input
+                    value={partnerName}
+                    onChange={(e) => setPartnerName(e.target.value)}
+                    maxLength={30}
+                    placeholder="e.g. Jordan"
+                    className="mt-2 w-full bg-secondary/60 border border-border px-4 py-3 text-sm outline-none focus:border-gold transition-colors"
+                  />
+                </div>
+                <div className="mt-10 flex items-center justify-center gap-6">
+                  <button
+                    onClick={() => setStep(2)}
+                    className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground hover:text-gold">
+                    <ArrowLeft className="h-3.5 w-3.5" /> Back
+                  </button>
+                  <button
+                    onClick={submit}
+                    disabled={generate.isPending}
+                    className="inline-flex items-center gap-2 bg-gold text-primary-foreground px-10 py-4 text-[11px] uppercase tracking-[0.2em] hover:bg-gold/90 transition-colors active:scale-[0.97] disabled:opacity-60">
+                    {generate.isPending ? (
+                      <>
+                        <Sparkles className="h-4 w-4 animate-pulse" /> Writing your letter…
+                      </>
+                    ) : (
+                      <>
+                        Write the Case <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 

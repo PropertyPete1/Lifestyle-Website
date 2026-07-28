@@ -3,7 +3,7 @@ import PageShell from "@/components/PageShell";
 import ListingCard from "@/components/ListingCard";
 import LeadForm from "@/components/LeadForm";
 import { trpc } from "@/lib/trpc";
-import { SITE } from "@shared/site";
+import { SITE, FEATURES } from "@shared/site";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowRight } from "lucide-react";
 
@@ -129,8 +129,8 @@ export default function NeighborhoodDetail() {
         </aside>
       </section>
 
-      {/* Listings in this area */}
-      {cityMatch.length > 0 && (
+      {/* Listings in this area — paused until IDX connects (FEATURES.SHOW_PLACEHOLDER_LISTINGS) */}
+      {FEATURES.SHOW_PLACEHOLDER_LISTINGS && cityMatch.length > 0 && (
         <section className="mx-auto max-w-[1400px] px-5 lg:px-8 pb-20">
           <h2 className="display-serif text-3xl md:text-4xl mb-8">Featured in {hood.name}</h2>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8">

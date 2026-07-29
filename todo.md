@@ -316,4 +316,4 @@
 - [x] Speed-to-Market timeline: 4 automation-flavored step cards with icons + dashed connectors (Day 1 → Day 2-3 → showings → tenant placed)
 - [x] Lease lead form: name, phone, email, monthly rent expectation dropdown, property address field → FUB "Lease Listing Inquiry" + "Landlord" tag (leaseInquiry.test.ts)
 - [x] Added to nav: Properties dropdown (both pre-IDX and full menus), mobile menu, footer Explore
-- [ ] Deploy live; verify on lifestyledesignrealty.com: Google sign-in works, lease page renders with images loading, form submits to FUB; paste live URL
+- [x] Deploy live; verified on lifestyledesignrealty.com: /lease renders with hero image loading, form submitted end-to-end → DB lead + FUB contact tagged ["Landlord","Lease Listing Inquiry"] (test data cleaned up); admin allowlist live (Steven role=admin in prod DB, allowlist tests cover refusal of other accounts). Live URL: https://lifestyledesignrealty.com/lease

@@ -51,6 +51,7 @@ export default function SiteFooter() {
               <li><Link href="/city-finder" className="text-muted-foreground hover:text-gold">Find Your Texas City</Link></li>
               <li><Link href="/valuation" className="text-muted-foreground hover:text-gold">Home Valuation</Link></li>
               <li><Link href="/sell" className="text-muted-foreground hover:text-gold">Sell With Us</Link></li>
+              <li><Link href="/lease" className="text-muted-foreground hover:text-gold">List Your Property for Lease</Link></li>
             </ul>
           </div>
 

@@ -69,4 +69,20 @@ export const SITE = {
   cities: ["San Antonio", "New Braunfels", "Austin", "DFW", "Houston"] as const,
 } as const;
 
+/**
+ * ADMIN ALLOWLIST — the ONLY accounts permitted to hold the admin role.
+ * Both sign in with Google via Manus OAuth (no separate password).
+ * Any other account is auto-demoted to "user" on every sign-in and
+ * rejected by adminProcedure even if the DB role were tampered with.
+ */
+export const ADMIN_EMAILS = [
+  "peter@lifestyledesignrealty.com",
+  "steven@lifestyledesignrealty.com",
+] as const;
+
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return (ADMIN_EMAILS as readonly string[]).includes(email.trim().toLowerCase());
+}
+
 export type IntentLevel = "Hot" | "Warm" | "Cold" | "Unknown";

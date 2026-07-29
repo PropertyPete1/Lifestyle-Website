@@ -82,6 +82,10 @@ export function computeIntent(answers: Record<string, unknown> | undefined): Int
 /** Build the full FUB tag: e.g. "Website - Valuation - Hot" */
 export function buildTag(sourceTag: string, intent: IntentLevel): string[] {
   const tags = [sourceTag];
+  // Landlord routing: lease-listing inquiries are LANDLORD leads, never
+  // buyer/seller. The explicit "Landlord" tag makes FUB smartlists and
+  // routing rules unambiguous regardless of how the source tag is filtered.
+  if (sourceTag === "Lease Listing Inquiry") tags.push("Landlord");
   if (intent !== "Unknown") tags.push(`${sourceTag} - ${intent}`);
   return tags;
 }

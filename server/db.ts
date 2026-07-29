@@ -20,6 +20,7 @@ import {
   visitorActivity,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import { isAdminEmail } from "../shared/site";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -70,12 +71,18 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.lastSignedIn = user.lastSignedIn;
       updateSet.lastSignedIn = user.lastSignedIn;
     }
-    if (user.role !== undefined) {
+    // ADMIN ALLOWLIST enforcement (shared/site.ts ADMIN_EMAILS): only the two
+    // company Google accounts (peter@/steven@lifestyledesignrealty.com) and the
+    // project owner may hold admin. Re-evaluated on EVERY sign-in so a stale or
+    // tampered role self-heals: allowlisted → admin, everyone else → user.
+    if (user.email !== undefined || user.openId === ENV.ownerOpenId) {
+      const shouldBeAdmin = isAdminEmail(user.email) || user.openId === ENV.ownerOpenId;
+      const role = shouldBeAdmin ? ("admin" as const) : ("user" as const);
+      values.role = role;
+      updateSet.role = role;
+    } else if (user.role !== undefined) {
       values.role = user.role;
       updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
     }
 
     if (!values.lastSignedIn) {

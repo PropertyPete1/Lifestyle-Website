@@ -12,7 +12,15 @@ import * as db from "./db";
 function ctxWith(user: { role: "admin" | "user" } | null): TrpcContext {
   return {
     user: user
-      ? ({ id: 1, openId: "o1", name: "T", email: "t@t.co", role: user.role } as TrpcContext["user"])
+      ? ({
+          id: 1,
+          openId: "o1",
+          name: "T",
+          // Admin procedures are allowlist-gated (shared/site.ts ADMIN_EMAILS),
+          // so a mock admin must carry an allowlisted company email.
+          email: user.role === "admin" ? "peter@lifestyledesignrealty.com" : "t@t.co",
+          role: user.role,
+        } as TrpcContext["user"])
       : null,
     req: {} as TrpcContext["req"],
     res: {} as TrpcContext["res"],

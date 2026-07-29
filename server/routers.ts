@@ -20,9 +20,15 @@ import {
   matchCity,
   pickStats,
 } from "./partnerPitch";
+import { isAdminEmail } from "@shared/site";
+import { ENV } from "./_core/env";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+  // Defense in depth: DB role must be admin AND the account must be on the
+  // hard allowlist (peter@/steven@lifestyledesignrealty.com, or project owner).
+  // Even a tampered DB role cannot grant admin to any other account.
+  const allowlisted = isAdminEmail(ctx.user.email) || ctx.user.openId === ENV.ownerOpenId;
+  if (ctx.user.role !== "admin" || !allowlisted) throw new TRPCError({ code: "FORBIDDEN" });
   return next({ ctx });
 });
 

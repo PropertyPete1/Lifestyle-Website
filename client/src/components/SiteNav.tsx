@@ -24,12 +24,14 @@ const PROPERTIES_MENU_FULL = [
   { label: "Portfolio", href: "/portfolio" },
   { label: "Neighborhoods", href: "/neighborhoods" },
   { label: "Sell With Us", href: "/sell" },
+  { label: "List for Lease", href: "/lease" },
 ];
 
 /** Pre-IDX: placeholder-powered links are unreachable; NC Search + Sell only. */
 const PROPERTIES_MENU_PRE_IDX = [
   { label: "New Construction Search", href: SITE.newConstructionUrl, external: true },
   { label: "Sell With Us", href: "/sell" },
+  { label: "List for Lease", href: "/lease" },
 ];
 
 export const PROPERTIES_MENU: { label: string; href: string; external?: boolean }[] =
@@ -48,6 +50,7 @@ const SECONDARY_ITEMS = [
   { label: "Meet the Team", href: "/team" },
   { label: "Testimonials", href: "/testimonials" },
   { label: "Sell With Us", href: "/sell" },
+  { label: "List for Lease", href: "/lease" },
   { label: "Links", href: "/links" },
 ];
 

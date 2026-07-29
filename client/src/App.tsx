@@ -18,6 +18,7 @@ import Testimonials from "./pages/Testimonials";
 import Valuation from "./pages/Valuation";
 import Contact from "./pages/Contact";
 import Sell from "./pages/Sell";
+import Lease from "./pages/Lease";
 import Join from "./pages/Join";
 import Links from "./pages/Links";
 import Convince, { ConvinceShared } from "./pages/Convince";
@@ -74,6 +75,7 @@ function Router() {
       <Route path={"/valuation"} component={Valuation} />
       <Route path={"/contact"} component={Contact} />
       <Route path={"/sell"} component={Sell} />
+      <Route path={"/lease"} component={Lease} />
       <Route path={"/join"} component={Join} />
       <Route path={"/links"} component={Links} />
       <Route path={"/convince"} component={Convince} />

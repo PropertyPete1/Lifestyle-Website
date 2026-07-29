@@ -305,3 +305,15 @@
 
 ## Address update (user request Jul 28, batch 7)
 - [x] Changed office address site-wide to 1212 Chicon St Unit 101, Austin TX 78702 (SITE.address, footer, Contact page now reads from SITE.address; /links + /privacy auto-inherit; grep confirms zero old-address references; verified rendering)
+
+## Steven admin + Lease page (user request Jul 28, batch 8)
+- [x] Steven admin access via Google sign-in (steven@lifestyledesignrealty.com promoted to admin in DB; both accounts use Google login via Manus OAuth); Peter keeps access
+- [x] Restrict admin to ONLY peter@ and steven@lifestyledesignrealty.com — ADMIN_EMAILS allowlist in shared/site.ts, enforced in upsertUser (self-heals on every sign-in) AND in adminProcedure (defense in depth)
+- [x] Test: adminAllowlist.test.ts — Steven authorized, random account (even role-tampered) refused, case-insensitive, lookalike domains rejected
+- [x] New page "List Your Property for Lease" (/lease) modeled on /sell: leasing headline/copy for landlords
+- [x] Kept Strategic Pricing + Professional Photography sections with adapted rental copy
+- [x] Replaced Expert Negotiation with Expert Tenant Screening (income verification, rental history, background checks)
+- [x] Speed-to-Market timeline: 4 automation-flavored step cards with icons + dashed connectors (Day 1 → Day 2-3 → showings → tenant placed)
+- [x] Lease lead form: name, phone, email, monthly rent expectation dropdown, property address field → FUB "Lease Listing Inquiry" + "Landlord" tag (leaseInquiry.test.ts)
+- [x] Added to nav: Properties dropdown (both pre-IDX and full menus), mobile menu, footer Explore
+- [ ] Deploy live; verify on lifestyledesignrealty.com: Google sign-in works, lease page renders with images loading, form submits to FUB; paste live URL

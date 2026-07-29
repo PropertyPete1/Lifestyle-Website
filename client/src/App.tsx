@@ -8,6 +8,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import GetStarted from "./pages/GetStarted";
 import Search, { Portfolio } from "./pages/Search";
+import SearchComingSoon from "./pages/SearchComingSoon";
 import ListingDetail from "./pages/ListingDetail";
 import Neighborhoods from "./pages/Neighborhoods";
 import NeighborhoodDetail from "./pages/NeighborhoodDetail";
@@ -23,6 +24,7 @@ import Convince, { ConvinceShared } from "./pages/Convince";
 import Privacy from "./pages/Privacy";
 import Admin from "./pages/Admin";
 import { usePageTracking } from "./hooks/usePageTracking";
+import { FEATURES } from "@shared/site";
 
 /**
  * GLOBAL RULE: every internal navigation resets scroll to the top of the new
@@ -56,8 +58,16 @@ function Router() {
       <Route path={"/get-started"} component={GetStarted} />
       <Route path={"/search"} component={Search} />
       <Route path={"/portfolio"} component={Portfolio} />
-      <Route path={"/listing/:slug"} component={ListingDetail} />
-      <Route path={"/neighborhoods"} component={Neighborhoods} />
+      {/* Pre-IDX: direct listing/neighborhoods URLs show the coming-soon
+          treatment instead of placeholder homes (code kept intact). */}
+      <Route
+        path={"/listing/:slug"}
+        component={FEATURES.SHOW_PROPERTY_SEARCH ? ListingDetail : SearchComingSoon}
+      />
+      <Route
+        path={"/neighborhoods"}
+        component={FEATURES.SHOW_PROPERTY_SEARCH ? Neighborhoods : SearchComingSoon}
+      />
       <Route path={"/city-finder"} component={CityFinder} />
       <Route path={"/team"} component={Team} />
       <Route path={"/testimonials"} component={Testimonials} />

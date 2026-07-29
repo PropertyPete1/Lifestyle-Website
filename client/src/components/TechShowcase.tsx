@@ -1,5 +1,6 @@
 import { Link } from "wouter";
 import { ArrowRight } from "lucide-react";
+import { FEATURES } from "@shared/site";
 
 /**
  * Compact visual showcase of real platform capabilities. Show, don't tell:
@@ -61,6 +62,10 @@ const CAPABILITIES = [
 ];
 
 export default function TechShowcase() {
+  // Pre-IDX: the AI property search card leads to placeholder data — hide it.
+  const cards = CAPABILITIES.filter(
+    (c) => c.href !== "/search" || FEATURES.SHOW_PROPERTY_SEARCH
+  );
   return (
     <section className="border-b border-border/60 bg-[oklch(0.165_0.005_285)]">
       <div className="mx-auto max-w-[1400px] px-5 lg:px-8 py-20 lg:py-24">
@@ -68,8 +73,8 @@ export default function TechShowcase() {
           <p className="eyebrow text-gold">Built Into This Site</p>
           <h2 className="display-serif text-3xl md:text-5xl mt-3">Tools That Work While You Browse</h2>
         </div>
-        <div className="grid md:grid-cols-3 gap-6 lg:gap-8">
-          {CAPABILITIES.map((c, i) => (
+        <div className={cards.length === 3 ? "grid md:grid-cols-3 gap-6 lg:gap-8" : "grid md:grid-cols-2 gap-6 lg:gap-8 max-w-4xl mx-auto"}>
+          {cards.map((c, i) => (
             <Link
               key={c.title}
               href={c.href}

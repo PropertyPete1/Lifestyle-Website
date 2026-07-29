@@ -3,7 +3,7 @@ import PageShell from "@/components/PageShell";
 import LeadForm from "@/components/LeadForm";
 import { useActivity } from "@/hooks/useActivity";
 import { useNcClickTracking } from "@/hooks/usePageTracking";
-import { SITE } from "@shared/site";
+import { SITE, FEATURES } from "@shared/site";
 import { IMG } from "@/lib/assets";
 import { cn } from "@/lib/utils";
 import { Link } from "wouter";
@@ -315,11 +315,13 @@ export default function CityFinder() {
                   <p className="mt-3 text-sm text-muted-foreground leading-relaxed">{c.why(answers)}</p>
                   {/* Primary next steps stay on-site; external tool is optional and clearly marked */}
                   <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
-                    <Link
-                      href={`/search?city=${encodeURIComponent(c.name)}`}
-                      className="text-cta inline-flex items-center gap-2">
-                      Browse {c.name} Listings <ArrowRight className="h-3.5 w-3.5" />
-                    </Link>
+                    {FEATURES.SHOW_PROPERTY_SEARCH && (
+                      <Link
+                        href={`/search?city=${encodeURIComponent(c.name)}`}
+                        className="text-cta inline-flex items-center gap-2">
+                        Browse {c.name} Listings <ArrowRight className="h-3.5 w-3.5" />
+                      </Link>
+                    )}
                     <Link
                       href={`/${c.slug}`}
                       className="text-cta inline-flex items-center gap-2">

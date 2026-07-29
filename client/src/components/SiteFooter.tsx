@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { SITE } from "@shared/site";
+import { SITE, FEATURES } from "@shared/site";
 import { useState } from "react";
 import WebsiteInquiryModal from "./WebsiteInquiryModal";
 
@@ -35,9 +35,19 @@ export default function SiteFooter() {
           <div>
             <h3 className="eyebrow text-gold mb-4">Explore</h3>
             <ul className="space-y-2.5 text-sm">
-              <li><Link href="/portfolio" className="text-muted-foreground hover:text-gold">Portfolio</Link></li>
-              <li><Link href="/search" className="text-muted-foreground hover:text-gold">Home Search</Link></li>
-              <li><Link href="/neighborhoods" className="text-muted-foreground hover:text-gold">Neighborhoods</Link></li>
+              {/* Pre-IDX: placeholder-powered links hidden until live MLS data */}
+              {FEATURES.SHOW_PROPERTY_SEARCH && (
+                <>
+                  <li><Link href="/portfolio" className="text-muted-foreground hover:text-gold">Portfolio</Link></li>
+                  <li><Link href="/search" className="text-muted-foreground hover:text-gold">Home Search</Link></li>
+                  <li><Link href="/neighborhoods" className="text-muted-foreground hover:text-gold">Neighborhoods</Link></li>
+                </>
+              )}
+              <li>
+                <a href={SITE.newConstructionUrl} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-gold">
+                  New Construction Search
+                </a>
+              </li>
               <li><Link href="/city-finder" className="text-muted-foreground hover:text-gold">Find Your Texas City</Link></li>
               <li><Link href="/valuation" className="text-muted-foreground hover:text-gold">Home Valuation</Link></li>
               <li><Link href="/sell" className="text-muted-foreground hover:text-gold">Sell With Us</Link></li>

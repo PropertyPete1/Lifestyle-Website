@@ -14,6 +14,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { NAV_ITEMS, PROPERTIES_MENU } from "../client/src/components/SiteNav";
+import { FEATURES } from "../shared/site";
 
 // Estimate of rendered px width for a nav-link label, calibrated against the
 // real rendering: at 1024px viewport the current 4-item nav measures ~700px
@@ -75,10 +76,21 @@ describe("desktop nav width budget", () => {
     expect(NAV_ITEMS.some((i) => i.label === "Now Hiring" && i.href === "/join")).toBe(true);
   });
 
-  it("no former top-level link was lost — all live in the Properties dropdown", () => {
+  it("Properties dropdown matches the property-search flag (pre-IDX gating)", () => {
     const dropdown = PROPERTIES_MENU.map((m) => m.label);
-    for (const label of ["Home Search", "Search by Property Type", "Portfolio", "Neighborhoods"]) {
-      expect(dropdown).toContain(label);
+    if (FEATURES.SHOW_PROPERTY_SEARCH) {
+      // Full menu once IDX is live — no former top-level link may be lost.
+      for (const label of ["Home Search", "Search by Property Type", "Portfolio", "Neighborhoods", "Sell With Us"]) {
+        expect(dropdown).toContain(label);
+      }
+    } else {
+      // Pre-IDX: NO placeholder-powered link may be reachable from the nav.
+      for (const label of ["Home Search", "Search by Property Type", "Portfolio", "Neighborhoods"]) {
+        expect(dropdown).not.toContain(label);
+      }
+      // Customers still get a property path: New Construction + Sell.
+      expect(dropdown).toContain("New Construction Search");
+      expect(dropdown).toContain("Sell With Us");
     }
   });
 });

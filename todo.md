@@ -276,7 +276,17 @@
 - [x] Homepage newsletter section hidden behind FEATURES.SHOW_NEWSLETTER=false (same pattern as listings flag); NewsletterForm code, FUB "Website - Newsletter" tagging, and subscriber data untouched. 101/101 tests pass
 
 ## Pull 858c3c3 + platform questions (user request Jul 28, batch 3)
-- [ ] Pull GitHub main commit 858c3c3 (TCPA consent checkbox + Privacy link in Website Inquiry modal, server-side enforcement, analytics test guard fix); run tests
-- [ ] Checkpoint so it deploys; verify running production bundle contains the consent checkbox (live check, not just pull)
-- [ ] Answer platform Q1: do plausible.io / manus-analytics (umami) / space-editor / Amplitude persist on custom domain? Which ones, for Privacy Policy disclosure
-- [ ] Answer platform Q2: does "Made with Manus" badge disappear on custom domain / paid plan; how to remove
+- [x] Pulled 858c3c3 cleanly; 104/104 tests pass (3 new consent tests)
+- [x] Checkpoint f5d0a3aa deployed; production bundle index-DeUvz1lL.js contains the web-design consent copy; live browser check confirmed checkbox + Privacy link render in the modal on the live site
+- [x] Q1 answered: umami (repo template, powers Manus dashboard analytics), plausible.io + spaceEditor/Amplitude injected at platform hosting level — all persist on custom domain; disclosure list provided
+- [x] Q2 answered: badge controlled by per-site hideBadge flag (currently false); no self-serve toggle found; recommend Settings → General check or help.manus.im request
+
+## Hide ALL non-new-build property search until IDX (user request Jul 28, batch 4)
+- [x] Audit every customer entry point to placeholder search/browse/listing experiences (nav, footer, homepage, city pages, links page, CTAs, direct URLs)
+- [x] Gate nav Properties dropdown entries behind FEATURES.SHOW_PROPERTY_SEARCH; dropdown now = New Construction Search + Sell With Us; navOverflow tests flag-aware and passing
+- [x] /search, /portfolio, /neighborhoods, /listing/:slug all render "Live MLS Search Coming Soon" screen with NC Search CTA when flag off (no fake results, no map panel)
+- [x] Hidden all Browse Properties links: homepage hero, footer Explore (Portfolio/Home Search/Neighborhoods), TechShowcase AI-search card, City Finder results "Browse {city} Listings", /sell Recent Results grid + Full Portfolio link
+- [x] Direct listing detail URLs render coming-soon treatment (no fake homes)
+- [x] City pages verified clean: area info + NC CTA + lead form only
+- [x] Zero deletion — all components, AI search backend, ListingsMap, seeds, admin Listings tab intact behind flag
+- [x] Live customer click-through verified (8-page screenshots + live DOM dropdown check); 104/104 tests pass

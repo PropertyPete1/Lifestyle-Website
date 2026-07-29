@@ -5,10 +5,11 @@ import ListingCard from "@/components/ListingCard";
 import AISearchBar from "@/components/AISearchBar";
 import ListingsMap from "@/components/ListingsMap";
 import AIStatusSequence from "@/components/AIStatusSequence";
+import SearchComingSoon from "@/pages/SearchComingSoon";
 import { useActivity } from "@/hooks/useActivity";
 import { useNcClickTracking } from "@/hooks/usePageTracking";
 import { trpc } from "@/lib/trpc";
-import { SITE } from "@shared/site";
+import { SITE, FEATURES } from "@shared/site";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LayoutGrid, Map as MapIcon, Sparkles, X } from "lucide-react";
@@ -278,9 +279,12 @@ function SearchInner({ portfolio }: { portfolio: boolean }) {
 
 /** Route-friendly wrappers (wouter passes RouteComponentProps). */
 export default function Search() {
+  // Pre-IDX: never render placeholder results to customers.
+  if (!FEATURES.SHOW_PROPERTY_SEARCH) return <SearchComingSoon />;
   return <SearchInner portfolio={false} />;
 }
 
 export function Portfolio() {
+  if (!FEATURES.SHOW_PROPERTY_SEARCH) return <SearchComingSoon />;
   return <SearchInner portfolio />;
 }

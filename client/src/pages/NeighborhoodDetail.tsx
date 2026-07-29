@@ -40,7 +40,11 @@ export default function NeighborhoodDetail() {
       <PageShell solidNav>
         <div className="mx-auto max-w-xl px-5 pt-40 pb-24 text-center">
           <h1 className="font-serif text-3xl">Area Not Found</h1>
-          <Link href="/neighborhoods" className="text-cta mt-8 inline-block">All Neighborhoods</Link>
+          <Link
+            href={FEATURES.SHOW_PROPERTY_SEARCH ? "/neighborhoods" : "/"}
+            className="text-cta mt-8 inline-block">
+            {FEATURES.SHOW_PROPERTY_SEARCH ? "All Neighborhoods" : "Back to Homepage"}
+          </Link>
         </div>
       </PageShell>
     );

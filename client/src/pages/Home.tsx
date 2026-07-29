@@ -83,7 +83,9 @@ export default function Home() {
             </a>
           </div>
           <div className="mt-8 flex flex-wrap gap-10">
-            <Link href="/search" className="text-cta text-foreground">Browse Properties</Link>
+            {FEATURES.SHOW_PROPERTY_SEARCH && (
+              <Link href="/search" className="text-cta text-foreground">Browse Properties</Link>
+            )}
             <Link href="/valuation" className="text-cta text-foreground">Home Valuation</Link>
           </div>
 
@@ -174,12 +176,14 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ============ AI SEARCH ============ */}
-      <section className="ambient-section border-y border-border/60 bg-[oklch(0.165_0.005_285)]">
-        <div className="mx-auto max-w-3xl px-5 lg:px-8 py-12">
-          <AISearchBar />
-        </div>
-      </section>
+      {/* ============ AI SEARCH — paused until IDX (FEATURES.SHOW_PROPERTY_SEARCH) ============ */}
+      {FEATURES.SHOW_PROPERTY_SEARCH && (
+        <section className="ambient-section border-y border-border/60 bg-[oklch(0.165_0.005_285)]">
+          <div className="mx-auto max-w-3xl px-5 lg:px-8 py-12">
+            <AISearchBar />
+          </div>
+        </section>
+      )}
 
       {/* ============ TECHNOLOGY SHOWCASE (show, don't tell) ============ */}
       <TechShowcase />

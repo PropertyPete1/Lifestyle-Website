@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Menu, X, Phone, ChevronDown } from "lucide-react";
-import { SITE } from "@shared/site";
+import { SITE, FEATURES } from "@shared/site";
 import { cn } from "@/lib/utils";
 import VeteranBadge from "@/components/VeteranBadge";
 
@@ -17,13 +17,23 @@ import VeteranBadge from "@/components/VeteranBadge";
  * everything collapses to the hamburger. A vitest width-budget test
  * (server/navOverflow.test.ts) guards this from regressing.
  */
-export const PROPERTIES_MENU = [
+/** Full dropdown once IDX is live. */
+const PROPERTIES_MENU_FULL = [
   { label: "Home Search", href: "/search" },
   { label: "Search by Property Type", href: "/search" },
   { label: "Portfolio", href: "/portfolio" },
   { label: "Neighborhoods", href: "/neighborhoods" },
   { label: "Sell With Us", href: "/sell" },
 ];
+
+/** Pre-IDX: placeholder-powered links are unreachable; NC Search + Sell only. */
+const PROPERTIES_MENU_PRE_IDX = [
+  { label: "New Construction Search", href: SITE.newConstructionUrl, external: true },
+  { label: "Sell With Us", href: "/sell" },
+];
+
+export const PROPERTIES_MENU: { label: string; href: string; external?: boolean }[] =
+  FEATURES.SHOW_PROPERTY_SEARCH ? PROPERTIES_MENU_FULL : PROPERTIES_MENU_PRE_IDX;
 
 /** Top-level desktop items. Kept short so the row always fits at >=1024px. */
 export const NAV_ITEMS = [
@@ -123,13 +133,25 @@ export default function SiteNav({
                   className="absolute left-1/2 -translate-x-1/2 top-full pt-2 min-w-56">
                   <div className="bg-background/98 backdrop-blur-sm border border-border/80 py-2 shadow-xl">
                     {PROPERTIES_MENU.map((m, i) => (
-                      <Link
-                        key={`${m.label}-${i}`}
-                        href={m.href}
-                        role="menuitem"
-                        className="nav-link block px-5 py-2.5 text-foreground/90 hover:text-gold hover:bg-gold/[0.06] whitespace-nowrap">
-                        {m.label}
-                      </Link>
+                      m.external ? (
+                        <a
+                          key={`${m.label}-${i}`}
+                          href={m.href}
+                          target="_blank"
+                          rel="noreferrer"
+                          role="menuitem"
+                          className="nav-link block px-5 py-2.5 text-foreground/90 hover:text-gold hover:bg-gold/[0.06] whitespace-nowrap">
+                          {m.label}
+                        </a>
+                      ) : (
+                        <Link
+                          key={`${m.label}-${i}`}
+                          href={m.href}
+                          role="menuitem"
+                          className="nav-link block px-5 py-2.5 text-foreground/90 hover:text-gold hover:bg-gold/[0.06] whitespace-nowrap">
+                          {m.label}
+                        </Link>
+                      )
                     ))}
                   </div>
                 </div>
@@ -205,9 +227,15 @@ export default function SiteNav({
               Ready to Buy or Sell? Get Started
             </button>
             {PROPERTIES_MENU.map((item, i) => (
-              <Link key={`m-${item.label}-${i}`} href={item.href} className="nav-link text-foreground/90 hover:text-gold py-1">
-                {item.label}
-              </Link>
+              item.external ? (
+                <a key={`m-${item.label}-${i}`} href={item.href} target="_blank" rel="noreferrer" className="nav-link text-foreground/90 hover:text-gold py-1">
+                  {item.label}
+                </a>
+              ) : (
+                <Link key={`m-${item.label}-${i}`} href={item.href} className="nav-link text-foreground/90 hover:text-gold py-1">
+                  {item.label}
+                </Link>
+              )
             ))}
             <Link href="/valuation" className="nav-link text-foreground/90 hover:text-gold py-1">
               Home Valuation

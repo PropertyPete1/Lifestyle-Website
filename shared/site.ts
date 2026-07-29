@@ -10,6 +10,11 @@
  */
 export const FEATURES = {
   SHOW_PLACEHOLDER_LISTINGS: false,
+  /** Master gate for ALL placeholder-powered search/browse/listing
+      experiences (/search, /portfolio, /neighborhoods, /listing/:slug,
+      nav+footer links to them). Until IDX connects, customers can only
+      reach New Construction Search. Flip to true with IDX. */
+  SHOW_PROPERTY_SEARCH: false,
   /** Newsletter promises "new listings in your inbox" — hidden pre-IDX.
       Re-enable alongside SHOW_PLACEHOLDER_LISTINGS when IDX connects. */
   SHOW_NEWSLETTER: false,

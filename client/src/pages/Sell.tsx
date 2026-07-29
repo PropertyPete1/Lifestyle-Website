@@ -3,6 +3,7 @@ import PageShell from "@/components/PageShell";
 import LeadForm from "@/components/LeadForm";
 import ListingCard from "@/components/ListingCard";
 import { trpc } from "@/lib/trpc";
+import { FEATURES } from "@shared/site";
 import { IMG } from "@/lib/assets";
 
 const PROCESS = [
@@ -42,7 +43,8 @@ export default function Sell() {
         ))}
       </section>
 
-      {sold.length > 0 && (
+      {/* Recent Results grid uses placeholder listing data — paused until IDX */}
+      {FEATURES.SHOW_PROPERTY_SEARCH && sold.length > 0 && (
         <section className="bg-[oklch(0.165_0.005_285)] border-y border-border/60">
           <div className="mx-auto max-w-[1400px] px-5 lg:px-8 py-20">
             <div className="flex items-end justify-between mb-10">

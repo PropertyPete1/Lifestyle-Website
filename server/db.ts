@@ -1,12 +1,14 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
+  InsertCityMatch,
   InsertLead,
   InsertListing,
   InsertPageEvent,
   InsertPartnerPitch,
   InsertVisitorActivity,
   bioLinks,
+  cityMatches,
   InsertUser,
   leads,
   listings,
@@ -328,6 +330,20 @@ export async function getPartnerPitchBySlug(slug: string) {
   const db = await getDb();
   if (!db) return undefined;
   const rows = await db.select().from(partnerPitches).where(eq(partnerPitches.slug, slug)).limit(1);
+  return rows[0];
+}
+
+/* ---------------- City matches (City Finder AI results) ---------------- */
+export async function createCityMatch(data: InsertCityMatch) {
+  const db = await getDb();
+  if (!db) throw new Error("DB unavailable");
+  await db.insert(cityMatches).values(data);
+}
+
+export async function getCityMatchBySlug(slug: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(cityMatches).where(eq(cityMatches.slug, slug)).limit(1);
   return rows[0];
 }
 

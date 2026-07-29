@@ -6,8 +6,10 @@ import { useNcClickTracking } from "@/hooks/usePageTracking";
 import { SITE, FEATURES } from "@shared/site";
 import { IMG } from "@/lib/assets";
 import { cn } from "@/lib/utils";
-import { Link } from "wouter";
-import { ArrowLeft, ArrowRight, ExternalLink, MapPin, Sparkles } from "lucide-react";
+import { Link, useRoute, useLocation } from "wouter";
+import { ArrowLeft, ArrowRight, Copy, ExternalLink, MapPin, MessageCircle, Share2, Sparkles } from "lucide-react";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 
 /* ---------- Quiz definition ---------- */
 interface Question {
@@ -169,12 +171,257 @@ const CITY_PROFILES: CityProfile[] = [
   },
 ];
 
+/* ---------- City data for hard facts (non-AI) ---------- */
+const CITY_HARD_DATA: Record<string, { priceRange: string; facts: string[] }> = {
+  "San Antonio": {
+    priceRange: "$180K–$600K",
+    facts: ["No state income tax", "Home to Joint Base San Antonio", "Booming new-construction suburbs"],
+  },
+  "New Braunfels": {
+    priceRange: "$250K–$700K",
+    facts: ["Comal & Guadalupe Rivers", "One of the fastest-growing cities in TX", "Strong new-build inventory"],
+  },
+  Austin: {
+    priceRange: "$300K–$1.2M",
+    facts: ["Major tech employers (Tesla, Apple, Google)", "Nationally ranked food & music scene", "Lake Travis & Barton Springs"],
+  },
+  DFW: {
+    priceRange: "$250K–$900K",
+    facts: ["Largest TX job market", "Elite school districts (Prosper, Southlake, Frisco)", "Deepest new-construction inventory"],
+  },
+  Houston: {
+    priceRange: "$200K–$800K",
+    facts: ["World-class dining & culture", "Energy & medical career hubs", "Best price-per-sqft of any major metro"],
+  },
+};
+
+/* ---------- Shared result rendering component ---------- */
+function CityMatchResults({
+  matches,
+  narratives,
+  slug,
+  answers,
+}: {
+  matches: { name: string; slug: string; img: string; medianPrice: string; vibe: string; why: (a: Record<string, string>) => string }[];
+  narratives: Record<string, { cityPitch: string; ldrPitch: string }> | null;
+  slug: string | null;
+  answers: Record<string, string>;
+}) {
+  const logNcClick = useNcClickTracking();
+
+  const shareUrl = slug ? `${window.location.origin}/city-finder/${slug}` : "";
+  const shareText = "I just found my Texas city match — check this out:";
+
+  const nativeShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "My Texas City Match", text: shareText, url: shareUrl });
+        return;
+      } catch { /* user cancelled */ }
+    }
+    copyLink();
+  };
+  const copyLink = () => {
+    navigator.clipboard.writeText(shareUrl).then(
+      () => toast.success("Link copied!"),
+      () => toast.error("Couldn't copy — try long-pressing the URL.")
+    );
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="text-center">
+        <p className="inline-flex items-center gap-2 eyebrow text-gold">
+          <Sparkles className="h-3.5 w-3.5" /> Here's what we found for you
+        </p>
+        <h2 className="font-serif text-3xl md:text-4xl mt-3">Your Texas City Report</h2>
+        <p className="mt-3 text-sm text-muted-foreground max-w-md mx-auto">
+          Based on your budget, lifestyle, and timeline — ranked for you.
+        </p>
+      </div>
+
+      {/* City cards */}
+      {matches.map((c, i) => {
+        const narrative = narratives?.[c.name];
+        const hardData = CITY_HARD_DATA[c.name];
+        return (
+          <div key={c.slug} className="border border-border bg-card overflow-hidden">
+            {/* Image + badge */}
+            <div className="relative aspect-[16/7] md:aspect-[16/5]">
+              <img src={c.img} alt={c.name} className="h-full w-full object-cover" />
+              <span className="absolute top-4 left-4 bg-gold text-primary-foreground px-3 py-1 text-[10px] uppercase tracking-[0.2em]">
+                Match #{i + 1}
+              </span>
+            </div>
+            <div className="p-6 lg:p-8">
+              {/* City name + hard data */}
+              <div className="flex items-center gap-2 text-gold">
+                <MapPin className="h-4 w-4" />
+                <h3 className="font-serif text-2xl">{c.name}</h3>
+              </div>
+              <p className="mt-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                Median price {c.medianPrice} · Range {hardData?.priceRange ?? "varies"}
+              </p>
+              <p className="mt-4 font-serif italic text-foreground/90">{c.vibe}</p>
+
+              {/* Hard facts (non-AI) */}
+              {hardData && (
+                <ul className="mt-4 space-y-1">
+                  {hardData.facts.map((f) => (
+                    <li key={f} className="text-sm text-muted-foreground flex items-start gap-2">
+                      <span className="text-gold mt-0.5">•</span> {f}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* AI-generated personalized narrative */}
+              {narrative ? (
+                <div className="mt-6 border-t border-border pt-6 space-y-4">
+                  <p className="text-sm leading-relaxed text-foreground/90">{narrative.cityPitch}</p>
+                  <p className="text-sm leading-relaxed text-muted-foreground italic">{narrative.ldrPitch}</p>
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-muted-foreground leading-relaxed">{c.why(answers)}</p>
+              )}
+
+              {/* CTAs */}
+              <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
+                {FEATURES.SHOW_PROPERTY_SEARCH && (
+                  <Link
+                    href={`/search?city=${encodeURIComponent(c.name)}`}
+                    className="text-cta inline-flex items-center gap-2">
+                    Browse {c.name} Listings <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                )}
+                <Link
+                  href={`/${c.slug}`}
+                  className="text-cta inline-flex items-center gap-2">
+                  Explore {c.name} <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+                <a
+                  href={SITE.newConstructionUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={logNcClick}
+                  className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.15em] text-muted-foreground hover:text-gold transition-colors">
+                  See New Construction in {c.name} <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Get Started CTA — the conversion moment */}
+      <div className="border-t border-border pt-10 text-center">
+        <h3 className="font-serif text-2xl md:text-3xl">Ready to make it happen?</h3>
+        <p className="mt-3 text-sm text-muted-foreground max-w-md mx-auto">
+          Tell us a little about yourself and we'll build your personalized moving plan — we typically respond within 30 minutes.
+        </p>
+        <div className="mt-6 text-left max-w-lg mx-auto">
+          <LeadForm
+            sourceTag="Website - City Finder"
+            submitLabel="Get Started"
+            compact
+            extraAnswers={{ ...answers, matchedCity: matches[0]?.name ?? "", cityFinderSlug: slug ?? "" }}
+          />
+        </div>
+      </div>
+
+      {/* Share Your Match */}
+      {slug && (
+        <div className="pt-6 text-center">
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-4">Share Your Match</p>
+          <div className="flex flex-wrap justify-center gap-3">
+            <button
+              onClick={nativeShare}
+              className="inline-flex items-center gap-2 bg-gold text-primary-foreground px-6 py-3 text-[11px] uppercase tracking-[0.2em] hover:bg-gold/90 transition-colors active:scale-[0.97]">
+              <Share2 className="h-4 w-4" /> Share
+            </button>
+            <button
+              onClick={copyLink}
+              className="inline-flex items-center gap-2 border border-border px-6 py-3 text-[11px] uppercase tracking-[0.2em] hover:border-gold hover:text-gold transition-colors active:scale-[0.97]">
+              <Copy className="h-4 w-4" /> Copy Link
+            </button>
+            <a
+              href={`sms:?&body=${encodeURIComponent(`${shareText} ${shareUrl}`)}`}
+              className="inline-flex items-center gap-2 border border-border px-6 py-3 text-[11px] uppercase tracking-[0.2em] hover:border-gold hover:text-gold transition-colors active:scale-[0.97]">
+              <MessageCircle className="h-4 w-4" /> Text It
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Shared-link page: /city-finder/:slug ---------- */
+export function CityFinderShared() {
+  const [, params] = useRoute("/city-finder/:slug");
+  const slug = params?.slug ?? "";
+  const { data, isLoading } = trpc.cityFinder.getBySlug.useQuery({ slug }, { enabled: !!slug });
+  const [, navigate] = useLocation();
+
+  // Reconstruct matches from cached data
+  const matches = useMemo(() => {
+    if (!data) return [];
+    return data.rankedCities.map((name) => {
+      const profile = CITY_PROFILES.find((p) => p.name === name);
+      return profile ?? { name, slug: name.toLowerCase().replace(/\s+/g, "-"), img: "", medianPrice: "—", vibe: "", why: () => "" };
+    });
+  }, [data]);
+
+  return (
+    <PageShell solidNav>
+      <div className="ambient-section mx-auto max-w-3xl px-5 lg:px-8 pt-28 lg:pt-36 pb-24">
+        {isLoading ? (
+          <p className="text-center text-muted-foreground animate-pulse py-20">Loading your city match…</p>
+        ) : data ? (
+          <>
+            <p className="eyebrow text-gold text-center">Signature Tool</p>
+            <h1 className="display-serif hero-glow text-4xl md:text-5xl mt-3 text-center">Find Your Texas City</h1>
+            <div className="mt-12">
+              <CityMatchResults
+                matches={matches}
+                narratives={data.narratives}
+                slug={data.slug}
+                answers={data.answers}
+              />
+            </div>
+            <div className="mt-12 text-center">
+              <button
+                onClick={() => navigate("/city-finder")}
+                className="text-cta inline-flex items-center gap-2">
+                Take the Quiz Yourself <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-20">
+            <p className="font-serif text-2xl">This link has expired or doesn't exist</p>
+            <button
+              onClick={() => navigate("/city-finder")}
+              className="text-cta mt-6 inline-flex items-center gap-2">
+              Take the Quiz <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
+    </PageShell>
+  );
+}
+
+/* ---------- Main quiz page ---------- */
 export default function CityFinder() {
-  const [step, setStep] = useState(0); // 0..QUESTIONS.length-1, then gate, then results
+  const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [unlocked, setUnlocked] = useState(false);
+  const [aiNarratives, setAiNarratives] = useState<Record<string, { cityPitch: string; ldrPitch: string }> | null>(null);
+  const [aiSlug, setAiSlug] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
   const logActivity = useActivity();
-  const logNcClick = useNcClickTracking();
 
   const total = QUESTIONS.length;
   const atGate = step >= total;
@@ -185,6 +432,28 @@ export default function CityFinder() {
       .sort((a, b) => b.points - a.points)
       .slice(0, 3);
   }, [answers]);
+
+  const generateMutation = trpc.cityFinder.generate.useMutation({
+    onSuccess: (data) => {
+      setAiNarratives(data.narratives);
+      setAiSlug(data.slug);
+      setGenerating(false);
+    },
+    onError: () => {
+      // Graceful fallback: show templated results without AI
+      setGenerating(false);
+    },
+  });
+
+  const handleUnlock = () => {
+    logActivity("city_finder", { city: matches[0]?.name, runnerUp: matches[1]?.name });
+    setUnlocked(true);
+    setGenerating(true);
+    generateMutation.mutate({
+      answers,
+      rankedCities: matches.map((m) => m.name),
+    });
+  };
 
   const select = (key: string, value: string) => {
     setAnswers((a) => ({ ...a, [key]: value }));
@@ -207,7 +476,9 @@ export default function CityFinder() {
         <p className="mt-3 text-[10px] uppercase tracking-[0.25em] text-muted-foreground text-center">
           {atGate
             ? unlocked
-              ? "Your Matches"
+              ? generating
+                ? "Generating Your Report…"
+                : "Your Matches"
               : "One Last Step"
             : `Question ${step + 1} of ${total}`}
         </p>
@@ -260,15 +531,7 @@ export default function CityFinder() {
                 submitLabel="Unlock My Matches"
                 compact
                 extraAnswers={answers}
-                onSuccess={() => {
-                  // Anonymous activity: remember the matched city so future
-                  // form submissions carry it into the FUB activity note.
-                  logActivity("city_finder", {
-                    city: matches[0]?.name,
-                    runnerUp: matches[1]?.name,
-                  });
-                  setUnlocked(true);
-                }}
+                onSuccess={handleUnlock}
               />
             </div>
             <button
@@ -279,72 +542,30 @@ export default function CityFinder() {
           </div>
         )}
 
-        {/* Results */}
-        {atGate && unlocked && (
-          <div className="mt-12 space-y-8">
-            {/* Completion payoff: dedicated on-site results screen */}
-            <div className="text-center">
-              <p className="inline-flex items-center gap-2 eyebrow text-gold">
-                <Sparkles className="h-3.5 w-3.5" /> Here's what we found for you
-              </p>
-              <h2 className="font-serif text-3xl md:text-4xl mt-3">
-                Your Texas City Report
-              </h2>
-              <p className="mt-3 text-sm text-muted-foreground max-w-md mx-auto">
-                Based on your budget, lifestyle, and timeline, these are your top three
-                matches — ranked for you.
-              </p>
+        {/* Generating state */}
+        {atGate && unlocked && generating && (
+          <div className="mt-12 text-center py-16">
+            <div className="inline-flex items-center gap-3">
+              <div className="h-5 w-5 border-2 border-gold border-t-transparent rounded-full animate-spin" />
+              <p className="text-muted-foreground">Writing your personalized city report…</p>
             </div>
-            {matches.map((c, i) => (
-              <div key={c.slug} className="border border-border bg-card overflow-hidden md:flex">
-                <div className="md:w-2/5 aspect-[4/3] md:aspect-auto relative">
-                  <img src={c.img} alt={c.name} className="h-full w-full object-cover" />
-                  <span className="absolute top-4 left-4 bg-gold text-primary-foreground px-3 py-1 text-[10px] uppercase tracking-[0.2em]">
-                    Match #{i + 1}
-                  </span>
-                </div>
-                <div className="p-6 lg:p-8 md:w-3/5">
-                  <div className="flex items-center gap-2 text-gold">
-                    <MapPin className="h-4 w-4" />
-                    <h3 className="font-serif text-2xl">{c.name}</h3>
-                  </div>
-                  <p className="mt-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                    Median price {c.medianPrice}
-                  </p>
-                  <p className="mt-4 font-serif italic text-foreground/90">{c.vibe}</p>
-                  <p className="mt-3 text-sm text-muted-foreground leading-relaxed">{c.why(answers)}</p>
-                  {/* Primary next steps stay on-site; external tool is optional and clearly marked */}
-                  <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-3">
-                    {FEATURES.SHOW_PROPERTY_SEARCH && (
-                      <Link
-                        href={`/search?city=${encodeURIComponent(c.name)}`}
-                        className="text-cta inline-flex items-center gap-2">
-                        Browse {c.name} Listings <ArrowRight className="h-3.5 w-3.5" />
-                      </Link>
-                    )}
-                    <Link
-                      href={`/${c.slug}`}
-                      className="text-cta inline-flex items-center gap-2">
-                      Explore {c.name} <ArrowRight className="h-3.5 w-3.5" />
-                    </Link>
-                    <a
-                      href={SITE.newConstructionUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={logNcClick}
-                      className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.15em] text-muted-foreground hover:text-gold transition-colors">
-                      See New Construction in {c.name} <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </div>
-                </div>
-              </div>
-            ))}
-            <p className="text-center text-xs text-muted-foreground pt-4">
-              A Lifestyle Design Realty professional will follow up with your full report — we typically respond within 30 minutes.
-            </p>
+            <p className="mt-4 text-xs text-muted-foreground/60">This takes about 10 seconds</p>
+          </div>
+        )}
+
+        {/* Results */}
+        {atGate && unlocked && !generating && (
+          <div className="mt-12">
+            <CityMatchResults
+              matches={matches}
+              narratives={aiNarratives}
+              slug={aiSlug}
+              answers={answers}
+            />
           </div>
         )}
       </div>
     </PageShell>
   );
 }
+

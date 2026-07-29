@@ -10,7 +10,10 @@
  */
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-sonnet-4-5";
+// Cheapest Anthropic model that writes well (verified working on this key).
+// Haiku 4.5 = $1/$5 per MTok vs Sonnet 4.5's $3/$15 — same model for ALL
+// AI writing on the site (Convince Your Partner + City Finder narratives).
+const MODEL = "claude-haiku-4-5";
 
 export const LIFESTYLE_OPTIONS = [
   "Lake/Water Life",

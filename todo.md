@@ -341,3 +341,15 @@
 
 ## /links trust signal line (user request Jul 29, batch 12)
 - [x] Compact one-line trust signals under "Central Texas Real Estate Professionals" on /links: VeteranBadge (compact, same gold flag as site header) + "4.6★ · 22 Google Reviews", hairline divider between, single line; 375px screenshot confirms clean fit with margin; 143/143 tests; deployed + pushed
+
+## City Finder AI upgrade + shareable results (user request Jul 29, batch 13)
+- [x] Use cheapest suitable Anthropic model for ALL AI writing: Convince Your Partner switched claude-sonnet-4-5 → claude-haiku-4-5 ($1/$5 vs $3/$15 per MTok, 3x cheaper; verified HTTP 200 on this key — dated/3.5 variants 404); City Finder will use the same MODEL constant. (aiSearch criteria extraction uses the built-in invokeLLM, not the Anthropic key.)
+- [x] Schema: city_matches table (slug, answers JSON, ranked cities, AI narratives per city, createdAt) for cached shareable results — migration 0009_cooing_hiroim.sql applied
+- [x] Backend: server/cityNarrative.ts — Anthropic Claude AI narrative generation per matched city (personalized to quiz answers), compliance guard (violatesCompliance + retry), graceful fallback to existing templated copy, cached per unique answer set
+- [x] Backend: cityFinder.generate mutation (parallel AI for top 3 cities, caches in city_matches, returns slug + narratives) + cityFinder.getBySlug query (public, returns cached result)
+- [x] Frontend: CityFinder.tsx upgraded — after lead gate unlock, calls generate → loading spinner → AI narratives with vivid city case + LDR pitch + prominent Get Started CTA + hard facts (non-AI)
+- [x] Frontend: "Share Your Match" button (native share / copy link / text SMS) same mechanism as Convince Your Partner
+- [x] Route: /city-finder/:slug renders the cached shared result via CityFinderShared component (same narrative on reload, counts as fresh site visit)
+- [x] Hard data (median price, price range, facts) stays non-AI; only narrative connective tissue is AI-written
+- [x] Vitest: 9 new tests (cityFinder.test.ts) covering generate, getBySlug, fallback, compliance, edge cases — 152/152 total
+- [ ] Deploy checkpoint, verify shareable URLs on live domain, push to GitHub

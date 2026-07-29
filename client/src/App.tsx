@@ -70,6 +70,7 @@ function Router() {
         component={FEATURES.SHOW_PROPERTY_SEARCH ? Neighborhoods : SearchComingSoon}
       />
       <Route path={"/city-finder"} component={CityFinder} />
+      <Route path={"/city-finder/:slug"} component={CityFinderShared} />
       <Route path={"/team"} component={Team} />
       <Route path={"/testimonials"} component={Testimonials} />
       <Route path={"/valuation"} component={Valuation} />
@@ -115,3 +116,4 @@ function App() {
 }
 
 export default App;
+import { CityFinderShared } from "./pages/CityFinder";

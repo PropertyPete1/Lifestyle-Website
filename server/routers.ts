@@ -20,6 +20,7 @@ import {
   matchCity,
   pickStats,
 } from "./partnerPitch";
+import { generateCityNarrative, fallbackNarrative, CITY_DATA } from "./cityNarrative";
 import { isAdminEmail } from "@shared/site";
 import { ENV } from "./_core/env";
 
@@ -153,6 +154,60 @@ export const appRouter = router({
         };
       }),
   }),
+
+  /** City Finder — AI-generated personalized city-match narratives, cached per slug. */
+  cityFinder: router({
+    /**
+     * Generate AI narratives for the top 3 matched cities. Caches the result
+     * in city_matches so shared links always reproduce the same text.
+     */
+    generate: publicProcedure
+      .input(
+        z.object({
+          answers: z.record(z.string(), z.string()),
+          rankedCities: z.array(z.string().min(1)).min(1).max(5),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const narratives: Record<string, { cityPitch: string; ldrPitch: string }> = {};
+        const cities = input.rankedCities.slice(0, 3);
+        // Generate narratives in parallel for speed
+        const results = await Promise.allSettled(
+          cities.map((city) => generateCityNarrative({ city, answers: input.answers }))
+        );
+        for (let i = 0; i < cities.length; i++) {
+          const r = results[i];
+          if (r.status === "fulfilled") {
+            narratives[cities[i]] = r.value;
+          } else {
+            console.error(`[cityFinder] AI failed for ${cities[i]}:`, r.reason);
+            narratives[cities[i]] = fallbackNarrative(cities[i]);
+          }
+        }
+        const slug = nanoid(10);
+        await db.createCityMatch({
+          slug,
+          answers: JSON.stringify(input.answers),
+          rankedCities: JSON.stringify(cities),
+          narratives: JSON.stringify(narratives),
+        });
+        return { slug, narratives } as const;
+      }),
+    /** Shared links: return the cached result by slug — never regenerate. */
+    getBySlug: publicProcedure
+      .input(z.object({ slug: z.string().min(1).max(24) }))
+      .query(async ({ input }) => {
+        const row = await db.getCityMatchBySlug(input.slug);
+        if (!row) return null;
+        return {
+          slug: row.slug,
+          answers: JSON.parse(row.answers) as Record<string, string>,
+          rankedCities: JSON.parse(row.rankedCities) as string[],
+          narratives: JSON.parse(row.narratives) as Record<string, { cityPitch: string; ldrPitch: string }>,
+        };
+      }),
+  }),
+
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {

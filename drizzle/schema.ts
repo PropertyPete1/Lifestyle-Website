@@ -231,3 +231,18 @@ export const partnerPitches = mysqlTable("partner_pitches", {
 });
 export type PartnerPitch = typeof partnerPitches.$inferSelect;
 export type InsertPartnerPitch = typeof partnerPitches.$inferInsert;
+
+/**
+ * City Finder AI results — cached per unique answer combination.
+ * Same architecture as partner_pitches: generate once, cache forever, share via slug.
+ */
+export const cityMatches = mysqlTable("city_matches", {
+  id: int("id").autoincrement().primaryKey(),
+  slug: varchar("slug", { length: 24 }).notNull().unique(),
+  answers: text("answers").notNull(), // JSON object of quiz answers
+  rankedCities: text("rankedCities").notNull(), // JSON array of city names (ranked)
+  narratives: text("narratives").notNull(), // JSON object { cityName: { cityPitch, ldrPitch } }
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type CityMatch = typeof cityMatches.$inferSelect;
+export type InsertCityMatch = typeof cityMatches.$inferInsert;

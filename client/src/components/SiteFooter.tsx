@@ -72,7 +72,7 @@ export default function SiteFooter() {
             <ul className="space-y-2.5 text-sm text-muted-foreground">
               <li><a href={SITE.phoneHref} className="hover:text-gold">{SITE.phone}</a></li>
               <li><a href={`mailto:${SITE.email}`} className="hover:text-gold break-all">{SITE.email}</a></li>
-              <li className="leading-relaxed">1209 S Saint Marys St #232<br />San Antonio, TX 78210</li>
+              <li className="leading-relaxed">1212 Chicon St Unit 101<br />Austin, TX 78702</li>
             </ul>
           </div>
         </div>

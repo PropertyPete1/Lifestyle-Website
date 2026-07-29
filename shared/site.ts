@@ -52,7 +52,7 @@ export const SITE = {
   phone: "(210) 981-3830",
   phoneHref: "tel:+12109813830",
   email: "team@lifestyledesignrealty.com",
-  address: "1209 S Saint Marys St #232, San Antonio TX 78210",
+  address: "1212 Chicon St Unit 101, Austin TX 78702",
   /** New Construction Search — external builder-network tool (vendor name never shown in UI) */
   newConstructionUrl: "https://a.nhb.app/u/peter-allen",
   iabsUrl: "https://drive.google.com/file/d/1DTDRFjzJJS_iD8aaNu8l4Wr3YmmR9zHe/view",

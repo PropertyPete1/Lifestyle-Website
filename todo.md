@@ -300,5 +300,8 @@
 ## Pre-domain final batch (user request Jul 28, batch 6)
 - [x] Pulled GitHub main 7ceffb5 (Links.tsx isLinkVisible filter + linkVisibility tests); 126/126 tests pass
 - [x] Added "Platform & Analytics" disclosure to /privacy (first-party cookieless analytics, Umami, Plausible, Manus bundle/Amplitude, provider policy links, change notice)
-- [ ] Checkpoint so both deploy; verify live /links shows no Home Search button; verify /privacy disclosure renders
-- [ ] Confirm deployed state stable for immediate lifestyledesignrealty.com binding
+- [x] Checkpointed + deployed (bundle index-CbeE6JHy.js); live /links verified — 7 buttons, no Home Search, no placeholder-search routes; /privacy Platform & Analytics disclosure renders with policy links
+- [x] Deployed state confirmed stable for immediate lifestyledesignrealty.com binding (126/126 tests, checkpoint 0528fd69 live, pushed to GitHub)
+
+## Address update (user request Jul 28, batch 7)
+- [x] Changed office address site-wide to 1212 Chicon St Unit 101, Austin TX 78702 (SITE.address, footer, Contact page now reads from SITE.address; /links + /privacy auto-inherit; grep confirms zero old-address references; verified rendering)

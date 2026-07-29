@@ -22,8 +22,7 @@ export default function Contact() {
               <Mail className="h-4 w-4 text-gold" /> {SITE.email}
             </a>
             <p className="flex items-start gap-3 text-muted-foreground">
-              <MapPin className="h-4 w-4 text-gold mt-0.5" /> 1209 S Saint Marys St #232<br className="hidden" />
-              , San Antonio TX 78210
+              <MapPin className="h-4 w-4 text-gold mt-0.5" /> {SITE.address}
             </p>
           </div>
         </div>

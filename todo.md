@@ -274,3 +274,9 @@
 - [x] /join closing: tagline "Lifestyle Design Realty. We built the brokerage we never had." + Team@lifestyledesignrealty.com email link added after the recruiting content; no DM language; form remains primary path
 - [x] Public email swapped via SITE.email (single source): footer, /contact, /privacy → team@lifestyledesignrealty.com. Notification recipient updated: INQUIRY_COPY_RECIPIENT (website-inquiry email copy) → team@. Other lead forms notify via FUB assignment + owner notification (no hardcoded peter@). Peter's personal bio email on /team card left as-is (personal contact, not brokerage contact)
 - [x] Homepage newsletter section hidden behind FEATURES.SHOW_NEWSLETTER=false (same pattern as listings flag); NewsletterForm code, FUB "Website - Newsletter" tagging, and subscriber data untouched. 101/101 tests pass
+
+## Pull 858c3c3 + platform questions (user request Jul 28, batch 3)
+- [ ] Pull GitHub main commit 858c3c3 (TCPA consent checkbox + Privacy link in Website Inquiry modal, server-side enforcement, analytics test guard fix); run tests
+- [ ] Checkpoint so it deploys; verify running production bundle contains the consent checkbox (live check, not just pull)
+- [ ] Answer platform Q1: do plausible.io / manus-analytics (umami) / space-editor / Amplitude persist on custom domain? Which ones, for Privacy Policy disclosure
+- [ ] Answer platform Q2: does "Made with Manus" badge disappear on custom domain / paid plan; how to remove

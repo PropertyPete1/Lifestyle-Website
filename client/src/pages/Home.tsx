@@ -61,7 +61,10 @@ export default function Home() {
           <div className="hairline w-40 my-7" />
           <p className="eyebrow text-foreground/80">{SITE.subheadline}</p>
 
-          {/* Primary CTAs — the three core actions */}
+          {/* Primary CTAs — gold Get Started stays primary; outlined actions
+              follow. flex-wrap keeps the row elegant at every width: at
+              desktop the four buttons flow onto two balanced lines if the
+              viewport is too narrow for one, and on mobile they stack. */}
           <div className="mt-12 flex flex-wrap items-center gap-5">
             <a
               href="#get-started"
@@ -81,6 +84,11 @@ export default function Home() {
               className="inline-flex items-center gap-3 border border-foreground/40 px-9 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:border-gold hover:text-gold transition-colors">
               New Construction Search
             </a>
+            <Link
+              href="/lease"
+              className="inline-flex items-center gap-3 border border-foreground/40 px-9 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:border-gold hover:text-gold transition-colors">
+              List for Lease
+            </Link>
           </div>
           <div className="mt-8 flex flex-wrap gap-10">
             {FEATURES.SHOW_PROPERTY_SEARCH && (

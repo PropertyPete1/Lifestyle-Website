@@ -317,3 +317,8 @@
 - [x] Lease lead form: name, phone, email, monthly rent expectation dropdown, property address field → FUB "Lease Listing Inquiry" + "Landlord" tag (leaseInquiry.test.ts)
 - [x] Added to nav: Properties dropdown (both pre-IDX and full menus), mobile menu, footer Explore
 - [x] Deploy live; verified on lifestyledesignrealty.com: /lease renders with hero image loading, form submitted end-to-end → DB lead + FUB contact tagged ["Landlord","Lease Listing Inquiry"] (test data cleaned up); admin allowlist live (Steven role=admin in prod DB, allowlist tests cover refusal of other accounts). Live URL: https://lifestyledesignrealty.com/lease
+
+## Homepage hero LIST FOR LEASE button (user request Jul 28, batch 9)
+- [x] Add "LIST FOR LEASE" as fourth hero button on homepage, outlined style matching FIND YOUR TEXAS CITY / NEW CONSTRUCTION SEARCH, linking to /lease
+- [x] Keep gold GET STARTED as primary CTA; flex-wrap flows 3+1 at 1280px, clean mobile stack verified at 375px
+- [ ] Verify live at desktop + mobile widths, confirm navigation to /lease, describe final layout; deploy

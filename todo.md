@@ -321,4 +321,4 @@
 ## Homepage hero LIST FOR LEASE button (user request Jul 28, batch 9)
 - [x] Add "LIST FOR LEASE" as fourth hero button on homepage, outlined style matching FIND YOUR TEXAS CITY / NEW CONSTRUCTION SEARCH, linking to /lease
 - [x] Keep gold GET STARTED as primary CTA; flex-wrap flows 3+1 at 1280px, clean mobile stack verified at 375px
-- [ ] Verify live at desktop + mobile widths, confirm navigation to /lease, describe final layout; deploy
+- [x] Verify live at desktop + mobile widths, confirm navigation to /lease (clicked live button → /lease), describe final layout; deployed (bundle index-B6_ZgkST.js live on lifestyledesignrealty.com)

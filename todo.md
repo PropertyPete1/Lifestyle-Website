@@ -296,3 +296,9 @@
 - [x] Purged 108 synthetic rows: prelaunch_audit UTM session (5), /listing/anything check (1), manus.im preview-iframe sessions (87), pre-source dev rows (13), my two verification visitor sessions (10 more incl. the banner_click); 47 genuine direct-visit rows remain
 - [x] Guard verified live: ran analytics suite, re-checked DB — zero test rows left behind (finally-block DELETE works)
 - [x] Site Stats confirmed real FUB-synced values (68 sales / $16.7M / $161K–$885K / $360K — matches the last daily-stats-sync run, not the 63/$26M seed)
+
+## Pre-domain final batch (user request Jul 28, batch 6)
+- [x] Pulled GitHub main 7ceffb5 (Links.tsx isLinkVisible filter + linkVisibility tests); 126/126 tests pass
+- [x] Added "Platform & Analytics" disclosure to /privacy (first-party cookieless analytics, Umami, Plausible, Manus bundle/Amplitude, provider policy links, change notice)
+- [ ] Checkpoint so both deploy; verify live /links shows no Home Search button; verify /privacy disclosure renders
+- [ ] Confirm deployed state stable for immediate lifestyledesignrealty.com binding

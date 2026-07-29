@@ -32,6 +32,41 @@ export default function Privacy() {
             providers who assist in operating our website and business, subject to
             confidentiality obligations, or when required by law.
           </p>
+          <h2 className="font-serif text-2xl text-foreground">Platform &amp; Analytics</h2>
+          <p>
+            We measure how our website is used so we can improve it. Our own analytics are
+            first-party and cookieless: an anonymous identifier is stored in your browser's
+            local storage to count page views and clicks. It contains no personal
+            information, is never linked to your identity, and we do not log IP addresses or
+            use fingerprinting.
+          </p>
+          <p>
+            Our website is built and hosted on the Manus platform, which currently loads a
+            small number of its own services alongside our site: Umami (served via
+            manus-analytics.com), a cookieless, privacy-focused analytics tool;{" "}
+            <a
+              href="https://plausible.io/privacy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-gold hover:underline"
+            >
+              Plausible Analytics
+            </a>
+            , a cookieless analytics script added at the hosting layer; and a Manus platform
+            bundle that may include{" "}
+            <a
+              href="https://amplitude.com/privacy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-gold hover:underline"
+            >
+              Amplitude
+            </a>{" "}
+            telemetry while present. These services operate anonymously and without
+            advertising cookies. The third-party services our hosting platform loads may
+            change over time; please refer to the linked policies of those providers for
+            details on their data practices.
+          </p>
           <h2 className="font-serif text-2xl text-foreground">Contact</h2>
           <p>
             Questions about this policy? Contact us at {SITE.email} or {SITE.phone}, or write to

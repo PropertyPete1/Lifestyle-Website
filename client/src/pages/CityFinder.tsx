@@ -1,9 +1,12 @@
 import { useMemo, useState } from "react";
 import PageShell from "@/components/PageShell";
 import LeadForm from "@/components/LeadForm";
+import AIStatusSequence from "@/components/AIStatusSequence";
+import RevealText from "@/components/RevealText";
 import { useActivity } from "@/hooks/useActivity";
-import { useNcClickTracking } from "@/hooks/usePageTracking";
+import { useCityFinderGenerateTracking, useNcClickTracking } from "@/hooks/usePageTracking";
 import { SITE, FEATURES } from "@shared/site";
+import { selectCityImage } from "@shared/cityImagery";
 import { IMG } from "@/lib/assets";
 import { cn } from "@/lib/utils";
 import { Link, useRoute, useLocation } from "wouter";
@@ -201,11 +204,14 @@ function CityMatchResults({
   narratives,
   slug,
   answers,
+  animate = false,
 }: {
   matches: { name: string; slug: string; img: string; medianPrice: string; vibe: string; why: (a: Record<string, string>) => string }[];
   narratives: Record<string, { cityPitch: string; ldrPitch: string }> | null;
   slug: string | null;
   answers: Record<string, string>;
+  /** True only for a just-generated result. Shared links / reloads render instantly. */
+  animate?: boolean;
 }) {
   const logNcClick = useNcClickTracking();
 
@@ -245,14 +251,24 @@ function CityMatchResults({
       {matches.map((c, i) => {
         const narrative = narratives?.[c.name];
         const hardData = CITY_HARD_DATA[c.name];
+        // Vibe-matched imagery: picks the slot fitting the visitor's answers,
+        // falling back to the city's landing-page hero.
+        const image = selectCityImage(c.name, answers);
         return (
           <div key={c.slug} className="border border-border bg-card overflow-hidden">
             {/* Image + badge */}
-            <div className="relative aspect-[16/7] md:aspect-[16/5]">
-              <img src={c.img} alt={c.name} className="h-full w-full object-cover" />
+            <div className="relative aspect-[16/9] md:aspect-[16/5]">
+              <img src={image.src} alt={image.alt} className="h-full w-full object-cover" />
+              {/* Bottom scrim: keeps the vibe caption legible on any photo */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/40" />
               <span className="absolute top-4 left-4 bg-gold text-primary-foreground px-3 py-1 text-[10px] uppercase tracking-[0.2em]">
                 Match #{i + 1}
               </span>
+              {image.label && (
+                <span className="absolute bottom-3 left-4 right-4 text-[10px] uppercase tracking-[0.18em] text-gold/90">
+                  {image.label}
+                </span>
+              )}
             </div>
             <div className="p-6 lg:p-8">
               {/* City name + hard data */}
@@ -279,8 +295,20 @@ function CityMatchResults({
               {/* AI-generated personalized narrative */}
               {narrative ? (
                 <div className="mt-6 border-t border-border pt-6 space-y-4">
-                  <p className="text-sm leading-relaxed text-foreground/90">{narrative.cityPitch}</p>
-                  <p className="text-sm leading-relaxed text-muted-foreground italic">{narrative.ldrPitch}</p>
+                  {/* Progressive reveal on a fresh generation only — shared
+                      links and reloads render instantly (see RevealText). */}
+                  <RevealText
+                    text={narrative.cityPitch}
+                    instant={!animate}
+                    startDelay={120 + i * 450}
+                    className="text-sm leading-relaxed text-foreground/90"
+                  />
+                  <RevealText
+                    text={narrative.ldrPitch}
+                    instant={!animate}
+                    startDelay={320 + i * 450}
+                    className="text-sm leading-relaxed text-muted-foreground italic"
+                  />
                 </div>
               ) : (
                 <p className="mt-4 text-sm text-muted-foreground leading-relaxed">{c.why(answers)}</p>
@@ -421,7 +449,10 @@ export default function CityFinder() {
   const [aiNarratives, setAiNarratives] = useState<Record<string, { cityPitch: string; ldrPitch: string }> | null>(null);
   const [aiSlug, setAiSlug] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  /** True only for the AI result produced in this session — drives the reveal. */
+  const [justGenerated, setJustGenerated] = useState(false);
   const logActivity = useActivity();
+  const logCityFinderGenerate = useCityFinderGenerateTracking();
 
   const total = QUESTIONS.length;
   const atGate = step >= total;
@@ -437,10 +468,14 @@ export default function CityFinder() {
     onSuccess: (data) => {
       setAiNarratives(data.narratives);
       setAiSlug(data.slug);
+      setJustGenerated(true);
       setGenerating(false);
+      // One event per real AI generation (never on shared-link reads).
+      logCityFinderGenerate();
     },
     onError: () => {
       // Graceful fallback: show templated results without AI
+      setJustGenerated(false);
       setGenerating(false);
     },
   });
@@ -542,14 +577,21 @@ export default function CityFinder() {
           </div>
         )}
 
-        {/* Generating state */}
+        {/* Generating state — staged status in the site's typography, no spinner */}
         {atGate && unlocked && generating && (
           <div className="mt-12 text-center py-16">
-            <div className="inline-flex items-center gap-3">
-              <div className="h-5 w-5 border-2 border-gold border-t-transparent rounded-full animate-spin" />
-              <p className="text-muted-foreground">Writing your personalized city report…</p>
-            </div>
-            <p className="mt-4 text-xs text-muted-foreground/60">This takes about 10 seconds</p>
+            <p className="eyebrow text-gold">One moment</p>
+            <h2 className="font-serif text-3xl md:text-4xl mt-3 mb-8">
+              Building your city report…
+            </h2>
+            <AIStatusSequence
+              stages={[
+                "Analyzing your priorities…",
+                "Comparing 5 Texas markets…",
+                "Writing your personalized match…",
+              ]}
+              interval={1800}
+            />
           </div>
         )}
 
@@ -561,6 +603,7 @@ export default function CityFinder() {
               narratives={aiNarratives}
               slug={aiSlug}
               answers={answers}
+              animate={justGenerated}
             />
           </div>
         )}

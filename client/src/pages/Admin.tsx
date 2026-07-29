@@ -211,6 +211,7 @@ function AnalyticsViewer() {
               { label: "New Construction Clicks", value: String(data.totals.ncClicks) },
               { label: "List for Lease Clicks", value: String(data.totals.leaseClicks) },
               { label: "Links Form Submissions", value: String(data.totals.linksForms ?? 0) },
+              { label: "City Finder Reports", value: String(data.totals.cityFinderGenerates ?? 0) },
               { label: "Banner CTR (of homepage views)", value: pct(data.funnel.bannerClicks, data.funnel.homeViews) },
             ].map((c) => (
               <div key={c.label} className="border border-border bg-card p-5">

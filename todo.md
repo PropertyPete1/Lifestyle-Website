@@ -290,3 +290,9 @@
 - [x] City pages verified clean: area info + NC CTA + lead form only
 - [x] Zero deletion — all components, AI search backend, ListingsMap, seeds, admin Listings tab intact behind flag
 - [x] Live customer click-through verified (8-page screenshots + live DOM dropdown check); 104/104 tests pass
+
+## Analytics data hygiene + Site Stats source check (user request Jul 28, batch 5)
+- [x] Inspected page_events: zero __test-*/test-src/test-verify rows existed (guard already cleans them); found other synthetic artifacts instead
+- [x] Purged 108 synthetic rows: prelaunch_audit UTM session (5), /listing/anything check (1), manus.im preview-iframe sessions (87), pre-source dev rows (13), my two verification visitor sessions (10 more incl. the banner_click); 47 genuine direct-visit rows remain
+- [x] Guard verified live: ran analytics suite, re-checked DB — zero test rows left behind (finally-block DELETE works)
+- [x] Site Stats confirmed real FUB-synced values (68 sales / $16.7M / $161K–$885K / $360K — matches the last daily-stats-sync run, not the 63/$26M seed)

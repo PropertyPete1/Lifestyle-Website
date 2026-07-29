@@ -118,32 +118,41 @@ describe("analytics.summary", () => {
   });
 });
 
-describe("getAnalyticsSummary (live DB)", () => {
+/**
+ * Live-DB integration test. Skipped unless DATABASE_URL is set, so a keyless
+ * CI/sandbox run reports "skipped" rather than a misleading failure. It writes
+ * synthetic rows into page_events, so cleanup runs in `finally` — otherwise a
+ * mid-test assertion failure would leave `/__test-*` rows polluting the real
+ * Analytics dashboard.
+ */
+describe.skipIf(!process.env.DATABASE_URL)("getAnalyticsSummary (live DB)", () => {
   beforeEach(() => vi.restoreAllMocks());
 
   it("aggregates real events written through logPageEvent", async () => {
     const marker = `/__test-${Date.now()}`;
     const vid = `v_test${Date.now().toString(36)}`;
-    await db.logPageEvent({ kind: "view", path: marker, visitorId: vid, source: "test-src", utmMedium: "test-med", utmCampaign: "test-camp" });
-    await db.logPageEvent({ kind: "view", path: marker, visitorId: vid, source: "test-src", utmMedium: "test-med", utmCampaign: "test-camp" });
-    await db.logPageEvent({ kind: "nc_click", path: marker, visitorId: vid, source: "test-src" });
-    const summary = await db.getAnalyticsSummary(1);
-    const row = summary.perPage.find((p) => p.path === marker);
-    expect(row?.views).toBe(2);
-    expect(row?.uniques).toBe(1);
-    expect(summary.totals.views).toBeGreaterThanOrEqual(2);
-    expect(summary.totals.ncClicks).toBeGreaterThanOrEqual(1);
-    const src = summary.sources.find((s) => s.source === "test-src");
-    expect(src?.views).toBe(2);
-    expect(src?.medium).toBe("test-med");
-    expect(src?.campaign).toBe("test-camp");
-    const nc = summary.ncByPath.find((p) => p.path === marker);
-    expect(nc?.clicks).toBe(1);
-    // cleanup
-    const conn = await db.getDb();
-    if (conn) {
-      const { sql } = await import("drizzle-orm");
-      await conn.execute(sql`DELETE FROM page_events WHERE path = ${marker}`);
+    try {
+      await db.logPageEvent({ kind: "view", path: marker, visitorId: vid, source: "test-src", utmMedium: "test-med", utmCampaign: "test-camp" });
+      await db.logPageEvent({ kind: "view", path: marker, visitorId: vid, source: "test-src", utmMedium: "test-med", utmCampaign: "test-camp" });
+      await db.logPageEvent({ kind: "nc_click", path: marker, visitorId: vid, source: "test-src" });
+      const summary = await db.getAnalyticsSummary(1);
+      const row = summary.perPage.find((p) => p.path === marker);
+      expect(row?.views).toBe(2);
+      expect(row?.uniques).toBe(1);
+      expect(summary.totals.views).toBeGreaterThanOrEqual(2);
+      expect(summary.totals.ncClicks).toBeGreaterThanOrEqual(1);
+      const src = summary.sources.find((s) => s.source === "test-src");
+      expect(src?.views).toBe(2);
+      expect(src?.medium).toBe("test-med");
+      expect(src?.campaign).toBe("test-camp");
+      const nc = summary.ncByPath.find((p) => p.path === marker);
+      expect(nc?.clicks).toBe(1);
+    } finally {
+      const conn = await db.getDb();
+      if (conn) {
+        const { sql } = await import("drizzle-orm");
+        await conn.execute(sql`DELETE FROM page_events WHERE path = ${marker}`);
+      }
     }
   });
 });

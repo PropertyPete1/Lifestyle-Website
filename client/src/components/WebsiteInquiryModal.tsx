@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
+import { SITE } from "@shared/site";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -21,6 +24,7 @@ export default function WebsiteInquiryModal({
   onOpenChange: (open: boolean) => void;
 }) {
   const [form, setForm] = useState({ name: "", email: "", phone: "", business: "", message: "" });
+  const [consent, setConsent] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +38,7 @@ export default function WebsiteInquiryModal({
     /.+@.+\..+/.test(form.email.trim()) &&
     form.phone.trim().length >= 7 &&
     form.message.trim().length > 0 &&
+    consent &&
     !submit.isPending;
 
   const handleOpenChange = (o: boolean) => {
@@ -43,6 +48,7 @@ export default function WebsiteInquiryModal({
       setTimeout(() => {
         setDone(false);
         setError(null);
+        setConsent(false);
         setForm({ name: "", email: "", phone: "", business: "", message: "" });
       }, 300);
     }
@@ -102,6 +108,24 @@ export default function WebsiteInquiryModal({
                   placeholder="I saw your website and I'd love something similar for my business…"
                   onChange={(e) => setForm({ ...form, message: e.target.value })} />
               </div>
+              {/* TCPA consent — required, matching every other lead form on the site */}
+              <div className="flex items-start gap-3 pt-1">
+                <Checkbox
+                  id="wi-consent"
+                  checked={consent}
+                  onCheckedChange={(v) => setConsent(v === true)}
+                  className="mt-0.5"
+                />
+                <label
+                  htmlFor="wi-consent"
+                  className="text-[11px] leading-relaxed text-muted-foreground cursor-pointer">
+                  {SITE.tcpaConsentWebDesign}{" "}
+                  <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">
+                    Privacy Policy
+                  </Link>
+                  .
+                </label>
+              </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
               <Button
                 disabled={!canSubmit}
@@ -112,6 +136,7 @@ export default function WebsiteInquiryModal({
                     phone: form.phone.trim(),
                     business: form.business.trim() || undefined,
                     message: form.message.trim(),
+                    tcpaConsent: true,
                   })
                 }
                 className="bg-gold text-primary-foreground hover:bg-gold/90 rounded-none uppercase tracking-[0.2em] text-xs h-11">

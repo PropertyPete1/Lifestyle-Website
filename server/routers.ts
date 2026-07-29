@@ -313,6 +313,9 @@ export const appRouter = router({
           phone: z.string().trim().min(7).max(40),
           business: z.string().trim().max(190).optional(),
           message: z.string().trim().min(1).max(3000),
+          // Consent must be given, not assumed — this pipeline calls/texts the
+          // phone number collected above, same as any other lead form.
+          tcpaConsent: z.literal(true, { message: "TCPA consent is required" }),
         })
       )
       .mutation(async ({ input }) => {

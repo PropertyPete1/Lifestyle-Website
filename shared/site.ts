@@ -32,6 +32,9 @@ export const SITE = {
     "All information is deemed reliable but not guaranteed and should be independently reviewed and verified.",
   tcpaConsent:
     "I agree to be contacted by Lifestyle Design Realty via call, email, and text for real estate services. To opt out, you can reply 'stop' at any time or reply 'help' for assistance. You can also click the unsubscribe link in the emails. Message and data rates may apply. Message frequency may vary.",
+  /** Web-design inquiries are a separate pipeline (Lifestyle Design Technologies, not the brokerage). */
+  tcpaConsentWebDesign:
+    "I agree to be contacted by Lifestyle Design Technologies via call, email, and text about website design services. To opt out, you can reply 'stop' at any time or reply 'help' for assistance. You can also click the unsubscribe link in the emails. Message and data rates may apply. Message frequency may vary.",
   instagram: "https://www.instagram.com/lifestyledesignrealtytexas",
   facebook: "https://www.facebook.com/p/Lifestyle-Design-Realty-Texas-61578742983077/",
   cities: ["San Antonio", "New Braunfels", "Austin", "DFW", "Houston"] as const,

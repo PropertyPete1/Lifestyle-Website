@@ -331,3 +331,10 @@
 - [x] 5. Phone REQUIRED on every lead form: server superRefine (≥7 digits, Newsletter exempt); LeadForm now always sends phone (covers City Finder/Valuation/Contact/Convince/Lease); GetStarted+Recruit+WebsiteInquiry already required; Convince "email is enough" copy removed; SearchComingSoon links to /get-started (no separate form)
 - [x] 6. Privacy Policy links audited: all five consent texts use relative <Link href="/privacy">; zero absolute dev/sandbox/manus privacy URLs in code (user saw the dev URL because relative links resolve to whatever host serves the page — on the live domain they resolve to lifestyledesignrealty.com/privacy)
 - [x] Run full test suite (139/139), checkpoint 60babb63 deployed, live bundle index-CaYSg0AG.js verified on custom domain, pushed to GitHub Lifestyle-Website main
+
+## /links page upgrades (user request Jul 29, batch 11 — four items)
+- [x] 1. Now Hiring banner at top of /links: same NowHiringBanner component (identical copy/styling), clickable → /join, above profile header; 375px screenshots confirm fully on-screen
+- [x] 2. Lead capture form BELOW the buttons (ungated): "Or skip the browsing — we'll reach out to you"; universal LeadForm (Name/Email/Phone required + interest select); TCPA + relative /privacy; FUB tag "Website - Links Page" + answers-aware routing (Joining the team → "Recruit - Website", Leasing → "Landlord", Buying/Selling → "Interest - X"); server phone validation via leads.submit; 30-minute confirmation; links_form analytics event on success
+- [x] 3. Full social icon row: Instagram + Facebook fixed; TikTok (inline SVG) / YouTube / LinkedIn slots via new site_settings table + settings router, editable in Admin → Bio Links → Social Profiles, hidden until URL provided
+- [x] 4. LDT credit at very bottom opening WebsiteInquiryModal; "Explore Our Full Website" → / added as final links button; Links Form Submissions card added to admin Analytics totals
+- [ ] Run full test suite (143/143 done), deploy, verify live bundle on custom domain, push to GitHub

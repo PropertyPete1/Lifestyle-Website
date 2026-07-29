@@ -80,12 +80,24 @@ export function computeIntent(answers: Record<string, unknown> | undefined): Int
 }
 
 /** Build the full FUB tag: e.g. "Website - Valuation - Hot" */
-export function buildTag(sourceTag: string, intent: IntentLevel): string[] {
+export function buildTag(
+  sourceTag: string,
+  intent: IntentLevel,
+  answers?: Record<string, unknown>
+): string[] {
   const tags = [sourceTag];
   // Landlord routing: lease-listing inquiries are LANDLORD leads, never
   // buyer/seller. The explicit "Landlord" tag makes FUB smartlists and
   // routing rules unambiguous regardless of how the source tag is filtered.
   if (sourceTag === "Lease Listing Inquiry") tags.push("Landlord");
+  // /links quick-capture routing: the "I'm interested in..." selection routes
+  // the lead. "Joining the team" gets the Recruit treatment (same tag family
+  // as the /join screening form) so it lands in recruiting workflows, never
+  // in buyer/seller pipelines. "Leasing" routes as a Landlord lead.
+  const interest = String(answers?.interest ?? "");
+  if (interest === "Joining the team") tags.push("Recruit - Website");
+  else if (interest === "Leasing") tags.push("Landlord");
+  else if (interest === "Buying" || interest === "Selling") tags.push(`Interest - ${interest}`);
   if (intent !== "Unknown") tags.push(`${sourceTag} - ${intent}`);
   return tags;
 }
@@ -123,7 +135,7 @@ export async function sendToFub(input: FubLeadInput): Promise<FubResult> {
       lastName: lastName || undefined,
       emails: [{ value: input.email }],
       phones: input.phone ? [{ value: input.phone }] : undefined,
-      tags: buildTag(input.sourceTag, input.intent),
+      tags: buildTag(input.sourceTag, input.intent, input.answers),
     },
   };
 

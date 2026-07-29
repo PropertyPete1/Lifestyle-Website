@@ -116,3 +116,16 @@ export function useLeaseClickTracking() {
     );
   };
 }
+
+/**
+ * Returns a fire-and-forget logger for /links lead-form submissions, so the
+ * admin Analytics tab can compare /links capture rate vs. button clicks.
+ */
+export function useLinksFormTracking() {
+  const track = trpc.analytics.track.useMutation();
+  return () =>
+    track.mutate(
+      { kind: "links_form", path: "/links", visitorId: getVisitorId() || undefined, ...getTrafficSource() },
+      { onError: () => undefined }
+    );
+}

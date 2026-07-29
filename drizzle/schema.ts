@@ -127,6 +127,19 @@ export const bioLinks = mysqlTable("bio_links", {
 });
 export type BioLink = typeof bioLinks.$inferSelect;
 
+/**
+ * Generic admin-editable key/value settings. First use: social profile URLs
+ * for the /links page (social_tiktok, social_youtube, social_linkedin) —
+ * an empty value means the icon slot stays hidden until the owner pastes a
+ * URL in Admin → Bio Links → Social Profiles.
+ */
+export const siteSettings = mysqlTable("site_settings", {
+  id: int("id").autoincrement().primaryKey(),
+  key: varchar("key", { length: 120 }).notNull().unique(),
+  value: text("value").notNull(),
+});
+export type SiteSetting = typeof siteSettings.$inferSelect;
+
 export const leads = mysqlTable("leads", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 190 }).notNull(),

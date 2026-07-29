@@ -203,13 +203,14 @@ function AnalyticsViewer() {
       ) : (
         <div className="space-y-10">
           {/* Totals */}
-          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4">
             {[
               { label: "Page Views", value: String(data.totals.views) },
               { label: "Unique Visitors", value: String(data.totals.uniques) },
               { label: "Banner Clicks", value: String(data.totals.bannerClicks) },
               { label: "New Construction Clicks", value: String(data.totals.ncClicks) },
               { label: "List for Lease Clicks", value: String(data.totals.leaseClicks) },
+              { label: "Links Form Submissions", value: String(data.totals.linksForms ?? 0) },
               { label: "Banner CTR (of homepage views)", value: pct(data.funnel.bannerClicks, data.funnel.homeViews) },
             ].map((c) => (
               <div key={c.label} className="border border-border bg-card p-5">
@@ -812,6 +813,61 @@ function LinksManager() {
           )}
         </DialogContent>
       </Dialog>
+
+      <SocialProfilesEditor />
+    </div>
+  );
+}
+
+/**
+ * Social profile URL slots shown on /links. Instagram and Facebook are fixed
+ * brokerage accounts (shared/site.ts); TikTok / YouTube / LinkedIn are
+ * owner-editable here — an empty field keeps that icon hidden on /links.
+ */
+function SocialProfilesEditor() {
+  const utils = trpc.useUtils();
+  const { data: socials } = trpc.settings.socials.useQuery();
+  const [draft, setDraft] = useState<Record<string, string> | null>(null);
+  const set = trpc.settings.set.useMutation({
+    onSuccess: () => { utils.settings.socials.invalidate(); toast.success("Saved"); },
+    onError: (e) => toast.error(e.message || "Invalid URL"),
+  });
+
+  const values = draft ?? socials ?? {};
+  const fields: { key: "social_tiktok" | "social_youtube" | "social_linkedin"; label: string; placeholder: string }[] = [
+    { key: "social_tiktok", label: "TikTok URL", placeholder: "https://www.tiktok.com/@..." },
+    { key: "social_youtube", label: "YouTube URL", placeholder: "https://www.youtube.com/@..." },
+    { key: "social_linkedin", label: "LinkedIn URL", placeholder: "https://www.linkedin.com/company/..." },
+  ];
+
+  return (
+    <div className="mt-10 max-w-2xl">
+      <SectionHeader title="Social Profiles (/links icons)" />
+      <p className="text-sm text-muted-foreground mb-4">
+        Instagram and Facebook are fixed to the brokerage accounts. Paste URLs below to show the
+        TikTok, YouTube, or LinkedIn icons on /links — leave a field empty to keep that icon hidden.
+      </p>
+      <div className="space-y-3">
+        {fields.map((f) => (
+          <div key={f.key} className="flex items-end gap-2">
+            <div className="flex-1 space-y-1.5">
+              <Label>{f.label}</Label>
+              <Input
+                value={values[f.key] ?? ""}
+                placeholder={f.placeholder}
+                onChange={(e) => setDraft({ ...(draft ?? socials ?? {}), [f.key]: e.target.value })}
+              />
+            </div>
+            <Button
+              variant="outline"
+              className="rounded-none text-xs uppercase tracking-widest"
+              disabled={set.isPending}
+              onClick={() => set.mutate({ key: f.key, value: (values[f.key] ?? "").trim() })}>
+              Save
+            </Button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

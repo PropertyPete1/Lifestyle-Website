@@ -13,6 +13,7 @@ import {
   neighborhoods,
   pageEvents,
   partnerPitches,
+  siteSettings,
   siteStats,
   teamMembers,
   testimonials,
@@ -382,7 +383,7 @@ export async function logPageEvent(data: InsertPageEvent) {
  */
 export async function getAnalyticsSummary(days = 30) {
   const empty = {
-    totals: { views: 0, uniques: 0, bannerClicks: 0, ncClicks: 0, leaseClicks: 0 },
+    totals: { views: 0, uniques: 0, bannerClicks: 0, ncClicks: 0, leaseClicks: 0, linksForms: 0 },
     perPage: [] as { path: string; views: number; uniques: number }[],
     daily: [] as { day: string; views: number; uniques: number; bannerClicks: number; ncClicks: number; leaseClicks: number }[],
     funnel: { homeViews: 0, bannerClicks: 0, joinViews: 0, recruitSubmissions: 0 },
@@ -403,6 +404,7 @@ export async function getAnalyticsSummary(days = 30) {
         bannerClicks: sql<number>`SUM(${pageEvents.kind} = 'banner_click')`,
         ncClicks: sql<number>`SUM(${pageEvents.kind} = 'nc_click')`,
         leaseClicks: sql<number>`SUM(${pageEvents.kind} = 'lease_click')`,
+        linksForms: sql<number>`SUM(${pageEvents.kind} = 'links_form')`,
       })
       .from(pageEvents)
       .where(since),
@@ -478,6 +480,7 @@ export async function getAnalyticsSummary(days = 30) {
       bannerClicks: Number(t?.bannerClicks ?? 0),
       ncClicks: Number(t?.ncClicks ?? 0),
       leaseClicks: Number(t?.leaseClicks ?? 0),
+      linksForms: Number(t?.linksForms ?? 0),
     },
     perPage: perPage.map((r) => ({ path: r.path, views: Number(r.views), uniques: Number(r.uniques) })),
     daily: daily.map((r) => ({
@@ -503,4 +506,24 @@ export async function getAnalyticsSummary(days = 30) {
     })),
     ncByPath: ncByPath.map((r) => ({ path: r.path, clicks: Number(r.clicks) })),
   };
+}
+
+/**
+ * Site settings — generic admin-editable key/value store.
+ * First use: social profile URLs for the /links page. Empty value = hidden.
+ */
+export async function getSiteSettings(keys?: string[]) {
+  const db = await getDb();
+  if (!db) return [] as { key: string; value: string }[];
+  const rows = await db.select({ key: siteSettings.key, value: siteSettings.value }).from(siteSettings);
+  return keys ? rows.filter((r) => keys.includes(r.key)) : rows;
+}
+
+export async function setSiteSetting(key: string, value: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .insert(siteSettings)
+    .values({ key, value })
+    .onDuplicateKeyUpdate({ set: { value } });
 }

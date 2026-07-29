@@ -245,6 +245,26 @@ export const appRouter = router({
     remove: adminProcedure.input(z.object({ id: z.number() })).mutation(({ input }) => db.deleteBioLink(input.id)),
   }),
 
+  /**
+   * Admin-editable site settings. First use: social profile URLs on /links
+   * (TikTok / YouTube / LinkedIn slots — hidden until a URL is provided).
+   */
+  settings: router({
+    socials: publicProcedure.query(async () => {
+      const rows = await db.getSiteSettings(["social_tiktok", "social_youtube", "social_linkedin"]);
+      return Object.fromEntries(rows.map((r) => [r.key, r.value])) as Record<string, string>;
+    }),
+    set: adminProcedure
+      .input(
+        z.object({
+          key: z.enum(["social_tiktok", "social_youtube", "social_linkedin"]),
+          // Empty string clears/hides the slot; otherwise require a valid URL.
+          value: z.union([z.literal(""), z.string().url().max(500)]),
+        })
+      )
+      .mutation(({ input }) => db.setSiteSetting(input.key, input.value)),
+  }),
+
   leads: router({
     /**
      * Lead submission pipeline: store locally → push to Follow Up Boss →
@@ -405,11 +425,11 @@ export const appRouter = router({
    * No IPs, no user agents, no fingerprinting, no third-party services.
    */
   analytics: router({
-    /** Public: record a page view, banner click, NC outbound click, or lease hero click. */
+    /** Public: record a page view, banner click, NC/lease outbound click, or /links form submission. */
     track: publicProcedure
       .input(
         z.object({
-          kind: z.enum(["view", "banner_click", "nc_click", "lease_click"]),
+          kind: z.enum(["view", "banner_click", "nc_click", "lease_click", "links_form"]),
           path: z
             .string()
             .min(1)

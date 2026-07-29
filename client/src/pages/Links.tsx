@@ -1,6 +1,6 @@
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
-import { SITE } from "@shared/site";
+import { SITE, isLinkVisible } from "@shared/site";
 import { Instagram, Facebook, ArrowUpRight } from "lucide-react";
 import { useNcClickTracking } from "@/hooks/usePageTracking";
 
@@ -26,7 +26,10 @@ export default function Links() {
 
         {/* Links */}
         <div className="w-full mt-10 space-y-3">
-          {(links ?? []).map((l) => {
+          {/* Bio links are admin-managed data, so a paused route (e.g. the
+              seeded "Home Search" → /search) can still be present in the DB.
+              Filter here so no customer is sent to a coming-soon dead end. */}
+          {(links ?? []).filter((l) => isLinkVisible(l.url)).map((l) => {
             const isInternal = l.url.startsWith("/");
             const cls =
               "group lux-lift flex items-center justify-between w-full border border-border bg-card px-6 py-4 text-xs uppercase tracking-[0.2em] hover:border-gold hover:text-gold transition-colors";

@@ -20,6 +20,30 @@ export const FEATURES = {
   SHOW_NEWSLETTER: false,
 } as const;
 
+/** Routes powered by placeholder listing data, gated by SHOW_PROPERTY_SEARCH. */
+const PROPERTY_SEARCH_ROUTES = ["/search", "/portfolio", "/neighborhoods", "/listing"] as const;
+
+/**
+ * True when a URL points at a placeholder-powered search/browse/listing route.
+ * Matches the route itself and anything below it ("/listing/abc", "/search?q=")
+ * but never a merely similar path ("/searchable", "/portfolios").
+ * External URLs (http/mailto/tel) are never property-search routes.
+ */
+export function isPropertySearchRoute(url: string): boolean {
+  if (!url.startsWith("/")) return false;
+  const path = url.split(/[?#]/)[0].replace(/\/+$/, "") || "/";
+  return PROPERTY_SEARCH_ROUTES.some((r) => path === r || path.startsWith(`${r}/`));
+}
+
+/**
+ * Whether a customer-facing link may be shown. Admin-managed content (e.g. the
+ * /links bio buttons stored in the DB) can still point at paused routes, so
+ * every such surface must filter through this rather than trusting the data.
+ */
+export function isLinkVisible(url: string): boolean {
+  return FEATURES.SHOW_PROPERTY_SEARCH || !isPropertySearchRoute(url);
+}
+
 export const SITE = {
   name: "Lifestyle Design Realty",
   eyebrow: "EXPERTISE. KNOWLEDGE. EXPERIENCE.",

@@ -484,7 +484,7 @@ export const appRouter = router({
     track: publicProcedure
       .input(
         z.object({
-          kind: z.enum(["view", "banner_click", "nc_click", "lease_click", "links_form"]),
+          kind: z.enum(["view", "banner_click", "nc_click", "lease_click", "links_form", "city_finder_generate"]),
           path: z
             .string()
             .min(1)

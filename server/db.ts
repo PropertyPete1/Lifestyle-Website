@@ -399,7 +399,7 @@ export async function logPageEvent(data: InsertPageEvent) {
  */
 export async function getAnalyticsSummary(days = 30) {
   const empty = {
-    totals: { views: 0, uniques: 0, bannerClicks: 0, ncClicks: 0, leaseClicks: 0, linksForms: 0 },
+    totals: { views: 0, uniques: 0, bannerClicks: 0, ncClicks: 0, leaseClicks: 0, linksForms: 0, cityFinderGenerates: 0 },
     perPage: [] as { path: string; views: number; uniques: number }[],
     daily: [] as { day: string; views: number; uniques: number; bannerClicks: number; ncClicks: number; leaseClicks: number }[],
     funnel: { homeViews: 0, bannerClicks: 0, joinViews: 0, recruitSubmissions: 0 },
@@ -421,6 +421,7 @@ export async function getAnalyticsSummary(days = 30) {
         ncClicks: sql<number>`SUM(${pageEvents.kind} = 'nc_click')`,
         leaseClicks: sql<number>`SUM(${pageEvents.kind} = 'lease_click')`,
         linksForms: sql<number>`SUM(${pageEvents.kind} = 'links_form')`,
+        cityFinderGenerates: sql<number>`SUM(${pageEvents.kind} = 'city_finder_generate')`,
       })
       .from(pageEvents)
       .where(since),
@@ -497,6 +498,7 @@ export async function getAnalyticsSummary(days = 30) {
       ncClicks: Number(t?.ncClicks ?? 0),
       leaseClicks: Number(t?.leaseClicks ?? 0),
       linksForms: Number(t?.linksForms ?? 0),
+      cityFinderGenerates: Number(t?.cityFinderGenerates ?? 0),
     },
     perPage: perPage.map((r) => ({ path: r.path, views: Number(r.views), uniques: Number(r.uniques) })),
     daily: daily.map((r) => ({

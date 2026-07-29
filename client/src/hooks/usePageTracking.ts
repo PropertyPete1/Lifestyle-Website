@@ -118,6 +118,26 @@ export function useLeaseClickTracking() {
 }
 
 /**
+ * Returns a fire-and-forget logger for City Finder AI generations — one event
+ * per real generation, so the admin Analytics tab can track how often the
+ * signature tool actually produces a report (and what it costs in AI calls).
+ * Deliberately NOT fired when a cached /city-finder/:slug link is read.
+ */
+export function useCityFinderGenerateTracking() {
+  const track = trpc.analytics.track.useMutation();
+  return () =>
+    track.mutate(
+      {
+        kind: "city_finder_generate",
+        path: "/city-finder",
+        visitorId: getVisitorId() || undefined,
+        ...getTrafficSource(),
+      },
+      { onError: () => undefined }
+    );
+}
+
+/**
  * Returns a fire-and-forget logger for /links lead-form submissions, so the
  * admin Analytics tab can compare /links capture rate vs. button clicks.
  */

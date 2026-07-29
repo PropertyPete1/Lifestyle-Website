@@ -3,6 +3,7 @@ import { useLocation, useRoute } from "wouter";
 import PageShell from "@/components/PageShell";
 import LeadForm from "@/components/LeadForm";
 import AIStatusSequence from "@/components/AIStatusSequence";
+import RevealText from "@/components/RevealText";
 import FinancingBanner from "@/components/FinancingBanner";
 import { useActivity } from "@/hooks/useActivity";
 import { trpc } from "@/lib/trpc";
@@ -82,12 +83,15 @@ function PitchResult({
   stats,
   partnerName,
   slug,
+  animate = false,
 }: {
   pitch: string;
   city: string;
   stats: string[];
   partnerName?: string;
   slug: string;
+  /** True only for a letter generated in this session; shared links are instant. */
+  animate?: boolean;
 }) {
   const shareUrl = `${window.location.origin}/convince/${slug}`;
   const shareText = partnerName
@@ -124,7 +128,7 @@ function PitchResult({
         <p className="text-xs uppercase tracking-[0.3em]">{city}, Texas</p>
       </div>
       <blockquote className="mt-8 font-serif text-2xl md:text-3xl leading-relaxed text-foreground/95 italic">
-        {pitch}
+        <RevealText text={pitch} instant={!animate} startDelay={200} speed={38} />
       </blockquote>
 
       {stats.length > 0 && (
@@ -316,13 +320,8 @@ export default function Convince() {
               {partnerName.trim() ? `Writing to ${partnerName.trim()}…` : "Writing your letter…"}
             </h2>
             <AIStatusSequence
-              stages={[
-                "Reading your picks…",
-                "Choosing your best-fit city…",
-                "Writing the letter…",
-                "Polishing every line…",
-              ]}
-              interval={1600}
+              stages={["Reading their hesitations…", "Crafting your case…"]}
+              interval={2200}
             />
           </div>
         )}
@@ -443,6 +442,7 @@ export default function Convince() {
             stats={result.stats}
             partnerName={result.partnerName}
             slug={result.slug}
+            animate
           />
         )}
       </div>

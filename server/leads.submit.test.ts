@@ -93,4 +93,30 @@ describe("leads.submit", () => {
     ).rejects.toThrow();
     expect(createLead).not.toHaveBeenCalled();
   });
+
+  it("rejects lead submissions without a phone number (site-wide rule)", async () => {
+    const caller = appRouter.createCaller(publicCtx());
+    await expect(
+      caller.leads.submit({ ...baseInput, phone: undefined })
+    ).rejects.toThrow(/phone/i);
+    expect(createLead).not.toHaveBeenCalled();
+  });
+
+  it("rejects lead submissions with a junk phone (too few digits)", async () => {
+    const caller = appRouter.createCaller(publicCtx());
+    await expect(caller.leads.submit({ ...baseInput, phone: "12-34" })).rejects.toThrow(/phone/i);
+    expect(createLead).not.toHaveBeenCalled();
+  });
+
+  it("allows the Newsletter subscription without a phone (the one exception)", async () => {
+    sendToFub.mockResolvedValue({ ok: true, fubId: "77" });
+    const caller = appRouter.createCaller(publicCtx());
+    const result = await caller.leads.submit({
+      ...baseInput,
+      phone: undefined,
+      sourceTag: "Website - Newsletter",
+    });
+    expect(result.success).toBe(true);
+    expect(createLead).toHaveBeenCalledTimes(1);
+  });
 });

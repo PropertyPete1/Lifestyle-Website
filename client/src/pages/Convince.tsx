@@ -165,7 +165,7 @@ function PitchResult({
       <div className="mt-16 border-t border-border pt-12 max-w-lg mx-auto">
         <h3 className="font-serif text-2xl">Want us to build your full moving plan?</h3>
         <p className="mt-2 text-sm text-muted-foreground">
-          Totally optional — leave your email and we'll map out what the move actually looks like.
+          Leave your details and we'll map out what the move actually looks like — we typically respond within 30 minutes.
         </p>
         <div className="mt-6 text-left">
           <LeadForm

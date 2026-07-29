@@ -100,3 +100,19 @@ export function useNcClickTracking() {
     );
   };
 }
+
+/**
+ * Returns a fire-and-forget logger for LIST FOR LEASE clicks (landlord
+ * interest). `path` records WHERE the CTA was clicked, same pattern as
+ * the New Construction click tracking.
+ */
+export function useLeaseClickTracking() {
+  const track = trpc.analytics.track.useMutation();
+  return () => {
+    const path = (window.location.pathname.split(/[?#]/)[0] || "/").replace(/(.)\/$/, "$1");
+    track.mutate(
+      { kind: "lease_click", path, visitorId: getVisitorId() || undefined, ...getTrafficSource() },
+      { onError: () => undefined }
+    );
+  };
+}

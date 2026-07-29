@@ -60,6 +60,9 @@ const listingInput = z.object({
 const leadInput = z.object({
   name: z.string().min(1).max(190),
   email: z.string().email().max(320),
+  // Phone is REQUIRED on every lead form site-wide (we work leads by phone).
+  // Enforced in superRefine below; the ONE exception is the Newsletter
+  // content subscription (email-only by design).
   phone: z.string().max(40).optional(),
   message: z.string().max(5000).optional(),
   sourceTag: z.string().min(1).max(190),
@@ -67,6 +70,16 @@ const leadInput = z.object({
   tcpaConsent: z.literal(true, { message: "TCPA consent is required" }),
   /** Anonymous first-party visitor id — links pre-inquiry site activity. */
   visitorId: z.string().max(40).optional(),
+}).superRefine((val, ctx) => {
+  if (val.sourceTag === "Website - Newsletter") return; // content subscription, not a lead inquiry
+  const digits = (val.phone ?? "").replace(/\D/g, "");
+  if (digits.length < 7) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["phone"],
+      message: "A valid phone number is required.",
+    });
+  }
 });
 
 export const appRouter = router({
@@ -392,11 +405,11 @@ export const appRouter = router({
    * No IPs, no user agents, no fingerprinting, no third-party services.
    */
   analytics: router({
-    /** Public: record a page view, banner click, or New Construction outbound click. */
+    /** Public: record a page view, banner click, NC outbound click, or lease hero click. */
     track: publicProcedure
       .input(
         z.object({
-          kind: z.enum(["view", "banner_click", "nc_click"]),
+          kind: z.enum(["view", "banner_click", "nc_click", "lease_click"]),
           path: z
             .string()
             .min(1)
@@ -415,11 +428,17 @@ export const appRouter = router({
         if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
         // Never track the admin area itself
         if (path.startsWith("/admin")) return { ok: true } as const;
+        // Exclude Manus preview-iframe traffic (manus.im referrer) so agent
+        // verification sessions and the Management UI preview never count.
+        const src = (input.source ?? "").toLowerCase();
+        if (src.includes("manus.im") || src.includes("manus.computer") || src.includes("manus-analytics")) {
+          return { ok: true } as const;
+        }
         await db.logPageEvent({
           kind: input.kind,
           path,
           visitorId: input.visitorId ?? "",
-          source: (input.source ?? "").toLowerCase().slice(0, 120),
+          source: src.slice(0, 120),
           utmMedium: (input.utmMedium ?? "").toLowerCase().slice(0, 120),
           utmCampaign: (input.utmCampaign ?? "").slice(0, 190),
         });

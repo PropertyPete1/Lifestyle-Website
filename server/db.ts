@@ -382,9 +382,9 @@ export async function logPageEvent(data: InsertPageEvent) {
  */
 export async function getAnalyticsSummary(days = 30) {
   const empty = {
-    totals: { views: 0, uniques: 0, bannerClicks: 0, ncClicks: 0 },
+    totals: { views: 0, uniques: 0, bannerClicks: 0, ncClicks: 0, leaseClicks: 0 },
     perPage: [] as { path: string; views: number; uniques: number }[],
-    daily: [] as { day: string; views: number; uniques: number; bannerClicks: number; ncClicks: number }[],
+    daily: [] as { day: string; views: number; uniques: number; bannerClicks: number; ncClicks: number; leaseClicks: number }[],
     funnel: { homeViews: 0, bannerClicks: 0, joinViews: 0, recruitSubmissions: 0 },
     sources: [] as { source: string; medium: string; campaign: string; views: number; uniques: number }[],
     ncByPath: [] as { path: string; clicks: number }[],
@@ -402,6 +402,7 @@ export async function getAnalyticsSummary(days = 30) {
         uniques: sql<number>`COUNT(DISTINCT CASE WHEN ${pageEvents.kind} = 'view' AND ${pageEvents.visitorId} <> '' THEN ${pageEvents.visitorId} END)`,
         bannerClicks: sql<number>`SUM(${pageEvents.kind} = 'banner_click')`,
         ncClicks: sql<number>`SUM(${pageEvents.kind} = 'nc_click')`,
+        leaseClicks: sql<number>`SUM(${pageEvents.kind} = 'lease_click')`,
       })
       .from(pageEvents)
       .where(since),
@@ -423,6 +424,7 @@ export async function getAnalyticsSummary(days = 30) {
         uniques: sql<number>`COUNT(DISTINCT CASE WHEN ${pageEvents.kind} = 'view' AND ${pageEvents.visitorId} <> '' THEN ${pageEvents.visitorId} END)`,
         bannerClicks: sql<number>`SUM(${pageEvents.kind} = 'banner_click')`,
         ncClicks: sql<number>`SUM(${pageEvents.kind} = 'nc_click')`,
+        leaseClicks: sql<number>`SUM(${pageEvents.kind} = 'lease_click')`,
       })
       .from(pageEvents)
       .where(since)
@@ -475,6 +477,7 @@ export async function getAnalyticsSummary(days = 30) {
       uniques: Number(t?.uniques ?? 0),
       bannerClicks: Number(t?.bannerClicks ?? 0),
       ncClicks: Number(t?.ncClicks ?? 0),
+      leaseClicks: Number(t?.leaseClicks ?? 0),
     },
     perPage: perPage.map((r) => ({ path: r.path, views: Number(r.views), uniques: Number(r.uniques) })),
     daily: daily.map((r) => ({
@@ -483,6 +486,7 @@ export async function getAnalyticsSummary(days = 30) {
       uniques: Number(r.uniques ?? 0),
       bannerClicks: Number(r.bannerClicks ?? 0),
       ncClicks: Number(r.ncClicks ?? 0),
+      leaseClicks: Number(r.leaseClicks ?? 0),
     })),
     funnel: {
       homeViews: Number(f?.homeViews ?? 0),

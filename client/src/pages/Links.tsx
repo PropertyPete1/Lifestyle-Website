@@ -2,7 +2,7 @@ import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { SITE, isLinkVisible } from "@shared/site";
 import { Instagram, Facebook, ArrowUpRight } from "lucide-react";
-import { useNcClickTracking } from "@/hooks/usePageTracking";
+import { useNcClickTracking, useLeaseClickTracking } from "@/hooks/usePageTracking";
 
 /**
  * /links — link-in-bio page replacing Linktree. Mobile-first, on-brand.
@@ -11,6 +11,7 @@ import { useNcClickTracking } from "@/hooks/usePageTracking";
 export default function Links() {
   const { data: links } = trpc.links.list.useQuery();
   const logNcClick = useNcClickTracking();
+  const logLeaseClick = useLeaseClickTracking();
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col items-center px-5 py-12">
@@ -51,6 +52,14 @@ export default function Links() {
               </a>
             );
           })}
+          {/* Landlord path for Instagram traffic — tracked like the hero CTA. */}
+          <Link
+            href="/lease"
+            onClick={logLeaseClick}
+            className="group lux-lift flex items-center justify-between w-full border border-border bg-card px-6 py-4 text-xs uppercase tracking-[0.2em] hover:border-gold hover:text-gold transition-colors">
+            Own a Rental? List It With Us
+            <ArrowUpRight className="h-4 w-4 opacity-40 group-hover:opacity-100" />
+          </Link>
         </div>
 
         {/* Socials */}

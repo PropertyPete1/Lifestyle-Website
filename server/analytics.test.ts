@@ -92,6 +92,25 @@ describe("analytics.track", () => {
     );
   });
 
+  it("records List for Lease clicks with kind lease_click and placement path", async () => {
+    const spy = vi.spyOn(db, "logPageEvent").mockResolvedValue(undefined);
+    const caller = appRouter.createCaller(ctxWith(null));
+    await caller.analytics.track({ kind: "lease_click", path: "/links", visitorId: "v_abc123" });
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "lease_click", path: "/links", visitorId: "v_abc123" })
+    );
+  });
+
+  it("excludes Manus preview-iframe traffic (manus.im / manus.computer referrers)", async () => {
+    const spy = vi.spyOn(db, "logPageEvent").mockResolvedValue(undefined);
+    const caller = appRouter.createCaller(ctxWith(null));
+    const a = await caller.analytics.track({ kind: "view", path: "/", source: "manus.im" });
+    const b = await caller.analytics.track({ kind: "view", path: "/join", source: "3000-abc.manus.computer" });
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("rejects paths that do not start with /", async () => {
     const caller = appRouter.createCaller(ctxWith(null));
     await expect(

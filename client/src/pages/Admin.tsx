@@ -149,18 +149,19 @@ function AnalyticsViewer() {
 
   /** Roll daily rows into weeks starting Monday for the weekly table. */
   const weekly = (() => {
-    if (!data) return [] as { week: string; views: number; uniques: number; bannerClicks: number; ncClicks: number }[];
-    const map = new Map<string, { week: string; views: number; uniques: number; bannerClicks: number; ncClicks: number }>();
+    if (!data) return [] as { week: string; views: number; uniques: number; bannerClicks: number; ncClicks: number; leaseClicks: number }[];
+    const map = new Map<string, { week: string; views: number; uniques: number; bannerClicks: number; ncClicks: number; leaseClicks: number }>();
     for (const d of data.daily) {
       const date = new Date(`${d.day}T00:00:00Z`);
       const monday = new Date(date);
       monday.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
       const key = monday.toISOString().slice(0, 10);
-      const row = map.get(key) ?? { week: key, views: 0, uniques: 0, bannerClicks: 0, ncClicks: 0 };
+      const row = map.get(key) ?? { week: key, views: 0, uniques: 0, bannerClicks: 0, ncClicks: 0, leaseClicks: 0 };
       row.views += d.views;
       row.uniques += d.uniques; // approx: sum of daily uniques
       row.bannerClicks += d.bannerClicks;
       row.ncClicks += d.ncClicks;
+      row.leaseClicks += d.leaseClicks;
       map.set(key, row);
     }
     return Array.from(map.values()).sort((a, b) => (a.week < b.week ? 1 : -1));
@@ -202,12 +203,13 @@ function AnalyticsViewer() {
       ) : (
         <div className="space-y-10">
           {/* Totals */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
             {[
               { label: "Page Views", value: String(data.totals.views) },
               { label: "Unique Visitors", value: String(data.totals.uniques) },
               { label: "Banner Clicks", value: String(data.totals.bannerClicks) },
               { label: "New Construction Clicks", value: String(data.totals.ncClicks) },
+              { label: "List for Lease Clicks", value: String(data.totals.leaseClicks) },
               { label: "Banner CTR (of homepage views)", value: pct(data.funnel.bannerClicks, data.funnel.homeViews) },
             ].map((c) => (
               <div key={c.label} className="border border-border bg-card p-5">
@@ -339,11 +341,12 @@ function AnalyticsViewer() {
                   <TableHead className="text-right">Uniques</TableHead>
                   <TableHead className="text-right">Banner Clicks</TableHead>
                   <TableHead className="text-right">NC Clicks</TableHead>
+                  <TableHead className="text-right">Lease Clicks</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.daily.length === 0 && (
-                  <TableRow><TableCell colSpan={6} className="text-muted-foreground text-sm">No traffic recorded yet in this window.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} className="text-muted-foreground text-sm">No traffic recorded yet in this window.</TableCell></TableRow>
                 )}
                 {data.daily.map((d) => (
                   <TableRow key={d.day}>
@@ -355,6 +358,7 @@ function AnalyticsViewer() {
                     <TableCell className="text-right">{d.uniques}</TableCell>
                     <TableCell className="text-right">{d.bannerClicks}</TableCell>
                     <TableCell className="text-right">{d.ncClicks}</TableCell>
+                    <TableCell className="text-right">{d.leaseClicks}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -372,11 +376,12 @@ function AnalyticsViewer() {
                   <TableHead className="text-right">Uniques (approx)</TableHead>
                   <TableHead className="text-right">Banner Clicks</TableHead>
                   <TableHead className="text-right">NC Clicks</TableHead>
+                  <TableHead className="text-right">Lease Clicks</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {weekly.length === 0 && (
-                  <TableRow><TableCell colSpan={5} className="text-muted-foreground text-sm">No traffic recorded yet in this window.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={6} className="text-muted-foreground text-sm">No traffic recorded yet in this window.</TableCell></TableRow>
                 )}
                 {weekly.map((w) => (
                   <TableRow key={w.week}>
@@ -385,6 +390,7 @@ function AnalyticsViewer() {
                     <TableCell className="text-right">{w.uniques}</TableCell>
                     <TableCell className="text-right">{w.bannerClicks}</TableCell>
                     <TableCell className="text-right">{w.ncClicks}</TableCell>
+                    <TableCell className="text-right">{w.leaseClicks}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

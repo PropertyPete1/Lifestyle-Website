@@ -92,7 +92,7 @@ export default function LeadForm({
     submit.mutate({
       name,
       email,
-      phone: phone || undefined,
+      phone,
       message: message || undefined,
       sourceTag,
       answers: { ...answers, ...extraAnswers },

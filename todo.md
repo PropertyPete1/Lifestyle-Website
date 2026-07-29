@@ -327,7 +327,7 @@
 - [x] 1. Track LIST FOR LEASE hero clicks as first-party event (lease_click kind) shown in Analytics (totals card + daily/weekly columns; hero + /links tracked)
 - [x] 2. Add "Own a Rental? List It With Us" button on /links pointing to /lease (tracked as lease_click)
 - [x] 3. Launch-day analytics reset: all page_events purged (0 rows); manus.im/manus.computer-sourced traffic now excluded server-side
-- [ ] 4. Post-bind sweep on lifestyledesignrealty.com: SSL, all routes, forms, FUB delivery, analytics attribution, script inspection vs privacy disclosure, Made-with-Manus badge check
+- [x] 4. Post-bind sweep on lifestyledesignrealty.com: SSL valid (TLS 1.3, Google Trust, exp Oct 2026, apex+www), all 19 routes 200, live Contact form E2E → FUB synced fubId=6248 (test data cleaned), server rejects phone-less submission (HTTP 400 "A valid phone number is required"), script inspection: custom domain loads only umami + manus-runtime (NO plausible — manus.space-only; NO Made-with-Manus badge on either domain); privacy disclosure covers everything that loads
 - [x] 5. Phone REQUIRED on every lead form: server superRefine (≥7 digits, Newsletter exempt); LeadForm now always sends phone (covers City Finder/Valuation/Contact/Convince/Lease); GetStarted+Recruit+WebsiteInquiry already required; Convince "email is enough" copy removed; SearchComingSoon links to /get-started (no separate form)
 - [x] 6. Privacy Policy links audited: all five consent texts use relative <Link href="/privacy">; zero absolute dev/sandbox/manus privacy URLs in code (user saw the dev URL because relative links resolve to whatever host serves the page — on the live domain they resolve to lifestyledesignrealty.com/privacy)
-- [ ] Run full test suite, checkpoint/deploy, verify live bundle on custom domain, push to GitHub
+- [x] Run full test suite (139/139), checkpoint 60babb63 deployed, live bundle index-CaYSg0AG.js verified on custom domain, pushed to GitHub Lifestyle-Website main

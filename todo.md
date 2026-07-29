@@ -337,4 +337,7 @@
 - [x] 2. Lead capture form BELOW the buttons (ungated): "Or skip the browsing — we'll reach out to you"; universal LeadForm (Name/Email/Phone required + interest select); TCPA + relative /privacy; FUB tag "Website - Links Page" + answers-aware routing (Joining the team → "Recruit - Website", Leasing → "Landlord", Buying/Selling → "Interest - X"); server phone validation via leads.submit; 30-minute confirmation; links_form analytics event on success
 - [x] 3. Full social icon row: Instagram + Facebook fixed; TikTok (inline SVG) / YouTube / LinkedIn slots via new site_settings table + settings router, editable in Admin → Bio Links → Social Profiles, hidden until URL provided
 - [x] 4. LDT credit at very bottom opening WebsiteInquiryModal; "Explore Our Full Website" → / added as final links button; Links Form Submissions card added to admin Analytics totals
-- [ ] Run full test suite (143/143 done), deploy, verify live bundle on custom domain, push to GitHub
+- [x] Run full test suite (143/143), deploy checkpoint 0a49a96d, live bundle index-DKnlwcZH.js on lifestyledesignrealty.com verified (all 6 new strings present), pushed to GitHub Lifestyle-Website main (b04d575..0a49a96)
+
+## /links trust signal line (user request Jul 29, batch 12)
+- [x] Compact one-line trust signals under "Central Texas Real Estate Professionals" on /links: VeteranBadge (compact, same gold flag as site header) + "4.6★ · 22 Google Reviews", hairline divider between, single line; 375px screenshot confirms clean fit with margin; 143/143 tests; deployed + pushed

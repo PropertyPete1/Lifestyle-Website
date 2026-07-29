@@ -11,6 +11,7 @@ import {
 import NowHiringBanner from "@/components/NowHiringBanner";
 import WebsiteInquiryModal from "@/components/WebsiteInquiryModal";
 import LeadForm from "@/components/LeadForm";
+import VeteranBadge from "@/components/VeteranBadge";
 
 /** TikTok mark (lucide has no TikTok icon) — stroke-styled to match. */
 function TikTokIcon({ className }: { className?: string }) {
@@ -58,6 +59,18 @@ export default function Links() {
           LIFESTYLE DESIGN <span className="text-gold">REALTY</span>
         </h1>
         <p className="eyebrow text-muted-foreground mt-2">Central Texas Real Estate Professionals</p>
+
+        {/* Compact trust signals — same treatments as the main site header.
+            One scannable line: veteran badge + Google rating. */}
+        <div className="mt-3 flex items-center justify-center gap-2.5 whitespace-nowrap">
+          <VeteranBadge compact className="tracking-[0.14em]" />
+          <span className="h-3 w-px bg-border shrink-0" aria-hidden />
+          <span className="inline-flex items-center gap-1 text-[8px] font-sans font-medium uppercase tracking-[0.14em] leading-none text-gold/90">
+            <span aria-hidden>4.6★</span>
+            <span className="text-muted-foreground">·</span>
+            <span>22 Google Reviews</span>
+          </span>
+        </div>
 
         {/* Links */}
         <div className="w-full mt-10 space-y-3">

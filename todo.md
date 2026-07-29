@@ -352,4 +352,4 @@
 - [x] Route: /city-finder/:slug renders the cached shared result via CityFinderShared component (same narrative on reload, counts as fresh site visit)
 - [x] Hard data (median price, price range, facts) stays non-AI; only narrative connective tissue is AI-written
 - [x] Vitest: 9 new tests (cityFinder.test.ts) covering generate, getBySlug, fallback, compliance, edge cases — 152/152 total
-- [ ] Deploy checkpoint, verify shareable URLs on live domain, push to GitHub
+- [x] Deploy checkpoint 7f5f9cb4, verified on lifestyledesignrealty.com (new bundle index-BhxZoMxz.js live, cityFinder.getBySlug returns 200, AI generation produces vivid personalized narratives, shared URL reproduces identical cached result — md5 verified, mobile 375px renders clean), pushed to GitHub Lifestyle-Website main (beb58cb..7f5f9cb)

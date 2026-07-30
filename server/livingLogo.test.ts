@@ -4,6 +4,8 @@ import {
   breathe,
   DEPTH_BUCKETS,
   fibonacciSphere,
+  isTrustworthyFrame,
+  TRUSTWORTHY_FRAME_MS,
   FIRST_CHECK_SAMPLES,
   haloCount,
   HALO_BY_TIER,
@@ -366,5 +368,39 @@ describe("shimmerBoost — rare arc, contained and gentle", () => {
     const wrapped = shimmerBoost(Math.PI / 2, 0.3, 0.5, Math.PI / 2);
     const same = shimmerBoost(Math.PI / 2, 0.3 + Math.PI * 2 * 5, 0.5, Math.PI / 2);
     expect(same).toBeCloseTo(wrapped, 5);
+  });
+});
+
+describe("isTrustworthyFrame — stalls must not be read as slowness", () => {
+  it("accepts normal frame deltas", () => {
+    for (const ms of [8, 16.6, 21, 33, 39]) expect(isTrustworthyFrame(ms)).toBe(true);
+  });
+
+  it("rejects stalled frames (throttled tab, app switch, long task)", () => {
+    for (const ms of [TRUSTWORTHY_FRAME_MS, 50, 120, 2000]) {
+      expect(isTrustworthyFrame(ms)).toBe(false);
+    }
+  });
+
+  it("rejects zero/negative deltas", () => {
+    expect(isTrustworthyFrame(0)).toBe(false);
+    expect(isTrustworthyFrame(-5)).toBe(false);
+  });
+
+  it("sits above the degrade budget so real slowness is still measurable", () => {
+    // Frames between the 21ms budget and the 40ms ceiling MUST still count,
+    // otherwise a genuinely struggling device could never trigger a downgrade.
+    expect(TRUSTWORTHY_FRAME_MS).toBeGreaterThan(21);
+    expect(isTrustworthyFrame(30)).toBe(true);
+    expect(shouldDegrade(Array(STEADY_CHECK_SAMPLES).fill(30))).toBe(true);
+  });
+
+  it("a clamped-stall run would have degraded — the guard prevents it", () => {
+    // Regression: the motion clamp is 50ms, above the 21ms budget. Before the
+    // guard, a throttled tab fed 50ms samples in and the animation shed tiers
+    // all the way to static for reasons unrelated to render cost.
+    const clampedStalls = Array(STEADY_CHECK_SAMPLES).fill(50);
+    expect(shouldDegrade(clampedStalls)).toBe(true); // would have degraded...
+    expect(clampedStalls.every((ms) => !isTrustworthyFrame(ms))).toBe(true); // ...but none are measurable
   });
 });

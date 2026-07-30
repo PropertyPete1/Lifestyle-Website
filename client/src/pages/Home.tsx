@@ -7,6 +7,7 @@ import NewsletterForm from "@/components/NewsletterForm";
 import ListingShowcase from "@/components/ListingShowcase";
 import AISearchBar from "@/components/AISearchBar";
 import FinancingBanner from "@/components/FinancingBanner";
+import NaniteSwarm from "@/components/NaniteSwarm";
 import TestimonialCarousel from "@/components/TestimonialCarousel";
 import VeteranBadge from "@/components/VeteranBadge";
 import TechShowcase from "@/components/TechShowcase";
@@ -54,6 +55,10 @@ export default function Home() {
           <div className="absolute inset-0 bg-black/65" />
           <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-black/40" />
         </div>
+        {/* Animated nanite swarm. Sits AFTER the background and BEFORE the
+            content below, so it always paints behind the headline/CTAs by DOM
+            order, and is pointer-events-none so it can never eat a CTA tap. */}
+        <NaniteSwarm />
         <div className="relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pt-32 pb-16">
           <p className="eyebrow text-foreground/90">{SITE.eyebrow}</p>
           <h1 className="display-serif hero-glow text-[10.5vw] sm:text-6xl md:text-7xl lg:text-[5.5rem] uppercase mt-5 text-foreground">
@@ -66,7 +71,7 @@ export default function Home() {
               follow. flex-wrap keeps the row elegant at every width: at
               desktop the four buttons flow onto two balanced lines if the
               viewport is too narrow for one, and on mobile they stack. */}
-          <div className="mt-12 flex flex-wrap items-center gap-5">
+          <div data-hero-ctas className="mt-12 flex flex-wrap items-center gap-5">
             <a
               href="#get-started"
               className="glow-gold inline-flex items-center gap-3 bg-gold text-primary-foreground px-9 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:bg-gold/90 transition-colors">

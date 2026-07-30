@@ -5,6 +5,7 @@ import {
   breathe,
   DEPTH_BUCKETS,
   FIRST_CHECK_SAMPLES,
+  isTrustworthyFrame,
   haloCount,
   MICRO_EVENT_DURATION,
   nextMicroEventDelay,
@@ -311,8 +312,17 @@ export default function LivingLogo({
         const t = (now - t0) / 1000;
 
         // --- adaptive degradation -----------------------------------------
-        frameTimes.push(dt * 1000);
-        if (frameTimes.length > 90) frameTimes.shift();
+        // Only MEASURE frames that reflect render cost. A stalled frame
+        // (throttled tab, app switch, long task elsewhere) would otherwise be
+        // read as "we are too slow" and shed tiers for no reason — and a run of
+        // them would degrade all the way to static.
+        const dtMs = dtRaw * 1000;
+        if (isTrustworthyFrame(dtMs)) {
+          frameTimes.push(dtMs);
+          if (frameTimes.length > 90) frameTimes.shift();
+        } else {
+          frameTimes.length = 0; // a stall invalidates the sample window
+        }
         const windowSize = checkedOnce ? STEADY_CHECK_SAMPLES : FIRST_CHECK_SAMPLES;
         if (shouldDegrade(frameTimes, 21, windowSize)) {
           checkedOnce = true;

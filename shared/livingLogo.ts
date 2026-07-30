@@ -102,6 +102,23 @@ export function haloCount(tier: PerfTier): number {
 }
 
 /**
+ * Longest frame delta still treated as a MEASUREMENT of render cost.
+ *
+ * A delta above this means the loop was stalled — a throttled/backgrounded tab,
+ * an app switch, a long task elsewhere on the page — not that our render is
+ * expensive. Feeding those samples to the degrade detector would make it shed
+ * tiers (eventually all the way to static) for reasons that have nothing to do
+ * with the animation. Callers clamp motion to a similar ceiling; this is the
+ * separate question of whether the frame is worth measuring.
+ */
+export const TRUSTWORTHY_FRAME_MS = 40;
+
+/** Whether a frame delta reflects real render cost rather than a stall. */
+export function isTrustworthyFrame(dtMs: number): boolean {
+  return dtMs > 0 && dtMs < TRUSTWORTHY_FRAME_MS;
+}
+
+/**
  * Frames to observe before the FIRST degrade decision. Shorter than the
  * steady-state window so a device that can't carry the denser v2 form drops a
  * tier quickly instead of stuttering through a long sample period.

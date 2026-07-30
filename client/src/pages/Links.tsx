@@ -12,6 +12,7 @@ import NowHiringBanner from "@/components/NowHiringBanner";
 import WebsiteInquiryModal from "@/components/WebsiteInquiryModal";
 import LeadForm from "@/components/LeadForm";
 import VeteranBadge from "@/components/VeteranBadge";
+import LivingLogo from "@/components/LivingLogo";
 
 /** TikTok mark (lucide has no TikTok icon) — stroke-styled to match. */
 function TikTokIcon({ className }: { className?: string }) {
@@ -51,11 +52,11 @@ export default function Links() {
           mobile bio traffic, so this is prime recruiting real estate. */}
       <NowHiringBanner />
       <div className="w-full max-w-md flex flex-col items-center text-center">
-        {/* Profile header */}
-        <div className="h-20 w-20 rounded-full border border-gold/60 flex items-center justify-center">
-          <span className="font-serif text-2xl text-gold">LDR</span>
-        </div>
-        <h1 className="font-serif text-2xl tracking-[0.12em] mt-5">
+        {/* Profile header — the animated brand mark. The box is a fixed size so
+            the space is reserved before the canvas initialises (no layout
+            shift), and the LDR mark inside it doubles as the static fallback. */}
+        <LivingLogo size={168} />
+        <h1 className="font-serif text-2xl tracking-[0.12em] mt-1">
           LIFESTYLE DESIGN <span className="text-gold">REALTY</span>
         </h1>
         <p className="eyebrow text-muted-foreground mt-2">Central Texas Real Estate Professionals</p>

@@ -4,6 +4,7 @@ import {
   breathe,
   DEPTH_BUCKETS,
   fibonacciSphere,
+  isOrbHero,
   isTrustworthyFrame,
   TRUSTWORTHY_FRAME_MS,
   FIRST_CHECK_SAMPLES,
@@ -12,6 +13,7 @@ import {
   MICRO_EVENT_MAX_GAP,
   MICRO_EVENT_MIN_GAP,
   nextMicroEventDelay,
+  ORB_HERO_FRACTION,
   nextTierDown,
   particleCount,
   PARTICLES_BY_TIER,
@@ -402,5 +404,103 @@ describe("isTrustworthyFrame — stalls must not be read as slowness", () => {
     const clampedStalls = Array(STEADY_CHECK_SAMPLES).fill(50);
     expect(shouldDegrade(clampedStalls)).toBe(true); // would have degraded...
     expect(clampedStalls.every((ms) => !isTrustworthyFrame(ms))).toBe(true); // ...but none are measurable
+  });
+});
+
+/* ===================== v3: intensity pass ================================ */
+
+describe("v3 intensity — density and brightness floor", () => {
+  it("is denser than v2 on capable tiers", () => {
+    expect(PARTICLES_BY_TIER.high).toBeGreaterThan(880); // v2 value
+    expect(PARTICLES_BY_TIER.medium).toBeGreaterThan(480);
+  });
+
+  it("holds the cheapest tier nearly flat — brightness, not count, on weak devices", () => {
+    // The whole point of the pass is to raise the visual floor without raising
+    // the frame cost where budget is tight.
+    expect(PARTICLES_BY_TIER.low).toBeLessThanOrEqual(260);
+  });
+
+  it("lifts the swell floor so troughs are no longer near-black", () => {
+    let min = 1;
+    for (let t = 0; t < 25; t += 0.17) {
+      for (let phi = 0; phi <= Math.PI; phi += 0.19) {
+        for (let th = 0; th < Math.PI * 2; th += 0.29) {
+          min = Math.min(min, swell(phi, th, t));
+        }
+      }
+    }
+    expect(min).toBeGreaterThan(0.2); // v2 bottomed out at 0
+    expect(min).toBeLessThan(0.45); // but still has real contrast
+  });
+
+  it("keeps swell bounded to 0..1 despite the raised floor", () => {
+    for (let t = 0; t < 15; t += 0.23) {
+      for (let phi = 0; phi <= Math.PI; phi += 0.21) {
+        const v = swell(phi, 1.1, t);
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+});
+
+describe("v3 intensity — flow bands unmistakable", () => {
+  it("widens the equator-to-pole shear well beyond v2", () => {
+    const pole = bandAngularVelocity(0);
+    const equator = bandAngularVelocity(Math.PI / 2);
+    // v2 sat around 2.6x; the pass targets a visibly stronger shear.
+    expect(equator / pole).toBeGreaterThan(3.5);
+  });
+
+  it("still never reverses a band", () => {
+    for (let phi = 0; phi <= Math.PI; phi += Math.PI / 120) {
+      expect(bandAngularVelocity(phi)).toBeGreaterThan(0);
+    }
+  });
+
+  it("stays majestic — the fastest band still takes >12s per revolution", () => {
+    let max = 0;
+    for (let phi = 0; phi <= Math.PI; phi += Math.PI / 240) {
+      max = Math.max(max, bandAngularVelocity(phi));
+    }
+    expect((Math.PI * 2) / max).toBeGreaterThan(12);
+  });
+});
+
+describe("v3 intensity — shimmer cadence", () => {
+  it("fires every 4-8s (was 6-12s)", () => {
+    expect(MICRO_EVENT_MIN_GAP).toBe(4);
+    expect(MICRO_EVENT_MAX_GAP).toBe(8);
+    for (const r of [0, 0.5, 1]) {
+      const d = nextMicroEventDelay(r);
+      expect(d).toBeGreaterThanOrEqual(4);
+      expect(d).toBeLessThanOrEqual(8);
+    }
+  });
+});
+
+describe("v3 intensity — hero bloom points", () => {
+  it("promotes a small fraction to bloom points", () => {
+    let heroes = 0;
+    const N = 20000;
+    for (let i = 0; i < N; i++) if (isOrbHero(i / N)) heroes++;
+    expect(heroes / N).toBeCloseTo(ORB_HERO_FRACTION, 2);
+  });
+
+  it("matches the hero swarm on AREAL density, not percentage", () => {
+    // The orb packs its particles into a tiny area, so copying the swarm's ~6%
+    // would crowd the form with white and wash out the gold identity.
+    expect(ORB_HERO_FRACTION).toBeLessThan(0.03);
+    // ...but there must still be enough to read as an accent species.
+    const bloomsAtHighTier = PARTICLES_BY_TIER.high * ORB_HERO_FRACTION;
+    expect(bloomsAtHighTier).toBeGreaterThan(10);
+    expect(bloomsAtHighTier).toBeLessThan(30);
+  });
+
+  it("scales bloom count with tier, so weak devices get fewer", () => {
+    const at = (t: "high" | "medium" | "low") => PARTICLES_BY_TIER[t] * ORB_HERO_FRACTION;
+    expect(at("high")).toBeGreaterThan(at("medium"));
+    expect(at("medium")).toBeGreaterThan(at("low"));
   });
 });

@@ -22,9 +22,9 @@ export const TIER_ORDER: PerfTier[] = ["high", "medium", "low", "static"];
  * the safety net if a given device disagrees.
  */
 export const PARTICLES_BY_TIER: Record<Exclude<PerfTier, "static">, number> = {
-  high: 880,
-  medium: 480,
-  low: 220,
+  high: 1150,
+  medium: 620,
+  low: 240,
 };
 
 /**
@@ -32,13 +32,31 @@ export const PARTICLES_BY_TIER: Record<Exclude<PerfTier, "static">, number> = {
  * and very faint, so they cost little but give the orb an energy field.
  */
 export const HALO_BY_TIER: Record<Exclude<PerfTier, "static">, number> = {
-  high: 130,
-  medium: 70,
-  low: 30,
+  high: 175,
+  medium: 95,
+  low: 36,
 };
 
 /** Pre-rendered sprite variants: front = warm/bright, back = dim/desaturated. */
 export const DEPTH_BUCKETS = 5;
+
+/**
+ * Fraction of orb particles promoted to ultra-bright warm-white "hero" points
+ * with bloom halos — the same accent species the homepage hero swarm uses, so
+ * the two animations read as one visual language.
+ *
+ * Deliberately far below the swarm's ~6%: this is matched on AREAL density, not
+ * percentage. The orb packs ~1150 particles into ~170², perhaps a fifteenth of
+ * the hero's area, so copying 6% put ~57 blooms in a tiny space and washed the
+ * gold identity out into glitter. ~1.5% lands ~17 blooms — the same visual
+ * frequency a viewer reads on the hero.
+ */
+export const ORB_HERO_FRACTION = 0.015;
+
+/** Whether a particle (given a 0..1 sample) is a bloom-halo hero point. */
+export function isOrbHero(rand: number): boolean {
+  return rand < ORB_HERO_FRACTION;
+}
 
 export interface DeviceHints {
   /** window.devicePixelRatio */
@@ -204,7 +222,9 @@ export function breathe(t: number, period = 7): number {
  */
 export function bandAngularVelocity(phi: number): number {
   const equatorial = Math.sin(phi); // 0 at poles, 1 at equator
-  return 0.085 + equatorial * 0.2 + Math.sin(phi * 3) * 0.045;
+  // v3 widens the equator-to-pole spread (was 0.085 + 0.20·eq + 0.045·h3) so the
+  // shear between bands is obvious at a glance rather than merely present.
+  return 0.075 + equatorial * 0.36 + Math.sin(phi * 3) * 0.085;
 }
 
 /**
@@ -213,9 +233,12 @@ export function bandAngularVelocity(phi: number): number {
  * the whole orb scaling. A latitude wave crossed with a slower longitudinal one.
  */
 export function swell(phi: number, theta: number, t: number): number {
-  const latWave = Math.sin(phi * 2.6 - t * 0.75);
-  const lonWave = Math.sin(theta * 1.4 + t * 0.32);
-  return 0.5 + 0.25 * latWave + 0.25 * lonWave; // bounded to 0..1
+  const latWave = Math.sin(phi * 2.6 - t * 0.9);
+  const lonWave = Math.sin(theta * 1.4 + t * 0.38);
+  // Skewed toward the bright end (v3) so lit bands punch while troughs still
+  // recede — a symmetric 0.5 mean read as uniformly dim on real screens.
+  const w = 0.5 + 0.25 * latWave + 0.25 * lonWave;
+  return 0.28 + w * 0.72; // 0.28..1
 }
 
 /* ------------------------------------------------------------------------- *
@@ -227,8 +250,8 @@ export function swell(phi: number, theta: number, t: number): number {
  * particle only while active.
  * ------------------------------------------------------------------------- */
 
-export const MICRO_EVENT_MIN_GAP = 6;
-export const MICRO_EVENT_MAX_GAP = 12;
+export const MICRO_EVENT_MIN_GAP = 4;
+export const MICRO_EVENT_MAX_GAP = 8;
 /** How long one shimmer takes to sweep the sphere. */
 export const MICRO_EVENT_DURATION = 2.4;
 

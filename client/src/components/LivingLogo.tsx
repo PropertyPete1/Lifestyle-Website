@@ -5,6 +5,7 @@ import {
   breathe,
   DEPTH_BUCKETS,
   FIRST_CHECK_SAMPLES,
+  isOrbHero,
   isTrustworthyFrame,
   haloCount,
   MICRO_EVENT_DURATION,
@@ -18,6 +19,7 @@ import {
   swell,
   type PerfTier,
 } from "@shared/livingLogo";
+import { NANITE_WARM_WHITE } from "@shared/naniteSwarm";
 
 /**
  * LIVING LOGO — a dense, breathing particle volume around the LDR monogram.
@@ -116,6 +118,27 @@ function makeSprites(): HTMLCanvasElement[] | null {
   return out;
 }
 
+/** Soft bloom for hero points — pre-rendered once, blitted per particle. */
+function makeBloom(radius: number, peak: number): HTMLCanvasElement | null {
+  const d = Math.max(2, Math.ceil(radius * 2));
+  const c = document.createElement("canvas");
+  c.width = d;
+  c.height = d;
+  const g = c.getContext("2d");
+  if (!g) return null;
+  const r = d / 2;
+  const { r: cr, g: cg, b: cb } = NANITE_WARM_WHITE;
+  const grad = g.createRadialGradient(r, r, 0, r, r, r);
+  grad.addColorStop(0, `rgba(${cr},${cg},${cb},${peak})`);
+  grad.addColorStop(0.45, `rgba(${cr},${cg},${cb},${peak * 0.35})`);
+  grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+  g.fillStyle = grad;
+  g.beginPath();
+  g.arc(r, r, r, 0, Math.PI * 2);
+  g.fill();
+  return c;
+}
+
 export default function LivingLogo({
   /** Rendered size in CSS px. The box is reserved up-front, so no layout shift. */
   size = 168,
@@ -200,6 +223,16 @@ export default function LivingLogo({
         setStaticOnly(true);
         return () => undefined;
       }
+      // Hero-point blooms, sized relative to the orb (the swarm uses 9/20px on a
+      // full-screen hero; the same ratio on a ~170px orb is ~6/13px).
+      const heroBloomR = size * 0.038;
+      const heroHaloR = size * 0.08;
+      const bloomInner = makeBloom(heroBloomR, 0.42);
+      const bloomOuter = makeBloom(heroHaloR, 0.16);
+      if (!bloomInner || !bloomOuter) {
+        setStaticOnly(true);
+        return () => undefined;
+      }
 
       const cx = size / 2;
       const cy = size / 2;
@@ -213,6 +246,7 @@ export default function LivingLogo({
       let sinPhi = new Float32Array(0);
       let cosPhi = new Float32Array(0);
       let jitter = new Float32Array(0); // per-particle radial variation
+      let heroFlag = new Uint8Array(0); // 1 = ultra-bright warm-white bloom point
       let ox = new Float32Array(0); // interaction offset, relaxes to 0
       let oy = new Float32Array(0);
 
@@ -245,6 +279,7 @@ export default function LivingLogo({
         sinPhi = new Float32Array(n);
         cosPhi = new Float32Array(n);
         jitter = new Float32Array(n);
+        heroFlag = new Uint8Array(n);
         ox = new Float32Array(n);
         oy = new Float32Array(n);
 
@@ -261,6 +296,7 @@ export default function LivingLogo({
           omega[i] = bandAngularVelocity(p);
           // Slight shell thickness so the surface isn't a hard eggshell.
           jitter[i] = 0.9 + rnd() * 0.16;
+          heroFlag[i] = isOrbHero(rnd()) ? 1 : 0;
         }
 
         hn = haloCount(t);
@@ -384,7 +420,7 @@ export default function LivingLogo({
         // breath so the mark sits in a living light source.
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = "source-over";
-        const glowPulse = 0.16 + (scale - 1) * 0.9;
+        const glowPulse = 0.22 + (scale - 1) * 1.1;
         const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.05);
         core.addColorStop(0, `rgba(${GOLD_HI.r},${GOLD_HI.g},${GOLD_HI.b},${glowPulse})`);
         core.addColorStop(0.45, `rgba(${GOLD.r},${GOLD.g},${GOLD.b},${glowPulse * 0.45})`);
@@ -448,7 +484,7 @@ export default function LivingLogo({
           // coordinated swell + rare shimmer arc
           let bright = 0.55 + 0.45 * swell(phi[i], th, t);
           if (evProgress >= 0) {
-            bright += 1.5 * shimmerBoost(phi[i], th, evProgress, eventPhi);
+            bright += 2.2 * shimmerBoost(phi[i], th, evProgress, eventPhi);
           }
           bright += boost;
 
@@ -459,10 +495,22 @@ export default function LivingLogo({
           // faster than the far face loses it, which is what makes the volume
           // punch instead of averaging into haze.
           const d2c = depth * depth;
-          const dia = (0.8 + d2c * 3.4) * (1 + boost * 0.7);
-          const alpha = (0.035 + d2c * 0.52) * bright;
+          const dia = (0.9 + d2c * 3.8) * (1 + boost * 0.7);
+          // v3 raises the visual floor through brightness/contrast rather than
+          // through raw count, so the frame cost stays close to v2.
+          const alpha = (0.06 + d2c * 0.78) * bright;
           ctx.globalAlpha = alpha > 1 ? 1 : alpha;
           ctx.drawImage(sprites[bucket], sx - dia / 2, sy - dia / 2, dia, dia);
+
+          // Ultra-bright warm-white hero points with a double bloom halo — the
+          // same accent species as the homepage swarm, concentrated on the orb.
+          if (heroFlag[i]) {
+            const ha = Math.min(1, (0.3 + depth * 0.7) * bright);
+            ctx.globalAlpha = ha * 0.5;
+            ctx.drawImage(bloomOuter, sx - heroHaloR, sy - heroHaloR, heroHaloR * 2, heroHaloR * 2);
+            ctx.globalAlpha = ha * 0.85;
+            ctx.drawImage(bloomInner, sx - heroBloomR, sy - heroBloomR, heroBloomR * 2, heroBloomR * 2);
+          }
         }
 
         ctx.globalAlpha = 1;

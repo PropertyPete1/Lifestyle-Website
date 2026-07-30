@@ -365,4 +365,8 @@
 
 ## Living Logo on /links — pull + verify (user request Jul 29, batch 16)
 - [x] Pulled GitHub 6e44a72 (LivingLogo gold particle mark on /links profile header), fast-forward merge, 207/207 tests pass
-- [ ] Checkpoint (auto-publish), verify live: animated orb renders around LDR monogram, banner/buttons/form/socials/credit intact, no layout shift on load
+- [x] Checkpoint cc5c09e4 deployed (bundle index-CYVlnVWI.js live); verified: animated particle orb renders around LDR monogram (168×168 canvas, fixed-size relative wrapper), Now Hiring banner + all 9 buttons + lead form + socials + credit line intact, CLS = 0 (no layout shift on load), mobile 375px clean; pushed to GitHub (6e44a72..cc5c09e)
+
+## Living Logo v2 — pull + verify (user request Jul 29, batch 17)
+- [x] Pulled GitHub 6734ae0 (Living Logo v2: dense dimensional particle volume, flow bands, shimmer arcs), fast-forward, 228/228 tests pass
+- [ ] Checkpoint (auto-publish), verify live: v2 orb renders on /links, all features intact, no layout shift

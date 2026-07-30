@@ -373,4 +373,8 @@
 
 ## Hero nanite swarm animation — pull + verify (user request Jul 30, batch 18)
 - [x] Pulled GitHub 2fe2513 (nanite swarm animation layer on homepage hero + adaptive degrade fix + /links orb intensity adjustments), fast-forward, 263/263 tests pass
-- [ ] Checkpoint (auto-publish), verify live: hero swarm flows behind headline with text legible, no layout shift, CTAs functional, 375px mobile smooth, /links orb still correct
+- [x] Checkpoint f124ab52 deployed; verified live: swarm canvas absolute inset-0 pointer-events-none behind headline (h1 fully legible, CLS = 0), particles confirmed drawing (3,842 lit px at 500ms), hero CTAs work (Find Your Texas City → /city-finder click-through), 375px mobile clean, /links orb intact; pushed to GitHub (2fe2513..f124ab5). NOTE: sandbox headless browser caps rAF at 30fps (~33ms > 21ms budget) so adaptive degrade correctly steps down to static after ~2.5s in that environment only — real 60fps devices sustain the animation by design
+
+## Living Logo v3 intensity pass — pull + verify (user request Jul 30, batch 19)
+- [x] Pulled GitHub 2b7a103 (Living Logo v3: brighter, denser, unmistakable circulation + stall-detection fix), fast-forward, 274/274 tests pass
+- [ ] Checkpoint (auto-publish), verify live desktop + 375px: hero swarm legible/clickable/no streaking, /links logo denser + brighter with bloom + circulation, all functionality intact

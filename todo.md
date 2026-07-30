@@ -369,4 +369,8 @@
 
 ## Living Logo v2 — pull + verify (user request Jul 29, batch 17)
 - [x] Pulled GitHub 6734ae0 (Living Logo v2: dense dimensional particle volume, flow bands, shimmer arcs), fast-forward, 228/228 tests pass
-- [ ] Checkpoint (auto-publish), verify live: v2 orb renders on /links, all features intact, no layout shift
+- [x] Checkpoint fdfcbc24 deployed (bundle index-_gEGUC__.js live); verified: v2 particle volume renders around LDR monogram (168×168 canvas, denser dimensional look), banner/9 buttons/form/socials/credit intact, CLS = 0; pushed to GitHub (6734ae0..fdfcbc2)
+
+## Hero nanite swarm animation — pull + verify (user request Jul 30, batch 18)
+- [x] Pulled GitHub 2fe2513 (nanite swarm animation layer on homepage hero + adaptive degrade fix + /links orb intensity adjustments), fast-forward, 263/263 tests pass
+- [ ] Checkpoint (auto-publish), verify live: hero swarm flows behind headline with text legible, no layout shift, CTAs functional, 375px mobile smooth, /links orb still correct

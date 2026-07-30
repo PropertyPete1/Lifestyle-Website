@@ -1,72 +1,118 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
+  bandAngularVelocity,
   breathe,
-  fibonacciSphere,
+  DEPTH_BUCKETS,
+  FIRST_CHECK_SAMPLES,
+  haloCount,
+  MICRO_EVENT_DURATION,
+  nextMicroEventDelay,
   nextTierDown,
   particleCount,
   selectTier,
+  shimmerBoost,
   shouldDegrade,
+  STEADY_CHECK_SAMPLES,
+  swell,
   type PerfTier,
 } from "@shared/livingLogo";
 
 /**
- * LIVING LOGO — a slowly breathing particle sphere around the LDR monogram.
+ * LIVING LOGO — a dense, breathing particle volume around the LDR monogram.
  *
  * WHY CANVAS 2D AND NOT WEBGL/THREE.JS
- * Three.js is ~150KB gzipped for what is decoratively a few hundred additive
- * dots — that fails the "keep total added JS lean" requirement. This is a
- * hand-rolled 2D implementation with zero new dependencies. It also widens the
- * fallback net: instead of "static when WebGL is unavailable" we get "static
- * when a 2D context is unavailable", which covers strictly more devices
- * (WebGL is blocked far more often than 2D).
+ * Three.js is ~150KB gzipped for what is decoratively a field of additive dots —
+ * that fails the "keep total added JS lean" requirement. This is a hand-rolled
+ * 2D implementation with zero new dependencies. It also widens the fallback net:
+ * instead of "static when WebGL is unavailable" we get "static when a 2D context
+ * is unavailable", which covers strictly more devices.
  *
- * HOW IT HITS 60fps
- * - The glow sprite is rendered ONCE into an offscreen canvas, then blitted per
- *   particle with drawImage. Per-particle createRadialGradient would dominate
- *   the frame budget; a cached blit is roughly an order of magnitude cheaper.
- * - Additive compositing ("lighter") produces the bloom where particles overlap,
- *   so the glow is free rather than another draw pass.
- * - devicePixelRatio is capped at 2. Backing-store cost is quadratic in DPR and
- *   a 3rd pixel of detail is invisible on a ~170px orb.
- * - Particle budget is tiered from device hints, then stepped DOWN if measured
- *   frame times stay over budget. It never steps up.
+ * HOW IT HITS 60fps AT ~1000 PARTICLES
+ * - Sprites are pre-rendered ONCE into DEPTH_BUCKETS offscreen canvases (warm +
+ *   bright for the front of the volume, dim + desaturated for the back) and then
+ *   blitted with drawImage. There is no per-particle gradient and no per-frame
+ *   colour string construction — the depth look costs a bucket index.
+ * - Particle state lives in flat Float32Arrays, so the hot loop walks
+ *   cache-friendly memory and allocates nothing per frame.
+ * - A particle's longitude is theta0 + omega(phi) * t evaluated directly, so
+ *   there is no per-frame integration, no accumulated drift, and no state to
+ *   write back. sin/cos of its FIXED latitude are precomputed.
+ * - Additive compositing ("lighter") makes overlap bloom, so density buys glow
+ *   for free instead of another draw pass.
+ * - devicePixelRatio capped at 2: backing-store cost is quadratic in DPR and a
+ *   third pixel is invisible on a ~170px orb.
+ * - Budget is tiered from device hints then stepped DOWN from measured frame
+ *   times, with a deliberately short FIRST window so a device that cannot carry
+ *   the dense form sheds particles fast instead of stuttering.
+ *
+ * WHAT MAKES IT READ AS A VOLUME RATHER THAN A SCATTER
+ * - Depth drives size, brightness AND saturation together, which is what sells
+ *   the third dimension; a flat scatter comes from varying only alpha.
+ * - Latitude-dependent angular velocity shears the surface into visible bands,
+ *   so motion looks like circulation through a form.
+ * - Travelling brightness swells make the breath visible as coordinated waves.
+ * - A sparse outer halo layer gives the orb an atmosphere.
+ * - Rare shimmer arcs sweep the surface as a moving highlight over existing
+ *   particles (no extra objects) to reward watching.
  *
  * WHEN IT DOESN'T RUN AT ALL (renders the plain static mark)
  * - prefers-reduced-motion: reduce
  * - no 2D canvas context
  * - sustained low framerate even at the cheapest tier
- * It also fully stops the rAF loop when the tab is hidden or the orb scrolls
- * out of view, so it costs nothing in the background.
+ * The rAF loop also stops entirely when the tab is hidden or the orb scrolls out
+ * of view, so it costs nothing in the background.
  *
  * ACCESSIBILITY: decorative only. The canvas is aria-hidden and conveys no
- * information; the monogram beside/behind it is real text.
+ * information; the monogram over it is real text.
  */
 
-/** Established canvas-safe gold (matches --gold oklch(0.75 0.09 85)). */
+/** Canvas-safe gold (matches --gold oklch(0.75 0.09 85)). */
 const GOLD = { r: 201, g: 169, b: 97 };
-/** Warmer highlight for near-camera particles. */
-const GOLD_HI = { r: 232, g: 205, b: 142 };
+/** Warm highlight for the front of the volume. */
+const GOLD_HI = { r: 240, g: 214, b: 152 };
+/** Cool, desaturated gold for the far side — reads as atmospheric depth. */
+const GOLD_FAR = { r: 116, g: 96, b: 54 };
 
 const MAX_DPR = 2;
+const SPRITE_PX = 32;
 
-/** Pre-render one soft particle into a small offscreen canvas (done once). */
-function makeGlowSprite(diameter: number): HTMLCanvasElement | null {
-  const c = document.createElement("canvas");
-  c.width = diameter;
-  c.height = diameter;
-  const g = c.getContext("2d");
-  if (!g) return null;
-  const r = diameter / 2;
-  const grad = g.createRadialGradient(r, r, 0, r, r, r);
-  grad.addColorStop(0, `rgba(${GOLD_HI.r},${GOLD_HI.g},${GOLD_HI.b},1)`);
-  grad.addColorStop(0.35, `rgba(${GOLD.r},${GOLD.g},${GOLD.b},0.55)`);
-  grad.addColorStop(1, `rgba(${GOLD.r},${GOLD.g},${GOLD.b},0)`);
-  g.fillStyle = grad;
-  g.beginPath();
-  g.arc(r, r, r, 0, Math.PI * 2);
-  g.fill();
-  return c;
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/**
+ * One sprite per depth bucket. `k` runs 0 (far) → 1 (near): colour warms toward
+ * GOLD_HI and the core hardens, so a near particle looks like a lit point and a
+ * far one like a soft mote.
+ */
+function makeSprites(): HTMLCanvasElement[] | null {
+  const out: HTMLCanvasElement[] = [];
+  for (let i = 0; i < DEPTH_BUCKETS; i++) {
+    const k = i / Math.max(1, DEPTH_BUCKETS - 1);
+    const c = document.createElement("canvas");
+    c.width = SPRITE_PX;
+    c.height = SPRITE_PX;
+    const g = c.getContext("2d");
+    if (!g) return null;
+    const r = SPRITE_PX / 2;
+
+    const cr = Math.round(lerp(GOLD_FAR.r, GOLD_HI.r, k));
+    const cg = Math.round(lerp(GOLD_FAR.g, GOLD_HI.g, k));
+    const cb = Math.round(lerp(GOLD_FAR.b, GOLD_HI.b, k));
+    // Far motes are pure haze; near points get a tight bright core.
+    const coreStop = lerp(0.06, 0.3, k);
+    const coreAlpha = lerp(0.5, 1, k);
+
+    const grad = g.createRadialGradient(r, r, 0, r, r, r);
+    grad.addColorStop(0, `rgba(${cr},${cg},${cb},${coreAlpha})`);
+    grad.addColorStop(coreStop, `rgba(${GOLD.r},${GOLD.g},${GOLD.b},${coreAlpha * 0.5})`);
+    grad.addColorStop(1, `rgba(${GOLD.r},${GOLD.g},${GOLD.b},0)`);
+    g.fillStyle = grad;
+    g.beginPath();
+    g.arc(r, r, r, 0, Math.PI * 2);
+    g.fill();
+    out.push(c);
+  }
+  return out;
 }
 
 export default function LivingLogo({
@@ -148,19 +194,90 @@ export default function LivingLogo({
       canvas.height = Math.round(size * dpr);
       ctx.scale(dpr, dpr);
 
-      const SPRITE = 24;
-      const sprite = makeGlowSprite(SPRITE);
-      if (!sprite) {
+      const sprites = makeSprites();
+      if (!sprites) {
         setStaticOnly(true);
         return () => undefined;
       }
 
-      let points = fibonacciSphere(particleCount(tier));
       const cx = size / 2;
       const cy = size / 2;
-      const baseR = size * 0.36;
+      const baseR = size * 0.35;
 
-      // Pointer proximity (cheap: one vector per frame, no per-particle hit test)
+      /* ---- particle buffers (flat, allocated once per tier) ------------- */
+      let n = 0;
+      let phi = new Float32Array(0);
+      let theta0 = new Float32Array(0);
+      let omega = new Float32Array(0);
+      let sinPhi = new Float32Array(0);
+      let cosPhi = new Float32Array(0);
+      let jitter = new Float32Array(0); // per-particle radial variation
+      let ox = new Float32Array(0); // interaction offset, relaxes to 0
+      let oy = new Float32Array(0);
+
+      let hn = 0;
+      let hPhi = new Float32Array(0);
+      let hTheta0 = new Float32Array(0);
+      let hOmega = new Float32Array(0);
+      let hRad = new Float32Array(0);
+
+      /**
+       * Deterministic PRNG so the form is identical on every load (and so the
+       * halo's scatter is reproducible) without shipping a dependency.
+       */
+      function mulberry(seed: number) {
+        let a = seed;
+        return () => {
+          a |= 0;
+          a = (a + 0x6d2b79f5) | 0;
+          let x = Math.imul(a ^ (a >>> 15), 1 | a);
+          x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+          return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+
+      function build(t: PerfTier) {
+        n = particleCount(t);
+        phi = new Float32Array(n);
+        theta0 = new Float32Array(n);
+        omega = new Float32Array(n);
+        sinPhi = new Float32Array(n);
+        cosPhi = new Float32Array(n);
+        jitter = new Float32Array(n);
+        ox = new Float32Array(n);
+        oy = new Float32Array(n);
+
+        const rnd = mulberry(0x5eed);
+        const golden = Math.PI * (3 - Math.sqrt(5));
+        for (let i = 0; i < n; i++) {
+          // Even latitude spread via the same golden-spiral distribution.
+          const yy = n === 1 ? 0 : 1 - (i / (n - 1)) * 2;
+          const p = Math.acos(Math.max(-1, Math.min(1, yy)));
+          phi[i] = p;
+          sinPhi[i] = Math.sin(p);
+          cosPhi[i] = Math.cos(p);
+          theta0[i] = golden * i;
+          omega[i] = bandAngularVelocity(p);
+          // Slight shell thickness so the surface isn't a hard eggshell.
+          jitter[i] = 0.9 + rnd() * 0.16;
+        }
+
+        hn = haloCount(t);
+        hPhi = new Float32Array(hn);
+        hTheta0 = new Float32Array(hn);
+        hOmega = new Float32Array(hn);
+        hRad = new Float32Array(hn);
+        for (let i = 0; i < hn; i++) {
+          const p = Math.acos(rnd() * 2 - 1);
+          hPhi[i] = p;
+          hTheta0[i] = rnd() * Math.PI * 2;
+          hOmega[i] = 0.03 + rnd() * 0.05; // much slower than the surface
+          hRad[i] = 1.18 + rnd() * 0.5; // 1.18–1.68 × sphere radius
+        }
+      }
+      build(tier);
+
+      /* ---- pointer (soft magnetic attraction) --------------------------- */
       let pointer: { x: number; y: number } | null = null;
       const onMove = (e: PointerEvent) => {
         const rect = canvas.getBoundingClientRect();
@@ -171,92 +288,171 @@ export default function LivingLogo({
       };
       host!.addEventListener("pointermove", onMove, { passive: true });
       host!.addEventListener("pointerleave", onLeave, { passive: true });
+      host!.addEventListener("pointercancel", onLeave, { passive: true });
 
-      let t0 = performance.now();
+      /* ---- micro-events ------------------------------------------------- */
+      const rndEvent = mulberry(0xa11e);
+      let nextEventAt = nextMicroEventDelay(rndEvent());
+      let eventStart = -1;
+      let eventPhi = Math.PI / 2;
+
+      const t0 = performance.now();
       let last = t0;
       const frameTimes: number[] = [];
+      let checkedOnce = false;
       let visible = true;
       let onScreen = true;
-      let paused = false;
+      let disposed = false;
 
       const frame = (now: number) => {
-        const dt = Math.min((now - last) / 1000, 0.05); // clamp after a pause
+        const dtRaw = (now - last) / 1000;
+        const dt = Math.min(dtRaw, 0.05); // clamp after a pause/tab switch
         last = now;
         const t = (now - t0) / 1000;
 
         // --- adaptive degradation -----------------------------------------
         frameTimes.push(dt * 1000);
         if (frameTimes.length > 90) frameTimes.shift();
-        if (shouldDegrade(frameTimes)) {
+        const windowSize = checkedOnce ? STEADY_CHECK_SAMPLES : FIRST_CHECK_SAMPLES;
+        if (shouldDegrade(frameTimes, 21, windowSize)) {
+          checkedOnce = true;
           const next = nextTierDown(tier);
           frameTimes.length = 0;
           if (next === "static") {
-            setStaticOnly(true); // give up; show the mark
+            setStaticOnly(true); // give up; the mark carries the brand
             return;
           }
           tier = next;
-          points = fibonacciSphere(particleCount(tier));
+          build(tier);
+        } else if (frameTimes.length >= windowSize) {
+          checkedOnce = true;
         }
+
+        // --- micro-event scheduling ---------------------------------------
+        if (eventStart < 0 && t >= nextEventAt) {
+          eventStart = t;
+          // Favour mid-latitudes, where an arc reads best.
+          eventPhi = 0.7 + rndEvent() * (Math.PI - 1.4);
+        } else if (eventStart >= 0 && t - eventStart > MICRO_EVENT_DURATION) {
+          eventStart = -1;
+          nextEventAt = t + nextMicroEventDelay(rndEvent());
+        }
+        const evProgress =
+          eventStart >= 0 ? (t - eventStart) / MICRO_EVENT_DURATION : -1;
 
         ctx.clearRect(0, 0, size, size);
 
         const scale = breathe(t);
         const r = baseR * scale;
-        // Slow orbit; the X wobble keeps it from reading as a flat spin.
-        const ry = t * 0.16;
-        const rx = Math.sin(t * 0.11) * 0.42;
-        const cosY = Math.cos(ry), sinY = Math.sin(ry);
-        const cosX = Math.cos(rx), sinX = Math.sin(rx);
+        // Global tilt wobble so the volume never reads as a flat spin.
+        const rx = Math.sin(t * 0.11) * 0.4;
+        const cosX = Math.cos(rx);
+        const sinX = Math.sin(rx);
 
-        // Soft core bloom — one gradient per frame, not per particle.
-        const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.15);
-        core.addColorStop(0, `rgba(${GOLD.r},${GOLD.g},${GOLD.b},0.10)`);
-        core.addColorStop(1, "rgba(0,0,0,0)");
+        /* ---- layer 1: outer atmosphere (behind, very faint) ------------- */
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = 0; i < hn; i++) {
+          const th = hTheta0[i] + hOmega[i] * t;
+          const sp = Math.sin(hPhi[i]);
+          const hx = sp * Math.cos(th);
+          const hz = sp * Math.sin(th);
+          const hy0 = Math.cos(hPhi[i]);
+          const hy = hy0 * cosX - hz * sinX;
+          const hzr = hz * cosX + hy0 * sinX;
+          const rr = r * hRad[i];
+          const depth = (hzr + 1) / 2;
+          const persp = 0.76 + depth * 0.36;
+          const sx = cx + hx * rr * persp;
+          const sy = cy + hy * rr * persp;
+          const dia = 1.6 + depth * 2.2;
+          ctx.globalAlpha = 0.035 + depth * 0.075;
+          ctx.drawImage(sprites[depth > 0.6 ? 2 : 1], sx - dia / 2, sy - dia / 2, dia, dia);
+        }
+
+        /* ---- layer 2: core light behind the monogram -------------------- */
+        // One gradient per frame (never per particle). Slightly pulsed with the
+        // breath so the mark sits in a living light source.
+        ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = "source-over";
+        const glowPulse = 0.16 + (scale - 1) * 0.9;
+        const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.05);
+        core.addColorStop(0, `rgba(${GOLD_HI.r},${GOLD_HI.g},${GOLD_HI.b},${glowPulse})`);
+        core.addColorStop(0.45, `rgba(${GOLD.r},${GOLD.g},${GOLD.b},${glowPulse * 0.45})`);
+        core.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = core;
         ctx.fillRect(0, 0, size, size);
 
+        /* ---- layer 3: the volume --------------------------------------- */
         ctx.globalCompositeOperation = "lighter";
+        const relax = Math.max(0, 1 - dt * 3.5); // interaction decay per frame
+        const px = pointer ? pointer.x : 0;
+        const py = pointer ? pointer.y : 0;
 
-        for (let i = 0; i < points.length; i++) {
-          const p = points[i];
-          // Organic drift: two cheap sines per axis instead of a noise library.
-          const wob = 1 + Math.sin(t * 0.7 + i * 0.35) * 0.035;
+        for (let i = 0; i < n; i++) {
+          const th = theta0[i] + omega[i] * t;
+          const ct = Math.cos(th);
+          const st = Math.sin(th);
+          const sp = sinPhi[i];
+          const rj = r * jitter[i];
 
-          // rotate Y then X
-          let x = p.x * cosY + p.z * sinY;
-          let z = p.z * cosY - p.x * sinY;
-          let y = p.y * cosX - z * sinX;
-          z = z * cosX + p.y * sinX;
+          // sphere → world, then the global X tilt
+          const wx = sp * ct;
+          const wz = sp * st;
+          const wy0 = cosPhi[i];
+          const wy = wy0 * cosX - wz * sinX;
+          const wz2 = wz * cosX + wy0 * sinX;
 
-          x *= r * wob;
-          y *= r * wob;
+          const depth = (wz2 + 1) / 2; // 0 = far side, 1 = near side
+          const persp = 0.72 + depth * 0.44;
+          let sx = cx + wx * rj * persp;
+          let sy = cy + wy * rj * persp;
 
-          // perspective: depth 0 (far) → 1 (near)
-          const depth = (z + 1) / 2;
-          const persp = 0.72 + depth * 0.42;
-          let sx = cx + x * persp;
-          let sy = cy + y * persp;
-
-          // pointer proximity: gentle outward push + brighten
+          // soft magnetic pull, relaxing back when the pointer leaves
+          let o1 = ox[i] * relax;
+          let o2 = oy[i] * relax;
           let boost = 0;
           if (pointer) {
-            const dx = sx - pointer.x;
-            const dy = sy - pointer.y;
+            const dx = px - sx;
+            const dy = py - sy;
             const d2 = dx * dx + dy * dy;
-            const R = 52;
+            const R = 46;
             if (d2 < R * R) {
               const f = 1 - Math.sqrt(d2) / R;
-              sx += dx * f * 0.22;
-              sy += dy * f * 0.22;
-              boost = f * 0.5;
+              o1 += dx * f * dt * 2.6;
+              o2 += dy * f * dt * 2.6;
+              boost = f * 0.55;
             }
           }
+          // Clamp so a lingering pointer can't collapse the form.
+          const om = Math.abs(o1) + Math.abs(o2);
+          if (om > 14) {
+            const s = 14 / om;
+            o1 *= s;
+            o2 *= s;
+          }
+          ox[i] = o1;
+          oy[i] = o2;
+          sx += o1;
+          sy += o2;
 
-          const alpha = (0.16 + depth * 0.5 + boost) * 0.95;
-          const dia = (1.1 + depth * 2.5) * (1 + boost * 0.5);
-          ctx.globalAlpha = Math.min(alpha, 1);
-          ctx.drawImage(sprite!, sx - dia / 2, sy - dia / 2, dia, dia);
+          // coordinated swell + rare shimmer arc
+          let bright = 0.55 + 0.45 * swell(phi[i], th, t);
+          if (evProgress >= 0) {
+            bright += 1.5 * shimmerBoost(phi[i], th, evProgress, eventPhi);
+          }
+          bright += boost;
+
+          // Depth drives size, alpha AND colour bucket together.
+          let bucket = (depth * DEPTH_BUCKETS) | 0;
+          if (bucket > DEPTH_BUCKETS - 1) bucket = DEPTH_BUCKETS - 1;
+          // Power curve rather than linear: the near face gains size and light
+          // faster than the far face loses it, which is what makes the volume
+          // punch instead of averaging into haze.
+          const d2c = depth * depth;
+          const dia = (0.8 + d2c * 3.4) * (1 + boost * 0.7);
+          const alpha = (0.035 + d2c * 0.52) * bright;
+          ctx.globalAlpha = alpha > 1 ? 1 : alpha;
+          ctx.drawImage(sprites[bucket], sx - dia / 2, sy - dia / 2, dia, dia);
         }
 
         ctx.globalAlpha = 1;
@@ -265,7 +461,7 @@ export default function LivingLogo({
       };
 
       const resume = () => {
-        if (paused || !visible || !onScreen) return;
+        if (disposed || !visible || !onScreen) return;
         last = performance.now();
         frameTimes.length = 0; // don't judge fps on the resume frame
         cancelAnimationFrame(raf);
@@ -292,12 +488,13 @@ export default function LivingLogo({
       raf = requestAnimationFrame(frame);
 
       return () => {
-        paused = true;
+        disposed = true;
         stop();
         io.disconnect();
         document.removeEventListener("visibilitychange", onVis);
         host!.removeEventListener("pointermove", onMove);
         host!.removeEventListener("pointerleave", onLeave);
+        host!.removeEventListener("pointercancel", onLeave);
       };
     }
 
@@ -323,15 +520,15 @@ export default function LivingLogo({
         style={{ width: size, height: size }}
       />
       {/* The real mark. Always rendered — it IS the static fallback, and it
-          stays visible on top of the particles so the brand never depends on
-          the animation running. */}
+          stays visible over the particles so the brand never depends on the
+          animation running. */}
       <div className="absolute inset-0 flex items-center justify-center">
         <div
           className={cn(
             "flex items-center justify-center rounded-full transition-all duration-700",
-            // The ring reads as the whole mark in static mode; once particles
-            // are alive it recedes so they become the outer form.
-            staticOnly ? "border border-gold/60" : "border border-gold/25"
+            // The ring reads as the whole mark in static mode; once the volume
+            // is alive it recedes so the particles become the outer form.
+            staticOnly ? "border border-gold/60" : "border border-gold/20"
           )}
           style={{ width: size * 0.48, height: size * 0.48 }}>
           <span

@@ -22,16 +22,19 @@ function ctxFor(user: { email: string | null; role: "admin" | "user"; openId: st
 }
 
 describe("admin allowlist", () => {
-  it("contains exactly the two company Google accounts", () => {
+  it("contains exactly the three company Google accounts", () => {
     expect([...ADMIN_EMAILS].sort()).toEqual([
       "peter@lifestyledesignrealty.com",
+      "stefanie@lifestyledesignrealty.com",
       "steven@lifestyledesignrealty.com",
     ]);
   });
 
-  it("isAdminEmail accepts both admins case-insensitively and rejects others", () => {
+  it("isAdminEmail accepts all admins case-insensitively and rejects others", () => {
     expect(isAdminEmail("peter@lifestyledesignrealty.com")).toBe(true);
     expect(isAdminEmail("steven@lifestyledesignrealty.com")).toBe(true);
+    expect(isAdminEmail("stefanie@lifestyledesignrealty.com")).toBe(true);
+    expect(isAdminEmail("Stefanie@LifestyleDesignRealty.com")).toBe(true);
     expect(isAdminEmail("Steven@LifestyleDesignRealty.com")).toBe(true);
     expect(isAdminEmail(" steven@lifestyledesignrealty.com ")).toBe(true);
     expect(isAdminEmail("random@gmail.com")).toBe(false);
@@ -47,6 +50,13 @@ describe("admin allowlist", () => {
       ctxFor({ email: "steven@lifestyledesignrealty.com", role: "admin", openId: "steven-open-id" })
     );
     // listAll is admin-gated; reaching the DB layer (not FORBIDDEN) proves authorization passed.
+    await expect(caller.testimonials.listAll()).resolves.toBeDefined();
+  });
+
+  it("grants admin procedures to Stefanie (allowlisted + admin role)", async () => {
+    const caller = appRouter.createCaller(
+      ctxFor({ email: "stefanie@lifestyledesignrealty.com", role: "admin", openId: "stefanie-open-id" })
+    );
     await expect(caller.testimonials.listAll()).resolves.toBeDefined();
   });
 

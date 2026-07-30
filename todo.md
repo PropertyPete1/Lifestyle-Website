@@ -353,3 +353,12 @@
 - [x] Hard data (median price, price range, facts) stays non-AI; only narrative connective tissue is AI-written
 - [x] Vitest: 9 new tests (cityFinder.test.ts) covering generate, getBySlug, fallback, compliance, edge cases — 152/152 total
 - [x] Deploy checkpoint 7f5f9cb4, verified on lifestyledesignrealty.com (new bundle index-BhxZoMxz.js live, cityFinder.getBySlug returns 200, AI generation produces vivid personalized narratives, shared URL reproduces identical cached result — md5 verified, mobile 375px renders clean), pushed to GitHub Lifestyle-Website main (beb58cb..7f5f9cb)
+
+## AI experience polish — pull + verify (user request Jul 29, batch 14)
+- [x] Pulled GitHub 8552577 (streaming text reveal, staged AI status, vibe-matched City Finder imagery + OG cards, city_finder_generate analytics), merged, 180/180 tests, checkpoint 32206ffe deployed
+- [x] Verified live: City Finder result hero imagery + vibe label, cached/shared results instant, Convince reveal intact, 375px legibility, OG card shows matched city photo (og:image = city-austin jpg), "City Finder Reports" admin analytics card wired; merge pushed to GitHub
+
+## Stefanie admin access (user request Jul 29, batch 15)
+- [x] Add stefanie@lifestyledesignrealty.com to ADMIN_EMAILS allowlist in shared/site.ts
+- [x] Promote her user row to admin in prod DB + update allowlist tests (181/181 pass)
+- [ ] Checkpoint (auto-publish), push to GitHub

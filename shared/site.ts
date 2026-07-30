@@ -78,6 +78,7 @@ export const SITE = {
 export const ADMIN_EMAILS = [
   "peter@lifestyledesignrealty.com",
   "steven@lifestyledesignrealty.com",
+  "stefanie@lifestyledesignrealty.com",
 ] as const;
 
 export function isAdminEmail(email: string | null | undefined): boolean {

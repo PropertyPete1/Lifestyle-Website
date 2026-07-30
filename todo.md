@@ -361,4 +361,8 @@
 ## Stefanie admin access (user request Jul 29, batch 15)
 - [x] Add stefanie@lifestyledesignrealty.com to ADMIN_EMAILS allowlist in shared/site.ts
 - [x] Promote her user row to admin in prod DB + update allowlist tests (181/181 pass)
-- [ ] Checkpoint (auto-publish), push to GitHub
+- [x] Checkpoint a913b173 (auto-published), pushed to GitHub Lifestyle-Website main (32206ff..a913b17)
+
+## Living Logo on /links — pull + verify (user request Jul 29, batch 16)
+- [x] Pulled GitHub 6e44a72 (LivingLogo gold particle mark on /links profile header), fast-forward merge, 207/207 tests pass
+- [ ] Checkpoint (auto-publish), verify live: animated orb renders around LDR monogram, banner/buttons/form/socials/credit intact, no layout shift on load

@@ -56,7 +56,11 @@ export default function ExitIntentModal() {
         return;
       }
       // If a confirmation is on screen, they already converted.
-      if (/we typically respond within 30 minutes/i.test(document.body.innerText)) return;
+      // Explicit marker only rendered by post-submit success states. A previous
+      // version scanned document.body.innerText for the confirmation sentence,
+      // but that exact wording is also a STATIC selling point beside the Get
+      // Started form, so the modal was permanently suppressed on the homepage.
+      if (document.querySelector("[data-lead-converted]")) return;
 
       shownRef.current = true;
       try {

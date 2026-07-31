@@ -41,7 +41,7 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
 
   if (done) {
     return (
-      <div className="flex flex-col items-center text-center py-12 gap-3">
+      <div data-lead-converted className="flex flex-col items-center text-center py-12 gap-3">
         <CheckCircle2 className="h-10 w-10 text-gold" />
         <h3 className="font-serif text-2xl">Thank You</h3>
         <p className="text-sm text-muted-foreground max-w-sm">

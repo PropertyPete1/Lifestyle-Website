@@ -486,6 +486,19 @@ Three separate bugs stacked up:
 - [x] Verified no layout shift: homepage CLS 0, /links CLS 0.055 (Living Logo canvas settling). No horizontal overflow on either page. Both pages confirmed at 375px mobile
 - [x] Verified /links?orbDebug=1 shows the debug panel (fixed, pointer-events-none, bottom-left, reporting tier/particles/halo/fps/cores/memory/DPR and each degrade step) and that it is absent without the flag, so it costs nothing for real visitors
 
+## Batch 25 — The Crown Branch hero (pull 9e4ba04 + live verification)
+
+- [x] Pulled 9e4ba04 from GitHub main (CrownBranch component + shared geometry module + 54 new tests); tsc clean, 440 tests passing
+- [ ] Checkpoint so the redesign deploys
+- [ ] Verify ENTRANCE on a fresh session: two gold heads race from top center down both edges while branches crown the headline at the same pace, content fading in during the draw
+- [ ] Verify SETTLED state: faint border + brighter crown remain with racers gliding the border and orbiting the crown, motion never stopping
+- [ ] Verify NO floating particles/swarm anywhere on the homepage hero
+- [ ] Verify a same-session reload skips the entrance and shows the settled state immediately
+- [ ] Verify mobile 375px: crown encloses the full wrapped headline, no collision with the Now Hiring or financing banners, no horizontal overflow
+- [ ] Verify headline/CTAs/hero buttons are legible and clickable with zero layout shift
+- [ ] Verify the /links living logo orb still renders unchanged
+- [ ] Push merged state and verification notes to GitHub
+
 ## Batch 25 — Homepage hero: remove the nanite swarm, build The Crown Branch (user request Jul 31)
 
 ### Part 1 — swarm unmounted, not deleted

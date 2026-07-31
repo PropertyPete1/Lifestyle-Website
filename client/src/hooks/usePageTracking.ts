@@ -175,3 +175,22 @@ export function useStickyCtaTracking() {
     );
   };
 }
+
+/**
+ * Taps on the /links "30 minutes" promise strip. Logged separately from the
+ * form submission itself so the strip can be judged on whether it actually
+ * drives people into the capture form.
+ */
+export function useLinksPromiseTracking() {
+  const track = trpc.analytics.track.useMutation();
+  return () =>
+    track.mutate(
+      {
+        kind: "links_promise_click",
+        path: "/links",
+        visitorId: getVisitorId() || undefined,
+        ...getTrafficSource(),
+      },
+      { onError: () => undefined }
+    );
+}

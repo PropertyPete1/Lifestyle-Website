@@ -12,14 +12,21 @@
 import mysql from "mysql2/promise";
 import "dotenv/config";
 
+/**
+ * The six live buttons, in priority order.
+ *
+ * Anything NOT in this list is deactivated (never deleted), so retired buttons
+ * stay recoverable from admin and a future run can't resurrect them. Currently
+ * retired: "Contact Us" (duplicate /contact), "Join Our Team" (the Now Hiring
+ * banner at the top of /links already goes to /join) and "Home Valuation"
+ * (seller intent is covered by Schedule a Consultation and the capture form).
+ */
 const DESIRED = [
   ["New Construction Search", "https://a.nhb.app/u/peter-allen"],
   ["Find Your Texas City", "/city-finder"],
   ["Convince Your Partner", "/convince"],
   ["Schedule a Consultation", "/contact"],
   ["Own a Rental? List It With Us", "/lease"],
-  ["Join Our Team", "/join"],
-  ["Home Valuation", "/valuation"],
   ["Explore Our Full Website", "/"],
 ];
 

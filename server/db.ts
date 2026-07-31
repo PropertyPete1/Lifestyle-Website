@@ -399,7 +399,7 @@ export async function logPageEvent(data: InsertPageEvent) {
  */
 export async function getAnalyticsSummary(days = 30) {
   const empty = {
-    totals: { views: 0, uniques: 0, bannerClicks: 0, ncClicks: 0, leaseClicks: 0, linksForms: 0, cityFinderGenerates: 0, exitIntentShows: 0, exitIntentClicks: 0, stickyCtaClicks: 0 },
+    totals: { views: 0, uniques: 0, bannerClicks: 0, ncClicks: 0, leaseClicks: 0, linksForms: 0, cityFinderGenerates: 0, exitIntentShows: 0, exitIntentClicks: 0, stickyCtaClicks: 0, linksPromiseClicks: 0 },
     perPage: [] as { path: string; views: number; uniques: number }[],
     daily: [] as { day: string; views: number; uniques: number; bannerClicks: number; ncClicks: number; leaseClicks: number }[],
     funnel: { homeViews: 0, bannerClicks: 0, joinViews: 0, recruitSubmissions: 0 },
@@ -425,6 +425,7 @@ export async function getAnalyticsSummary(days = 30) {
         exitIntentShows: sql<number>`SUM(${pageEvents.kind} = 'exit_intent_show')`,
         exitIntentClicks: sql<number>`SUM(${pageEvents.kind} = 'exit_intent_click')`,
         stickyCtaClicks: sql<number>`SUM(${pageEvents.kind} = 'sticky_cta_click')`,
+        linksPromiseClicks: sql<number>`SUM(${pageEvents.kind} = 'links_promise_click')`,
       })
       .from(pageEvents)
       .where(since),
@@ -505,6 +506,7 @@ export async function getAnalyticsSummary(days = 30) {
       exitIntentShows: Number(t?.exitIntentShows ?? 0),
       exitIntentClicks: Number(t?.exitIntentClicks ?? 0),
       stickyCtaClicks: Number(t?.stickyCtaClicks ?? 0),
+      linksPromiseClicks: Number(t?.linksPromiseClicks ?? 0),
     },
     perPage: perPage.map((r) => ({ path: r.path, views: Number(r.views), uniques: Number(r.uniques) })),
     daily: daily.map((r) => ({

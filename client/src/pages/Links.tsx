@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
@@ -8,11 +8,13 @@ import {
   useNcClickTracking,
   useLeaseClickTracking,
   useLinksFormTracking,
+  useLinksPromiseTracking,
 } from "@/hooks/usePageTracking";
 import NowHiringBanner from "@/components/NowHiringBanner";
 import WebsiteInquiryModal from "@/components/WebsiteInquiryModal";
 import LeadForm from "@/components/LeadForm";
 import { ResponseBadge, TrustLine } from "@/components/TrustSignals";
+import { Zap, ArrowDown } from "lucide-react";
 import VeteranBadge from "@/components/VeteranBadge";
 import LivingLogo from "@/components/LivingLogo";
 
@@ -47,6 +49,31 @@ export default function Links() {
   const logLeaseClick = useLeaseClickTracking();
   const logFormSubmit = useLinksFormTracking();
   const [inquiryOpen, setInquiryOpen] = useState(false);
+  const logPromiseClick = useLinksPromiseTracking();
+  const captureRef = useRef<HTMLDivElement>(null);
+  const [flash, setFlash] = useState(false);
+
+  /**
+   * Promise strip → capture form. Smooth-scrolls (instantly for reduced-motion
+   * users) and pulses the form so the eye lands on the destination instead of
+   * just arriving there.
+   */
+  const jumpToCapture = () => {
+    logPromiseClick();
+    const el = captureRef.current;
+    if (!el) return;
+    const reduced =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
+    // Toggle off → on in a separate task so a re-tap restarts the animation
+    // instead of no-oping. Deliberately setTimeout and not requestAnimationFrame:
+    // rAF is throttled in background/hidden contexts, which made the highlight
+    // silently never apply while the scroll still happened.
+    setFlash(false);
+    window.setTimeout(() => setFlash(true), 0);
+    window.setTimeout(() => setFlash(false), 1800);
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col items-center px-5 pb-12 pt-[calc(var(--hiring-banner-h,44px)+2.5rem)]">
@@ -75,8 +102,26 @@ export default function Links() {
           </span>
         </div>
 
+        {/* 30-minute promise — the highest-intent path on the page, so it sits
+            in the header where it is visible without scrolling rather than
+            buried under every button. Deliberately a slim gold accent, not a
+            filled banner, so it never competes with Now Hiring above it. */}
+        <button
+          type="button"
+          onClick={jumpToCapture}
+          className="group mt-4 w-full border border-gold/45 bg-gold/[0.07] px-4 py-2.5 text-left transition-colors hover:border-gold/80 hover:bg-gold/[0.12] active:scale-[0.995]">
+          <span className="flex items-center gap-2.5">
+            <Zap className="h-3.5 w-3.5 shrink-0 text-gold" aria-hidden />
+            <span className="text-[10.5px] leading-snug tracking-[0.08em] text-foreground/90">
+              Skip the browsing — tell us what you need and we'll reach out{" "}
+              <span className="text-gold">within 30 minutes</span>
+            </span>
+            <ArrowDown className="ml-auto h-3.5 w-3.5 shrink-0 text-gold/80 transition-transform group-hover:translate-y-0.5" aria-hidden />
+          </span>
+        </button>
+
         {/* Links */}
-        <div className="w-full mt-10 space-y-3">
+        <div className="w-full mt-6 space-y-3">
           {/* Bio links are admin-managed data, so a paused route (e.g. the
               seeded "Home Search" → /search) can still be present in the DB.
               Filter here so no customer is sent to a coming-soon dead end. */}
@@ -136,7 +181,12 @@ export default function Links() {
 
         {/* Direct lead capture — an additive shortcut BELOW the buttons.
             Nothing above is gated on it. */}
-        <div className="w-full mt-12 border border-gold/30 bg-card/60 p-6 text-left">
+        <div
+          ref={captureRef}
+          className={cn(
+            "w-full mt-12 border border-gold/30 bg-card/60 p-6 text-left",
+            flash && "form-flash"
+          )}>
           <p className="font-serif text-xl text-center leading-snug">
             Or skip the browsing — <span className="text-gold">we'll reach out to you</span>
           </p>

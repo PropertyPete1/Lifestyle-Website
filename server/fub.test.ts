@@ -92,3 +92,35 @@ describe("FUB API key validation", () => {
     }
   );
 });
+
+describe("leasing routes to Landlord from every entry point", () => {
+  it("tags the /lease form", () => {
+    expect(buildTag("Lease Listing Inquiry", "Unknown")).toContain("Landlord");
+  });
+
+  it("tags the /links quick-capture Leasing selection", () => {
+    expect(buildTag("Website - Links Page", "Unknown", { interest: "Leasing" })).toContain(
+      "Landlord"
+    );
+  });
+
+  it("tags the Get Started 'List for Lease' goal (was missing entirely)", () => {
+    const tags = buildTag("Website - Get Started", "Hot", { goal: "List for Lease" });
+    expect(tags).toContain("Landlord");
+    expect(tags).toContain("Website - Get Started");
+  });
+
+  it("does not tag buyers or sellers as landlords", () => {
+    for (const goal of ["Buy", "Sell", "Buy & Sell"]) {
+      expect(buildTag("Website - Get Started", "Hot", { goal })).not.toContain("Landlord");
+    }
+  });
+
+  it("never duplicates the Landlord tag", () => {
+    const tags = buildTag("Lease Listing Inquiry", "Unknown", {
+      interest: "Leasing",
+      goal: "List for Lease",
+    });
+    expect(tags.filter((t) => t === "Landlord")).toHaveLength(1);
+  });
+});

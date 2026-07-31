@@ -103,8 +103,6 @@ async function run() {
     ["Convince Your Partner", "/convince"],
     ["Schedule a Consultation", "/contact"],
     ["Own a Rental? List It With Us", "/lease"],
-    ["Join Our Team", "/join"],
-    ["Home Valuation", "/valuation"],
     ["Explore Our Full Website", "/"],
   ];
   for (let i = 0; i < links.length; i++) {

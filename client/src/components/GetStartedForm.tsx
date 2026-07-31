@@ -118,6 +118,7 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
               <SelectItem value="Buy">Buy</SelectItem>
               <SelectItem value="Sell">Sell</SelectItem>
               <SelectItem value="Buy & Sell">Buy & Sell</SelectItem>
+              <SelectItem value="List for Lease">List for Lease</SelectItem>
             </SelectContent>
           </Select>
         </div>

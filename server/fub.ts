@@ -98,8 +98,16 @@ export function buildTag(
   if (interest === "Joining the team") tags.push("Recruit - Website");
   else if (interest === "Leasing") tags.push("Landlord");
   else if (interest === "Buying" || interest === "Selling") tags.push(`Interest - ${interest}`);
+  // Get Started uses "goal" rather than "interest", so its leasing selection is
+  // routed here too — a landlord who comes through the main form must land in
+  // the same FUB pipeline as one who used /lease or the /links capture.
+  const goal = String(answers?.goal ?? "");
+  if (/lease/i.test(goal)) tags.push("Landlord");
   if (intent !== "Unknown") tags.push(`${sourceTag} - ${intent}`);
-  return tags;
+  // De-dupe: several routes can legitimately conclude "Landlord" (the /lease
+  // source tag, a Leasing interest, a leasing goal) and FUB should receive the
+  // tag once, not repeated.
+  return Array.from(new Set(tags));
 }
 
 function answersToNote(answers?: Record<string, unknown>, message?: string): string {

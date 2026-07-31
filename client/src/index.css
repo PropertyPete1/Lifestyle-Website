@@ -455,3 +455,17 @@ button:active, [role="button"]:active {
     50% { box-shadow: 0 0 30px -5px color-mix(in oklch, var(--gold) 40%, transparent); }
   }
 }
+
+/* /links: brief gold glow on the quick-capture form after the promise strip is
+   tapped, so the eye lands on the destination rather than just arriving there.
+   Motion-safe: reduced-motion users get the scroll with no pulse. */
+@media (prefers-reduced-motion: no-preference) {
+  .form-flash {
+    animation: form-flash 1.6s var(--ease-out, ease-out) 1;
+  }
+  @keyframes form-flash {
+    0%   { box-shadow: 0 0 0 0 oklch(0.75 0.09 85 / 0); }
+    18%  { box-shadow: 0 0 26px 4px oklch(0.75 0.09 85 / 0.42); }
+    100% { box-shadow: 0 0 0 0 oklch(0.75 0.09 85 / 0); }
+  }
+}

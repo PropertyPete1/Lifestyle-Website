@@ -398,10 +398,10 @@
 
 - [x] Pull GitHub main through e71f7bd (297 tests passing, tsc clean)
 - [x] Ran scripts-reorder-bio-links.mjs against production twice (idempotent): 6 active buttons in order, "Home Valuation" and "Join Our Team" deactivated (not deleted, still recoverable from admin)
-- [ ] Checkpoint so the changes deploy
-- [ ] Verify /links live: exactly 6 buttons in order, NC Search gold-emphasized first, Explore Our Full Website last, Join Our Team + Home Valuation gone
-- [ ] Verify gold promise strip is fully above the fold at 375px and taps smooth-scroll to the capture form with a gold glow pulse
-- [ ] Verify main Get Started form includes "List for Lease" in the "I'm looking to" select
-- [ ] Verify desktop Properties dropdown includes List for Lease
-- [ ] Verify no layout shift and existing /links + homepage features intact
+- [x] Checkpoint fd197150 saved and auto-published
+- [x] Verified /links live: links.list returns exactly 6 active buttons in order (NC Search, Find Your Texas City, Convince Your Partner, Schedule a Consultation, Own a Rental? List It With Us, Explore Our Full Website). NC Search renders with the gold-emphasized treatment first, Explore Our Full Website last, and Join Our Team + Home Valuation no longer appear
+- [x] Verified the gold promise strip: sits at 350-401px from document top (bottom edge 401px), so fully above the fold even on the smallest common mobile viewport (568px tall) — comfortably above the fold at 375x812. Tapping it smooth-scrolls to the capture card (scrolled 0 -> 585, card centered in view) and applies the `form-flash` class with computed animation `form-flash 1.6s`, cleared after 1800ms so a re-tap restarts it. Reduced-motion users get the scroll without the pulse (the keyframes live inside a prefers-reduced-motion: no-preference block)
+- [x] Verified the live homepage Get Started form: "I'm Looking To" now offers Buy / Sell / Buy & Sell / **List for Lease**
+- [x] Verified the desktop Properties dropdown on the live site: New Construction Search -> a.nhb.app, Sell With Us -> /sell, **List for Lease -> /lease**
+- [x] Verified no layout shift: homepage CLS 0, /links CLS 0.057 (from the Living Logo canvas settling; strip/buttons hold their space). No horizontal overflow on either page once the nav dropdown is closed. Existing features intact — /links banner, 6 buttons, capture form with Buying/Selling/Leasing/Joining, socials, phone, TREC links, LDT credit; homepage hero CTAs, Get Started form, markets, team, testimonials, footer. Landlord FUB routing covered by 5 tests: /lease form, /links "Leasing" interest, Get Started "List for Lease" goal, buyers/sellers NOT tagged Landlord, and no duplicate tag
 - [ ] Push merged state to GitHub

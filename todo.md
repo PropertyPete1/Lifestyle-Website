@@ -404,4 +404,4 @@
 - [x] Verified the live homepage Get Started form: "I'm Looking To" now offers Buy / Sell / Buy & Sell / **List for Lease**
 - [x] Verified the desktop Properties dropdown on the live site: New Construction Search -> a.nhb.app, Sell With Us -> /sell, **List for Lease -> /lease**
 - [x] Verified no layout shift: homepage CLS 0, /links CLS 0.057 (from the Living Logo canvas settling; strip/buttons hold their space). No horizontal overflow on either page once the nav dropdown is closed. Existing features intact — /links banner, 6 buttons, capture form with Buying/Selling/Leasing/Joining, socials, phone, TREC links, LDT credit; homepage hero CTAs, Get Started form, markets, team, testimonials, footer. Landlord FUB routing covered by 5 tests: /lease form, /links "Leasing" interest, Get Started "List for Lease" goal, buyers/sellers NOT tagged Landlord, and no duplicate tag
-- [ ] Push merged state to GitHub
+- [x] Pushed merged state and verification notes to GitHub main (88f9495)

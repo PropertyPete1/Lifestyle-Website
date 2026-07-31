@@ -15,6 +15,18 @@ import { useBannerClickTracking } from "@/hooks/usePageTracking";
  * - Its real rendered height is measured via ResizeObserver into the
  *   `--hiring-banner-h` CSS var on <html>, which SiteNav uses as its `top`
  *   offset — so banner and nav never overlap at any width or wrap count.
+ *
+ * Feedback-loop contract (the "ResizeObserver loop completed with undelivered
+ * notifications" bug): the measured height is written to a CSS var that other
+ * elements lay out against, so a naive write inside the observer callback can
+ * re-trigger the observer in the same delivery cycle. Three guards prevent it:
+ *   1. Read the size off the ResizeObserverEntry rather than `offsetHeight`,
+ *      so the callback never forces a synchronous layout.
+ *   2. Round to whole pixels — subpixel jitter alone was enough to keep
+ *      re-arming the loop.
+ *   3. Apply the write in a requestAnimationFrame, and skip it entirely when
+ *      the value has not changed, so at most one style write happens per frame
+ *      and a settled banner writes nothing at all.
  */
 export default function NowHiringBanner() {
   const ref = useRef<HTMLDivElement>(null);
@@ -23,12 +35,33 @@ export default function NowHiringBanner() {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const apply = () =>
-      document.documentElement.style.setProperty("--hiring-banner-h", `${el.offsetHeight}px`);
-    apply();
-    const ro = new ResizeObserver(apply);
+
+    let last = -1;
+    let frame = 0;
+
+    const write = (height: number) => {
+      const next = Math.round(height);
+      if (next === last) return; // no-op writes are what keep the loop alive
+      last = next;
+      document.documentElement.style.setProperty("--hiring-banner-h", `${next}px`);
+    };
+
+    // Initial measurement happens once, outside any observer callback.
+    write(el.getBoundingClientRect().height);
+
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (!entry) return;
+      // borderBoxSize matches offsetHeight semantics; contentRect is the
+      // fallback for older engines that don't report box sizes.
+      const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+      // Defer the style write out of the resize delivery cycle.
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => write(height));
+    });
     ro.observe(el);
     return () => {
+      cancelAnimationFrame(frame);
       ro.disconnect();
       document.documentElement.style.removeProperty("--hiring-banner-h");
     };

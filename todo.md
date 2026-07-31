@@ -393,3 +393,15 @@
 - [x] Re-verified the fix on the LIVE homepage (bundle index-CKu9bSPq.js): exit-intent now fires on / where it never could before — modal shows "Want us to find your perfect Texas home?", session key set on show, Esc closes; no data-lead-converted marker present pre-submit
 - [x] Submitted one valid test lead end-to-end through the live Get Started form ("__TEST Delete Me", test-delete-me@lifestyledesignrealty.com, (210) 981-3830, Buy / Just exploring, consent checked). UI showed the Thank You confirmation; DB row 450001 recorded sourceTag "Website - Get Started", intent Cold, fubStatus **synced**, fubId 4046. Independently confirmed against the live FUB API: person 4046 carries the submitted email + phone and the new tags "Website - Get Started" and "Website - Get Started - Cold", assigned to Steven Van Orden
 - [x] Noted for Peter: FUB deduped this submission onto a PRE-EXISTING person (created 2025-05-10, stage "Trash", previously tagged "Bounced" / "Silviano Contreras") instead of creating a new contact — expected FUB behavior when the email/phone already exists. The website->FUB push itself is confirmed working; only that old trashed record picked up the new tags. Leads with fresh contact details create new people normally
+
+## Batch 21 — /links trim to 6 buttons, promise strip, leasing in Get Started (pull e71f7bd)
+
+- [x] Pull GitHub main through e71f7bd (297 tests passing, tsc clean)
+- [x] Ran scripts-reorder-bio-links.mjs against production twice (idempotent): 6 active buttons in order, "Home Valuation" and "Join Our Team" deactivated (not deleted, still recoverable from admin)
+- [ ] Checkpoint so the changes deploy
+- [ ] Verify /links live: exactly 6 buttons in order, NC Search gold-emphasized first, Explore Our Full Website last, Join Our Team + Home Valuation gone
+- [ ] Verify gold promise strip is fully above the fold at 375px and taps smooth-scroll to the capture form with a gold glow pulse
+- [ ] Verify main Get Started form includes "List for Lease" in the "I'm looking to" select
+- [ ] Verify desktop Properties dropdown includes List for Lease
+- [ ] Verify no layout shift and existing /links + homepage features intact
+- [ ] Push merged state to GitHub

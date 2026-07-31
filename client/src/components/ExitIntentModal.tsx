@@ -1,0 +1,139 @@
+import { useEffect, useRef, useState } from "react";
+import { ArrowRight, X } from "lucide-react";
+import { useExitIntentTracking } from "@/hooks/usePageTracking";
+
+/**
+ * EXIT-INTENT NUDGE — desktop only, once per session, one CTA.
+ *
+ * Rules, deliberately conservative so this never becomes the thing people
+ * remember about the site:
+ * - Desktop pointers only. Mobile has no real exit intent and the usual
+ *   proxies (scroll-up, back gesture) fire while someone is just reading, so
+ *   this is hard-disabled below the tablet breakpoint AND on coarse pointers.
+ * - Once per SESSION (sessionStorage), and never again once dismissed.
+ * - Suppressed entirely if the visitor already converted or is mid-form, so it
+ *   can't interrupt someone who is already doing the thing it asks for.
+ * - prefers-reduced-motion gets no entrance animation.
+ * - Esc closes, the backdrop closes, focus moves to the dialog.
+ *
+ * Shows and clicks are logged as first-party analytics events so its
+ * conversion rate is measurable — if it doesn't earn its keep, delete it.
+ */
+
+const SEEN_KEY = "ldr_exit_intent_seen";
+
+export default function ExitIntentModal() {
+  const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const track = useExitIntentTracking();
+  const shownRef = useRef(false);
+
+  useEffect(() => {
+    // --- eligibility -------------------------------------------------------
+    const coarse =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches;
+    if (coarse || window.innerWidth < 1024) return; // never on mobile/tablet
+
+    try {
+      if (sessionStorage.getItem(SEEN_KEY)) return; // once per session
+    } catch {
+      return; // storage blocked → don't risk repeat nags
+    }
+
+    const onLeave = (e: MouseEvent) => {
+      if (shownRef.current) return;
+      // Only a genuine exit toward the browser chrome, not a stray move.
+      if (e.clientY > 8 || e.relatedTarget) return;
+
+      // Don't interrupt someone already filling a form or reading a result.
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        active instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      // If a confirmation is on screen, they already converted.
+      if (/we typically respond within 30 minutes/i.test(document.body.innerText)) return;
+
+      shownRef.current = true;
+      try {
+        sessionStorage.setItem(SEEN_KEY, "1");
+      } catch {
+        /* ignore */
+      }
+      setOpen(true);
+      track("exit_intent_show");
+    };
+
+    document.addEventListener("mouseout", onLeave);
+    return () => document.removeEventListener("mouseout", onLeave);
+  }, [track]);
+
+  useEffect(() => {
+    if (!open) return;
+    dialogRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  if (!open) return null;
+
+  const reduced =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-5"
+      onClick={() => setOpen(false)}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="exit-intent-title"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+        className={[
+          "relative w-full max-w-md border border-gold/40 bg-card p-8 text-center outline-none",
+          reduced ? "" : "animate-in fade-in zoom-in-95 duration-200",
+        ].join(" ")}>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          aria-label="Close"
+          className="absolute right-3 top-3 p-2 text-muted-foreground hover:text-gold">
+          <X className="h-4 w-4" />
+        </button>
+
+        <p className="eyebrow text-gold">Before you go</p>
+        <h2 id="exit-intent-title" className="mt-3 font-serif text-2xl leading-snug">
+          Want us to find your perfect Texas home?
+        </h2>
+        <p className="mt-3 text-sm text-muted-foreground">Takes 30 seconds.</p>
+
+        <a
+          href="/#get-started"
+          onClick={() => {
+            track("exit_intent_click");
+            setOpen(false);
+          }}
+          className="glow-gold mt-7 inline-flex items-center gap-3 bg-gold px-8 py-4 text-xs font-medium uppercase tracking-[0.2em] text-primary-foreground transition-colors hover:bg-gold/90">
+          Get Started <ArrowRight className="h-4 w-4" />
+        </a>
+
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="mt-5 block w-full text-[11px] uppercase tracking-[0.18em] text-muted-foreground hover:text-foreground">
+          No thanks
+        </button>
+      </div>
+    </div>
+  );
+}

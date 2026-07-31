@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { SITE } from "@shared/site";
+import FormError from "@/components/FormError";
+import { humanizeSubmitError } from "@shared/formErrors";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -30,8 +32,20 @@ export default function WebsiteInquiryModal({
 
   const submit = trpc.websiteInquiry.submit.useMutation({
     onSuccess: () => setDone(true),
-    onError: (e) => setError(e.message || "Something went wrong. Please try again."),
+    onError: (e) => setError(humanizeSubmitError(e)),
   });
+
+  const doSubmit = () => {
+    setError(null);
+    submit.mutate({
+      name: form.name.trim(),
+      email: form.email.trim(),
+      phone: form.phone.trim(),
+      business: form.business.trim() || undefined,
+      message: form.message.trim(),
+      tcpaConsent: true,
+    });
+  };
 
   const canSubmit =
     form.name.trim().length > 0 &&
@@ -126,19 +140,12 @@ export default function WebsiteInquiryModal({
                   .
                 </label>
               </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && (
+                <FormError message={error} onRetry={doSubmit} retrying={submit.isPending} />
+              )}
               <Button
                 disabled={!canSubmit}
-                onClick={() =>
-                  submit.mutate({
-                    name: form.name.trim(),
-                    email: form.email.trim(),
-                    phone: form.phone.trim(),
-                    business: form.business.trim() || undefined,
-                    message: form.message.trim(),
-                    tcpaConsent: true,
-                  })
-                }
+                onClick={doSubmit}
                 className="bg-gold text-primary-foreground hover:bg-gold/90 rounded-none uppercase tracking-[0.2em] text-xs h-11">
                 {submit.isPending ? (
                   <span className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Sending…</span>

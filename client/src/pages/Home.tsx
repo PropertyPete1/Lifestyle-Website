@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import PageShell from "@/components/PageShell";
 import StatCounter from "@/components/StatCounter";
 import GetStartedForm from "@/components/GetStartedForm";
+import { ResponseBadge, TrustLine } from "@/components/TrustSignals";
 import NewsletterForm from "@/components/NewsletterForm";
 import ListingShowcase from "@/components/ListingShowcase";
 import AISearchBar from "@/components/AISearchBar";
@@ -43,7 +44,7 @@ export default function Home() {
   const logLeaseClick = useLeaseClickTracking();
 
   return (
-    <PageShell hiringBanner>
+    <PageShell stickyCta hiringBanner>
       {/* ============ HERO ============ */}
       <section className="ambient-section ambient-lines relative min-h-[88svh] flex items-center overflow-hidden pt-[var(--hiring-banner-h,0px)]">
         <div className="absolute inset-0">
@@ -128,6 +129,12 @@ export default function Home() {
             </div>
           </div>
           <div className="reveal glass-card border border-gold/40 p-6 lg:p-10">
+            {/* Social proof + the response promise, right where the visitor
+                decides whether to hand over their details. */}
+            <div className="mb-5 flex flex-col gap-3">
+              <ResponseBadge className="self-start" />
+              <TrustLine />
+            </div>
             <GetStartedForm />
           </div>
         </div>

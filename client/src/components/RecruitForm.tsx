@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { toast } from "sonner";
+import FormError from "@/components/FormError";
+import { humanizeSubmitError, isUsablePhone, PHONE_HINT } from "@shared/formErrors";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
 import { getVisitorId } from "@/lib/visitor";
@@ -29,9 +31,11 @@ export default function RecruitForm() {
   const [consent, setConsent] = useState(false);
   const [done, setDone] = useState(false);
 
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const submit = trpc.leads.submit.useMutation({
     onSuccess: () => setDone(true),
-    onError: (err) => toast.error(err.message || "Something went wrong. Please try again."),
+    onError: (err) => setSubmitError(humanizeSubmitError(err)),
   });
 
   if (done) {
@@ -44,16 +48,9 @@ export default function RecruitForm() {
     );
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!licenseNumber || !transactionsClosed || !fullTime || !currentBrokerage) {
-      toast.error("Please answer all five screening questions.");
-      return;
-    }
-    if (!consent) {
-      toast.error("Please agree to the consent terms to continue.");
-      return;
-    }
+  /** Extracted so the failure banner's "Try again" can re-send the same data. */
+  const doSubmit = () => {
+    setSubmitError(null);
     submit.mutate({
       name,
       email,
@@ -66,12 +63,30 @@ export default function RecruitForm() {
         fullTimeAgent: fullTime,
         crm: crm || "No CRM",
         currentBrokerage,
-        // recruiting intent inputs (server computeIntent):
         licenseStatus: licenseNumber ? "Licensed active" : "Not licensed",
         fullTime,
       },
       tcpaConsent: true,
     });
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitError(null);
+    setFieldError(null);
+    if (!licenseNumber || !transactionsClosed || !fullTime || !currentBrokerage) {
+      setFieldError("Please answer all five screening questions.");
+      return;
+    }
+    if (!consent) {
+      setFieldError("Please agree to the consent terms to continue.");
+      return;
+    }
+    if (!isUsablePhone(phone)) {
+      setFieldError(PHONE_HINT);
+      return;
+    }
+    doSubmit();
   };
 
   return (
@@ -83,7 +98,18 @@ export default function RecruitForm() {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="rc-phone" className="text-xs uppercase tracking-widest text-muted-foreground">Phone *</Label>
-          <Input id="rc-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required className="bg-secondary/60 border-border" />
+          <Input
+            id="rc-phone"
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            required
+            aria-invalid={fieldError === PHONE_HINT || undefined}
+            className="bg-secondary/60 border-border"
+          />
+          {fieldError === PHONE_HINT && (
+            <p role="alert" className="text-[11px] text-destructive">{PHONE_HINT}</p>
+          )}
         </div>
         <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor="rc-email" className="text-xs uppercase tracking-widest text-muted-foreground">Email *</Label>
@@ -124,6 +150,13 @@ export default function RecruitForm() {
           <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>.
         </label>
       </div>
+
+{fieldError && fieldError !== PHONE_HINT && (
+        <p role="alert" className="text-[11px] text-destructive">{fieldError}</p>
+      )}
+      {submitError && (
+        <FormError message={submitError} onRetry={doSubmit} retrying={submit.isPending} />
+      )}
 
       <Button
         type="submit"

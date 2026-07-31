@@ -66,6 +66,15 @@ const trpcClient = trpc.createClient({
         return globalThis.fetch(input, {
           ...(init ?? {}),
           credentials: "include",
+          /**
+           * Hard timeout on every request. Without one, a hung request left a
+           * lead form's submit button spinning forever with no error and no
+           * retry path — the visitor simply assumed it worked. 20s is far
+           * beyond a normal submit (sub-second) but short enough that a stuck
+           * request surfaces as a real, actionable error instead of an endless
+           * spinner. Any caller-supplied signal still wins.
+           */
+          signal: init?.signal ?? AbortSignal.timeout(20_000),
         });
       },
     }),

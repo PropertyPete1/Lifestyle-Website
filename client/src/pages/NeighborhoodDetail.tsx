@@ -26,7 +26,7 @@ export default function NeighborhoodDetail() {
 
   if (isLoading) {
     return (
-      <PageShell solidNav>
+      <PageShell stickyCta solidNav>
         <div className="mx-auto max-w-[1400px] px-5 lg:px-8 pt-28 pb-20 space-y-6">
           <Skeleton className="h-[40vh] w-full" />
           <Skeleton className="h-10 w-1/2" />
@@ -37,7 +37,7 @@ export default function NeighborhoodDetail() {
 
   if (!hood) {
     return (
-      <PageShell solidNav>
+      <PageShell stickyCta solidNav>
         <div className="mx-auto max-w-xl px-5 pt-40 pb-24 text-center">
           <h1 className="font-serif text-3xl">Area Not Found</h1>
           <Link
@@ -57,7 +57,7 @@ export default function NeighborhoodDetail() {
   );
 
   return (
-    <PageShell>
+    <PageShell stickyCta>
       {/* Hero */}
       <section className="relative min-h-[65svh] flex items-end">
         <div className="absolute inset-0">

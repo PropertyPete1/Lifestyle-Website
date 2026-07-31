@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { cn } from "@/lib/utils";
 import { SITE, isLinkVisible } from "@shared/site";
 import { Instagram, Facebook, Youtube, Linkedin, ArrowUpRight } from "lucide-react";
 import {
@@ -11,6 +12,7 @@ import {
 import NowHiringBanner from "@/components/NowHiringBanner";
 import WebsiteInquiryModal from "@/components/WebsiteInquiryModal";
 import LeadForm from "@/components/LeadForm";
+import { ResponseBadge, TrustLine } from "@/components/TrustSignals";
 import VeteranBadge from "@/components/VeteranBadge";
 import LivingLogo from "@/components/LivingLogo";
 
@@ -78,14 +80,44 @@ export default function Links() {
           {/* Bio links are admin-managed data, so a paused route (e.g. the
               seeded "Home Search" → /search) can still be present in the DB.
               Filter here so no customer is sent to a coming-soon dead end. */}
-          {(links ?? []).filter((l) => isLinkVisible(l.url)).map((l) => {
+          {/* Bio links are admin-managed data, so a paused route (e.g. the
+              seeded "Home Search" → /search) can still be present in the DB.
+              Filter here so no customer is sent to a coming-soon dead end.
+              EVERY button on this page is now a bio_links row (Own a Rental and
+              Explore Our Full Website used to be hardcoded below), so admin
+              ordering governs all of them and the priority order is data, not
+              markup. */}
+          {(links ?? []).filter((l) => isLinkVisible(l.url)).map((l, i) => {
             const isInternal = l.url.startsWith("/");
-            const cls =
-              "group lux-lift flex items-center justify-between w-full border border-border bg-card px-6 py-4 text-xs uppercase tracking-[0.2em] hover:border-gold hover:text-gold transition-colors";
+            // Visual hierarchy: the top button carries a gold border so the eye
+            // lands on the money path first. Everything else stays neutral so
+            // the emphasis actually means something.
+            const primary = i === 0;
+            const cls = cn(
+              "group lux-lift flex items-center justify-between w-full px-6 py-4 text-xs uppercase tracking-[0.2em] transition-colors",
+              primary
+                ? "border border-gold/70 bg-gold/10 text-foreground hover:bg-gold/15 hover:border-gold"
+                : "border border-border bg-card hover:border-gold hover:text-gold"
+            );
+            const arrow = (
+              <ArrowUpRight
+                className={cn(
+                  "h-4 w-4 group-hover:opacity-100",
+                  primary ? "text-gold opacity-80" : "opacity-40"
+                )}
+              />
+            );
+            // Outbound clicks keep their existing first-party tracking.
+            const onClick =
+              l.url === SITE.newConstructionUrl
+                ? logNcClick
+                : l.url === "/lease"
+                  ? logLeaseClick
+                  : undefined;
             return isInternal ? (
-              <Link key={l.id} href={l.url} className={cls}>
+              <Link key={l.id} href={l.url} onClick={onClick} className={cls}>
                 {l.label}
-                <ArrowUpRight className="h-4 w-4 opacity-40 group-hover:opacity-100" />
+                {arrow}
               </Link>
             ) : (
               <a
@@ -94,27 +126,12 @@ export default function Links() {
                 target="_blank"
                 rel="noreferrer"
                 className={cls}
-                onClick={l.url === SITE.newConstructionUrl ? logNcClick : undefined}>
+                onClick={onClick}>
                 {l.label}
-                <ArrowUpRight className="h-4 w-4 opacity-40 group-hover:opacity-100" />
+                {arrow}
               </a>
             );
           })}
-          {/* Landlord path for Instagram traffic — tracked like the hero CTA. */}
-          <Link
-            href="/lease"
-            onClick={logLeaseClick}
-            className="group lux-lift flex items-center justify-between w-full border border-border bg-card px-6 py-4 text-xs uppercase tracking-[0.2em] hover:border-gold hover:text-gold transition-colors">
-            Own a Rental? List It With Us
-            <ArrowUpRight className="h-4 w-4 opacity-40 group-hover:opacity-100" />
-          </Link>
-          {/* Final button: full-site escape hatch */}
-          <Link
-            href="/"
-            className="group lux-lift flex items-center justify-between w-full border border-border bg-card px-6 py-4 text-xs uppercase tracking-[0.2em] hover:border-gold hover:text-gold transition-colors">
-            Explore Our Full Website
-            <ArrowUpRight className="h-4 w-4 opacity-40 group-hover:opacity-100" />
-          </Link>
         </div>
 
         {/* Direct lead capture — an additive shortcut BELOW the buttons.
@@ -123,6 +140,10 @@ export default function Links() {
           <p className="font-serif text-xl text-center leading-snug">
             Or skip the browsing — <span className="text-gold">we'll reach out to you</span>
           </p>
+          <div className="mt-4 flex flex-col items-center gap-2.5">
+            <ResponseBadge />
+            <TrustLine className="justify-center" />
+          </div>
           <div className="mt-5">
             <LeadForm
               sourceTag="Website - Links Page"

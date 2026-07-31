@@ -92,13 +92,20 @@ async function run() {
 
   // ---- Bio links ----
   await db.execute(`DELETE FROM bio_links`);
+  // Ordered by business priority — the money path first. Every /links button
+  // is a row here (including Own a Rental and Explore Our Full Website, which
+  // used to be hardcoded in the page) so admin drag-ordering governs all of
+  // them uniformly. "Contact Us" was removed: it pointed at /contact, the same
+  // destination as "Schedule a Consultation".
   const links = [
-    ["Search Homes", "/search"],
-    ["Find Your Texas City (Quiz)", "/city-finder"],
-    ["New Builds Across Texas", "https://a.nhb.app/u/peter-allen"],
-    ["What's My Home Worth?", "/valuation"],
+    ["New Construction Search", "https://a.nhb.app/u/peter-allen"],
+    ["Find Your Texas City", "/city-finder"],
+    ["Convince Your Partner", "/convince"],
     ["Schedule a Consultation", "/contact"],
+    ["Own a Rental? List It With Us", "/lease"],
     ["Join Our Team", "/join"],
+    ["Home Valuation", "/valuation"],
+    ["Explore Our Full Website", "/"],
   ];
   for (let i = 0; i < links.length; i++) {
     await db.execute({

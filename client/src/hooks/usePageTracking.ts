@@ -149,3 +149,29 @@ export function useLinksFormTracking() {
       { onError: () => undefined }
     );
 }
+
+/**
+ * Exit-intent modal instrumentation. Both events are logged so the modal can be
+ * judged on whether it actually earns its place: shows vs clicks is its
+ * conversion rate, and if that stays near zero it should be removed.
+ */
+export function useExitIntentTracking() {
+  const track = trpc.analytics.track.useMutation();
+  return (kind: "exit_intent_show" | "exit_intent_click") =>
+    track.mutate(
+      { kind, path: "/", visitorId: getVisitorId() || undefined, ...getTrafficSource() },
+      { onError: () => undefined }
+    );
+}
+
+/** Sticky mobile CTA taps, so its value is measurable the same way. */
+export function useStickyCtaTracking() {
+  const track = trpc.analytics.track.useMutation();
+  return () => {
+    const path = (window.location.pathname.split(/[?#]/)[0] || "/").replace(/(.)\/$/, "$1");
+    track.mutate(
+      { kind: "sticky_cta_click", path, visitorId: getVisitorId() || undefined, ...getTrafficSource() },
+      { onError: () => undefined }
+    );
+  };
+}

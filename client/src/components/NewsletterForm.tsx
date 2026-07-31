@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { toast } from "sonner";
+import FormError from "@/components/FormError";
+import { humanizeSubmitError, isUsablePhone, PHONE_HINT } from "@shared/formErrors";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
 import { getVisitorId } from "@/lib/visitor";
@@ -21,12 +23,14 @@ export default function NewsletterForm() {
   const [consent, setConsent] = useState(false);
   const [done, setDone] = useState(false);
 
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const submit = trpc.leads.submit.useMutation({
     onSuccess: () => {
       setDone(true);
       toast.success("You're subscribed.");
     },
-    onError: (err) => toast.error(err.message || "Something went wrong. Please try again."),
+    onError: (err) => setSubmitError(humanizeSubmitError(err)),
   });
 
   if (done) {
@@ -37,12 +41,9 @@ export default function NewsletterForm() {
     );
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!consent) {
-      toast.error("Please agree to the consent terms to continue.");
-      return;
-    }
+  /** Extracted so the failure banner's "Try again" can re-send the same data. */
+  const doSubmit = () => {
+    setSubmitError(null);
     submit.mutate({
       name,
       email,
@@ -50,6 +51,17 @@ export default function NewsletterForm() {
       tcpaConsent: true,
       visitorId: getVisitorId() || undefined,
     });
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitError(null);
+    setFieldError(null);
+    if (!consent) {
+      setFieldError("Please agree to the consent terms to continue.");
+      return;
+    }
+    doSubmit();
   };
 
   return (
@@ -72,7 +84,14 @@ export default function NewsletterForm() {
           required
           className="bg-transparent border-0 border-b border-border rounded-none px-0 focus-visible:ring-0 focus-visible:border-gold"
         />
-        <Button
+{fieldError && fieldError !== PHONE_HINT && (
+        <p role="alert" className="text-[11px] text-destructive">{fieldError}</p>
+      )}
+      {submitError && (
+        <FormError message={submitError} onRetry={doSubmit} retrying={submit.isPending} />
+      )}
+
+      <Button
           type="submit"
           disabled={submit.isPending}
           variant="outline"

@@ -192,7 +192,7 @@ export function ConvinceShared() {
   const [, navigate] = useLocation();
 
   return (
-    <PageShell solidNav>
+    <PageShell stickyCta solidNav>
       <div className="mx-auto max-w-3xl px-5 lg:px-8 pt-28 lg:pt-36 pb-24">
         {isLoading ? (
           <p className="text-center text-muted-foreground animate-pulse py-20">
@@ -289,7 +289,7 @@ export default function Convince() {
   const result = generate.data;
 
   return (
-    <PageShell solidNav>
+    <PageShell stickyCta solidNav>
       <div className="ambient-section mx-auto max-w-3xl px-5 lg:px-8 pt-28 lg:pt-36 pb-24">
         {stage === "intro" && (
           <div className="text-center">

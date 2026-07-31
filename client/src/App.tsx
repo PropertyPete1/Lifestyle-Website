@@ -2,6 +2,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
 import { Route, Switch, useLocation } from "wouter";
+import ExitIntentModal from "@/components/ExitIntentModal";
 import { useLayoutEffect } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -109,6 +110,8 @@ function App() {
         <TooltipProvider>
           <Toaster />
           <Router />
+          {/* Desktop-only, once per session, single CTA. */}
+          <ExitIntentModal />
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { toast } from "sonner";
+import FormError from "@/components/FormError";
+import { humanizeSubmitError, isUsablePhone, PHONE_HINT } from "@shared/formErrors";
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
 import { markLeadCaptured } from "@/lib/leadSession";
@@ -61,6 +63,8 @@ export default function LeadForm({
   const [consent, setConsent] = useState(false);
   const [done, setDone] = useState(false);
 
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const submit = trpc.leads.submit.useMutation({
     onSuccess: () => {
       setDone(true);
@@ -68,7 +72,7 @@ export default function LeadForm({
       toast.success("Thank you — we typically respond within 30 minutes.");
       onSuccess?.();
     },
-    onError: (err) => toast.error(err.message || "Something went wrong. Please try again."),
+    onError: (err) => setSubmitError(humanizeSubmitError(err)),
   });
 
   if (done) {
@@ -83,12 +87,9 @@ export default function LeadForm({
     );
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!consent) {
-      toast.error("Please agree to the consent terms to continue.");
-      return;
-    }
+  /** Extracted so the failure banner's "Try again" can re-send the same data. */
+  const doSubmit = () => {
+    setSubmitError(null);
     submit.mutate({
       name,
       email,
@@ -99,6 +100,25 @@ export default function LeadForm({
       tcpaConsent: true,
       visitorId: getVisitorId() || undefined,
     });
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitError(null);
+    setFieldError(null);
+    if (!consent) {
+      // Inline + persistent, not a toast: the checkbox is below the fold on
+      // mobile, so a disappearing toast left the submit looking dead.
+      setFieldError("Please agree to the consent terms to continue.");
+      return;
+    }
+    // Catch the server's phone rule here so the visitor gets a message pointing
+    // at the field instead of a round-trip rejection.
+    if (!isUsablePhone(phone)) {
+      setFieldError(PHONE_HINT);
+      return;
+    }
+    doSubmit();
   };
 
   return (
@@ -115,7 +135,18 @@ export default function LeadForm({
         </div>
         <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor={`${sourceTag}-phone`} className="text-xs uppercase tracking-widest text-muted-foreground">Phone *</Label>
-          <Input id={`${sourceTag}-phone`} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required className="bg-secondary/60 border-border" />
+          <Input
+            id={`${sourceTag}-phone`}
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            required
+            aria-invalid={fieldError === PHONE_HINT || undefined}
+            className="bg-secondary/60 border-border"
+          />
+          {fieldError === PHONE_HINT && (
+            <p role="alert" className="text-[11px] text-destructive">{PHONE_HINT}</p>
+          )}
         </div>
       </div>
 
@@ -161,6 +192,13 @@ export default function LeadForm({
           <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>.
         </label>
       </div>
+
+      {fieldError && fieldError !== PHONE_HINT && (
+        <p role="alert" className="text-[11px] text-destructive">{fieldError}</p>
+      )}
+      {submitError && (
+        <FormError message={submitError} onRetry={doSubmit} retrying={submit.isPending} />
+      )}
 
       <Button
         type="submit"

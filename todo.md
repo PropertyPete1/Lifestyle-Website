@@ -477,3 +477,11 @@ Three separate bugs stacked up:
 - [x] Confirmed the stall guard in situ: while genuinely throttled the panel reports `fps —` and no samples accumulate, so a throttled environment can never degrade a device
 - [x] Fallbacks and perf discipline unchanged: /links CLS **0** with no layout-shift entries at all, orb box reserved at 168×168, no horizontal overflow, static LDR monogram always rendered, debug panel absent without the flag, homepage hero canvas still `pointer-events-none` with a 2x-capped backing store and a legible headline, no console errors beyond the expected local tRPC failures (no backend in the preview)
 - [x] Manus: pulled 3e9c421 and checkpointed; read /links?orbDebug=1 on the live site as far as this sandbox allows (reports tier medium · 620 particles, because headless Chromium REPORTS deviceMemory 4GB and is frame-capped at 30fps). Confirming `tier high · particles 1150` requires a real iPhone, which no sandbox browser can stand in for — handed to Peter as the one open check. Traced the policy to show why an iPhone now qualifies: Safari reports no deviceMemory, which is treated as "no signal" rather than 4GB, so 4-6 Apple cores resolve to high
+
+## Batch 24 — re-verification of the device-tier fix (already-deployed commit)
+
+- [x] Confirmed 3e9c421 is an ancestor of HEAD and GitHub main has nothing newer, so no pull was needed; the live bundle (index-DFEu24Ui.js) already contains the tier fix, the 1150 budget and the orbDebug overlay
+- [x] Verified the /links orb renders on the live site: 168x168 canvas painting 7,269 lit pixels in a fixed 168x168 wrapper
+- [x] Verified the homepage swarm renders on the live site: full-bleed 1265x839 canvas, peak 5,587 lit pixels sampled over a fresh mount, pointer-events-none over an absolutely-positioned parent so it takes no layout and cannot block CTAs; headline renders above it in near-white
+- [x] Verified no layout shift: homepage CLS 0, /links CLS 0.055 (Living Logo canvas settling). No horizontal overflow on either page. Both pages confirmed at 375px mobile
+- [x] Verified /links?orbDebug=1 shows the debug panel (fixed, pointer-events-none, bottom-left, reporting tier/particles/halo/fps/cores/memory/DPR and each degrade step) and that it is absent without the flag, so it costs nothing for real visitors

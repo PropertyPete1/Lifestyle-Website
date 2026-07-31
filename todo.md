@@ -416,10 +416,11 @@
 ## Batch 23 — guide-trail chip restyle + orb fidelity
 
 - [x] Pulled GitHub main: c6b6f6c (promise chip restyle + guided gold trail) and 3e9c421 (orb fidelity — every iPhone was rendering 240 of 1150 particles); 386 tests passing
-- [ ] Checkpoint so the changes deploy
-- [ ] Verify on mobile: promise chip is pill-styled with "Tap here"
-- [ ] Verify tapping draws the gold line down the gutter while auto-scrolling to the glowing form
-- [ ] Report tier/fps from a fresh load of /links?orbDebug=1
+- [x] Checkpoint e054ca14 saved and auto-published
+- [x] Verified at 375px: the promise is now a soft-filled gold pill (fully rounded, no border) with the underlined "Tap here" affordance, visually distinct from the hard-cornered bordered link buttons below it, and sitting above the fold in the header
+- [x] Verified the tap sequence on the live page. The gold line draws down the gutter (x=453, left of the 465px content edge) as the page smooth-scrolls: head travelled y1 410 -> 0 -> 134 over 11 sampled frames while scrollY went 0 -> 724, so line and scroll move together rather than one after the other. Trail holds full opacity through the 850ms draw then fades to 0 and self-hides (visibility hidden, opacity 0). The capture card's glow fires at ~962ms — right as the head arrives — and clears at ~2650ms (850 draw + 1800 flash), so a re-tap restarts it. Overlay is fixed/pointer-events-none/aria-hidden, so it never intercepts a button tap and adds no layout
+- [x] Read /links?orbDebug=1 on the live site. Fresh mount reports: **tier medium, particles 620, halo 95, fps 30, 6 cores / 4GB / 1x DPR**. The sandbox browser is capped at 30fps, so the adaptive ladder then steps medium -> low (240 particles, ~1.76s) -> static (~5s), leaving a lit static mark (7,242 lit pixels on the 168x168 canvas) rather than a blank canvas. The 30fps cap is a headless-environment artifact, not a device signal — a real 60fps phone holds its tier. Note the sandbox lands on medium (not high) only because it is Chromium and REPORTS deviceMemory 4GB; a real iPhone reports no deviceMemory at all, which under the new policy means "no signal" -> 4-6 cores with unknown memory -> **high (1150 particles)**. That is exactly the 240 -> 1150 fix in 3e9c421, and the orbDebug flag is confirmed present in the deployed bundle
+- [ ] Push merged state and verification notes to GitHub
 
 ## Batch 23 — /links promise strip: visual disambiguation + guided connection (user request Jul 31)
 

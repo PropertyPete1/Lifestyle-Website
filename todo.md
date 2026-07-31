@@ -413,6 +413,14 @@
 - [x] Added server/bannerResizeObserver.test.ts (7 tests): no offsetHeight in the callback, entry-based measurement, rAF defer + cancel, Math.round, unchanged-value early return, cleanup intact, and a filesystem scan asserting NowHiringBanner stays the only app-level ResizeObserver so this bug class can't reappear elsewhere
 - [x] Verified: cleared browserConsole.log, then reloaded / and /links at 375px, 640px and desktop plus a stress test cycling the layout through 15 widths (1280 -> 320 -> 1280) across the banner's wrap breakpoints. Zero ResizeObserver errors, zero console errors of any kind. The var still tracks correctly (42px = real banner height) and the nav sits flush below the banner with no overlap
 
+## Batch 23 — guide-trail chip restyle + orb fidelity
+
+- [x] Pulled GitHub main: c6b6f6c (promise chip restyle + guided gold trail) and 3e9c421 (orb fidelity — every iPhone was rendering 240 of 1150 particles); 386 tests passing
+- [ ] Checkpoint so the changes deploy
+- [ ] Verify on mobile: promise chip is pill-styled with "Tap here"
+- [ ] Verify tapping draws the gold line down the gutter while auto-scrolling to the glowing form
+- [ ] Report tier/fps from a fresh load of /links?orbDebug=1
+
 ## Batch 23 — /links promise strip: visual disambiguation + guided connection (user request Jul 31)
 
 - [x] **Restyled the strip as a chip.** It was a gold-bordered rectangle with a ↓ arrow sitting directly above the gold-bordered NC Search button — two gold boxes stacked, so they read as one control with a secondary row. Now a pill (`rounded-full`, soft `bg-gold/[0.09]` fill, **no border**) so it no longer shares the buttons' visual vocabulary. Arrow removed; the affordance is an underlined gold "Tap here" ending the copy: "⚡ Skip the browsing — tell us what you need and we'll reach out *within 30 minutes*. **Tap here**"

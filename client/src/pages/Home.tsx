@@ -1,5 +1,7 @@
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { ArrowRight } from "lucide-react";
+import { cn } from "@/lib/utils";
 import PageShell from "@/components/PageShell";
 import StatCounter from "@/components/StatCounter";
 import GetStartedForm from "@/components/GetStartedForm";
@@ -8,14 +10,34 @@ import NewsletterForm from "@/components/NewsletterForm";
 import ListingShowcase from "@/components/ListingShowcase";
 import AISearchBar from "@/components/AISearchBar";
 import FinancingBanner from "@/components/FinancingBanner";
-import NaniteSwarm from "@/components/NaniteSwarm";
+import CrownBranch from "@/components/CrownBranch";
 import TestimonialCarousel from "@/components/TestimonialCarousel";
 import VeteranBadge from "@/components/VeteranBadge";
 import TechShowcase from "@/components/TechShowcase";
 import { trpc } from "@/lib/trpc";
 import { useNcClickTracking, useLeaseClickTracking } from "@/hooks/usePageTracking";
 import { SITE, FEATURES } from "@shared/site";
+import { shouldPlayEntrance } from "@shared/crownBranch";
 import { IMG } from "@/lib/assets";
+
+/**
+ * Whether this visit gets the Crown Branch entrance, decided BEFORE first paint
+ * so the hero is never briefly hidden from someone who isn't going to see one.
+ * Mirrors CrownBranch's own decision; both read the same session flag.
+ */
+function willPlayCrownEntrance(): boolean {
+  if (typeof window === "undefined") return false;
+  const reduced =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let store: Storage | null = null;
+  try {
+    store = window.sessionStorage;
+  } catch {
+    store = null;
+  }
+  return shouldPlayEntrance(store, reduced);
+}
 
 const CITY_CARDS = [
   { name: "San Antonio", slug: "san-antonio", img: IMG.citySanAntonio },
@@ -42,6 +64,21 @@ export default function Home() {
   const { data: team } = trpc.team.list.useQuery();
   const logNcClick = useNcClickTracking();
   const logLeaseClick = useLeaseClickTracking();
+  /** Measured live by CrownBranch so the crown frame tracks the real headline. */
+  const headlineRef = useRef<HTMLHeadingElement>(null);
+  /**
+   * Hero content fades in once the border entrance is ~40% drawn. It starts
+   * hidden ONLY when an entrance is actually going to play — a returning
+   * visitor, reduced motion, or a browser where CrownBranch never mounts must
+   * see the hero immediately, so the default is visible and the safety timer
+   * below guarantees it can never stay hidden.
+   */
+  const [heroRevealed, setHeroRevealed] = useState(() => !willPlayCrownEntrance());
+  useEffect(() => {
+    if (heroRevealed) return;
+    const t = window.setTimeout(() => setHeroRevealed(true), 2500);
+    return () => window.clearTimeout(t);
+  }, [heroRevealed]);
 
   return (
     <PageShell stickyCta hiringBanner>
@@ -56,13 +93,20 @@ export default function Home() {
           <div className="absolute inset-0 bg-black/65" />
           <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-black/40" />
         </div>
-        {/* Animated nanite swarm. Sits AFTER the background and BEFORE the
+        {/* The Crown Branch line work. Sits AFTER the background and BEFORE the
             content below, so it always paints behind the headline/CTAs by DOM
             order, and is pointer-events-none so it can never eat a CTA tap. */}
-        <NaniteSwarm />
-        <div className="relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pt-32 pb-16">
+        <CrownBranch headlineRef={headlineRef} onReveal={() => setHeroRevealed(true)} />
+        <div
+          className={cn(
+            "relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pt-32 pb-16",
+            "transition-opacity duration-[900ms] ease-out",
+            heroRevealed ? "opacity-100" : "opacity-0"
+          )}>
           <p className="eyebrow text-foreground/90">{SITE.eyebrow}</p>
-          <h1 className="display-serif hero-glow text-[10.5vw] sm:text-6xl md:text-7xl lg:text-[5.5rem] uppercase mt-5 text-foreground">
+          <h1
+            ref={headlineRef}
+            className="display-serif hero-glow text-[10.5vw] sm:text-6xl md:text-7xl lg:text-[5.5rem] uppercase mt-5 text-foreground">
             {SITE.headline}
           </h1>
           <div className="hairline w-40 my-7" />

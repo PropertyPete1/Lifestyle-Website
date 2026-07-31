@@ -377,4 +377,15 @@
 
 ## Living Logo v3 intensity pass — pull + verify (user request Jul 30, batch 19)
 - [x] Pulled GitHub 2b7a103 (Living Logo v3: brighter, denser, unmistakable circulation + stall-detection fix), fast-forward, 274/274 tests pass
-- [ ] Checkpoint (auto-publish), verify live desktop + 375px: hero swarm legible/clickable/no streaking, /links logo denser + brighter with bloom + circulation, all functionality intact
+- [x] Checkpoint d7bc4eed deployed (bundle index-Cb8Pgz1Y.js live); verified desktop + 375px: hero swarm particles drift upward (centroid dy=-20px over 350ms, no horizontal streaking pattern), h1/CTAs legible + clickable (pointer-events-none layer), CLS=0, no horizontal overflow; /links v3 logo measurably denser/brighter (772 lit samples, 90 bright accents, 64 warm-white bloom pixels on 168px canvas vs sparse v1), monogram clearly lit; all homepage + /links features intact; pushed to GitHub (2b7a103..d7bc4ee). Sandbox 30fps rAF cap still triggers designed degrade-to-static after sample window (desktop 60fps devices unaffected); v3 degrade leaves the styled static mark rather than clearing
+
+## Form error handling + conversion pass — pull, migrate, verify (user request, batch 20)
+- [x] Pulled GitHub a9cdb19 (form error handling, 20s request timeout, /links conversion pass, trust badges, exit-intent, sticky mobile CTA), 285/285 tests pass
+- [x] Ran scripts-reorder-bio-links.mjs against production DB — 8 active buttons in intended order. Found the script's url-keyed keep-set spared the duplicate "Contact Us" (shares /contact with "Schedule a Consultation"); hardened the script to key deactivation on claimed row ids and re-ran clean/idempotent
+- [ ] Checkpoint (auto-publish)
+- [ ] Verify /links live: no Contact Us duplicate, new button order, top button gold-emphasized
+- [ ] Verify bad-phone submit shows readable inline error, not raw JSON
+- [ ] Verify trust line + response badge render near Get Started and /links form
+- [ ] Verify sticky mobile CTA appears at 375px, dismissible, never covers inputs
+- [ ] Verify exit-intent fires once on desktop leave-intent, closes via Esc/backdrop/No-thanks, never on mobile
+- [ ] Submit one valid test lead end-to-end named "__TEST Delete Me" and confirm it reaches FUB

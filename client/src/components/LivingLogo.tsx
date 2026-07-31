@@ -3,20 +3,29 @@ import { cn } from "@/lib/utils";
 import {
   bandAngularVelocity,
   breathe,
+  DEGRADE_BUDGET_MS,
   DEPTH_BUCKETS,
   FIRST_CHECK_SAMPLES,
+  isOrbDebugEnabled,
   isOrbHero,
   isTrustworthyFrame,
+  isWarmedUp,
   haloCount,
   MICRO_EVENT_DURATION,
   nextMicroEventDelay,
   nextTierDown,
+  nextTierUp,
   particleCount,
+  REBUILD_WARMUP_MS,
+  rollingFps,
   selectTier,
   shimmerBoost,
   shouldDegrade,
+  shouldRecover,
   STEADY_CHECK_SAMPLES,
   swell,
+  tierRank,
+  WARMUP_MS,
   type PerfTier,
 } from "@shared/livingLogo";
 import { NANITE_WARM_WHITE } from "@shared/naniteSwarm";
@@ -139,6 +148,21 @@ function makeBloom(radius: number, peak: number): HTMLCanvasElement | null {
   return c;
 }
 
+/** Snapshot rendered by the ?orbDebug=1 overlay. */
+type OrbDebug = {
+  tier: PerfTier;
+  /** What the hardware hints assigned — the ceiling recovery may return to. */
+  assigned: PerfTier;
+  particles: number;
+  halo: number;
+  fps: number;
+  /** Tier history, e.g. "↓medium ↑high". */
+  steps: string;
+  cores: number;
+  memoryGb: number | null;
+  dpr: number;
+};
+
 export default function LivingLogo({
   /** Rendered size in CSS px. The box is reserved up-front, so no layout shift. */
   size = 168,
@@ -151,10 +175,29 @@ export default function LivingLogo({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   /** Drives the static fallback. Starts true so first paint is never blocked. */
   const [staticOnly, setStaticOnly] = useState(true);
+  /** ?orbDebug=1 — what a REAL device is doing, rather than what we assume. */
+  const [debug, setDebug] = useState<OrbDebug | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+
+    const debugOn =
+      typeof window !== "undefined" && isOrbDebugEnabled(window.location.search);
+    // Written every frame, read on a 4Hz timer — the hot loop must never
+    // trigger a React render.
+    const stats: OrbDebug = {
+      tier: "static",
+      assigned: "static",
+      particles: 0,
+      halo: 0,
+      fps: 0,
+      steps: "",
+      cores: 0,
+      memoryGb: null,
+      dpr: 1,
+    };
+    let debugTimer = 0;
 
     // ---- capability + tier decision -------------------------------------
     const probe = document.createElement("canvas").getContext("2d");
@@ -174,7 +217,26 @@ export default function LivingLogo({
       reducedMotion,
       canvasSupported: !!probe,
     });
-    if (tier === "static") return; // stay on the static mark
+    /** Ceiling for recovery: measurement may hand back tiers, never invent them. */
+    const assignedTier = tier;
+
+    if (debugOn) {
+      stats.assigned = assignedTier;
+      stats.tier = tier;
+      stats.cores = nav.hardwareConcurrency ?? 0;
+      stats.memoryGb = typeof nav.deviceMemory === "number" ? nav.deviceMemory : null;
+      stats.dpr = window.devicePixelRatio || 1;
+      stats.particles = particleCount(tier);
+      stats.halo = haloCount(tier);
+      // Publish immediately so the static/opt-out cases are visible too.
+      setDebug({ ...stats });
+      debugTimer = window.setInterval(() => setDebug({ ...stats }), 250);
+    }
+
+    if (tier === "static") {
+      // Nothing further to run, but the debug timer (if any) still needs a home.
+      return () => window.clearInterval(debugTimer);
+    }
 
     // ---- lazy init: never compete with FCP or button interactivity -------
     let started = false;
@@ -341,37 +403,107 @@ export default function LivingLogo({
       let onScreen = true;
       let disposed = false;
 
+      /* ---- adaptive tiering state -------------------------------------- */
+      /** When measurement last restarted — frames before the warm-up elapses
+       *  are not measured at all. */
+      let builtAt = t0;
+      /** How long that warm-up lasts. Long on first start (page load), short
+       *  after a rebuild or a resume, which settle much faster. */
+      let warmupMs = WARMUP_MS;
+      /** Start of the current unbroken run of healthy frames. */
+      let healthySince = -1;
+      /** Step-ups so far, so each further one demands a longer proof. */
+      let recoveries = 0;
+      /** Human-readable tier history for the debug overlay. */
+      const steps: string[] = [];
+
+      /** Restart measurement without changing tier (resume, visibility). */
+      const rearm = (now: number, ms: number) => {
+        builtAt = now;
+        warmupMs = ms;
+        frameTimes.length = 0;
+        healthySince = -1;
+      };
+
+      const rebuild = (next: PerfTier, why: string, now: number) => {
+        tier = next;
+        build(next);
+        rearm(now, REBUILD_WARMUP_MS);
+        steps.push(`${why}${next}`);
+        if (steps.length > 6) steps.shift();
+      };
+
       const frame = (now: number) => {
         const dtRaw = (now - last) / 1000;
         const dt = Math.min(dtRaw, 0.05); // clamp after a pause/tab switch
         last = now;
         const t = (now - t0) / 1000;
 
-        // --- adaptive degradation -----------------------------------------
+        // --- adaptive tiering ---------------------------------------------
         // Only MEASURE frames that reflect render cost. A stalled frame
         // (throttled tab, app switch, long task elsewhere) would otherwise be
         // read as "we are too slow" and shed tiers for no reason — and a run of
         // them would degrade all the way to static.
+        // On top of that, frames inside the warm-up window are discarded
+        // outright: page load is the jankiest moment a visitor sees, and it used
+        // to be the moment that decided their tier for the rest of the session.
         const dtMs = dtRaw * 1000;
-        if (isTrustworthyFrame(dtMs)) {
-          frameTimes.push(dtMs);
-          if (frameTimes.length > 90) frameTimes.shift();
-        } else {
+        const warm = isWarmedUp(now - builtAt, warmupMs);
+        if (!isTrustworthyFrame(dtMs)) {
           frameTimes.length = 0; // a stall invalidates the sample window
+          healthySince = -1; // ...and breaks the healthy streak
+        } else if (warm) {
+          frameTimes.push(dtMs);
+          if (frameTimes.length > 120) frameTimes.shift();
+          // The streak is what recovery TIMES, so any frame over the degrade
+          // budget has to restart it — otherwise a device running steadily slow
+          // accrues a "healthy" streak and claims a tier back on the strength of
+          // one brief good patch. Tolerance is the degrade budget, not the
+          // recovery budget: 60fps jitter must not keep resetting the clock.
+          if (dtMs > DEGRADE_BUDGET_MS) healthySince = -1;
+          else if (healthySince < 0) healthySince = now;
         }
+
         const windowSize = checkedOnce ? STEADY_CHECK_SAMPLES : FIRST_CHECK_SAMPLES;
-        if (shouldDegrade(frameTimes, 21, windowSize)) {
+        if (warm && shouldDegrade(frameTimes, DEGRADE_BUDGET_MS, windowSize)) {
           checkedOnce = true;
           const next = nextTierDown(tier);
-          frameTimes.length = 0;
           if (next === "static") {
             setStaticOnly(true); // give up; the mark carries the brand
+            steps.push("↓static");
+            if (debugOn) {
+              // This path returns without reaching the publish below, and a
+              // debug panel that reports the last animated tier after the
+              // animation has given up is worse than no panel at all.
+              stats.tier = "static";
+              stats.particles = 0;
+              stats.halo = 0;
+              stats.fps = rollingFps(frameTimes);
+              stats.steps = steps.join(" ");
+            }
             return;
           }
-          tier = next;
-          build(tier);
+          rebuild(next, "↓", now);
+        } else if (
+          // Recovery: a device that has since proved itself gets its tier back,
+          // one step at a time and never above what its hardware was assigned.
+          warm &&
+          tierRank(tier) > tierRank(assignedTier) &&
+          healthySince >= 0 &&
+          shouldRecover(frameTimes, now - healthySince, recoveries)
+        ) {
+          recoveries++;
+          rebuild(nextTierUp(tier), "↑", now);
         } else if (frameTimes.length >= windowSize) {
           checkedOnce = true;
+        }
+
+        if (debugOn) {
+          stats.tier = tier;
+          stats.particles = n;
+          stats.halo = hn;
+          stats.fps = rollingFps(frameTimes);
+          stats.steps = steps.join(" ");
         }
 
         // --- micro-event scheduling ---------------------------------------
@@ -520,8 +652,11 @@ export default function LivingLogo({
 
       const resume = () => {
         if (disposed || !visible || !onScreen) return;
-        last = performance.now();
-        frameTimes.length = 0; // don't judge fps on the resume frame
+        const now = performance.now();
+        last = now;
+        // Don't judge fps on the resume frames, and don't let time spent hidden
+        // count toward a healthy streak that would earn a tier back unearned.
+        rearm(now, REBUILD_WARMUP_MS);
         cancelAnimationFrame(raf);
         raf = requestAnimationFrame(frame);
       };
@@ -557,6 +692,7 @@ export default function LivingLogo({
     }
 
     return () => {
+      window.clearInterval(debugTimer);
       cancelSchedule();
       cleanupRun?.();
     };
@@ -596,6 +732,29 @@ export default function LivingLogo({
           </span>
         </div>
       </div>
+
+      {/* ?orbDebug=1 — what THIS device actually got, so live fidelity can be
+          read off a real phone instead of inferred. Opt-in, fixed and
+          pointer-events-none, so it costs nothing and shifts nothing when the
+          flag is absent (the usual case). */}
+      {debug && (
+        <div
+          data-testid="orb-debug"
+          className="pointer-events-none fixed bottom-2 left-2 z-[70] rounded bg-black/85 px-2 py-1.5 text-left font-mono text-[10px] leading-[1.5] text-gold ring-1 ring-gold/30">
+          <div>
+            tier <b>{debug.tier}</b>
+            {debug.tier !== debug.assigned && <span> (assigned {debug.assigned})</span>}
+          </div>
+          <div>
+            particles {debug.particles} · halo {debug.halo}
+          </div>
+          <div>fps {debug.fps || "—"}</div>
+          <div className="text-gold/60">
+            {debug.cores || "?"} cores · {debug.memoryGb ?? "?"}GB · {debug.dpr}x
+          </div>
+          {debug.steps && <div className="text-gold/60">{debug.steps}</div>}
+        </div>
+      )}
     </div>
   );
 }

@@ -425,3 +425,46 @@
 - [x] 32 new tests in `server/guideTrail.test.ts` (timing budget, opacity envelope, easing monotonicity, gutter invariant, segment clipping/landing, plus source contracts: chip is a borderless pill, no `ArrowDown` anywhere, underlined "Tap here", promise copy intact, tracking wired, `mt-9` gap, overlay is pointer-events-none/fixed/z-40 with full teardown, reduced-motion branches). 334 total, `tsc --noEmit` clean, `vite build` clean. The only 2 failing tests are the pre-existing live-credential checks (`FUB_API_KEY`, `ANTHROPIC_API_KEY`) that need env vars not present locally
 - [x] Verified in a local 375×667 preview: **chip bottom sits 500px from the document top with the real 3-line mobile banner (70px) — above the fold on 667px and on the 568px smallest common viewport**; CLS = 0 (no layout-shift entries at all on load); no horizontal overflow (scrollWidth 375); taps reach both the chip and the first button with the overlay forced visible (`elementFromPoint` returns the target, never the SVG); frame-stepped the trail through its full life and confirmed x=10 throughout, head travelling 499.6 → 667 on the eased curve with the tail 72px behind, opacity 1 → 0.06 by t=1300. NOTE: the sandbox browser throttles rAF to ~2fps while scripted, so the animation was verified by driving its frame callbacks on a fake clock rather than by wall-clock sampling — same class of sandbox limitation recorded in batches 18/19
 - [ ] Manus: pull this commit + checkpoint, then re-verify the chip/trail on the live /links
+
+## Batch 24 — Orb fidelity investigation: live visitors saw a far weaker orb than dev (user request Jul 31)
+
+### 1. Deployed version — VERIFIED CURRENT, the deploy was never the problem
+- [x] lifestyledesignrealty.com and lifestyle-re-6avnvcuv.manus.space serve the **same** bundle (`/assets/index-Disx-g6W.js`) — the apex domain is now pointed at this build
+- [x] That bundle contains the full v3 intensity pass from 2b7a103: tier budgets `high:1150,medium:620,low:240`, halo `175/95/36`, swell floor (`return .28+(.5+.25*i+.25*c)*.72`), `ORB_HERO_FRACTION = .015`, v3 band velocity (`.075 + eq*.36 + sin(3φ)*.085`) and the v3 alpha curve (`.06 + d²*.78`). Nothing stale was serving
+
+### 2. ROOT CAUSE — tier assignment, not the renderer. Every iPhone was scored as a budget device
+Traced `selectTier` against what browsers actually report:
+
+| device | cores | deviceMemory | dpr | OLD tier | orb particles | NEW tier |
+|---|---|---|---|---|---|---|
+| iPhone 12/13/14 Safari | 4 | *(unreported)* | 3 | **low** | **240** | high (1150) |
+| iPhone 15/16 Pro Safari | 6 | *(unreported)* | 3 | **low** | **240** | high (1150) |
+| iPhone SE3 Safari | 4 | *(unreported)* | 2 | **low** | **240** | high (1150) |
+| Galaxy S23 Chrome | 8 | 8 | 3 | medium | 620 | high (1150) |
+| Android Firefox | 8 | *(unreported)* | 3 | **low** | **240** | high (1150) |
+| MacBook Pro (dev screenshots) | 12 | *(unreported)* | 2 | high | 1150 | high (1150) |
+
+Three separate bugs stacked up:
+- **`cores <= 4 → low`.** iOS Safari reports hardwareConcurrency 4 on every iPhone through the 14 (6 on the 15/16 Pro). Four Apple cores are not a budget device — but that rule alone put every one of them on 240 particles while the dev machine ran 1150. **That 4.8× is the reported gap.**
+- **`memoryGb ?? 4`.** `navigator.deviceMemory` is Chromium-only; Safari and Firefox have never shipped it. Defaulting unknown to 4GB scored every Apple device as a mid-range Android, which is what dropped the 6-core iPhone 15 Pro to medium before the DPR rule finished it off
+- **The `dpr >= 3` demotion charged for pixels that are never painted.** Both renderers clamp their backing store to `MAX_DPR = 2`, so a 3x screen fills exactly as many device pixels as a 2x one at the same CSS size (confirmed live: the 1280×839 hero canvas has a 2560×1678 backing store on a 2x display). This is what finished off every remaining 3x phone
+- [x] New policy, 4 lines: `cores<=2 || memory<=2 → low`; `cores>=8 → high`; `cores>=4 && memory>=8 → high` (unknown memory reads as no-signal, not as small); else medium. DPR is no longer a tiering input. Genuinely weak hardware still starts at the floor: 2GB → low, dual-core → low, 4-core/4GB budget Android → medium
+- [x] NOTE: `selectTier` is shared with the homepage hero swarm, so those devices also move 85 → 280 nanites. Deliberate, and the reason the safety net below was extended to NaniteSwarm rather than only the orb
+
+### 3. Permanent downgrade on load jank — FIXED, both directions
+- [x] **Warm-up grace.** Frames within `WARMUP_MS = 2500` of loop start are not measured at all (`REBUILD_WARMUP_MS = 600` after a tier change or a resume). Page load is the jankiest window a visitor ever sees and it was exactly the window that decided their tier for the session
+- [x] **Recovery.** After a sustained healthy streak the tier steps back UP one level, capped at the tier the hardware was assigned (`tierRank(tier) > tierRank(assignedTier)`). Window is 10s, doubling per attempt to 80s (`recoveryWindowMs`) so the two decisions can never ping-pong
+- [x] **Hysteresis band.** Degrade at avg >21ms, recover at avg <18.5ms — a device averaging 18.5-21ms does neither. Recovery budget was 17ms in the first draft and raised to 18.5 after live driving showed a real 60fps device (~16.7ms with jitter) could not reliably clear it
+- [x] **Caught during live driving:** the healthy streak was only broken by *stalls*, so a device running steadily at 33fps accrued a "healthy" 10s and could claim a tier back off one brief good patch. Any frame over the degrade budget now restarts the streak — tolerance is the 21ms degrade budget, not the 18.5ms recovery budget, so ordinary 60fps jitter doesn't keep resetting the clock
+- [x] Trustworthy-frame stall guard unchanged: a stall (>40ms) still wipes the sample window, and now also breaks the healthy streak, so time spent stalled can never be counted as proof of health
+
+### 4. Debug view — `?orbDebug=1` on /links
+- [x] Fixed bottom-left panel: current tier (plus the assigned tier when they differ), particle + halo counts, rolling fps, the device's own cores/memory/dpr, and the tier history (`↓medium ↑high`). Opt-in only, explicitly off for `?orbDebug=0`, `pointer-events-none` + `fixed` so it contributes zero layout, publishes at 4Hz from a ref so the hot loop never triggers a React render, and creates no timer at all when the flag is absent
+- [x] Fixed during verification: the give-up path returned before the publish, so the panel reported the last animated tier after the animation had already fallen back to static
+
+### 5. Verification
+- [x] 386 tests (was 334): 83 in livingLogo.test.ts including the rewritten tiering suite (asserted against real device profiles, with the three regressions named), plus new server/orbFidelity.test.ts (28) covering what a real phone receives, the DPR cap in both renderers, warm-up/recovery wiring in both components, the debug overlay's opt-in and zero-layout contract, and unchanged fallbacks. `tsc --noEmit` clean, `vite build` clean. The only 2 failures are the pre-existing live-credential checks (FUB_API_KEY, ANTHROPIC_API_KEY) that need env vars not present locally
+- [x] **Drove the real component through a full degrade→recover cycle** in a local preview using a synthetic frame clock (the sandbox browser throttles rAF to ~2fps and reports the tab hidden, so wall-clock driving is impossible — same limitation recorded in batches 18/19): steady 60fps → `tier high, 1150 particles` · brief 33fps hitch → `↓medium, 620` · healthy ~5s → still medium (correctly patient, under the 10s window) · healthy streak passes 10s → **`↑high, 1150`** · continues healthy → stays at high, never exceeds the assigned tier
+- [x] Confirmed the stall guard in situ: while genuinely throttled the panel reports `fps —` and no samples accumulate, so a throttled environment can never degrade a device
+- [x] Fallbacks and perf discipline unchanged: /links CLS **0** with no layout-shift entries at all, orb box reserved at 168×168, no horizontal overflow, static LDR monogram always rendered, debug panel absent without the flag, homepage hero canvas still `pointer-events-none` with a 2x-capped backing store and a legible headline, no console errors beyond the expected local tRPC failures (no backend in the preview)
+- [ ] Manus: pull + checkpoint, then open **/links?orbDebug=1 on a real iPhone** and confirm it reports `tier high · particles 1150` — that is the check this batch exists to make possible

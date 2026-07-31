@@ -1,12 +1,19 @@
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import {
+  DEGRADE_BUDGET_MS,
   FIRST_CHECK_SAMPLES,
   isTrustworthyFrame,
+  isWarmedUp,
   nextTierDown,
+  nextTierUp,
+  REBUILD_WARMUP_MS,
   selectTier,
   shouldDegrade,
+  shouldRecover,
   STEADY_CHECK_SAMPLES,
+  tierRank,
+  WARMUP_MS,
   type PerfTier,
 } from "@shared/livingLogo";
 import {
@@ -109,6 +116,8 @@ export default function NaniteSwarm({ className }: { className?: string }) {
       reducedMotion,
       canvasSupported: !!probe,
     });
+    /** Ceiling for recovery: measurement may hand tiers back, never invent them. */
+    const assignedTier = tier;
     if (tier === "static") return; // hero stays exactly as it is today
 
     let started = false;
@@ -267,6 +276,22 @@ export default function NaniteSwarm({ className }: { className?: string }) {
       let visible = true;
       let onScreen = true;
       let disposed = false;
+
+      /* ---- adaptive tiering state (shared policy with LivingLogo) ------- */
+      // Hero paint is the busiest moment on the page, so the same two guards
+      // apply: frames inside the warm-up aren't measured, and a tier lost to a
+      // rough patch can be earned back instead of lasting the whole session.
+      let builtAt = t0;
+      let warmupMs = WARMUP_MS;
+      let healthySince = -1;
+      let recoveries = 0;
+
+      const rearm = (now: number, ms: number) => {
+        builtAt = now;
+        warmupMs = ms;
+        frameTimes.length = 0;
+        healthySince = -1;
+      };
       let raf = 0;
 
       const frame = (now: number) => {
@@ -281,23 +306,40 @@ export default function NaniteSwarm({ className }: { className?: string }) {
         // read as "we are too slow" and shed tiers for no reason — and a run of
         // them would degrade all the way to static.
         const dtMs = dtRaw * 1000;
-        if (isTrustworthyFrame(dtMs)) {
-          frameTimes.push(dtMs);
-          if (frameTimes.length > 90) frameTimes.shift();
-        } else {
+        const warm = isWarmedUp(now - builtAt, warmupMs);
+        if (!isTrustworthyFrame(dtMs)) {
           frameTimes.length = 0; // a stall invalidates the sample window
+          healthySince = -1; // ...and breaks the healthy streak
+        } else if (warm) {
+          frameTimes.push(dtMs);
+          if (frameTimes.length > 120) frameTimes.shift();
+          // Any frame over the degrade budget restarts the streak, so "healthy
+          // for 10s" means what it says rather than "running for 10s".
+          if (dtMs > DEGRADE_BUDGET_MS) healthySince = -1;
+          else if (healthySince < 0) healthySince = now;
         }
+
         const windowSize = checkedOnce ? STEADY_CHECK_SAMPLES : FIRST_CHECK_SAMPLES;
-        if (shouldDegrade(frameTimes, 21, windowSize)) {
+        if (warm && shouldDegrade(frameTimes, DEGRADE_BUDGET_MS, windowSize)) {
           checkedOnce = true;
           const next = nextTierDown(tier);
-          frameTimes.length = 0;
           if (next === "static") {
             ctx.clearRect(0, 0, W, H); // hero returns to exactly as-designed
             return;
           }
           tier = next;
           build(tier);
+          rearm(now, REBUILD_WARMUP_MS);
+        } else if (
+          warm &&
+          tierRank(tier) > tierRank(assignedTier) &&
+          healthySince >= 0 &&
+          shouldRecover(frameTimes, now - healthySince, recoveries)
+        ) {
+          recoveries++;
+          tier = nextTierUp(tier);
+          build(tier);
+          rearm(now, REBUILD_WARMUP_MS);
         } else if (frameTimes.length >= windowSize) {
           checkedOnce = true;
         }
@@ -413,8 +455,11 @@ export default function NaniteSwarm({ className }: { className?: string }) {
 
       const resume = () => {
         if (disposed || !visible || !onScreen) return;
-        last = performance.now();
-        frameTimes.length = 0;
+        const now = performance.now();
+        last = now;
+        // Don't judge fps on the resume frames, and don't let time spent hidden
+        // count toward a healthy streak that would earn a tier back unearned.
+        rearm(now, REBUILD_WARMUP_MS);
         cancelAnimationFrame(raf);
         raf = requestAnimationFrame(frame);
       };

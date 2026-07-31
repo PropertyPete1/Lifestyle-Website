@@ -15,6 +15,20 @@ import {
   nextMicroEventDelay,
   ORB_HERO_FRACTION,
   nextTierDown,
+  nextTierUp,
+  tierRank,
+  isWarmedUp,
+  isOrbDebugEnabled,
+  rollingFps,
+  recoveryWindowMs,
+  shouldRecover,
+  DEGRADE_BUDGET_MS,
+  RECOVERY_BACKOFF_MAX,
+  RECOVERY_BUDGET_MS,
+  RECOVERY_MIN_SAMPLES,
+  RECOVERY_WINDOW_MS,
+  REBUILD_WARMUP_MS,
+  WARMUP_MS,
   particleCount,
   PARTICLES_BY_TIER,
   selectTier,
@@ -23,6 +37,7 @@ import {
   STEADY_CHECK_SAMPLES,
   swell,
   type DeviceHints,
+  type PerfTier,
 } from "../shared/livingLogo";
 
 /**
@@ -54,55 +69,97 @@ describe("selectTier — hard opt-outs win over any hardware hint", () => {
   });
 });
 
-describe("selectTier — device hints", () => {
+/**
+ * Tiering is asserted against what browsers ACTUALLY report on real devices,
+ * because the previous policy failed on exactly that ground: live visitors saw
+ * a far weaker orb than dev screenshots, and the reason was that every iPhone
+ * was being scored as a budget device.
+ *
+ * The three facts these cases encode:
+ *   - iOS Safari reports hardwareConcurrency 4 (6 on 15/16 Pro) and NEVER
+ *     reports deviceMemory. Firefox doesn't report it either.
+ *   - deviceMemory is Chromium-only and quantised, capping at 8.
+ *   - Both renderers clamp their backing store to MAX_DPR = 2, so a 3x screen
+ *     paints no more device pixels than a 2x one at the same CSS size.
+ */
+const phone = (over: Partial<DeviceHints>): DeviceHints => ({
+  ...base,
+  dpr: 3,
+  viewportWidth: 390,
+  cores: 4,
+  memoryGb: undefined,
+  ...over,
+});
+
+describe("selectTier — real devices, not guesses", () => {
   it("gives a high-end desktop the top tier", () => {
     expect(
       selectTier({ ...base, dpr: 1, viewportWidth: 1440, cores: 12, memoryGb: 16 })
     ).toBe("high");
   });
 
-  it("gives a low-core phone the cheapest animated tier", () => {
-    expect(selectTier({ ...base, cores: 4, memoryGb: 4 })).toBe("low");
+  it("REGRESSION: a modern iPhone is not a budget device", () => {
+    // iPhone 12/13/14 and SE3 all report 4 cores and no deviceMemory. Under the
+    // old `cores <= 4 → low` rule every one of them rendered 240 particles
+    // while the dev machine rendered 1150 — the whole reported fidelity gap.
+    expect(selectTier(phone({ cores: 4 }))).toBe("high"); // 12/13/14
+    expect(selectTier(phone({ cores: 6 }))).toBe("high"); // 15/16 Pro
+    expect(selectTier(phone({ cores: 4, dpr: 2, viewportWidth: 375 }))).toBe("high"); // SE3
   });
 
-  it("treats very low memory as low-end regardless of core count", () => {
-    expect(selectTier({ ...base, cores: 8, memoryGb: 2 })).toBe("low");
+  it("REGRESSION: unknown memory is no signal, not a small number", () => {
+    // Safari/Firefox never expose deviceMemory. Defaulting it to 4GB scored
+    // every Apple device as mid-range Android.
+    const unknown = selectTier(phone({ cores: 8, memoryGb: undefined }));
+    const known = selectTier(phone({ cores: 8, memoryGb: 8 }));
+    expect(unknown).toBe(known);
+    expect(unknown).toBe("high");
   });
 
-  it("lands mid-range hardware on medium", () => {
+  it("REGRESSION: 3x screens are not penalised for pixels nobody paints", () => {
+    // MAX_DPR = 2 in both LivingLogo and NaniteSwarm, so the fill cost at 3x is
+    // identical to 2x. The old demotion charged for it anyway.
+    for (const cores of [4, 8, 12]) {
+      expect(selectTier({ ...base, dpr: 3, cores, memoryGb: 8 })).toBe(
+        selectTier({ ...base, dpr: 2, cores, memoryGb: 8 })
+      );
+    }
+  });
+
+  it("still routes flagship and mid Android correctly", () => {
+    expect(selectTier(phone({ dpr: 2.625, cores: 8, memoryGb: 8 }))).toBe("high"); // Pixel 8
+    expect(selectTier(phone({ cores: 8, memoryGb: 4 }))).toBe("high"); // mid, 8 cores
+    expect(selectTier(phone({ dpr: 2, cores: 4, memoryGb: 4 }))).toBe("medium"); // budget
+  });
+
+  it("still holds genuinely weak hardware at the floor", () => {
+    expect(selectTier({ ...base, cores: 8, memoryGb: 2 })).toBe("low"); // 2GB
+    expect(selectTier({ ...base, cores: 2, memoryGb: 8 })).toBe("low"); // dual core
+    expect(selectTier({ ...base, cores: 1, memoryGb: 4 })).toBe("low");
+  });
+
+  it("lands genuinely mid-range hardware on medium", () => {
     expect(selectTier({ ...base, cores: 6, memoryGb: 6 })).toBe("medium");
+    expect(selectTier({ ...base, cores: 4, memoryGb: 4 })).toBe("medium");
   });
 
-  it("assumes mid-range (not best-case) when hints are unavailable", () => {
-    const t = selectTier({
-      dpr: 2,
-      viewportWidth: 375,
-      reducedMotion: false,
-      canvasSupported: true,
-    });
-    // cores/memory default to 4 → low. Never "high" on an unknown device.
-    expect(t).not.toBe("high");
-    expect(t).not.toBe("static");
+  it("never returns static from a hardware hint — only from opt-outs", () => {
+    // static is reserved for reduced-motion and no-canvas, plus MEASURED
+    // slowness at the cheapest tier. No hint combination may produce it.
+    for (const cores of [1, 2, 4, 8, 16]) {
+      for (const memoryGb of [undefined, 0.5, 1, 2, 4, 8]) {
+        for (const dpr of [1, 2, 3, 4]) {
+          expect(selectTier({ ...base, cores, memoryGb, dpr })).not.toBe("static");
+        }
+      }
+    }
   });
 
-  it("steps down a tier on 3x-DPR screens (fill cost is quadratic in dpr)", () => {
-    const at2x = selectTier({ ...base, dpr: 2, cores: 12, memoryGb: 16 });
-    const at3x = selectTier({ ...base, dpr: 3, cores: 12, memoryGb: 16 });
-    expect(at2x).toBe("high");
-    expect(at3x).toBe("medium");
-  });
-
-  it("never lets a DPR penalty alone disable the animation", () => {
-    // low + 3x DPR must stay animated; static is reserved for opt-outs and
-    // measured slowness.
-    expect(selectTier({ ...base, dpr: 3, cores: 4, memoryGb: 4 })).toBe("low");
-  });
-
-  it("gives a capable desktop headroom a phone would not get", () => {
-    const phone = selectTier({ ...base, viewportWidth: 375, cores: 8, memoryGb: 6 });
-    const desktop = selectTier({ ...base, dpr: 1, viewportWidth: 1440, cores: 8, memoryGb: 6 });
-    expect(phone).toBe("medium");
-    expect(desktop).toBe("high");
+  it("is a starting point the measured loop can move in both directions", () => {
+    // The optimism above is only safe because assignment is no longer final.
+    const assigned = selectTier(phone({ cores: 4 }));
+    expect(nextTierDown(assigned)).toBe("medium");
+    expect(nextTierUp("medium")).toBe(assigned);
   });
 });
 
@@ -502,5 +559,138 @@ describe("v3 intensity — hero bloom points", () => {
     const at = (t: "high" | "medium" | "low") => PARTICLES_BY_TIER[t] * ORB_HERO_FRACTION;
     expect(at("high")).toBeGreaterThan(at("medium"));
     expect(at("medium")).toBeGreaterThan(at("low"));
+  });
+});
+
+/* ===================== v4: warm-up, recovery, debug view ================= */
+
+describe("warm-up — load jank must not decide the session", () => {
+  it("discards frames until the device has actually settled", () => {
+    expect(isWarmedUp(0)).toBe(false);
+    expect(isWarmedUp(WARMUP_MS - 1)).toBe(false);
+    expect(isWarmedUp(WARMUP_MS)).toBe(true);
+  });
+
+  it("covers the jankiest seconds of a page load", () => {
+    expect(WARMUP_MS).toBeGreaterThanOrEqual(2000);
+  });
+
+  it("re-warms briefly after a rebuild, not for the full load window", () => {
+    // A tier change only has to let new buffers settle; making it wait the full
+    // load grace would leave a struggling device stuttering for seconds.
+    expect(REBUILD_WARMUP_MS).toBeLessThan(WARMUP_MS);
+    expect(isWarmedUp(REBUILD_WARMUP_MS, REBUILD_WARMUP_MS)).toBe(true);
+    expect(isWarmedUp(REBUILD_WARMUP_MS - 1, REBUILD_WARMUP_MS)).toBe(false);
+  });
+
+  it("still lets a genuinely slow device shed a tier promptly after warm-up", () => {
+    // Grace is a delay, not an amnesty: the first check window is unchanged.
+    expect(shouldDegrade(Array(FIRST_CHECK_SAMPLES).fill(40), 21, FIRST_CHECK_SAMPLES)).toBe(true);
+  });
+});
+
+describe("recovery — a bad moment is no longer permanent", () => {
+  const healthy = Array(RECOVERY_MIN_SAMPLES).fill(16.6);
+  const marginal = Array(RECOVERY_MIN_SAMPLES).fill(19);
+
+  it("steps a tier back up after a sustained healthy window", () => {
+    expect(shouldRecover(healthy, RECOVERY_WINDOW_MS)).toBe(true);
+  });
+
+  it("will not act on a short healthy streak", () => {
+    expect(shouldRecover(healthy, RECOVERY_WINDOW_MS - 1)).toBe(false);
+    expect(shouldRecover(healthy, 0)).toBe(false);
+  });
+
+  it("will not act on too few samples, however long the streak", () => {
+    expect(shouldRecover(Array(RECOVERY_MIN_SAMPLES - 1).fill(16.6), 60_000)).toBe(false);
+    expect(shouldRecover([], 60_000)).toBe(false);
+  });
+
+  it("leaves a hysteresis band so the two decisions can never chatter", () => {
+    // Between the recovery budget and the degrade budget, NEITHER fires.
+    expect(RECOVERY_BUDGET_MS).toBeLessThan(DEGRADE_BUDGET_MS);
+    expect(shouldRecover(marginal, 60_000)).toBe(false);
+    expect(shouldDegrade(marginal, DEGRADE_BUDGET_MS, RECOVERY_MIN_SAMPLES)).toBe(false);
+  });
+
+  it("demands a longer proof each time a tier is handed back", () => {
+    expect(recoveryWindowMs(0)).toBe(RECOVERY_WINDOW_MS);
+    expect(recoveryWindowMs(1)).toBe(RECOVERY_WINDOW_MS * 2);
+    expect(recoveryWindowMs(2)).toBe(RECOVERY_WINDOW_MS * 4);
+    // ...and stops growing, so it can't become unreachable.
+    expect(recoveryWindowMs(9)).toBe(recoveryWindowMs(RECOVERY_BACKOFF_MAX));
+    expect(recoveryWindowMs(-3)).toBe(RECOVERY_WINDOW_MS);
+    // A second step-up on the same streak length that earned the first: no.
+    expect(shouldRecover(healthy, RECOVERY_WINDOW_MS, 1)).toBe(false);
+    expect(shouldRecover(healthy, RECOVERY_WINDOW_MS * 2, 1)).toBe(true);
+  });
+
+  it("steps up one tier at a time and stops at high", () => {
+    expect(nextTierUp("low")).toBe("medium");
+    expect(nextTierUp("medium")).toBe("high");
+    expect(nextTierUp("high")).toBe("high");
+  });
+
+  it("never resurrects an animation that gave up entirely", () => {
+    // Reaching "static" stops the loop, so no frames are measured and recovery
+    // can never be evaluated. The rank check is the belt to that braces.
+    expect(tierRank("static")).toBeGreaterThan(tierRank("low"));
+    expect(tierRank("high")).toBe(0);
+  });
+
+  it("caps recovery at the tier the hardware was assigned", () => {
+    // The loop only recovers while rank(current) > rank(assigned).
+    const assigned: PerfTier = "medium";
+    expect(tierRank("low") > tierRank(assigned)).toBe(true); // may step up
+    expect(tierRank("medium") > tierRank(assigned)).toBe(false); // already there
+    expect(tierRank("high") > tierRank(assigned)).toBe(false); // never above
+  });
+
+  it("round-trips: degrade then recover returns the original tier", () => {
+    const start: PerfTier = "high";
+    const dropped = nextTierDown(start);
+    expect(dropped).toBe("medium");
+    expect(nextTierUp(dropped)).toBe(start);
+  });
+});
+
+describe("?orbDebug — opt-in, and genuinely off by default", () => {
+  it("is off for ordinary visitors", () => {
+    expect(isOrbDebugEnabled("")).toBe(false);
+    expect(isOrbDebugEnabled("?utm_source=instagram")).toBe(false);
+    expect(isOrbDebugEnabled("?orb=1")).toBe(false);
+    expect(isOrbDebugEnabled("?myOrbDebug=1")).toBe(false);
+  });
+
+  it("turns on for the documented forms", () => {
+    expect(isOrbDebugEnabled("?orbDebug=1")).toBe(true);
+    expect(isOrbDebugEnabled("?orbDebug=true")).toBe(true);
+    expect(isOrbDebugEnabled("?orbDebug")).toBe(true);
+    expect(isOrbDebugEnabled("?utm_source=ig&orbDebug=1")).toBe(true);
+    expect(isOrbDebugEnabled("orbDebug=1")).toBe(true); // no leading ?
+  });
+
+  it("respects an explicit off, so a stale link can't strand the panel", () => {
+    expect(isOrbDebugEnabled("?orbDebug=0")).toBe(false);
+    expect(isOrbDebugEnabled("?orbDebug=false")).toBe(false);
+  });
+});
+
+describe("rollingFps", () => {
+  it("reports the framerate implied by recent deltas", () => {
+    expect(rollingFps(Array(30).fill(16.6))).toBe(60);
+    expect(rollingFps(Array(30).fill(33.3))).toBe(30);
+  });
+
+  it("only looks at the recent window, so recovery shows up quickly", () => {
+    const frames = [...Array(60).fill(50), ...Array(30).fill(16.6)];
+    expect(rollingFps(frames, 30)).toBe(60);
+  });
+
+  it("handles an empty or degenerate history without NaN", () => {
+    expect(rollingFps([])).toBe(0);
+    expect(rollingFps([0])).toBe(0);
+    expect(Number.isFinite(rollingFps([1e-9]))).toBe(true);
   });
 });

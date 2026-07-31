@@ -456,9 +456,9 @@ button:active, [role="button"]:active {
   }
 }
 
-/* /links: brief gold glow on the quick-capture form after the promise strip is
+/* /links: brief gold glow on the quick-capture form after the promise chip is
    tapped, so the eye lands on the destination rather than just arriving there.
-   Motion-safe: reduced-motion users get the scroll with no pulse. */
+   It is also where the guide trail terminates. */
 @media (prefers-reduced-motion: no-preference) {
   .form-flash {
     animation: form-flash 1.6s var(--ease-out, ease-out) 1;
@@ -467,5 +467,13 @@ button:active, [role="button"]:active {
     0%   { box-shadow: 0 0 0 0 oklch(0.75 0.09 85 / 0); }
     18%  { box-shadow: 0 0 26px 4px oklch(0.75 0.09 85 / 0.42); }
     100% { box-shadow: 0 0 0 0 oklch(0.75 0.09 85 / 0); }
+  }
+}
+/* Reduced motion still needs to be TOLD where it landed — it just gets a held
+   static highlight instead of a pulse (and no trail on the way down). */
+@media (prefers-reduced-motion: reduce) {
+  .form-flash {
+    border-color: color-mix(in oklch, var(--gold) 75%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--gold) 45%, transparent);
   }
 }

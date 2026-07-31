@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { SITE, isLinkVisible } from "@shared/site";
+import { GUIDE_DRAW_MS } from "@shared/guideTrail";
 import { Instagram, Facebook, Youtube, Linkedin, ArrowUpRight } from "lucide-react";
 import {
   useNcClickTracking,
@@ -13,10 +14,14 @@ import {
 import NowHiringBanner from "@/components/NowHiringBanner";
 import WebsiteInquiryModal from "@/components/WebsiteInquiryModal";
 import LeadForm from "@/components/LeadForm";
+import GuideTrail from "@/components/GuideTrail";
 import { ResponseBadge, TrustLine } from "@/components/TrustSignals";
-import { Zap, ArrowDown } from "lucide-react";
+import { Zap } from "lucide-react";
 import VeteranBadge from "@/components/VeteranBadge";
 import LivingLogo from "@/components/LivingLogo";
+
+/** Matches the .form-flash keyframe duration in index.css, plus a little slack. */
+const FLASH_MS = 1800;
 
 /** TikTok mark (lucide has no TikTok icon) — stroke-styled to match. */
 function TikTokIcon({ className }: { className?: string }) {
@@ -50,13 +55,25 @@ export default function Links() {
   const logFormSubmit = useLinksFormTracking();
   const [inquiryOpen, setInquiryOpen] = useState(false);
   const logPromiseClick = useLinksPromiseTracking();
+  const promiseRef = useRef<HTMLButtonElement>(null);
   const captureRef = useRef<HTMLDivElement>(null);
   const [flash, setFlash] = useState(false);
+  const [trailRun, setTrailRun] = useState(0);
+  const flashTimers = useRef<number[]>([]);
+
+  // A second tap mid-animation must not let the first tap's "turn it off" timer
+  // cut the new pulse short.
+  const clearFlashTimers = () => {
+    for (const id of flashTimers.current) window.clearTimeout(id);
+    flashTimers.current = [];
+  };
+  useEffect(() => clearFlashTimers, []);
 
   /**
-   * Promise strip → capture form. Smooth-scrolls (instantly for reduced-motion
-   * users) and pulses the form so the eye lands on the destination instead of
-   * just arriving there.
+   * Promise chip → capture form. Smooth-scrolls (instantly for reduced-motion
+   * users), draws the gold guide trail down the gutter alongside the scroll,
+   * and lands it in the form's glow pulse so the tap reads as one connected
+   * movement rather than a teleport.
    */
   const jumpToCapture = () => {
     logPromiseClick();
@@ -66,13 +83,20 @@ export default function Links() {
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     el.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
+    // Reduced motion: no trail, and the highlight lands immediately with the
+    // instant scroll. Otherwise the pulse waits for the trail's head to arrive.
+    if (!reduced) setTrailRun((n) => n + 1);
+    const delay = reduced ? 0 : GUIDE_DRAW_MS;
     // Toggle off → on in a separate task so a re-tap restarts the animation
     // instead of no-oping. Deliberately setTimeout and not requestAnimationFrame:
     // rAF is throttled in background/hidden contexts, which made the highlight
     // silently never apply while the scroll still happened.
+    clearFlashTimers();
     setFlash(false);
-    window.setTimeout(() => setFlash(true), 0);
-    window.setTimeout(() => setFlash(false), 1800);
+    flashTimers.current.push(
+      window.setTimeout(() => setFlash(true), delay),
+      window.setTimeout(() => setFlash(false), delay + FLASH_MS),
+    );
   };
 
   return (
@@ -104,24 +128,36 @@ export default function Links() {
 
         {/* 30-minute promise — the highest-intent path on the page, so it sits
             in the header where it is visible without scrolling rather than
-            buried under every button. Deliberately a slim gold accent, not a
-            filled banner, so it never competes with Now Hiring above it. */}
+            buried under every button.
+            Shape carries the meaning here: every LINK below is a hard-cornered
+            bordered rectangle, so the promise is a soft-filled pill with no
+            border. Two gold rectangles stacked read as one control with a
+            secondary row; a chip does not. The "tap here" affordance is the
+            underline, not an arrow pointing at the button under it. */}
         <button
+          ref={promiseRef}
           type="button"
           onClick={jumpToCapture}
-          className="group mt-4 w-full border border-gold/45 bg-gold/[0.07] px-4 py-2.5 text-left transition-colors hover:border-gold/80 hover:bg-gold/[0.12] active:scale-[0.995]">
-          <span className="flex items-center gap-2.5">
-            <Zap className="h-3.5 w-3.5 shrink-0 text-gold" aria-hidden />
-            <span className="text-[10.5px] leading-snug tracking-[0.08em] text-foreground/90">
-              Skip the browsing — tell us what you need and we'll reach out{" "}
-              <span className="text-gold">within 30 minutes</span>
+          className="group mt-4 w-full rounded-full bg-gold/[0.09] px-6 py-3 text-center transition-colors hover:bg-gold/[0.15] active:scale-[0.995]">
+          <span className="text-[10.5px] leading-relaxed tracking-[0.06em] text-foreground/90">
+            <Zap
+              className="mr-1.5 inline-block h-3.5 w-3.5 align-[-0.15em] text-gold"
+              aria-hidden
+            />
+            Skip the browsing — tell us what you need and we'll reach out{" "}
+            <span className="text-gold">within 30 minutes</span>.{" "}
+            <span className="text-gold underline decoration-gold/60 underline-offset-2 transition-colors group-hover:decoration-gold">
+              Tap here
             </span>
-            <ArrowDown className="ml-auto h-3.5 w-3.5 shrink-0 text-gold/80 transition-transform group-hover:translate-y-0.5" aria-hidden />
           </span>
         </button>
 
-        {/* Links */}
-        <div className="w-full mt-6 space-y-3">
+        {/* The trail this tap draws — fixed, pointer-events-none, zero layout. */}
+        <GuideTrail runId={trailRun} fromRef={promiseRef} toRef={captureRef} />
+
+        {/* Links — mt-9 (not mt-6) so the promise chip reads as its own thing
+            with air under it, rather than as the first row of the button stack. */}
+        <div className="w-full mt-9 space-y-3">
           {/* Bio links are admin-managed data, so a paused route (e.g. the
               seeded "Home Search" → /search) can still be present in the DB.
               Filter here so no customer is sent to a coming-soon dead end. */}

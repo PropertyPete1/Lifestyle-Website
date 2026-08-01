@@ -67,16 +67,23 @@ export default function Home() {
   /** Measured live by CrownBranch so the crown frame tracks the real headline. */
   const headlineRef = useRef<HTMLHeadingElement>(null);
   /**
-   * Hero content fades in once the border entrance is ~40% drawn. It starts
-   * hidden ONLY when an entrance is actually going to play — a returning
-   * visitor, reduced motion, or a browser where CrownBranch never mounts must
-   * see the hero immediately, so the default is visible and the safety timer
-   * below guarantees it can never stay hidden.
+   * Hero content fades in almost immediately — CrownBranch calls onReveal by
+   * CONTENT_REVEAL_MAX_MS (200ms) at the latest, and the fade itself runs
+   * CONTENT_FADE_MS (420ms), so the hero is fully readable inside ~0.6s while
+   * the line work continues drawing around it. The animation is polish, never a
+   * gate.
+   *
+   * It starts hidden ONLY when an entrance is actually going to play — a
+   * returning visitor, reduced motion, or a browser where CrownBranch never
+   * mounts must see the hero immediately, so the default is visible and the
+   * safety timer below guarantees it can never stay hidden.
    */
   const [heroRevealed, setHeroRevealed] = useState(() => !willPlayCrownEntrance());
   useEffect(() => {
     if (heroRevealed) return;
-    const t = window.setTimeout(() => setHeroRevealed(true), 2500);
+    // Backstop only: an order of magnitude past the intended 200ms reveal, in
+    // case rAF never runs (background tab at mount, canvas unavailable).
+    const t = window.setTimeout(() => setHeroRevealed(true), 1200);
     return () => window.clearTimeout(t);
   }, [heroRevealed]);
 
@@ -100,7 +107,7 @@ export default function Home() {
         <div
           className={cn(
             "relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pt-32 pb-16",
-            "transition-opacity duration-[900ms] ease-out",
+            "transition-opacity duration-[420ms] ease-out",
             heroRevealed ? "opacity-100" : "opacity-0"
           )}>
           <p className="eyebrow text-foreground/90">{SITE.eyebrow}</p>

@@ -9,6 +9,8 @@ import {
   borderRect,
   branchBirthMs,
   CONTENT_REVEAL_FRACTION,
+  CONTENT_REVEAL_MAX_MS,
+  CONTENT_FADE_MS,
   contentRevealMs,
   CROWN_ALPHA_DRAW,
   CROWN_ALPHA_SETTLED,
@@ -256,11 +258,51 @@ describe("entrance timing", () => {
     expect(total).toBeGreaterThanOrEqual(branch + crownLen / HEAD_SPEED);
   });
 
-  it("reveals the hero content at 40% of the border entrance", () => {
+  it("completes the whole entrance in the 1.1-1.3s target window on desktop", () => {
+    // Decisive and quick, not the 3.3s the original 0.62 speed actually took at
+    // this size. Distance-based timing makes the long desktop path the binding
+    // case, so this is the one worth pinning.
+    const total = entranceDurationMs(borderLen, branch, crownLen);
+    expect(total).toBeGreaterThan(1000);
+    expect(total).toBeLessThan(1400);
+  });
+
+  it("finishes shorter mobile paths sooner while still reading as a drawn line", () => {
+    const mobileHeads = borderHeadPaths(375, 812);
+    const mLen = polylineLength(mobileHeads.left);
+    const mCrown = crownRectFromHeadline(
+      { left: 20, top: 222, right: 355, bottom: 499 },
+      { left: 0, top: 0, right: 375, bottom: 812 }
+    );
+    const mCrownLen = polylineLength(crownHeadPaths(mCrown).left);
+    const mBranch = branchBirthMs(mobileHeads.left, mCrown.top);
+    const total = entranceDurationMs(mLen, mBranch, mCrownLen);
+    // Quicker than desktop because the path is shorter — the point of keeping
+    // this distance-based — but never an instant flash.
+    expect(total).toBeLessThan(entranceDurationMs(borderLen, branch, crownLen));
+    expect(total).toBeGreaterThan(300);
+    // The head still takes a perceptible beat to travel down to the crown.
+    expect(mBranch).toBeGreaterThan(120);
+  });
+
+  it("reveals the hero content almost immediately, never gating on the lines", () => {
     expect(CONTENT_REVEAL_FRACTION).toBe(0.4);
-    expect(contentRevealMs(borderLen)).toBeCloseTo((borderLen * 0.4) / HEAD_SPEED, 6);
-    // Well before the entrance ends — the content must not wait for the lines.
+    // Content first: on every real viewport the ceiling governs, so the fade
+    // begins by ~200ms no matter how long the path is.
+    expect(CONTENT_REVEAL_MAX_MS).toBeLessThanOrEqual(250);
+    expect(contentRevealMs(borderLen)).toBeLessThanOrEqual(CONTENT_REVEAL_MAX_MS);
+    expect(contentRevealMs(borderLen)).toBeGreaterThan(0);
+    // Reveal plus the fade itself completes inside ~0.6s.
+    expect(CONTENT_REVEAL_MAX_MS + CONTENT_FADE_MS).toBeLessThanOrEqual(650);
+    // And still well before the entrance ends, so the lines draw around content
+    // that is already on screen.
     expect(contentRevealMs(borderLen)).toBeLessThan(entranceDurationMs(borderLen, branch, crownLen));
+  });
+
+  it("takes the distance milestone when it lands earlier than the ceiling", () => {
+    // A very short path reveals on distance rather than waiting for the ceiling.
+    expect(contentRevealMs(100)).toBeCloseTo((100 * CONTENT_REVEAL_FRACTION) / HEAD_SPEED, 6);
+    expect(contentRevealMs(100)).toBeLessThan(CONTENT_REVEAL_MAX_MS);
   });
 
   it("cannot divide by zero if a speed of 0 is ever passed", () => {
@@ -467,17 +509,26 @@ describe("hero wiring", () => {
     expect(CROWN).not.toMatch(/crown\s*=\s*\{\s*left:\s*\d/);
   });
 
-  it("fades the hero content in once the entrance is under way", () => {
+  it("fades the hero content in fast, so the page is never gated on the lines", () => {
     expect(HOME).toContain("onReveal");
-    expect(HOME).toContain("duration-[900ms]");
+    // The markup duration must match CONTENT_FADE_MS, and reveal + fade has to
+    // land inside ~0.6s.
+    expect(HOME).toContain(`duration-[${CONTENT_FADE_MS}ms]`);
+    expect(CONTENT_REVEAL_MAX_MS + CONTENT_FADE_MS).toBeLessThanOrEqual(650);
     expect(HOME).toMatch(/heroRevealed \? "opacity-100" : "opacity-0"/);
   });
 
   it("can never leave the hero content invisible", () => {
     // Default is visible; it only starts hidden when an entrance is definitely
-    // going to play, and a timer un-hides it regardless.
+    // going to play, and a backstop timer un-hides it regardless.
     expect(HOME).toMatch(/useState\(\(\) => !willPlayCrownEntrance\(\)\)/);
-    expect(HOME).toMatch(/setTimeout\(\(\) => setHeroRevealed\(true\), 2500\)/);
+    const backstop = HOME.match(/setTimeout\(\(\) => setHeroRevealed\(true\), (\d+)\)/);
+    expect(backstop).not.toBeNull();
+    const ms = Number(backstop![1]);
+    // Comfortably past the intended reveal, but no longer the old 2.5s wait —
+    // if rAF never runs, the visitor still sees the hero quickly.
+    expect(ms).toBeGreaterThan(CONTENT_REVEAL_MAX_MS * 2);
+    expect(ms).toBeLessThanOrEqual(1500);
     // Every exit from the loop reveals, including the degrade path.
     expect(CROWN.match(/revealRef\.current\?\.\(\)/g)?.length).toBeGreaterThanOrEqual(4);
   });

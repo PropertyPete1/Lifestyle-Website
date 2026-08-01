@@ -25,8 +25,16 @@ export type Rect = { left: number; top: number; right: number; bottom: number };
 
 /* ---- one speed for the whole system -------------------------------------- */
 
-/** Entrance head speed, px per ms. Every head in the system uses this. */
-export const HEAD_SPEED = 0.62;
+/**
+ * Entrance head speed, px per ms. Every head in the system uses this.
+ *
+ * Tuned so the FULL entrance (border + crown, whichever finishes later) lands
+ * in ~1.1-1.3s on the long desktop/laptop paths: 1146ms at 1280x839 and 1282ms
+ * at 1440x900. Shorter paths finish sooner by design — that is what keeping the
+ * timing distance-based buys us, and a 375px head still takes ~250ms to reach
+ * the crown, so it reads as a drawn line rather than a flash.
+ */
+export const HEAD_SPEED = 1.8;
 /** Settled racers glide rather than sprint — a different job, a slower pace. */
 export const RACER_SPEED = 0.14;
 
@@ -48,8 +56,28 @@ export const CROWN_ALPHA_DRAW = 0.7;
 export const BORDER_ALPHA_SETTLED = 0.16;
 export const CROWN_ALPHA_SETTLED = 0.3;
 
-/** Hero content starts its fade once the border entrance is this far along. */
+/**
+ * Hero content starts its fade once the border entrance is this far along.
+ *
+ * Kept as a distance fraction (not a duration) so it scales with path length,
+ * but clamped by CONTENT_REVEAL_MAX_MS below so the content is never gated on
+ * the animation. The line should draw around already-visible content, reading
+ * as polish rather than a loading screen.
+ */
 export const CONTENT_REVEAL_FRACTION = 0.4;
+
+/**
+ * Hard ceiling on when the hero content starts fading in, in ms.
+ *
+ * The visitor must never feel like they are waiting on the line work to see the
+ * page. Whatever the viewport, the fade begins by this point — on the long
+ * laptop path the distance fraction alone would not start until ~508ms, so this
+ * is what actually governs there.
+ */
+export const CONTENT_REVEAL_MAX_MS = 200;
+
+/** How long the hero content fade itself takes, in ms. Completes well under 0.6s. */
+export const CONTENT_FADE_MS = 420;
 
 /** Entrance plays once per session; returning visitors get the settled state. */
 export const SESSION_KEY = "ldr_crown_seen";
@@ -271,9 +299,13 @@ export function entranceDurationMs(
 export function contentRevealMs(
   borderLen: number,
   speed = HEAD_SPEED,
-  fraction = CONTENT_REVEAL_FRACTION
+  fraction = CONTENT_REVEAL_FRACTION,
+  maxMs = CONTENT_REVEAL_MAX_MS
 ): number {
-  return speed > 0 ? (borderLen * fraction) / speed : 0;
+  if (speed <= 0) return 0;
+  // Whichever comes first: the distance milestone, or the hard ceiling. Content
+  // first, always — the animation is never allowed to become a gate.
+  return Math.min((borderLen * fraction) / speed, maxMs);
 }
 
 /* ---- settled racers ------------------------------------------------------ */

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useLocation } from "wouter";
 import { ArrowRight, X } from "lucide-react";
 import { useExitIntentTracking } from "@/hooks/usePageTracking";
 
@@ -13,6 +14,11 @@ import { useExitIntentTracking } from "@/hooks/usePageTracking";
  * - Once per SESSION (sessionStorage), and never again once dismissed.
  * - Suppressed entirely if the visitor already converted or is mid-form, so it
  *   can't interrupt someone who is already doing the thing it asks for.
+ * - NEVER on the link-in-bio routes (see EXCLUDED_PATHS). /links is the landing
+ *   page for Instagram traffic and is deliberately a no-brainer: one screen of
+ *   tap targets, including a prominent "Find Your Texas City" button. A modal
+ *   asking the same question interrupts that traffic before they have even read
+ *   the page, so the nudge is scoped out of it entirely.
  * - prefers-reduced-motion gets no entrance animation.
  * - Esc closes, the backdrop closes, focus moves to the dialog.
  *
@@ -22,13 +28,34 @@ import { useExitIntentTracking } from "@/hooks/usePageTracking";
 
 const SEEN_KEY = "ldr_exit_intent_seen";
 
+/**
+ * Routes where the nudge must never appear. Matched against the pathname with
+ * an exact / prefix test so `/links` and `/links/anything` are both covered.
+ */
+export const EXIT_INTENT_EXCLUDED_PATHS = ["/links"] as const;
+
+export function isExitIntentExcluded(pathname: string): boolean {
+  const path = (pathname || "/").replace(/\/+$/, "") || "/";
+  return EXIT_INTENT_EXCLUDED_PATHS.some(
+    (excluded) => path === excluded || path.startsWith(`${excluded}/`),
+  );
+}
+
 export default function ExitIntentModal() {
   const [open, setOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const track = useExitIntentTracking();
   const shownRef = useRef(false);
+  const [location] = useLocation();
+  const excluded = isExitIntentExcluded(location);
+
+  // Close immediately if a route change lands on an excluded page while open.
+  useEffect(() => {
+    if (excluded) setOpen(false);
+  }, [excluded]);
 
   useEffect(() => {
+    if (excluded) return; // never arm the listener on excluded routes
     // --- eligibility -------------------------------------------------------
     const coarse =
       typeof window.matchMedia === "function" &&
@@ -74,7 +101,7 @@ export default function ExitIntentModal() {
 
     document.addEventListener("mouseout", onLeave);
     return () => document.removeEventListener("mouseout", onLeave);
-  }, [track]);
+  }, [track, excluded]);
 
   useEffect(() => {
     if (!open) return;
@@ -86,7 +113,7 @@ export default function ExitIntentModal() {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  if (!open) return null;
+  if (!open || excluded) return null;
 
   const reduced =
     typeof window.matchMedia === "function" &&

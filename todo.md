@@ -547,3 +547,14 @@ Three separate bugs stacked up:
 - [x] 460 tests passing, type-check clean
 - [x] Pushed to GitHub main (a59bf9d) and checkpointed a59bf9d8, auto-published (live bundle index-BG9jxSE-.js)
 - [x] Verified live on lifestyledesignrealty.com. Measured the deployed fade duration as exactly 0.42s (matching CONTENT_FADE_MS), and on a fresh mount with the session flag cleared the hero content began fading at ~354-387ms and reached full opacity at 521ms — inside the ~0.6s brief. Note the reveal reads slightly later than the 200ms constant because the sandbox browser runs rAF at ~33ms/frame and the route remount itself costs a few frames; on a 60fps device the reveal lands at the 200ms mark. Canvas lit-pixel count rose from 0 to 421 over the same window, confirming the line work draws around content that is already visible rather than gating it
+
+## Batch 28 — pull the five audit fixes and verify (production was 6 commits behind)
+
+- [x] Pulled GitHub main. Six commits came in, not five: the listed 9a44b8f / 9edbc86 / 850183c / 5d62c8b / 4ae20fb plus 5750c1c ("test(leads): prove the timeout wrapper doesn't break normal traffic"). 14 files changed, 5 new test files, 1 new shared module (shared/requestTimeout.ts)
+- [x] Full suite passes: 527 tests across 38 files, type-check clean. Peter expected 524 — the extra 3 are the ones added by 5750c1c, the sixth commit he did not list. Nothing is failing or skipped, so the count is higher rather than short
+- [ ] Checkpoint so it deploys
+- [ ] Review what the five fixes actually changed, since two touch lead submission and one touches the AI compliance guard
+- [ ] Verify 1: the live bundle hash changed from index-BG9jxSE-.js
+- [ ] Verify 2: `curl -s https://lifestyledesignrealty.com/ | grep -c noscript` returns 1
+- [ ] Verify 3: submit a form with a bad phone on the live site and confirm the readable inline error still works
+- [ ] Report the new bundle hash and all results

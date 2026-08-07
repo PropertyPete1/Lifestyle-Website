@@ -105,10 +105,11 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
             onChange={(e) => setPhone(e.target.value)}
             required
             aria-invalid={fieldError === PHONE_HINT || undefined}
+            aria-describedby={fieldError === PHONE_HINT ? "gs-phone-error" : undefined}
             className="bg-secondary/60 border-border"
           />
           {fieldError === PHONE_HINT && (
-            <p role="alert" className="text-[11px] text-destructive">{PHONE_HINT}</p>
+            <p id="gs-phone-error" role="alert" className="text-[11px] text-destructive">{PHONE_HINT}</p>
           )}
         </div>
         <div className={cn("space-y-1.5", !compact && "sm:col-span-2")}>

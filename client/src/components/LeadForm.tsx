@@ -147,10 +147,11 @@ export default function LeadForm({
             onChange={(e) => setPhone(e.target.value)}
             required
             aria-invalid={fieldError === PHONE_HINT || undefined}
+            aria-describedby={fieldError === PHONE_HINT ? `${sourceTag}-phone-error` : undefined}
             className="bg-secondary/60 border-border"
           />
           {fieldError === PHONE_HINT && (
-            <p role="alert" className="text-[11px] text-destructive">{PHONE_HINT}</p>
+            <p id={`${sourceTag}-phone-error`} role="alert" className="text-[11px] text-destructive">{PHONE_HINT}</p>
           )}
         </div>
       </div>

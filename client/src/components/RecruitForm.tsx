@@ -112,10 +112,11 @@ export default function RecruitForm() {
             onChange={(e) => setPhone(e.target.value)}
             required
             aria-invalid={fieldError === PHONE_HINT || undefined}
+            aria-describedby={fieldError === PHONE_HINT ? "rc-phone-error" : undefined}
             className="bg-secondary/60 border-border"
           />
           {fieldError === PHONE_HINT && (
-            <p role="alert" className="text-[11px] text-destructive">{PHONE_HINT}</p>
+            <p id="rc-phone-error" role="alert" className="text-[11px] text-destructive">{PHONE_HINT}</p>
           )}
         </div>
         <div className="space-y-1.5 sm:col-span-2">

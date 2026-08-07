@@ -54,6 +54,9 @@ export default function RecruitForm() {
 
   /** Extracted so the failure banner's "Try again" can re-send the same data. */
   const doSubmit = () => {
+    // See LeadForm: one application per submission, enforced here rather than
+    // relying on the disabled button alone.
+    if (submit.isPending) return;
     setSubmitError(null);
     submit.mutate({
       name,

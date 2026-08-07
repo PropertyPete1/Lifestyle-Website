@@ -55,6 +55,9 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
 
   /** Extracted so the failure banner's "Try again" can re-send the same data. */
   const doSubmit = () => {
+    // See LeadForm: one lead per submission is enforced here, not just by the
+    // disabled button, so a duplicate can't reach FUB.
+    if (submit.isPending) return;
     setSubmitError(null);
     submit.mutate({
       name,

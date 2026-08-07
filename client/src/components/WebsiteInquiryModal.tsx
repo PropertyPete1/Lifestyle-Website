@@ -36,6 +36,8 @@ export default function WebsiteInquiryModal({
   });
 
   const doSubmit = () => {
+    // See LeadForm: one inquiry per submission, enforced at the send.
+    if (submit.isPending) return;
     setError(null);
     submit.mutate({
       name: form.name.trim(),

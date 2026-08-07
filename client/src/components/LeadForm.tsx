@@ -89,6 +89,11 @@ export default function LeadForm({
 
   /** Extracted so the failure banner's "Try again" can re-send the same data. */
   const doSubmit = () => {
+    // The disabled submit button already absorbs real double-taps, but that
+    // makes "one lead per submission" a property of a DOM attribute rather than
+    // of this function. A duplicate here is a duplicate contact in FUB, so the
+    // in-flight check lives with the send.
+    if (submit.isPending) return;
     setSubmitError(null);
     submit.mutate({
       name,

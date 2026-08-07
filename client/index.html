@@ -16,6 +16,42 @@
 
   <body>
     <div id="root"></div>
+    <!--
+      Without JavaScript the SPA renders nothing at all — a blank page with no
+      brokerage identification, no contact route, and no TREC links. This is the
+      static floor: who we are, how to reach us, and the required notices, for a
+      visitor with JS disabled or a crawler that does not execute it.
+    -->
+    <noscript>
+      <div style="max-width:44rem;margin:0 auto;padding:3rem 1.25rem;font-family:Montserrat,system-ui,sans-serif;color:#e8e6e3;background:#0d0d0f;line-height:1.7">
+        <h1 style="font-family:'Cormorant Garamond',Georgia,serif;font-size:2rem;letter-spacing:.08em;font-weight:400;margin:0 0 .5rem">
+          LIFESTYLE DESIGN <span style="color:#c9a961">REALTY</span>
+        </h1>
+        <p style="text-transform:uppercase;letter-spacing:.2em;font-size:.7rem;color:#9b9894;margin:0 0 2rem">
+          Central Texas Real Estate Professionals
+        </p>
+        <p>
+          This site needs JavaScript for the full experience. Please enable it, or
+          reach us directly — we typically respond within 30 minutes.
+        </p>
+        <p style="margin:1.5rem 0">
+          <a href="tel:+12109813830" style="color:#c9a961">(210) 981-3830</a><br />
+          <a href="mailto:team@lifestyledesignrealty.com" style="color:#c9a961">team@lifestyledesignrealty.com</a><br />
+          1212 Chicon St Unit 101, Austin TX 78702
+        </p>
+        <p style="font-size:.75rem;color:#9b9894">
+          <a href="https://drive.google.com/file/d/1DTDRFjzJJS_iD8aaNu8l4Wr3YmmR9zHe/view" style="color:#9b9894">Texas Real Estate Commission Information About Brokerage Services</a>
+          &nbsp;·&nbsp;
+          <a href="https://www.trec.texas.gov/forms/consumer-protection-notice" style="color:#9b9894">Texas Real Estate Commission Consumer Protection Notice</a>
+          &nbsp;·&nbsp;
+          <a href="/privacy" style="color:#9b9894">Privacy Policy</a>
+        </p>
+        <p style="font-size:.75rem;color:#9b9894">
+          All information is deemed reliable but not guaranteed and should be
+          independently reviewed and verified. Equal Housing Opportunity.
+        </p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
     <script
       defer

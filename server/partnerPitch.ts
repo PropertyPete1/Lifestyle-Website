@@ -258,16 +258,47 @@ export async function generatePitch(input: PitchInput): Promise<string> {
 /**
  * Compliance guard for AI output: numeric financial figures, rates, and
  * comparative affordability/savings claims are all rejected.
+ *
+ * WHY THE WORD FORMS MATTER AS MUCH AS THE SYMBOLS: this started as a
+ * symbol-only guard (`%` and `$`), which meant an LLM that wrote "rates as low
+ * as 3.99 percent" or "homes from 300,000 dollars" sailed straight through to a
+ * customer. A rate quoted without the adjacent lender disclosure is exactly the
+ * claim the hero's attorney-reviewed disclaimer exists to qualify, and the AI
+ * pages are the one surface where nobody reviews the wording before a visitor
+ * reads it. So every figure is matched in BOTH the symbol and the spelled form.
+ *
+ * Deliberately still allowed, because the system prompt invites them and they
+ * carry no number: "negotiated rate buydowns", "builder incentives", "your
+ * money goes further". Over-blocking here is not free — every rejection costs a
+ * retry and then falls back to templated copy, so the patterns are written to
+ * catch quantities, not the general subject of money.
  */
 export function violatesCompliance(text: string): boolean {
   const patterns = [
-    /\d+(\.\d+)?\s*%/, // percentages
-    /\$\s?\d/, // dollar figures
+    // --- percentages, symbol and word ---
+    /\d+(\.\d+)?\s*%/, // 3.99%
+    /\d[\d,.]*\s*(percent|per cent|pct)\b/i, // "3.99 percent"
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten|half|quarter)\b[^.]{0,24}\bper ?cent\b/i, // "five and a half percent"
+
+    // --- dollar figures, symbol and word ---
+    /\$\s?\d/, // $310,000
+    /\d[\d,.]*\s*(dollars|usd)\b/i, // "300,000 dollars"
+    /\b(hundred|thousand|million)\s+dollars\b/i, // "three hundred thousand dollars"
+    /\b\d[\d,.]*\s?[kK]\b/, // "310K"
+
+    // --- rate language ---
+    /\binterest rates?\b/i,
+    /\b(mortgage|financing|loan|lending)\s+rates?\b/i, // "mortgage rate" — not just "interest rate"
+    /\brates?\s+(as low as|starting at|from|around|near|down to)\b/i,
+    /\bAPR\b/, // case-sensitive so it can't fire on "Apr"
+    /\bbasis points?\b/i,
+    /\b(\d+(\.\d+)?|one|two|three|four)\s+points?\s+(buy-?down)\b/i,
+    /\bmortgage payments?\b/i,
+
+    // --- comparative affordability / savings ---
     /\b(costs?|pay(ing)?|priced?)\b[^.]{0,40}\b(half|double|twice|fraction|less than|a third)\b/i,
     /\b(half|double|twice|a fraction of|a third of)\b[^.]{0,40}\b(price|cost|what you'?d pay|the money)\b/i,
     /\bsave (you )?(thousands|tens of thousands|hundreds)\b/i,
-    /\binterest rates?\b/i,
-    /\bmortgage payments?\b/i,
   ];
   return patterns.some((p) => p.test(text));
 }

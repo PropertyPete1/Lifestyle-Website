@@ -566,4 +566,4 @@ Three separate bugs stacked up:
 ## Batch 28 follow-up — small a11y gap found while verifying
 
 - [x] Fixed. Gave the error `<p>` an id and referenced it from the input via `aria-describedby` in all three forms that collect a phone (GetStartedForm `gs-phone-error`, RecruitForm `rc-phone-error`, LeadForm `${sourceTag}-phone-error` so several instances on one page cannot collide). The attribute is conditional on the same predicate that renders the message, since a stale `aria-describedby` pointing at a removed node is worse than none. 15 new tests pin the association, the conditionality, and that `role="alert"` still fires
-- [ ] Run the full suite, checkpoint, and push the a11y fix to GitHub
+- [x] 542 tests passing, checkpoint 645380e7 saved and auto-published, pushed to GitHub main (645380e)

@@ -1,5 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { COOKIE_NAME, UNAUTHED_ERR_MSG } from '@shared/const';
+import { REQUEST_TIMEOUT_MS, withTimeout } from '@shared/requestTimeout';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { createRoot } from "react-dom/client";
@@ -72,9 +73,13 @@ const trpcClient = trpc.createClient({
            * retry path — the visitor simply assumed it worked. 20s is far
            * beyond a normal submit (sub-second) but short enough that a stuck
            * request surfaces as a real, actionable error instead of an endless
-           * spinner. Any caller-supplied signal still wins.
+           * spinner.
+           *
+           * COMBINED, never chosen: httpBatchLink always supplies its own
+           * signal, so `init?.signal ?? timeout` silently discarded the
+           * deadline on every request. See shared/requestTimeout.ts.
            */
-          signal: init?.signal ?? AbortSignal.timeout(20_000),
+          signal: withTimeout(init?.signal, REQUEST_TIMEOUT_MS),
         });
       },
     }),

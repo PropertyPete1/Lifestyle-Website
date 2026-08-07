@@ -83,6 +83,50 @@ describe("submit timeout fires through the real tRPC client", () => {
   });
 });
 
+/**
+ * The wrapper sits on EVERY request the site makes, so the failure mode that
+ * matters most is not "the timeout doesn't fire" but "normal traffic broke".
+ */
+describe("normal traffic is unaffected", () => {
+  it("completes a successful round-trip and does not abort early", async () => {
+    const ok = http.createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify([{ result: { data: { ok: true } } }]));
+      });
+    });
+    await new Promise<void>((resolve) => ok.listen(0, resolve));
+    const okPort = (ok.address() as AddressInfo).port;
+
+    let combined = false;
+    const client = createTRPCClient<never>({
+      links: [
+        httpBatchLink({
+          url: `http://127.0.0.1:${okPort}/api/trpc`,
+          fetch(input, init) {
+            const signal = withTimeout(init?.signal, REQUEST_TIMEOUT_MS);
+            combined = signal !== init?.signal;
+            return globalThis.fetch(input as string, { ...(init ?? {}), signal });
+          },
+        }),
+      ],
+    });
+
+    try {
+      // A run of sequential requests: nothing may abort, and the per-request
+      // timeout must not accumulate or fire on a healthy server.
+      for (let i = 0; i < 25; i++) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await expect((client as any).health.check.query()).resolves.toBeDefined();
+      }
+      expect(combined, "must be using the combined signal, not tRPC's raw one").toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => ok.close(() => resolve()));
+    }
+  });
+});
+
 describe("withTimeout", () => {
   it("times out when there is no caller signal", async () => {
     const s = withTimeout(undefined, 50);

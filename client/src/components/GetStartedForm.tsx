@@ -6,6 +6,7 @@ import { humanizeSubmitError, isUsablePhone, PHONE_HINT } from "@shared/formErro
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
 import { getVisitorId } from "@/lib/visitor";
+import { markLeadCaptured } from "@/lib/leadSession";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -34,6 +35,7 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
   const submit = trpc.leads.submit.useMutation({
     onSuccess: () => {
       setDone(true);
+      markLeadCaptured(); // suppresses the exit-intent nudge for the rest of the session
       toast.success("Thank you — we typically respond within 30 minutes.");
     },
     onError: (err) => setSubmitError(humanizeSubmitError(err)),

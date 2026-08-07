@@ -6,6 +6,7 @@ import { humanizeSubmitError, isUsablePhone, PHONE_HINT } from "@shared/formErro
 import { trpc } from "@/lib/trpc";
 import { SITE } from "@shared/site";
 import { getVisitorId } from "@/lib/visitor";
+import { markLeadCaptured } from "@/lib/leadSession";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,7 +35,10 @@ export default function RecruitForm() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const submit = trpc.leads.submit.useMutation({
-    onSuccess: () => setDone(true),
+    onSuccess: () => {
+      setDone(true);
+      markLeadCaptured(); // suppresses the exit-intent nudge for the rest of the session
+    },
     onError: (err) => setSubmitError(humanizeSubmitError(err)),
   });
 

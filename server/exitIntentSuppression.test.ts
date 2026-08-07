@@ -59,3 +59,84 @@ describe("exit-intent conversion suppression", () => {
     }
   });
 });
+
+/**
+ * The DOM marker only exists while the confirmation is still mounted. A visitor
+ * who submitted on the homepage and then clicked through to /team lost it, and
+ * the nudge came back to ask someone already in the pipeline to get started.
+ * Conversion is therefore also recorded for the SESSION, and the modal checks
+ * both.
+ */
+describe("exit-intent suppression survives navigation after converting", () => {
+  it.each([
+    ["components/GetStartedForm.tsx"],
+    ["components/LeadForm.tsx"],
+    ["components/RecruitForm.tsx"],
+  ])("%s records the conversion for the session", (file) => {
+    const src = code(file);
+    expect(src, `${file} must call markLeadCaptured() on success`).toMatch(/markLeadCaptured\(\)/);
+  });
+
+  it("the modal consults the session flag, not just the DOM marker", () => {
+    const src = code("components/ExitIntentModal.tsx");
+    expect(src).toMatch(/isLeadCaptured\(\)/);
+  });
+
+  it("the session flag is actually read somewhere (it was dead code before)", () => {
+    const consumers = ["components/ExitIntentModal.tsx"].filter((f) =>
+      /isLeadCaptured/.test(code(f))
+    );
+    expect(consumers.length).toBeGreaterThan(0);
+  });
+});
+
+describe("leadSession flag behaviour", () => {
+  const withStorage = async (store: Storage | null, fn: () => Promise<void> | void) => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+    Object.defineProperty(globalThis, "sessionStorage", {
+      configurable: true,
+      get() {
+        if (store === null) throw new Error("storage blocked");
+        return store;
+      },
+    });
+    try {
+      await fn();
+    } finally {
+      if (original) Object.defineProperty(globalThis, "sessionStorage", original);
+      else delete (globalThis as { sessionStorage?: unknown }).sessionStorage;
+    }
+  };
+
+  const fakeStore = (): Storage => {
+    const map = new Map<string, string>();
+    return {
+      getItem: (k: string) => map.get(k) ?? null,
+      setItem: (k: string, v: string) => void map.set(k, v),
+      removeItem: (k: string) => void map.delete(k),
+      clear: () => map.clear(),
+      key: () => null,
+      get length() {
+        return map.size;
+      },
+    } as Storage;
+  };
+
+  it("reports captured only after a lead is marked", async () => {
+    const { isLeadCaptured, markLeadCaptured } = await import("../client/src/lib/leadSession");
+    await withStorage(fakeStore(), () => {
+      expect(isLeadCaptured()).toBe(false);
+      markLeadCaptured();
+      expect(isLeadCaptured()).toBe(true);
+    });
+  });
+
+  it("degrades silently when storage is blocked (private mode)", async () => {
+    const { isLeadCaptured, markLeadCaptured } = await import("../client/src/lib/leadSession");
+    await withStorage(null, () => {
+      // Neither call may throw; the visitor still gets a working site.
+      expect(() => markLeadCaptured()).not.toThrow();
+      expect(isLeadCaptured()).toBe(false);
+    });
+  });
+});

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { ArrowRight, X } from "lucide-react";
 import { useExitIntentTracking } from "@/hooks/usePageTracking";
+import { isLeadCaptured } from "@/lib/leadSession";
 
 /**
  * EXIT-INTENT NUDGE — desktop only, once per session, one CTA.
@@ -88,6 +89,12 @@ export default function ExitIntentModal() {
       // but that exact wording is also a STATIC selling point beside the Get
       // Started form, so the modal was permanently suppressed on the homepage.
       if (document.querySelector("[data-lead-converted]")) return;
+      // ...and once they have converted ANYWHERE this session, stay quiet for
+      // the rest of it. The DOM marker only survives while the confirmation is
+      // still mounted, so submitting on the homepage and then clicking through
+      // to /team used to bring the modal back — asking someone who is already
+      // in the pipeline to please get started.
+      if (isLeadCaptured()) return;
 
       shownRef.current = true;
       try {

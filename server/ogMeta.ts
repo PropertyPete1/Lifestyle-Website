@@ -4,6 +4,17 @@ import { selectCityImage } from "../shared/cityImagery";
 
 const OG_IMAGE = "/manus-storage/convince-og-card_a3d08b2e.png";
 
+/**
+ * Recruiting-specific share card for /join. Shared links must sell the hiring
+ * opportunity at a glance rather than the general brokerage homepage.
+ */
+export const JOIN_OG_IMAGE = "/manus-storage/join-og-card_7218d8c9.png";
+
+export const JOIN_OG_TITLE = "Now Hiring: Licensed Agents — Lifestyle Design Realty";
+
+export const JOIN_OG_DESCRIPTION =
+  "Real leads. Real support. Lease commissions up to $6,000 per deal. Veteran-owned brokerage hiring in Austin, San Antonio, Dallas & Houston.";
+
 export function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -62,7 +73,8 @@ export function registerOgMeta(app: Express) {
   app.use(async (req: Request, res: Response, next: NextFunction) => {
     const isConvince = req.path.startsWith("/convince");
     const isCityFinder = req.path.startsWith("/city-finder");
-    if (!isConvince && !isCityFinder) return next();
+    const isJoin = req.path === "/join" || req.path === "/join/";
+    if (!isConvince && !isCityFinder && !isJoin) return next();
     // Only intercept HTML document requests, not assets/api
     const accepts = req.headers.accept || "";
     if (!accepts.includes("text/html") && accepts !== "*/*" && accepts !== "") return next();
@@ -75,6 +87,14 @@ export function registerOgMeta(app: Express) {
     let description =
       "Someone wants to move to Texas with you — and asked us to make the case. Read the letter Lifestyle Design Realty wrote about the life waiting for you here.";
     let image: string | undefined;
+
+    // Recruiting card: canonicalised to the non-trailing-slash /join URL so
+    // every share of the page collapses onto one preview.
+    if (isJoin) {
+      title = JOIN_OG_TITLE;
+      description = JOIN_OG_DESCRIPTION;
+      image = JOIN_OG_IMAGE;
+    }
 
     const cityFinderSlug = req.path.match(/^\/city-finder\/([A-Za-z0-9_-]+)$/);
     if (isCityFinder) {
@@ -124,7 +144,11 @@ export function registerOgMeta(app: Express) {
         "Want to move to Texas but need help convincing your partner? Take the 60-second quiz and we'll write the case for you.";
     }
 
-    const tags = buildTags({ title, description, url: fullUrl, image });
+    const canonicalUrl = isJoin
+      ? `${proto}://${host}/join`
+      : fullUrl;
+
+    const tags = buildTags({ title, description, url: canonicalUrl, image });
 
     // Monkey-patch send to inject tags into the outgoing HTML
     const originalSend = res.send.bind(res);

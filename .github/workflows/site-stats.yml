@@ -1,0 +1,97 @@
+name: site-stats
+run-name: "site-stats: publish status/site_stats.json"
+# Publishes real website traffic to status/site_stats.json so LIFESTYLE reads
+# measured visitor numbers instead of a blank panel.
+#
+# Every six hours rather than once a day: the file carries today AND yesterday,
+# and a once-daily run would leave "today" frozen at whatever had happened by
+# 4am. Yesterday is settled at every run; today gets fresher through the day.
+#
+# This job only ever runs SELECTs and commits one JSON file. It cannot change
+# the site, and nothing it does reaches production without Peter's Manus
+# checkpoint — status/site_stats.json is not part of the app bundle.
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Never let two publishers race each other onto main.
+concurrency:
+  group: site-stats
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      # Exits non-zero ONLY if no file could be written at all. An unreachable
+      # database is not a failure of this job: the writer records the outage in
+      # `unavailable` and publishes that, which is the honest result.
+      - name: Write status/site_stats.json
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm stats:site
+
+      # A queued run checked out the SHA it was queued at, so a sibling's commit
+      # is invisible to it (see: this org's CI has been bitten by exactly that).
+      # Rebase onto whatever main is NOW, re-apply our freshly generated file,
+      # and retry. The file is a whole snapshot every run, so the newest writer
+      # winning is correct — there is nothing in the old copy to preserve.
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          FILE=status/site_stats.json
+
+          if [ ! -f "$FILE" ]; then
+            echo "No $FILE was produced — nothing to publish."
+            exit 0
+          fi
+
+          cp "$FILE" "${RUNNER_TEMP}/site_stats.json"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git reset --hard origin/main
+            mkdir -p status
+            cp "${RUNNER_TEMP}/site_stats.json" "$FILE"
+
+            if git diff --quiet -- "$FILE"; then
+              echo "$FILE is unchanged — nothing to commit."
+              exit 0
+            fi
+
+            git add -- "$FILE"
+            git commit -m "status: site traffic telemetry for $(date -u +%Y-%m-%dT%H:%MZ)"
+
+            if git push origin HEAD:main; then
+              echo "Published $FILE."
+              exit 0
+            fi
+
+            echo "Push rejected (attempt ${attempt}/3) — someone else landed first; rebasing."
+            sleep $((attempt * 5))
+          done
+
+          echo "Could not publish $FILE after 3 attempts." >&2
+          exit 1

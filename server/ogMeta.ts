@@ -7,8 +7,10 @@ const OG_IMAGE = "/manus-storage/convince-og-card_a3d08b2e.png";
 /**
  * Recruiting-specific share card for /join. Shared links must sell the hiring
  * opportunity at a glance rather than the general brokerage homepage.
+ * Rendered at exactly 1200x630 to match the declared og:image dimensions —
+ * crawlers reserve space from those numbers, so they must not lie.
  */
-export const JOIN_OG_IMAGE = "/manus-storage/join-og-card_7218d8c9.png";
+export const JOIN_OG_IMAGE = "/manus-storage/join-og-card-1200x630_68cc9bda.png";
 
 export const JOIN_OG_TITLE = "Now Hiring: Licensed Agents — Lifestyle Design Realty";
 

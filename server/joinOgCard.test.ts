@@ -36,6 +36,12 @@ describe("join OG card", () => {
     expect(JOIN_OG_IMAGE.startsWith("/manus-storage/")).toBe(true);
   });
 
+  it("uses an asset rendered at the declared 1200x630, so the tags don't lie", () => {
+    // crawlers reserve layout space from og:image:width/height; a mismatch
+    // between declared and actual dimensions causes preview jank
+    expect(JOIN_OG_IMAGE).toContain("1200x630");
+  });
+
   it("emits full OG + Twitter summary_large_image tags for /join", () => {
     const tags = buildTags({
       title: JOIN_OG_TITLE,

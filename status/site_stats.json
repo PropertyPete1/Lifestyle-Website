@@ -1,22 +1,32 @@
 {
   "date": "2026-08-12",
-  "generated_at": "2026-08-12T19:02:32Z",
+  "generated_at": "2026-08-13T02:01:46Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-12": {
-      "page_views": 38,
-      "unique_visitors": 32,
+      "page_views": 97,
+      "unique_visitors": 78,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
+          "path": "/join",
+          "views": 24,
+          "unique_visitors": 21
+        },
+        {
           "path": "/",
-          "views": 9,
-          "unique_visitors": 9
+          "views": 23,
+          "unique_visitors": 18
+        },
+        {
+          "path": "/links",
+          "views": 19,
+          "unique_visitors": 15
         },
         {
           "path": "/san-antonio-homes-for-sale",
-          "views": 3,
-          "unique_visitors": 3
+          "views": 4,
+          "unique_visitors": 4
         },
         {
           "path": "/austin",
@@ -24,19 +34,9 @@
           "unique_visitors": 2
         },
         {
-          "path": "/links",
-          "views": 2,
-          "unique_visitors": 1
-        },
-        {
           "path": "/properties",
           "views": 2,
           "unique_visitors": 2
-        },
-        {
-          "path": "/home-search/listings",
-          "views": 1,
-          "unique_visitors": 1
         },
         {
           "path": "/home-search/listings/7227250309292178264-7502-LINFIELD-ST",

@@ -1,30 +1,35 @@
 {
   "date": "2026-08-13",
-  "generated_at": "2026-08-13T13:12:00Z",
+  "generated_at": "2026-08-13T19:03:41Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-13": {
-      "page_views": 10,
-      "unique_visitors": 10,
+      "page_views": 27,
+      "unique_visitors": 25,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 4,
-          "unique_visitors": 4
+          "views": 8,
+          "unique_visitors": 8
         },
         {
           "path": "/san-antonio-homes-for-sale",
+          "views": 3,
+          "unique_visitors": 3
+        },
+        {
+          "path": "/home-search/listings/3081903230623490487-144-Eagle-Ford-DR",
           "views": 2,
           "unique_visitors": 2
         },
         {
-          "path": "/links",
+          "path": "/blog/commuting-from-kyle-to-austin-what-to-know",
           "views": 1,
           "unique_visitors": 1
         },
         {
-          "path": "/blog/commuting-from-kyle-to-austin-what-to-know",
+          "path": "/home-search/listings/3081271420972008085-124-Parsons",
           "views": 1,
           "unique_visitors": 1
         },
@@ -34,7 +39,22 @@
           "unique_visitors": 1
         },
         {
+          "path": "/home-search/listings/7227518141732304258-1510-Periwinkle-St",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
           "path": "/blog/san-antonio-housing-inventory-a-buyers-guide",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/austin-homes-for-sale",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/7227842758963843805-16522-Glen-Eve-Path",
           "views": 1,
           "unique_visitors": 1
         }

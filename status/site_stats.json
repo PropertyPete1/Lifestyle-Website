@@ -1,27 +1,46 @@
 {
-  "date": "2026-08-12",
-  "generated_at": "2026-08-13T02:01:46Z",
+  "date": "2026-08-13",
+  "generated_at": "2026-08-13T07:27:30Z",
   "timezone": "America/Chicago",
   "days": {
+    "2026-08-13": {
+      "page_views": 2,
+      "unique_visitors": 2,
+      "views_without_visitor_id": 0,
+      "top_pages": [
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/links",
+          "views": 1,
+          "unique_visitors": 1
+        }
+      ],
+      "lead_submissions": 0,
+      "complete": false
+    },
     "2026-08-12": {
-      "page_views": 97,
-      "unique_visitors": 78,
+      "page_views": 114,
+      "unique_visitors": 87,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/join",
-          "views": 24,
-          "unique_visitors": 21
+          "views": 29,
+          "unique_visitors": 25
         },
         {
           "path": "/",
-          "views": 23,
-          "unique_visitors": 18
+          "views": 27,
+          "unique_visitors": 20
         },
         {
           "path": "/links",
-          "views": 19,
-          "unique_visitors": 15
+          "views": 22,
+          "unique_visitors": 17
         },
         {
           "path": "/san-antonio-homes-for-sale",
@@ -29,7 +48,12 @@
           "unique_visitors": 4
         },
         {
-          "path": "/austin",
+          "path": "/home-search/listings",
+          "views": 3,
+          "unique_visitors": 3
+        },
+        {
+          "path": "/team",
           "views": 2,
           "unique_visitors": 2
         },
@@ -39,83 +63,19 @@
           "unique_visitors": 2
         },
         {
-          "path": "/home-search/listings/7227250309292178264-7502-LINFIELD-ST",
-          "views": 1,
-          "unique_visitors": 1
+          "path": "/city-finder",
+          "views": 2,
+          "unique_visitors": 2
         },
         {
-          "path": "/home-valuation",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/blog",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/contact",
-          "views": 1,
-          "unique_visitors": 1
-        }
-      ],
-      "lead_submissions": 0,
-      "complete": false
-    },
-    "2026-08-11": {
-      "page_views": 51,
-      "unique_visitors": 36,
-      "views_without_visitor_id": 0,
-      "top_pages": [
-        {
-          "path": "/",
-          "views": 14,
-          "unique_visitors": 10
-        },
-        {
-          "path": "/links",
-          "views": 4,
-          "unique_visitors": 4
-        },
-        {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 4,
-          "unique_visitors": 4
-        },
-        {
-          "path": "/boerne-homes-for-sale",
-          "views": 3,
-          "unique_visitors": 3
-        },
-        {
-          "path": "/valuation",
-          "views": 3,
+          "path": "/austin",
+          "views": 2,
           "unique_visitors": 2
         },
         {
           "path": "/contact",
-          "views": 3,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/sell",
-          "views": 2,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/3081973851528660187-108-Parsons",
           "views": 2,
           "unique_visitors": 2
-        },
-        {
-          "path": "/join",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/team",
-          "views": 1,
-          "unique_visitors": 1
         }
       ],
       "lead_submissions": 0,

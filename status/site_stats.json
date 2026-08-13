@@ -1,20 +1,40 @@
 {
   "date": "2026-08-13",
-  "generated_at": "2026-08-13T07:27:30Z",
+  "generated_at": "2026-08-13T13:12:00Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-13": {
-      "page_views": 2,
-      "unique_visitors": 2,
+      "page_views": 10,
+      "unique_visitors": 10,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
+          "path": "/",
+          "views": 4,
+          "unique_visitors": 4
+        },
+        {
           "path": "/san-antonio-homes-for-sale",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/links",
           "views": 1,
           "unique_visitors": 1
         },
         {
-          "path": "/links",
+          "path": "/blog/commuting-from-kyle-to-austin-what-to-know",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/privacy",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/blog/san-antonio-housing-inventory-a-buyers-guide",
           "views": 1,
           "unique_visitors": 1
         }

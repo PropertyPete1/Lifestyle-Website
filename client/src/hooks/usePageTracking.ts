@@ -194,3 +194,23 @@ export function useLinksPromiseTracking() {
       { onError: () => undefined }
     );
 }
+
+/**
+ * Returns a fire-and-forget logger for the /links "MEET PRIMARY — OUR AI"
+ * outbound clicks (→ lifestyledesigntechnologies.com). Same first-party
+ * pattern as the NC/lease buttons; the outbound URL additionally carries
+ * utm_source=linkpage-primary so the LDT site can attribute the visit.
+ */
+export function usePrimaryClickTracking() {
+  const track = trpc.analytics.track.useMutation();
+  return () =>
+    track.mutate(
+      {
+        kind: "primary_click",
+        path: "/links",
+        visitorId: getVisitorId() || undefined,
+        ...getTrafficSource(),
+      },
+      { onError: () => undefined }
+    );
+}

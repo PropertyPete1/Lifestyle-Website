@@ -1,60 +1,60 @@
 {
-  "date": "2026-08-12",
-  "generated_at": "2026-08-12T19:02:32Z",
+  "date": "2026-08-14",
+  "generated_at": "2026-08-14T13:07:17Z",
   "timezone": "America/Chicago",
   "days": {
-    "2026-08-12": {
-      "page_views": 38,
-      "unique_visitors": 32,
+    "2026-08-14": {
+      "page_views": 18,
+      "unique_visitors": 16,
       "views_without_visitor_id": 0,
       "top_pages": [
-        {
-          "path": "/",
-          "views": 9,
-          "unique_visitors": 9
-        },
         {
           "path": "/san-antonio-homes-for-sale",
           "views": 3,
           "unique_visitors": 3
         },
         {
-          "path": "/austin",
+          "path": "/links",
           "views": 2,
           "unique_visitors": 2
         },
         {
-          "path": "/links",
+          "path": "/",
           "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/privacy",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/7227622974163719445-229-JERSEY-LANE",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/join",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/neighborhoods/dripping-springs",
+          "views": 1,
           "unique_visitors": 1
         },
         {
           "path": "/properties",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/home-search/listings",
           "views": 1,
           "unique_visitors": 1
         },
         {
-          "path": "/home-search/listings/7227250309292178264-7502-LINFIELD-ST",
+          "path": "/home-search/listings/7227761299812800244-325-DENALI-DRIVE",
           "views": 1,
           "unique_visitors": 1
         },
         {
-          "path": "/home-valuation",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/blog",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/contact",
+          "path": "/home-search/listings/722725112152649247-115-W-Highland-Boulevard",
           "views": 1,
           "unique_visitors": 1
         }
@@ -62,20 +62,20 @@
       "lead_submissions": 0,
       "complete": false
     },
-    "2026-08-11": {
-      "page_views": 51,
-      "unique_visitors": 36,
+    "2026-08-13": {
+      "page_views": 62,
+      "unique_visitors": 51,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 14,
-          "unique_visitors": 10
+          "views": 19,
+          "unique_visitors": 18
         },
         {
           "path": "/links",
-          "views": 4,
-          "unique_visitors": 4
+          "views": 5,
+          "unique_visitors": 5
         },
         {
           "path": "/san-antonio-homes-for-sale",
@@ -83,29 +83,19 @@
           "unique_visitors": 4
         },
         {
-          "path": "/boerne-homes-for-sale",
+          "path": "/team",
           "views": 3,
           "unique_visitors": 3
         },
         {
-          "path": "/valuation",
+          "path": "/properties",
           "views": 3,
           "unique_visitors": 2
         },
         {
-          "path": "/contact",
+          "path": "/city-finder",
           "views": 3,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/sell",
-          "views": 2,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/3081973851528660187-108-Parsons",
-          "views": 2,
-          "unique_visitors": 2
+          "unique_visitors": 3
         },
         {
           "path": "/join",
@@ -113,12 +103,22 @@
           "unique_visitors": 2
         },
         {
-          "path": "/team",
+          "path": "/home-search/listings/3081903230623490487-144-Eagle-Ford-DR",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/agent/steven-van-orden",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/austin-homes-for-sale",
           "views": 1,
           "unique_visitors": 1
         }
       ],
-      "lead_submissions": 0,
+      "lead_submissions": 2,
       "complete": true
     }
   },

@@ -10,6 +10,7 @@ import {
   useLeaseClickTracking,
   useLinksFormTracking,
   useLinksPromiseTracking,
+  usePrimaryClickTracking,
 } from "@/hooks/usePageTracking";
 import NowHiringBanner from "@/components/NowHiringBanner";
 import WebsiteInquiryModal from "@/components/WebsiteInquiryModal";
@@ -53,6 +54,7 @@ export default function Links() {
   const logNcClick = useNcClickTracking();
   const logLeaseClick = useLeaseClickTracking();
   const logFormSubmit = useLinksFormTracking();
+  const logPrimaryClick = usePrimaryClickTracking();
   const [inquiryOpen, setInquiryOpen] = useState(false);
   const logPromiseClick = useLinksPromiseTracking();
   const promiseRef = useRef<HTMLButtonElement>(null);
@@ -168,7 +170,32 @@ export default function Links() {
               Explore Our Full Website used to be hardcoded below), so admin
               ordering governs all of them and the priority order is data, not
               markup. */}
-          {(links ?? []).filter((l) => isLinkVisible(l.url)).map((l, i) => {
+          {(() => {
+            const visible = (links ?? []).filter((l) => isLinkVisible(l.url));
+            // MEET PRIMARY — the one hardcoded row in an otherwise data-driven
+            // stack. It pairs with the PRIMARY orb above (green accent instead
+            // of gold) and slots directly below New Construction Search; if the
+            // admin ever hides that row, it falls to the end of the stack.
+            // utm_source carries the "linkpage-primary" tag to the LDT site,
+            // and the click is logged first-party like every other button.
+            const primaryRow = (
+              <a
+                key="ldt-primary"
+                href="https://lifestyledesigntechnologies.com/?utm_source=linkpage-primary"
+                target="_blank"
+                rel="noopener"
+                onClick={logPrimaryClick}
+                className="group lux-lift flex items-center justify-between w-full px-6 py-4 text-xs uppercase tracking-[0.2em] transition-colors border border-[#4ADE80]/60 bg-[#4ADE80]/[0.07] text-foreground hover:bg-[#4ADE80]/[0.12] hover:border-[#4ADE80]">
+                <span className="flex flex-col items-start gap-1 text-left">
+                  <span>Meet Primary — Our AI</span>
+                  <span className="text-[8.5px] tracking-[0.18em] text-[#4ADE80]/80">
+                    24/7 AI Operations
+                  </span>
+                </span>
+                <ArrowUpRight className="h-4 w-4 text-[#4ADE80] opacity-70 group-hover:opacity-100" />
+              </a>
+            );
+            const rows = visible.map((l, i) => {
             const isInternal = l.url.startsWith("/");
             // Visual hierarchy: the top button carries a gold border so the eye
             // lands on the money path first. Everything else stays neutral so
@@ -212,7 +239,11 @@ export default function Links() {
                 {arrow}
               </a>
             );
-          })}
+            });
+            const ncIdx = visible.findIndex((l) => l.url === SITE.newConstructionUrl);
+            rows.splice(ncIdx >= 0 ? ncIdx + 1 : rows.length, 0, primaryRow);
+            return rows;
+          })()}
         </div>
 
         {/* Direct lead capture — an additive shortcut BELOW the buttons.

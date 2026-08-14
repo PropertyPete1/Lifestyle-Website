@@ -1,22 +1,71 @@
 {
-  "date": "2026-08-13",
-  "generated_at": "2026-08-14T01:58:52Z",
+  "date": "2026-08-14",
+  "generated_at": "2026-08-14T07:25:24Z",
   "timezone": "America/Chicago",
   "days": {
+    "2026-08-14": {
+      "page_views": 8,
+      "unique_visitors": 6,
+      "views_without_visitor_id": 0,
+      "top_pages": [
+        {
+          "path": "/links",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/neighborhoods/dripping-springs",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/join",
+          "views": 1,
+          "unique_visitors": 1
+        }
+      ],
+      "lead_submissions": 0,
+      "complete": false
+    },
     "2026-08-13": {
-      "page_views": 47,
-      "unique_visitors": 41,
+      "page_views": 62,
+      "unique_visitors": 51,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 15,
-          "unique_visitors": 15
+          "views": 19,
+          "unique_visitors": 18
+        },
+        {
+          "path": "/links",
+          "views": 5,
+          "unique_visitors": 5
         },
         {
           "path": "/san-antonio-homes-for-sale",
           "views": 4,
           "unique_visitors": 4
+        },
+        {
+          "path": "/team",
+          "views": 3,
+          "unique_visitors": 3
+        },
+        {
+          "path": "/properties",
+          "views": 3,
+          "unique_visitors": 2
         },
         {
           "path": "/city-finder",
@@ -39,86 +88,12 @@
           "unique_visitors": 2
         },
         {
-          "path": "/links",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/home-search/listings/7227842758963843805-16522-Glen-Eve-Path",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/privacy",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
           "path": "/austin-homes-for-sale",
           "views": 1,
           "unique_visitors": 1
         }
       ],
       "lead_submissions": 2,
-      "complete": false
-    },
-    "2026-08-12": {
-      "page_views": 114,
-      "unique_visitors": 87,
-      "views_without_visitor_id": 0,
-      "top_pages": [
-        {
-          "path": "/join",
-          "views": 29,
-          "unique_visitors": 25
-        },
-        {
-          "path": "/",
-          "views": 27,
-          "unique_visitors": 20
-        },
-        {
-          "path": "/links",
-          "views": 22,
-          "unique_visitors": 17
-        },
-        {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 4,
-          "unique_visitors": 4
-        },
-        {
-          "path": "/home-search/listings",
-          "views": 3,
-          "unique_visitors": 3
-        },
-        {
-          "path": "/team",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/properties",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/city-finder",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/austin",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/contact",
-          "views": 2,
-          "unique_visitors": 2
-        }
-      ],
-      "lead_submissions": 0,
       "complete": true
     }
   },

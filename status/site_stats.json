@@ -1,22 +1,32 @@
 {
   "date": "2026-08-13",
-  "generated_at": "2026-08-13T19:03:41Z",
+  "generated_at": "2026-08-14T01:58:52Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-13": {
-      "page_views": 27,
-      "unique_visitors": 25,
+      "page_views": 47,
+      "unique_visitors": 41,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 8,
-          "unique_visitors": 8
+          "views": 15,
+          "unique_visitors": 15
         },
         {
           "path": "/san-antonio-homes-for-sale",
+          "views": 4,
+          "unique_visitors": 4
+        },
+        {
+          "path": "/city-finder",
           "views": 3,
           "unique_visitors": 3
+        },
+        {
+          "path": "/join",
+          "views": 2,
+          "unique_visitors": 2
         },
         {
           "path": "/home-search/listings/3081903230623490487-144-Eagle-Ford-DR",
@@ -24,12 +34,17 @@
           "unique_visitors": 2
         },
         {
-          "path": "/blog/commuting-from-kyle-to-austin-what-to-know",
-          "views": 1,
-          "unique_visitors": 1
+          "path": "/agent/steven-van-orden",
+          "views": 2,
+          "unique_visitors": 2
         },
         {
-          "path": "/home-search/listings/3081271420972008085-124-Parsons",
+          "path": "/links",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/home-search/listings/7227842758963843805-16522-Glen-Eve-Path",
           "views": 1,
           "unique_visitors": 1
         },
@@ -39,27 +54,12 @@
           "unique_visitors": 1
         },
         {
-          "path": "/home-search/listings/7227518141732304258-1510-Periwinkle-St",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/blog/san-antonio-housing-inventory-a-buyers-guide",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
           "path": "/austin-homes-for-sale",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/7227842758963843805-16522-Glen-Eve-Path",
           "views": 1,
           "unique_visitors": 1
         }
       ],
-      "lead_submissions": 0,
+      "lead_submissions": 2,
       "complete": false
     },
     "2026-08-12": {

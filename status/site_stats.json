@@ -1,20 +1,20 @@
 {
   "date": "2026-08-14",
-  "generated_at": "2026-08-14T07:25:24Z",
+  "generated_at": "2026-08-14T13:07:17Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-14": {
-      "page_views": 8,
-      "unique_visitors": 6,
+      "page_views": 18,
+      "unique_visitors": 16,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
-          "path": "/links",
-          "views": 2,
-          "unique_visitors": 2
+          "path": "/san-antonio-homes-for-sale",
+          "views": 3,
+          "unique_visitors": 3
         },
         {
-          "path": "/san-antonio-homes-for-sale",
+          "path": "/links",
           "views": 2,
           "unique_visitors": 2
         },
@@ -24,12 +24,37 @@
           "unique_visitors": 2
         },
         {
-          "path": "/neighborhoods/dripping-springs",
+          "path": "/privacy",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/7227622974163719445-229-JERSEY-LANE",
           "views": 1,
           "unique_visitors": 1
         },
         {
           "path": "/join",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/neighborhoods/dripping-springs",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/properties",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/7227761299812800244-325-DENALI-DRIVE",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/722725112152649247-115-W-Highland-Boulevard",
           "views": 1,
           "unique_visitors": 1
         }

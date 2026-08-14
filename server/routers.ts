@@ -495,6 +495,7 @@ export const appRouter = router({
             "exit_intent_click",
             "sticky_cta_click",
             "links_promise_click",
+            "primary_click",
           ]),
           path: z
             .string()

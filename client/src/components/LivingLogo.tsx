@@ -28,10 +28,16 @@ import {
   WARMUP_MS,
   type PerfTier,
 } from "@shared/livingLogo";
-import { NANITE_WARM_WHITE } from "@shared/naniteSwarm";
 
 /**
  * LIVING LOGO — a dense, breathing particle volume around the LDR monogram.
+ *
+ * PRIMARY RESKIN: the volume is now the mini "PRIMARY" orb — a glowing
+ * green-core sphere on a deep blue field (the look of THE FLOOR at
+ * brain.lifestyledesignrealty.com), with drifting green + coral particles
+ * (~70/30). Only the palette, the core glow, and the CSS backdrop changed;
+ * the animation system, budgets, and tiering below are untouched. The LDR
+ * monogram and its ring stay gold so the realty brand carries over.
  *
  * WHY CANVAS 2D AND NOT WEBGL/THREE.JS
  * Three.js is ~150KB gzipped for what is decoratively a field of additive dots —
@@ -79,12 +85,27 @@ import { NANITE_WARM_WHITE } from "@shared/naniteSwarm";
  * information; the monogram over it is real text.
  */
 
-/** Canvas-safe gold (matches --gold oklch(0.75 0.09 85)). */
-const GOLD = { r: 201, g: 169, b: 97 };
-/** Warm highlight for the front of the volume. */
-const GOLD_HI = { r: 240, g: 214, b: 152 };
-/** Cool, desaturated gold for the far side — reads as atmospheric depth. */
-const GOLD_FAR = { r: 116, g: 96, b: 54 };
+/** A particle palette: base body, near-side highlight, far-side depth tint. */
+type Palette = {
+  base: { r: number; g: number; b: number };
+  hi: { r: number; g: number; b: number };
+  far: { r: number; g: number; b: number };
+};
+
+/** PRIMARY green (#4ADE80) — the dominant particle species (~70%). */
+const GREEN: Palette = {
+  base: { r: 74, g: 222, b: 128 },
+  hi: { r: 199, g: 250, b: 216 }, // #7CF5A0-tinted white for the near face
+  far: { r: 32, g: 96, b: 60 },
+};
+/** Soft coral (#F87171) — the accent species (~30%). */
+const CORAL: Palette = {
+  base: { r: 248, g: 113, b: 113 },
+  hi: { r: 253, g: 205, b: 205 },
+  far: { r: 110, g: 52, b: 52 },
+};
+/** Mint-white for the hero-point blooms — the orb's own warm-white analogue. */
+const PRIMARY_MINT = { r: 214, g: 255, b: 230 };
 
 const MAX_DPR = 2;
 const SPRITE_PX = 32;
@@ -93,10 +114,10 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /**
  * One sprite per depth bucket. `k` runs 0 (far) → 1 (near): colour warms toward
- * GOLD_HI and the core hardens, so a near particle looks like a lit point and a
- * far one like a soft mote.
+ * the palette highlight and the core hardens, so a near particle looks like a
+ * lit point and a far one like a soft mote.
  */
-function makeSprites(): HTMLCanvasElement[] | null {
+function makeSprites({ base, hi, far }: Palette): HTMLCanvasElement[] | null {
   const out: HTMLCanvasElement[] = [];
   for (let i = 0; i < DEPTH_BUCKETS; i++) {
     const k = i / Math.max(1, DEPTH_BUCKETS - 1);
@@ -107,17 +128,17 @@ function makeSprites(): HTMLCanvasElement[] | null {
     if (!g) return null;
     const r = SPRITE_PX / 2;
 
-    const cr = Math.round(lerp(GOLD_FAR.r, GOLD_HI.r, k));
-    const cg = Math.round(lerp(GOLD_FAR.g, GOLD_HI.g, k));
-    const cb = Math.round(lerp(GOLD_FAR.b, GOLD_HI.b, k));
+    const cr = Math.round(lerp(far.r, hi.r, k));
+    const cg = Math.round(lerp(far.g, hi.g, k));
+    const cb = Math.round(lerp(far.b, hi.b, k));
     // Far motes are pure haze; near points get a tight bright core.
     const coreStop = lerp(0.06, 0.3, k);
     const coreAlpha = lerp(0.5, 1, k);
 
     const grad = g.createRadialGradient(r, r, 0, r, r, r);
     grad.addColorStop(0, `rgba(${cr},${cg},${cb},${coreAlpha})`);
-    grad.addColorStop(coreStop, `rgba(${GOLD.r},${GOLD.g},${GOLD.b},${coreAlpha * 0.5})`);
-    grad.addColorStop(1, `rgba(${GOLD.r},${GOLD.g},${GOLD.b},0)`);
+    grad.addColorStop(coreStop, `rgba(${base.r},${base.g},${base.b},${coreAlpha * 0.5})`);
+    grad.addColorStop(1, `rgba(${base.r},${base.g},${base.b},0)`);
     g.fillStyle = grad;
     g.beginPath();
     g.arc(r, r, r, 0, Math.PI * 2);
@@ -136,7 +157,7 @@ function makeBloom(radius: number, peak: number): HTMLCanvasElement | null {
   const g = c.getContext("2d");
   if (!g) return null;
   const r = d / 2;
-  const { r: cr, g: cg, b: cb } = NANITE_WARM_WHITE;
+  const { r: cr, g: cg, b: cb } = PRIMARY_MINT;
   const grad = g.createRadialGradient(r, r, 0, r, r, r);
   grad.addColorStop(0, `rgba(${cr},${cg},${cb},${peak})`);
   grad.addColorStop(0.45, `rgba(${cr},${cg},${cb},${peak * 0.35})`);
@@ -280,8 +301,11 @@ export default function LivingLogo({
       canvas.height = Math.round(size * dpr);
       ctx.scale(dpr, dpr);
 
-      const sprites = makeSprites();
-      if (!sprites) {
+      // Two sprite families, one per species; the per-particle cost of the
+      // second colour is a flag-indexed array pick, nothing more.
+      const greenSprites = makeSprites(GREEN);
+      const coralSprites = makeSprites(CORAL);
+      if (!greenSprites || !coralSprites) {
         setStaticOnly(true);
         return () => undefined;
       }
@@ -308,7 +332,8 @@ export default function LivingLogo({
       let sinPhi = new Float32Array(0);
       let cosPhi = new Float32Array(0);
       let jitter = new Float32Array(0); // per-particle radial variation
-      let heroFlag = new Uint8Array(0); // 1 = ultra-bright warm-white bloom point
+      let heroFlag = new Uint8Array(0); // 1 = ultra-bright mint-white bloom point
+      let coralFlag = new Uint8Array(0); // 1 = coral species (~30%), else green
       let ox = new Float32Array(0); // interaction offset, relaxes to 0
       let oy = new Float32Array(0);
 
@@ -342,6 +367,7 @@ export default function LivingLogo({
         cosPhi = new Float32Array(n);
         jitter = new Float32Array(n);
         heroFlag = new Uint8Array(n);
+        coralFlag = new Uint8Array(n);
         ox = new Float32Array(n);
         oy = new Float32Array(n);
 
@@ -359,6 +385,8 @@ export default function LivingLogo({
           // Slight shell thickness so the surface isn't a hard eggshell.
           jitter[i] = 0.9 + rnd() * 0.16;
           heroFlag[i] = isOrbHero(rnd()) ? 1 : 0;
+          // ~70/30 green-to-coral, deterministic like everything else here.
+          coralFlag[i] = rnd() < 0.3 ? 1 : 0;
         }
 
         hn = haloCount(t);
@@ -544,7 +572,8 @@ export default function LivingLogo({
           const sy = cy + hy * rr * persp;
           const dia = 1.6 + depth * 2.2;
           ctx.globalAlpha = 0.035 + depth * 0.075;
-          ctx.drawImage(sprites[depth > 0.6 ? 2 : 1], sx - dia / 2, sy - dia / 2, dia, dia);
+          // Atmosphere stays all-green: it reads as the orb's own glow.
+          ctx.drawImage(greenSprites[depth > 0.6 ? 2 : 1], sx - dia / 2, sy - dia / 2, dia, dia);
         }
 
         /* ---- layer 2: core light behind the monogram -------------------- */
@@ -554,8 +583,8 @@ export default function LivingLogo({
         ctx.globalCompositeOperation = "source-over";
         const glowPulse = 0.22 + (scale - 1) * 1.1;
         const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.05);
-        core.addColorStop(0, `rgba(${GOLD_HI.r},${GOLD_HI.g},${GOLD_HI.b},${glowPulse})`);
-        core.addColorStop(0.45, `rgba(${GOLD.r},${GOLD.g},${GOLD.b},${glowPulse * 0.45})`);
+        core.addColorStop(0, `rgba(${GREEN.hi.r},${GREEN.hi.g},${GREEN.hi.b},${glowPulse})`);
+        core.addColorStop(0.45, `rgba(${GREEN.base.r},${GREEN.base.g},${GREEN.base.b},${glowPulse * 0.45})`);
         core.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = core;
         ctx.fillRect(0, 0, size, size);
@@ -632,10 +661,11 @@ export default function LivingLogo({
           // through raw count, so the frame cost stays close to v2.
           const alpha = (0.06 + d2c * 0.78) * bright;
           ctx.globalAlpha = alpha > 1 ? 1 : alpha;
-          ctx.drawImage(sprites[bucket], sx - dia / 2, sy - dia / 2, dia, dia);
+          const fam = coralFlag[i] ? coralSprites : greenSprites;
+          ctx.drawImage(fam[bucket], sx - dia / 2, sy - dia / 2, dia, dia);
 
-          // Ultra-bright warm-white hero points with a double bloom halo — the
-          // same accent species as the homepage swarm, concentrated on the orb.
+          // Ultra-bright mint-white hero points with a double bloom halo — the
+          // same accent treatment as the homepage swarm, concentrated on the orb.
           if (heroFlag[i]) {
             const ha = Math.min(1, (0.3 + depth * 0.7) * bright);
             ctx.globalAlpha = ha * 0.5;
@@ -703,6 +733,20 @@ export default function LivingLogo({
       ref={hostRef}
       className={cn("relative shrink-0", className)}
       style={{ width: size, height: size }}>
+      {/* THE FLOOR backdrop: deep blue space with a soft static green core.
+          Pure CSS, sized by the reserved box (no layout shift), and always
+          present — so the reduced-motion / static fallback still reads as the
+          PRIMARY orb, just without the drifting particles. */}
+      <div
+        aria-hidden
+        className="absolute inset-0 rounded-full"
+        style={{
+          background: [
+            "radial-gradient(circle at 50% 50%, rgba(124,245,160,0.32) 0%, rgba(74,222,128,0.18) 18%, rgba(74,222,128,0) 40%)",
+            "radial-gradient(circle at 50% 50%, rgba(43,58,140,0.6) 0%, rgba(30,42,94,0.75) 36%, rgba(30,42,94,0.3) 60%, rgba(30,42,94,0) 72%)",
+          ].join(", "),
+        }}
+      />
       {/* Canvas is purely decorative. */}
       <canvas
         ref={canvasRef}

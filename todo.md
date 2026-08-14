@@ -579,3 +579,13 @@ Three separate bugs stacked up:
 - [x] Image dimension mismatch corrected: the first asset declared 1200x630 but served 1920x1080 webp. Rendered a true 1200x630 PNG (48px trimmed top and bottom from the 16:9 source to reach 1.905 — well outside the decorative border, no text touched), uploaded to `/manus-storage/join-og-card-1200x630_68cc9bda.png`, re-pointed the tag, and added a test pinning it. Re-verified live: og:image serves that URL, resolves HTTP 200 image/png 644,513 bytes under a crawler UA, and measures exactly 1200x630 as declared
 - [x] Final live state confirmed: all 12 tags served to facebookexternalhit; /join/ canonicalises to https://lifestyledesignrealty.com/join; homepage, /convince, /city-finder, /lease all keep their own titles. 581 tests passing, code pushed to GitHub main (c08e582)
 - [x] Note: the GitHub token expired mid-session (`gh auth status` reports GH_TOKEN invalid), so the last docs-only commit recording this verification is committed locally but not pushed. All code and asset changes made it to main in c08e582 — only the todo.md notes are pending. Re-auth the GitHub connector to flush it
+
+## Batch 30 — deploy GitHub main (PRIMARY orb reskin + MEET PRIMARY link)
+
+- [x] GitHub auth restored (token now valid) and the previously stranded docs commit flushed to main
+- [x] Pulled and merged github/main 98bf10a — 8 commits behind: the PRIMARY orb reskin PR #2 plus 7 automated site-traffic telemetry commits. Files touched: LivingLogo.tsx, usePageTracking.ts, Links.tsx, routers.ts, status/site_stats.json. No conflicts
+- [x] Verified merged code: tsc clean, 581/581 tests passing (42 files) — unchanged count, so the PR shipped no new tests of its own
+- [x] Checkpoint 6b83d877 saved and auto-published; pushed merge to GitHub main (6b83d87)
+- [x] Live bundle changed to `index-BDOmfyxf.js` (764,129 bytes) and contains all the PR's markers: `linkpage-primary`, `primary_click`, `Meet Primary`, `24/7 AI Operations`, the LDT outbound URL, green `4ADE80`/`r:74,g:222` and coral `r:248,g:113,b:113`. Routes /, /links, /join all 200
+- [x] Visual verification at 375px: the orb now renders green/coral particles over a deep-blue CSS backdrop with the gold LDR monogram intact, and a green-bordered "MEET PRIMARY — OUR AI / 24/7 AI OPERATIONS" row sits directly below New Construction Search as specified. Existing /links features unchanged (banner, promise chip, 6 data-driven buttons, lead form, socials, LDT credit)
+- [x] Note for the record: an earlier bundle read (`index-jP4XmOMz.js`) lacked the markers because it was captured mid-rollout; the settled bundle has them. Worth remembering to re-read the hash rather than trusting the first post-deploy fetch

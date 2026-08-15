@@ -1,42 +1,42 @@
 {
   "date": "2026-08-14",
-  "generated_at": "2026-08-14T18:55:00Z",
+  "generated_at": "2026-08-15T01:15:08Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-14": {
-      "page_views": 62,
-      "unique_visitors": 42,
+      "page_views": 81,
+      "unique_visitors": 54,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/links",
-          "views": 18,
-          "unique_visitors": 10
+          "views": 23,
+          "unique_visitors": 11
         },
         {
           "path": "/",
-          "views": 17,
-          "unique_visitors": 13
+          "views": 20,
+          "unique_visitors": 16
         },
         {
           "path": "/san-antonio-homes-for-sale",
-          "views": 4,
-          "unique_visitors": 4
+          "views": 5,
+          "unique_visitors": 5
         },
         {
           "path": "/home-search/listings/7227508571570036918-1543-GIBBS",
-          "views": 3,
-          "unique_visitors": 3
+          "views": 5,
+          "unique_visitors": 5
         },
         {
           "path": "/join",
-          "views": 3,
-          "unique_visitors": 3
+          "views": 5,
+          "unique_visitors": 5
         },
         {
           "path": "/team",
-          "views": 3,
-          "unique_visitors": 3
+          "views": 5,
+          "unique_visitors": 4
         },
         {
           "path": "/neighborhoods/dripping-springs",

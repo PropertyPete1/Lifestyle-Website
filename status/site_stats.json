@@ -1,11 +1,30 @@
 {
-  "date": "2026-08-14",
-  "generated_at": "2026-08-15T01:15:08Z",
+  "date": "2026-08-15",
+  "generated_at": "2026-08-15T06:38:51Z",
   "timezone": "America/Chicago",
   "days": {
+    "2026-08-15": {
+      "page_views": 3,
+      "unique_visitors": 3,
+      "views_without_visitor_id": 0,
+      "top_pages": [
+        {
+          "path": "/",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 1,
+          "unique_visitors": 1
+        }
+      ],
+      "lead_submissions": 0,
+      "complete": false
+    },
     "2026-08-14": {
-      "page_views": 81,
-      "unique_visitors": 54,
+      "page_views": 89,
+      "unique_visitors": 62,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
@@ -15,8 +34,8 @@
         },
         {
           "path": "/",
-          "views": 20,
-          "unique_visitors": 16
+          "views": 23,
+          "unique_visitors": 19
         },
         {
           "path": "/san-antonio-homes-for-sale",
@@ -60,65 +79,6 @@
         }
       ],
       "lead_submissions": 0,
-      "complete": false
-    },
-    "2026-08-13": {
-      "page_views": 62,
-      "unique_visitors": 51,
-      "views_without_visitor_id": 0,
-      "top_pages": [
-        {
-          "path": "/",
-          "views": 19,
-          "unique_visitors": 18
-        },
-        {
-          "path": "/links",
-          "views": 5,
-          "unique_visitors": 5
-        },
-        {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 4,
-          "unique_visitors": 4
-        },
-        {
-          "path": "/team",
-          "views": 3,
-          "unique_visitors": 3
-        },
-        {
-          "path": "/properties",
-          "views": 3,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/city-finder",
-          "views": 3,
-          "unique_visitors": 3
-        },
-        {
-          "path": "/join",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/home-search/listings/3081903230623490487-144-Eagle-Ford-DR",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/agent/steven-van-orden",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/austin-homes-for-sale",
-          "views": 1,
-          "unique_visitors": 1
-        }
-      ],
-      "lead_submissions": 2,
       "complete": true
     }
   },

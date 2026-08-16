@@ -1,13 +1,18 @@
 {
   "date": "2026-08-16",
-  "generated_at": "2026-08-16T06:40:32Z",
+  "generated_at": "2026-08-16T12:39:20Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-16": {
-      "page_views": 3,
-      "unique_visitors": 3,
+      "page_views": 10,
+      "unique_visitors": 9,
       "views_without_visitor_id": 0,
       "top_pages": [
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 2,
+          "unique_visitors": 2
+        },
         {
           "path": "/lifestyledesignrealty.com/team",
           "views": 1,
@@ -19,7 +24,32 @@
           "unique_visitors": 1
         },
         {
-          "path": "/san-antonio-homes-for-sale",
+          "path": "/city-finder",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/neighborhoods/kyle-1",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/links",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/lifestyledesignrealty.com/blog/fha-vs-conventional-loans-in-boerne",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/team",
           "views": 1,
           "unique_visitors": 1
         }

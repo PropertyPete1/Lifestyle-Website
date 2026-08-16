@@ -1,17 +1,32 @@
 {
   "date": "2026-08-16",
-  "generated_at": "2026-08-16T12:39:20Z",
+  "generated_at": "2026-08-16T18:29:42Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-16": {
-      "page_views": 10,
-      "unique_visitors": 9,
+      "page_views": 29,
+      "unique_visitors": 25,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
+          "path": "/links",
+          "views": 7,
+          "unique_visitors": 6
+        },
+        {
+          "path": "/",
+          "views": 6,
+          "unique_visitors": 6
+        },
+        {
           "path": "/san-antonio-homes-for-sale",
-          "views": 2,
-          "unique_visitors": 2
+          "views": 3,
+          "unique_visitors": 3
+        },
+        {
+          "path": "/city-finder",
+          "views": 3,
+          "unique_visitors": 3
         },
         {
           "path": "/lifestyledesignrealty.com/team",
@@ -24,22 +39,12 @@
           "unique_visitors": 1
         },
         {
-          "path": "/city-finder",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
           "path": "/neighborhoods/kyle-1",
           "views": 1,
           "unique_visitors": 1
         },
         {
-          "path": "/links",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/",
+          "path": "/lifestyledesignrealty.com/blog/san-antonio-housing-inventory-a-buyers-guide",
           "views": 1,
           "unique_visitors": 1
         },

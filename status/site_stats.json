@@ -1,22 +1,46 @@
 {
-  "date": "2026-08-15",
-  "generated_at": "2026-08-16T01:20:09Z",
+  "date": "2026-08-16",
+  "generated_at": "2026-08-16T06:40:32Z",
   "timezone": "America/Chicago",
   "days": {
+    "2026-08-16": {
+      "page_views": 3,
+      "unique_visitors": 3,
+      "views_without_visitor_id": 0,
+      "top_pages": [
+        {
+          "path": "/lifestyledesignrealty.com/team",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/lifestyledesignrealty.com/neighborhoods/san-antonio",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 1,
+          "unique_visitors": 1
+        }
+      ],
+      "lead_submissions": 0,
+      "complete": false
+    },
     "2026-08-15": {
-      "page_views": 65,
-      "unique_visitors": 50,
+      "page_views": 78,
+      "unique_visitors": 62,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/links",
-          "views": 25,
-          "unique_visitors": 14
+          "views": 31,
+          "unique_visitors": 20
         },
         {
           "path": "/",
-          "views": 9,
-          "unique_visitors": 8
+          "views": 10,
+          "unique_visitors": 9
         },
         {
           "path": "/san-antonio-homes-for-sale",
@@ -55,65 +79,6 @@
         },
         {
           "path": "/home-valuation",
-          "views": 1,
-          "unique_visitors": 1
-        }
-      ],
-      "lead_submissions": 0,
-      "complete": false
-    },
-    "2026-08-14": {
-      "page_views": 89,
-      "unique_visitors": 62,
-      "views_without_visitor_id": 0,
-      "top_pages": [
-        {
-          "path": "/links",
-          "views": 23,
-          "unique_visitors": 11
-        },
-        {
-          "path": "/",
-          "views": 23,
-          "unique_visitors": 19
-        },
-        {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 5,
-          "unique_visitors": 5
-        },
-        {
-          "path": "/home-search/listings/7227508571570036918-1543-GIBBS",
-          "views": 5,
-          "unique_visitors": 5
-        },
-        {
-          "path": "/join",
-          "views": 5,
-          "unique_visitors": 5
-        },
-        {
-          "path": "/team",
-          "views": 5,
-          "unique_visitors": 4
-        },
-        {
-          "path": "/neighborhoods/dripping-springs",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/722725112152649247-115-W-Highland-Boulevard",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/properties",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/7227761299812800244-325-DENALI-DRIVE",
           "views": 1,
           "unique_visitors": 1
         }

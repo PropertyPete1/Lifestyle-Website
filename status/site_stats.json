@@ -1,20 +1,35 @@
 {
   "date": "2026-08-15",
-  "generated_at": "2026-08-15T18:30:14Z",
+  "generated_at": "2026-08-16T01:20:09Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-15": {
-      "page_views": 24,
-      "unique_visitors": 21,
+      "page_views": 65,
+      "unique_visitors": 50,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
+          "path": "/links",
+          "views": 25,
+          "unique_visitors": 14
+        },
+        {
           "path": "/",
-          "views": 8,
-          "unique_visitors": 7
+          "views": 9,
+          "unique_visitors": 8
         },
         {
           "path": "/san-antonio-homes-for-sale",
+          "views": 4,
+          "unique_visitors": 4
+        },
+        {
+          "path": "/join",
+          "views": 3,
+          "unique_visitors": 3
+        },
+        {
+          "path": "/team",
           "views": 3,
           "unique_visitors": 3
         },
@@ -24,22 +39,12 @@
           "unique_visitors": 2
         },
         {
-          "path": "/team",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/7227780531719871043-13207-Camino-Carlos",
+          "path": "/neighborhoods/manchaca",
           "views": 1,
           "unique_visitors": 1
         },
         {
           "path": "/alamo-ranch-homes-for-sale",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/boerne-homes-for-sale",
           "views": 1,
           "unique_visitors": 1
         },
@@ -50,11 +55,6 @@
         },
         {
           "path": "/home-valuation",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/neighborhoods/manchaca",
           "views": 1,
           "unique_visitors": 1
         }

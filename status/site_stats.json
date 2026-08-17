@@ -1,22 +1,61 @@
 {
-  "date": "2026-08-16",
-  "generated_at": "2026-08-17T01:17:09Z",
+  "date": "2026-08-17",
+  "generated_at": "2026-08-17T06:56:23Z",
   "timezone": "America/Chicago",
   "days": {
-    "2026-08-16": {
-      "page_views": 37,
-      "unique_visitors": 33,
+    "2026-08-17": {
+      "page_views": 6,
+      "unique_visitors": 6,
       "views_without_visitor_id": 0,
       "top_pages": [
+        {
+          "path": "/home-search/listings/3081487814616262111-158-Sumter-WAY",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/3081945358786011590-801-W-Highway-290",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/lifestyledesignrealty.com/neighborhoods/bulverde",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/lifestyledesignrealty.com/blog/bulverde-housing-market-basics",
+          "views": 1,
+          "unique_visitors": 1
+        }
+      ],
+      "lead_submissions": 0,
+      "complete": false
+    },
+    "2026-08-16": {
+      "page_views": 51,
+      "unique_visitors": 47,
+      "views_without_visitor_id": 0,
+      "top_pages": [
+        {
+          "path": "/",
+          "views": 11,
+          "unique_visitors": 11
+        },
         {
           "path": "/links",
           "views": 8,
           "unique_visitors": 7
-        },
-        {
-          "path": "/",
-          "views": 6,
-          "unique_visitors": 6
         },
         {
           "path": "/san-antonio-homes-for-sale",
@@ -29,9 +68,9 @@
           "unique_visitors": 3
         },
         {
-          "path": "/lifestyledesignrealty.com/team",
-          "views": 1,
-          "unique_visitors": 1
+          "path": "/kyle-homes-for-sale",
+          "views": 2,
+          "unique_visitors": 2
         },
         {
           "path": "/lifestyledesignrealty.com/neighborhoods/san-antonio",
@@ -44,76 +83,17 @@
           "unique_visitors": 1
         },
         {
-          "path": "/lifestyledesignrealty.com/blog/san-antonio-housing-inventory-a-buyers-guide",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
           "path": "/lifestyledesignrealty.com/blog/fha-vs-conventional-loans-in-boerne",
           "views": 1,
           "unique_visitors": 1
         },
         {
-          "path": "/team",
+          "path": "/lifestyledesignrealty.com/blog/san-antonio-housing-inventory-a-buyers-guide",
           "views": 1,
           "unique_visitors": 1
-        }
-      ],
-      "lead_submissions": 0,
-      "complete": false
-    },
-    "2026-08-15": {
-      "page_views": 78,
-      "unique_visitors": 62,
-      "views_without_visitor_id": 0,
-      "top_pages": [
-        {
-          "path": "/links",
-          "views": 31,
-          "unique_visitors": 20
-        },
-        {
-          "path": "/",
-          "views": 10,
-          "unique_visitors": 9
-        },
-        {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 4,
-          "unique_visitors": 4
-        },
-        {
-          "path": "/join",
-          "views": 3,
-          "unique_visitors": 3
         },
         {
           "path": "/team",
-          "views": 3,
-          "unique_visitors": 3
-        },
-        {
-          "path": "/properties",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/neighborhoods/manchaca",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/alamo-ranch-homes-for-sale",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-valuation",
           "views": 1,
           "unique_visitors": 1
         }

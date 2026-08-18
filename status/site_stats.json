@@ -1,17 +1,61 @@
 {
-  "date": "2026-08-17",
-  "generated_at": "2026-08-18T01:14:37Z",
+  "date": "2026-08-18",
+  "generated_at": "2026-08-18T06:43:02Z",
   "timezone": "America/Chicago",
   "days": {
-    "2026-08-17": {
-      "page_views": 51,
-      "unique_visitors": 37,
+    "2026-08-18": {
+      "page_views": 6,
+      "unique_visitors": 3,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 18,
-          "unique_visitors": 11
+          "views": 2,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/properties",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/lease",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/3081406963755009629-187-Pendleton-DR",
+          "views": 1,
+          "unique_visitors": 1
+        }
+      ],
+      "lead_submissions": 0,
+      "complete": false
+    },
+    "2026-08-17": {
+      "page_views": 64,
+      "unique_visitors": 46,
+      "views_without_visitor_id": 0,
+      "top_pages": [
+        {
+          "path": "/",
+          "views": 22,
+          "unique_visitors": 13
+        },
+        {
+          "path": "/city-finder",
+          "views": 5,
+          "unique_visitors": 4
+        },
+        {
+          "path": "/links",
+          "views": 5,
+          "unique_visitors": 5
         },
         {
           "path": "/san-antonio-homes-for-sale",
@@ -19,19 +63,9 @@
           "unique_visitors": 4
         },
         {
-          "path": "/links",
+          "path": "/join",
           "views": 3,
           "unique_visitors": 3
-        },
-        {
-          "path": "/city-finder",
-          "views": 3,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/join",
-          "views": 2,
-          "unique_visitors": 2
         },
         {
           "path": "/home-search/listings/3081400883503196664-965-Sweet-Gum-DR",
@@ -59,66 +93,7 @@
           "unique_visitors": 1
         }
       ],
-      "lead_submissions": 0,
-      "complete": false
-    },
-    "2026-08-16": {
-      "page_views": 51,
-      "unique_visitors": 47,
-      "views_without_visitor_id": 0,
-      "top_pages": [
-        {
-          "path": "/",
-          "views": 11,
-          "unique_visitors": 11
-        },
-        {
-          "path": "/links",
-          "views": 8,
-          "unique_visitors": 7
-        },
-        {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 4,
-          "unique_visitors": 4
-        },
-        {
-          "path": "/city-finder",
-          "views": 3,
-          "unique_visitors": 3
-        },
-        {
-          "path": "/kyle-homes-for-sale",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/lifestyledesignrealty.com/neighborhoods/san-antonio",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/neighborhoods/kyle-1",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/lifestyledesignrealty.com/blog/fha-vs-conventional-loans-in-boerne",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/lifestyledesignrealty.com/blog/san-antonio-housing-inventory-a-buyers-guide",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/team",
-          "views": 1,
-          "unique_visitors": 1
-        }
-      ],
-      "lead_submissions": 0,
+      "lead_submissions": 1,
       "complete": true
     }
   },

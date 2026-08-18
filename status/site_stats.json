@@ -1,17 +1,22 @@
 {
   "date": "2026-08-17",
-  "generated_at": "2026-08-17T18:39:38Z",
+  "generated_at": "2026-08-18T01:14:37Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-17": {
-      "page_views": 33,
-      "unique_visitors": 24,
+      "page_views": 51,
+      "unique_visitors": 37,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 10,
-          "unique_visitors": 7
+          "views": 18,
+          "unique_visitors": 11
+        },
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 4,
+          "unique_visitors": 4
         },
         {
           "path": "/links",
@@ -19,14 +24,9 @@
           "unique_visitors": 3
         },
         {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 3,
-          "unique_visitors": 3
-        },
-        {
           "path": "/city-finder",
-          "views": 2,
-          "unique_visitors": 1
+          "views": 3,
+          "unique_visitors": 2
         },
         {
           "path": "/join",

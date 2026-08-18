@@ -1,17 +1,32 @@
 {
   "date": "2026-08-18",
-  "generated_at": "2026-08-18T06:43:02Z",
+  "generated_at": "2026-08-18T12:47:02Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-18": {
-      "page_views": 6,
-      "unique_visitors": 3,
+      "page_views": 11,
+      "unique_visitors": 8,
       "views_without_visitor_id": 0,
       "top_pages": [
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 2,
+          "unique_visitors": 2
+        },
         {
           "path": "/",
           "views": 2,
           "unique_visitors": 1
+        },
+        {
+          "path": "/lease",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/privacy",
+          "views": 2,
+          "unique_visitors": 2
         },
         {
           "path": "/properties",
@@ -19,17 +34,12 @@
           "unique_visitors": 1
         },
         {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/lease",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
           "path": "/home-search/listings/3081406963755009629-187-Pendleton-DR",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/neighborhoods",
           "views": 1,
           "unique_visitors": 1
         }

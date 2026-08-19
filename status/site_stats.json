@@ -1,32 +1,51 @@
 {
-  "date": "2026-08-18",
-  "generated_at": "2026-08-19T01:16:30Z",
+  "date": "2026-08-19",
+  "generated_at": "2026-08-19T06:43:21Z",
   "timezone": "America/Chicago",
   "days": {
+    "2026-08-19": {
+      "page_views": 2,
+      "unique_visitors": 2,
+      "views_without_visitor_id": 0,
+      "top_pages": [
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/links",
+          "views": 1,
+          "unique_visitors": 1
+        }
+      ],
+      "lead_submissions": 0,
+      "complete": false
+    },
     "2026-08-18": {
-      "page_views": 54,
-      "unique_visitors": 38,
+      "page_views": 68,
+      "unique_visitors": 46,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 14,
-          "unique_visitors": 10
+          "views": 18,
+          "unique_visitors": 12
         },
         {
           "path": "/links",
-          "views": 10,
-          "unique_visitors": 5
+          "views": 17,
+          "unique_visitors": 12
+        },
+        {
+          "path": "/city-finder",
+          "views": 5,
+          "unique_visitors": 3
         },
         {
           "path": "/san-antonio-homes-for-sale",
           "views": 4,
           "unique_visitors": 4
-        },
-        {
-          "path": "/city-finder",
-          "views": 3,
-          "unique_visitors": 1
         },
         {
           "path": "/lease",
@@ -60,65 +79,6 @@
         }
       ],
       "lead_submissions": 0,
-      "complete": false
-    },
-    "2026-08-17": {
-      "page_views": 64,
-      "unique_visitors": 46,
-      "views_without_visitor_id": 0,
-      "top_pages": [
-        {
-          "path": "/",
-          "views": 22,
-          "unique_visitors": 13
-        },
-        {
-          "path": "/city-finder",
-          "views": 5,
-          "unique_visitors": 4
-        },
-        {
-          "path": "/links",
-          "views": 5,
-          "unique_visitors": 5
-        },
-        {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 4,
-          "unique_visitors": 4
-        },
-        {
-          "path": "/join",
-          "views": 3,
-          "unique_visitors": 3
-        },
-        {
-          "path": "/home-search/listings/3081400883503196664-965-Sweet-Gum-DR",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/3081339874776143582-6205-Blakely-BND",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/lifestyledesignrealty.com/neighborhoods/bulverde",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/lifestyledesignrealty.com/blog/bulverde-housing-market-basics",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-valuation",
-          "views": 1,
-          "unique_visitors": 1
-        }
-      ],
-      "lead_submissions": 1,
       "complete": true
     }
   },

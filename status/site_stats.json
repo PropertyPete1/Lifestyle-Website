@@ -1,20 +1,45 @@
 {
   "date": "2026-08-19",
-  "generated_at": "2026-08-19T06:43:21Z",
+  "generated_at": "2026-08-19T12:47:54Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-19": {
-      "page_views": 2,
-      "unique_visitors": 2,
+      "page_views": 9,
+      "unique_visitors": 9,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
+          "path": "/links",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
           "path": "/san-antonio-homes-for-sale",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/neighborhoods/kyle-1",
           "views": 1,
           "unique_visitors": 1
         },
         {
-          "path": "/links",
+          "path": "/home-search/listings/7227202966398716072-316-Castin-Ln",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/3081997431501610744-3111-Tom-Green-ST-201",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/7227527809039193729-BLOCK-1-LOT-21-Standing-Tall",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/3081798624666459238-221-Diamond-Point-DR",
           "views": 1,
           "unique_visitors": 1
         }

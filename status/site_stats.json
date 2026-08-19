@@ -1,17 +1,32 @@
 {
   "date": "2026-08-18",
-  "generated_at": "2026-08-18T18:39:04Z",
+  "generated_at": "2026-08-19T01:16:30Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-18": {
-      "page_views": 28,
-      "unique_visitors": 20,
+      "page_views": 54,
+      "unique_visitors": 38,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 9,
+          "views": 14,
+          "unique_visitors": 10
+        },
+        {
+          "path": "/links",
+          "views": 10,
           "unique_visitors": 5
+        },
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 4,
+          "unique_visitors": 4
+        },
+        {
+          "path": "/city-finder",
+          "views": 3,
+          "unique_visitors": 1
         },
         {
           "path": "/lease",
@@ -19,12 +34,12 @@
           "unique_visitors": 3
         },
         {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 3,
-          "unique_visitors": 3
+          "path": "/team",
+          "views": 2,
+          "unique_visitors": 2
         },
         {
-          "path": "/links",
+          "path": "/home-search/listings/3081973851528660187-108-Parsons",
           "views": 2,
           "unique_visitors": 2
         },
@@ -34,27 +49,12 @@
           "unique_visitors": 2
         },
         {
-          "path": "/properties",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/team",
+          "path": "/home-search/listings/308167602580615246-300-Oak-Springs-DR",
           "views": 1,
           "unique_visitors": 1
         },
         {
           "path": "/neighborhoods",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/3081406963755009629-187-Pendleton-DR",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/308167602580615246-300-Oak-Springs-DR",
           "views": 1,
           "unique_visitors": 1
         }

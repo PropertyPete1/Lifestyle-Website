@@ -1,27 +1,42 @@
 {
   "date": "2026-08-19",
-  "generated_at": "2026-08-19T12:47:54Z",
+  "generated_at": "2026-08-19T18:35:59Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-19": {
-      "page_views": 9,
-      "unique_visitors": 9,
+      "page_views": 45,
+      "unique_visitors": 34,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
+          "path": "/",
+          "views": 15,
+          "unique_visitors": 13
+        },
+        {
+          "path": "/city-finder",
+          "views": 8,
+          "unique_visitors": 7
+        },
+        {
           "path": "/links",
-          "views": 2,
-          "unique_visitors": 2
+          "views": 4,
+          "unique_visitors": 3
         },
         {
           "path": "/san-antonio-homes-for-sale",
+          "views": 3,
+          "unique_visitors": 3
+        },
+        {
+          "path": "/home-search/listings/7227356561471508186-2901-MARTIN-LUTHER-KING-DR",
           "views": 2,
           "unique_visitors": 2
         },
         {
-          "path": "/neighborhoods/kyle-1",
-          "views": 1,
-          "unique_visitors": 1
+          "path": "/home-search/listings",
+          "views": 2,
+          "unique_visitors": 2
         },
         {
           "path": "/home-search/listings/7227202966398716072-316-Castin-Ln",

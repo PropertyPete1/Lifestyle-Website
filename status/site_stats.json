@@ -1,17 +1,37 @@
 {
   "date": "2026-08-20",
-  "generated_at": "2026-08-20T12:50:45Z",
+  "generated_at": "2026-08-20T18:39:43Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-20": {
-      "page_views": 23,
-      "unique_visitors": 21,
+      "page_views": 46,
+      "unique_visitors": 43,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 9,
-          "unique_visitors": 8
+          "views": 23,
+          "unique_visitors": 22
+        },
+        {
+          "path": "/lease",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/city-finder",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/links",
+          "views": 2,
+          "unique_visitors": 2
         },
         {
           "path": "/team",
@@ -19,27 +39,12 @@
           "unique_visitors": 2
         },
         {
-          "path": "/city-finder",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/links",
+          "path": "/home-search/listings/308123457753198475-187-Waterloo-DR",
           "views": 1,
           "unique_visitors": 1
         },
         {
           "path": "/home-search/listings/7227213848263475366-115-Cibolo-Creek-Dr",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/7227417690100926812-1855-Musk-Rose",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/308123457753198475-187-Waterloo-DR",
           "views": 1,
           "unique_visitors": 1
         },
@@ -50,11 +55,6 @@
         },
         {
           "path": "/agent/peter-allen",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/san-antonio-homes-for-sale",
           "views": 1,
           "unique_visitors": 1
         }

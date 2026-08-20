@@ -1,32 +1,32 @@
 {
   "date": "2026-08-19",
-  "generated_at": "2026-08-19T18:35:59Z",
+  "generated_at": "2026-08-20T01:15:36Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-19": {
-      "page_views": 45,
-      "unique_visitors": 34,
+      "page_views": 57,
+      "unique_visitors": 43,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 15,
-          "unique_visitors": 13
+          "views": 21,
+          "unique_visitors": 18
         },
         {
           "path": "/city-finder",
-          "views": 8,
-          "unique_visitors": 7
+          "views": 9,
+          "unique_visitors": 8
         },
         {
           "path": "/links",
-          "views": 4,
-          "unique_visitors": 3
+          "views": 5,
+          "unique_visitors": 4
         },
         {
           "path": "/san-antonio-homes-for-sale",
-          "views": 3,
-          "unique_visitors": 3
+          "views": 4,
+          "unique_visitors": 4
         },
         {
           "path": "/home-search/listings/7227356561471508186-2901-MARTIN-LUTHER-KING-DR",

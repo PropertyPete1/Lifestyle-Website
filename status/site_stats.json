@@ -1,25 +1,60 @@
 {
   "date": "2026-08-21",
-  "generated_at": "2026-08-21T06:47:19Z",
+  "generated_at": "2026-08-21T12:48:24Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-21": {
-      "page_views": 3,
-      "unique_visitors": 3,
+      "page_views": 17,
+      "unique_visitors": 17,
       "views_without_visitor_id": 0,
       "top_pages": [
+        {
+          "path": "/",
+          "views": 3,
+          "unique_visitors": 3
+        },
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 2,
+          "unique_visitors": 2
+        },
         {
           "path": "/home-search/listings/7227238483756747240-236-Woods-Of-Boerne",
           "views": 1,
           "unique_visitors": 1
         },
         {
-          "path": "/san-antonio-homes-for-sale",
+          "path": "/home-search/listings/3081370412508105903-209-Prairie-Verbena-DR",
           "views": 1,
           "unique_visitors": 1
         },
         {
           "path": "/privacy",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-valuation",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/3081673770422115347-1164-Bearkat-Canyon-DR",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/3081229934308539312-13207-Stabler-DR",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/agent/luke-durbin",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/30819031952267760-1208-Verdant-WAY",
           "views": 1,
           "unique_visitors": 1
         }

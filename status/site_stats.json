@@ -1,17 +1,41 @@
 {
-  "date": "2026-08-20",
-  "generated_at": "2026-08-21T01:19:22Z",
+  "date": "2026-08-21",
+  "generated_at": "2026-08-21T06:47:19Z",
   "timezone": "America/Chicago",
   "days": {
+    "2026-08-21": {
+      "page_views": 3,
+      "unique_visitors": 3,
+      "views_without_visitor_id": 0,
+      "top_pages": [
+        {
+          "path": "/home-search/listings/7227238483756747240-236-Woods-Of-Boerne",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/privacy",
+          "views": 1,
+          "unique_visitors": 1
+        }
+      ],
+      "lead_submissions": 0,
+      "complete": false
+    },
     "2026-08-20": {
-      "page_views": 63,
-      "unique_visitors": 59,
+      "page_views": 68,
+      "unique_visitors": 64,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 29,
-          "unique_visitors": 28
+          "views": 31,
+          "unique_visitors": 30
         },
         {
           "path": "/team",
@@ -55,65 +79,6 @@
         },
         {
           "path": "/agent/peter-allen",
-          "views": 1,
-          "unique_visitors": 1
-        }
-      ],
-      "lead_submissions": 0,
-      "complete": false
-    },
-    "2026-08-19": {
-      "page_views": 67,
-      "unique_visitors": 49,
-      "views_without_visitor_id": 0,
-      "top_pages": [
-        {
-          "path": "/",
-          "views": 24,
-          "unique_visitors": 21
-        },
-        {
-          "path": "/city-finder",
-          "views": 9,
-          "unique_visitors": 8
-        },
-        {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 5,
-          "unique_visitors": 5
-        },
-        {
-          "path": "/links",
-          "views": 5,
-          "unique_visitors": 4
-        },
-        {
-          "path": "/join",
-          "views": 3,
-          "unique_visitors": 3
-        },
-        {
-          "path": "/home-search/listings",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/home-search/listings/7227356561471508186-2901-MARTIN-LUTHER-KING-DR",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/alamo-ranch-homes-for-sale",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/home-search/listings/7227527809039193729-BLOCK-1-LOT-21-Standing-Tall",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/3081798624666459238-221-Diamond-Point-DR",
           "views": 1,
           "unique_visitors": 1
         }

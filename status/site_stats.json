@@ -1,17 +1,32 @@
 {
   "date": "2026-08-20",
-  "generated_at": "2026-08-20T18:39:43Z",
+  "generated_at": "2026-08-21T01:19:22Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-20": {
-      "page_views": 46,
-      "unique_visitors": 43,
+      "page_views": 63,
+      "unique_visitors": 59,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 23,
-          "unique_visitors": 22
+          "views": 29,
+          "unique_visitors": 28
+        },
+        {
+          "path": "/team",
+          "views": 5,
+          "unique_visitors": 5
+        },
+        {
+          "path": "/links",
+          "views": 4,
+          "unique_visitors": 4
+        },
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 3,
+          "unique_visitors": 3
         },
         {
           "path": "/lease",
@@ -20,21 +35,6 @@
         },
         {
           "path": "/city-finder",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/links",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/team",
           "views": 2,
           "unique_visitors": 2
         },

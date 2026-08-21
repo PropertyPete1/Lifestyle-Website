@@ -1,22 +1,22 @@
 {
   "date": "2026-08-21",
-  "generated_at": "2026-08-21T12:48:24Z",
+  "generated_at": "2026-08-21T18:36:59Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-21": {
-      "page_views": 17,
-      "unique_visitors": 17,
+      "page_views": 27,
+      "unique_visitors": 27,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 3,
-          "unique_visitors": 3
+          "views": 6,
+          "unique_visitors": 6
         },
         {
           "path": "/san-antonio-homes-for-sale",
-          "views": 2,
-          "unique_visitors": 2
+          "views": 3,
+          "unique_visitors": 3
         },
         {
           "path": "/home-search/listings/7227238483756747240-236-Woods-Of-Boerne",

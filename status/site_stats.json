@@ -1,22 +1,46 @@
 {
-  "date": "2026-08-21",
-  "generated_at": "2026-08-22T01:14:58Z",
+  "date": "2026-08-22",
+  "generated_at": "2026-08-22T06:40:36Z",
   "timezone": "America/Chicago",
   "days": {
+    "2026-08-22": {
+      "page_views": 3,
+      "unique_visitors": 3,
+      "views_without_visitor_id": 0,
+      "top_pages": [
+        {
+          "path": "/home-search/listings/3081955160215086375-809-Jackson-River-LOOP",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/neighborhoods/new-braunfels",
+          "views": 1,
+          "unique_visitors": 1
+        }
+      ],
+      "lead_submissions": 0,
+      "complete": false
+    },
     "2026-08-21": {
-      "page_views": 49,
-      "unique_visitors": 47,
+      "page_views": 67,
+      "unique_visitors": 58,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
-          "views": 12,
-          "unique_visitors": 12
+          "views": 17,
+          "unique_visitors": 15
         },
         {
           "path": "/links",
-          "views": 6,
-          "unique_visitors": 6
+          "views": 8,
+          "unique_visitors": 8
         },
         {
           "path": "/san-antonio-homes-for-sale",
@@ -24,22 +48,27 @@
           "unique_visitors": 4
         },
         {
-          "path": "/home-search/listings/3081370412508105903-209-Prairie-Verbena-DR",
-          "views": 1,
+          "path": "/austin",
+          "views": 3,
+          "unique_visitors": 3
+        },
+        {
+          "path": "/city-finder",
+          "views": 2,
+          "unique_visitors": 2
+        },
+        {
+          "path": "/lease",
+          "views": 2,
           "unique_visitors": 1
         },
         {
-          "path": "/home-valuation",
+          "path": "/home-search/listings/30819031952267760-1208-Verdant-WAY",
           "views": 1,
           "unique_visitors": 1
         },
         {
           "path": "/privacy",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/3081673770422115347-1164-Bearkat-Canyon-DR",
           "views": 1,
           "unique_visitors": 1
         },
@@ -52,73 +81,9 @@
           "path": "/agent/luke-durbin",
           "views": 1,
           "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/30819031952267760-1208-Verdant-WAY",
-          "views": 1,
-          "unique_visitors": 1
         }
       ],
-      "lead_submissions": 0,
-      "complete": false
-    },
-    "2026-08-20": {
-      "page_views": 68,
-      "unique_visitors": 64,
-      "views_without_visitor_id": 0,
-      "top_pages": [
-        {
-          "path": "/",
-          "views": 31,
-          "unique_visitors": 30
-        },
-        {
-          "path": "/team",
-          "views": 5,
-          "unique_visitors": 5
-        },
-        {
-          "path": "/links",
-          "views": 4,
-          "unique_visitors": 4
-        },
-        {
-          "path": "/san-antonio-homes-for-sale",
-          "views": 3,
-          "unique_visitors": 3
-        },
-        {
-          "path": "/lease",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/city-finder",
-          "views": 2,
-          "unique_visitors": 2
-        },
-        {
-          "path": "/home-search/listings/308123457753198475-187-Waterloo-DR",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/7227213848263475366-115-Cibolo-Creek-Dr",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/home-search/listings/3081699622859278747-344-Matthews-LN",
-          "views": 1,
-          "unique_visitors": 1
-        },
-        {
-          "path": "/agent/peter-allen",
-          "views": 1,
-          "unique_visitors": 1
-        }
-      ],
-      "lead_submissions": 0,
+      "lead_submissions": 2,
       "complete": true
     }
   },

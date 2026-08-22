@@ -1,27 +1,27 @@
 {
   "date": "2026-08-21",
-  "generated_at": "2026-08-21T18:36:59Z",
+  "generated_at": "2026-08-22T01:14:58Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-21": {
-      "page_views": 27,
-      "unique_visitors": 27,
+      "page_views": 49,
+      "unique_visitors": 47,
       "views_without_visitor_id": 0,
       "top_pages": [
         {
           "path": "/",
+          "views": 12,
+          "unique_visitors": 12
+        },
+        {
+          "path": "/links",
           "views": 6,
           "unique_visitors": 6
         },
         {
           "path": "/san-antonio-homes-for-sale",
-          "views": 3,
-          "unique_visitors": 3
-        },
-        {
-          "path": "/home-search/listings/7227238483756747240-236-Woods-Of-Boerne",
-          "views": 1,
-          "unique_visitors": 1
+          "views": 4,
+          "unique_visitors": 4
         },
         {
           "path": "/home-search/listings/3081370412508105903-209-Prairie-Verbena-DR",
@@ -29,12 +29,12 @@
           "unique_visitors": 1
         },
         {
-          "path": "/privacy",
+          "path": "/home-valuation",
           "views": 1,
           "unique_visitors": 1
         },
         {
-          "path": "/home-valuation",
+          "path": "/privacy",
           "views": 1,
           "unique_visitors": 1
         },

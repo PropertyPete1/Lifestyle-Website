@@ -1,25 +1,60 @@
 {
   "date": "2026-08-22",
-  "generated_at": "2026-08-22T06:40:36Z",
+  "generated_at": "2026-08-22T12:39:17Z",
   "timezone": "America/Chicago",
   "days": {
     "2026-08-22": {
-      "page_views": 3,
-      "unique_visitors": 3,
+      "page_views": 14,
+      "unique_visitors": 14,
       "views_without_visitor_id": 0,
       "top_pages": [
+        {
+          "path": "/san-antonio-homes-for-sale",
+          "views": 3,
+          "unique_visitors": 3
+        },
         {
           "path": "/home-search/listings/3081955160215086375-809-Jackson-River-LOOP",
           "views": 1,
           "unique_visitors": 1
         },
         {
-          "path": "/san-antonio-homes-for-sale",
+          "path": "/links",
           "views": 1,
           "unique_visitors": 1
         },
         {
           "path": "/neighborhoods/new-braunfels",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/7227447504060335666-BLOCK-1-LOT-24-Standing-Tall",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/3081454342766773933-268-Basket-Flower-LOOP",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/3081360610679946189-124-S-Sage-HOLW",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/home-search/listings/7227175353127757515-3717-Bentwood-Elm",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/lease",
+          "views": 1,
+          "unique_visitors": 1
+        },
+        {
+          "path": "/neighborhoods/bulverde",
           "views": 1,
           "unique_visitors": 1
         }

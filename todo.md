@@ -589,3 +589,13 @@ Three separate bugs stacked up:
 - [x] Live bundle changed to `index-BDOmfyxf.js` (764,129 bytes) and contains all the PR's markers: `linkpage-primary`, `primary_click`, `Meet Primary`, `24/7 AI Operations`, the LDT outbound URL, green `4ADE80`/`r:74,g:222` and coral `r:248,g:113,b:113`. Routes /, /links, /join all 200
 - [x] Visual verification at 375px: the orb now renders green/coral particles over a deep-blue CSS backdrop with the gold LDR monogram intact, and a green-bordered "MEET PRIMARY — OUR AI / 24/7 AI OPERATIONS" row sits directly below New Construction Search as specified. Existing /links features unchanged (banner, promise chip, 6 data-driven buttons, lead form, socials, LDT credit)
 - [x] Note for the record: an earlier bundle read (`index-jP4XmOMz.js`) lacked the markers because it was captured mid-rollout; the settled bundle has them. Worth remembering to re-read the hash rather than trusting the first post-deploy fetch
+
+## Batch 31 — deploy /links build-time snapshot first-paint fix
+
+- [x] Pulled GitHub main through 7fcd1fb (`fix(links): paint the whole bio stack in the first frame (#3)`) plus telemetry commits; fast-forward merge, no conflicts
+- [x] TypeScript check clean and full suite passing: 586/586 tests across 43 files, including 5 new bioLinksSnapshot tests
+- [ ] Save a checkpoint so the latest branch deploys
+- [ ] Verify the live /links page paints all link rows together on first paint with no staggered pop-in
+- [ ] Verify the PRIMARY orb remains intact and animated
+- [ ] Measure live layout stability and confirm no layout shift
+- [ ] Record the deployed bundle/checkpoint and report the verification results

@@ -594,8 +594,8 @@ Three separate bugs stacked up:
 
 - [x] Pulled GitHub main through 7fcd1fb (`fix(links): paint the whole bio stack in the first frame (#3)`) plus telemetry commits; fast-forward merge, no conflicts
 - [x] TypeScript check clean and full suite passing: 586/586 tests across 43 files, including 5 new bioLinksSnapshot tests
-- [ ] Save a checkpoint so the latest branch deploys
-- [ ] Verify the live /links page paints all link rows together on first paint with no staggered pop-in
-- [ ] Verify the PRIMARY orb remains intact and animated
-- [ ] Measure live layout stability and confirm no layout shift
-- [ ] Record the deployed bundle/checkpoint and report the verification results
+- [x] Checkpoint 2fab49f4 saved and auto-published from GitHub main 7fcd1fb
+- [x] Verified live /links on a fresh URL: all 5 current rows are supplied by the compiled BIO_LINKS_SNAPSHOT before the live query wins; all are simultaneously present, opacity 1, visibility visible, transform none — no stagger/fade classes or network-gated empty stack
+- [x] PRIMARY orb intact: live 168×168 canvas, 11,975 painted pixels sampled; green/coral palette and `Meet Primary`, `linkpage-primary`, `primary_click` markers all present in the deployed bundle
+- [x] Live layout stability measured: CLS 0, zero layout-shift entries, zero horizontal overflow
+- [x] Deployment recorded: checkpoint 2fab49f4, settled live bundle `assets/index-BiFSG2yI.js` (764,805 bytes), routes and /links content verified live

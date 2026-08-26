@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 import { SITE, isLinkVisible } from "@shared/site";
+import { BIO_LINKS_SNAPSHOT } from "@shared/bioLinksSnapshot";
 import { GUIDE_DRAW_MS } from "@shared/guideTrail";
 import { Instagram, Facebook, Youtube, Linkedin, ArrowUpRight } from "lucide-react";
 import {
@@ -171,7 +172,13 @@ export default function Links() {
               ordering governs all of them and the priority order is data, not
               markup. */}
           {(() => {
-            const visible = (links ?? []).filter((l) => isLinkVisible(l.url));
+            // First paint used to show only the hardcoded MEET PRIMARY row
+            // while the DB rows waited on a network round-trip — an ugly
+            // staggered pop-in on slow mobile, where all the bio traffic is.
+            // Until (or if ever) the fetch lands, render the build-time
+            // snapshot instead: same rows, same order, so the swap to live
+            // data is a no-op unless an admin actually edited the links.
+            const visible = (links ?? BIO_LINKS_SNAPSHOT).filter((l) => isLinkVisible(l.url));
             // MEET PRIMARY — the one hardcoded row in an otherwise data-driven
             // stack. It pairs with the PRIMARY orb above (green accent instead
             // of gold) and slots directly below New Construction Search; if the

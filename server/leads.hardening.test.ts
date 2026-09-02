@@ -112,6 +112,22 @@ describe("share pages with corrupt cached rows", () => {
     await expect(appRouter.createCaller(ctx()).partnerPitch.getBySlug({ slug: "bad" })).resolves.toBeNull();
   });
 
+  it("partnerPitch.getBySlug returns null when only the stats column is corrupt", async () => {
+    getPartnerPitchBySlug.mockResolvedValue({
+      slug: "bad2", city: "Austin", pitch: "p", partnerName: null,
+      selections: JSON.stringify(["Space & Land"]), stats: "[not json",
+    });
+    await expect(appRouter.createCaller(ctx()).partnerPitch.getBySlug({ slug: "bad2" })).resolves.toBeNull();
+  });
+
+  it("cityFinder.getBySlug returns null when only one of its columns is corrupt", async () => {
+    for (const bad of ["answers", "rankedCities", "narratives"] as const) {
+      const row = { slug: "b", answers: "{}", rankedCities: "[\"Austin\"]", narratives: "{}" };
+      getCityMatchBySlug.mockResolvedValueOnce({ ...row, [bad]: "<html>" });
+      await expect(appRouter.createCaller(ctx()).cityFinder.getBySlug({ slug: "b" })).resolves.toBeNull();
+    }
+  });
+
   it("cityFinder.getBySlug returns null instead of throwing", async () => {
     getCityMatchBySlug.mockResolvedValue({
       slug: "bad", answers: "{}", rankedCities: "[\"Austin\"]", narratives: "<html>",

@@ -120,7 +120,12 @@ async function metricsForDay(db: Db, dateStr: string): Promise<DayMetrics> {
  * succeeds we publish today and name yesterday in `unavailable`, rather than
  * throwing away a good number because its neighbour was missing.
  */
-export async function collectSiteMetrics(now = new Date()): Promise<CollectedMetrics> {
+export async function collectSiteMetrics(
+  now = new Date(),
+  /** Test seam: a prepared drizzle handle skips the pool (and DATABASE_URL). */
+  opts: { db?: Db } = {}
+): Promise<CollectedMetrics> {
+  if (opts.db) return readBothDays(opts.db, now);
   const url = process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
@@ -164,34 +169,37 @@ export async function collectSiteMetrics(now = new Date()): Promise<CollectedMet
   });
 
   try {
-    const db = drizzle(pool);
-    const today = todayInChicago(now);
-    const yesterday = previousDay(today);
-    const unavailable: UnavailableEntry[] = [];
-
-    const read = async (dateStr: string, label: string) => {
-      try {
-        return await metricsForDay(db, dateStr);
-      } catch (err) {
-        unavailable.push({
-          metric: `page_views, unique_visitors, top_pages, lead_submissions (${label} ${dateStr})`,
-          reason: `query failed: ${describeError(err)}`,
-        });
-        return null;
-      }
-    };
-
-    const [todayMetrics, yesterdayMetrics] = await Promise.all([
-      read(today, "today"),
-      read(yesterday, "yesterday"),
-    ]);
-
-    return { today: todayMetrics, yesterday: yesterdayMetrics, unavailable };
+    return await readBothDays(drizzle(pool), now);
   } finally {
     await pool.end().catch(() => {
       /* closing a pool that never opened is not a failure worth reporting */
     });
   }
+}
+
+async function readBothDays(db: Db, now: Date): Promise<CollectedMetrics> {
+  const today = todayInChicago(now);
+  const yesterday = previousDay(today);
+  const unavailable: UnavailableEntry[] = [];
+
+  const read = async (dateStr: string, label: string) => {
+    try {
+      return await metricsForDay(db, dateStr);
+    } catch (err) {
+      unavailable.push({
+        metric: `page_views, unique_visitors, top_pages, lead_submissions (${label} ${dateStr})`,
+        reason: `query failed: ${describeError(err)}`,
+      });
+      return null;
+    }
+  };
+
+  const [todayMetrics, yesterdayMetrics] = await Promise.all([
+    read(today, "today"),
+    read(yesterday, "yesterday"),
+  ]);
+
+  return { today: todayMetrics, yesterday: yesterdayMetrics, unavailable };
 }
 
 /** Reject rather than hang forever on an unreachable database. */

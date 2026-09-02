@@ -10,8 +10,33 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { drizzle } from "drizzle-orm/mysql2";
 import { describeError, STATS_FILENAME, STATUS_DIRNAME } from "./siteTelemetry";
-import { EXIT_NO_READABLE_DAY, EXIT_OK, EXIT_WRITE_FAILED, run } from "./writeSiteStats";
+import { collectSiteMetrics, EXIT_NO_READABLE_DAY, EXIT_OK, EXIT_WRITE_FAILED, run } from "./writeSiteStats";
+
+describe("collectSiteMetrics names the driver's reason for a failed day", () => {
+  it("puts the driver error before drizzle's 'Failed query' wrapper, for both days", async () => {
+    const driver = Object.assign(new Error("Access denied for user 'site'@'10.0.0.9'"), {
+      code: "ER_ACCESS_DENIED_ERROR",
+    });
+    // A drizzle handle over a client whose every query fails like a locked-out
+    // MySQL user. drizzle wraps that in a DrizzleQueryError whose message is
+    // only the SQL — exactly the shape the live job has been publishing.
+    const client = {
+      query: () => Promise.reject(driver),
+      execute: () => Promise.reject(driver),
+    };
+    const db = drizzle({ client: client as never });
+    const collected = await collectSiteMetrics(new Date("2026-09-02T20:00:00Z"), { db });
+    expect(collected.today).toBeNull();
+    expect(collected.yesterday).toBeNull();
+    expect(collected.unavailable).toHaveLength(2);
+    for (const u of collected.unavailable ?? []) {
+      expect(u.reason).toMatch(/^query failed: \[ER_ACCESS_DENIED_ERROR\] Access denied/);
+      expect(u.reason.indexOf("Access denied")).toBeLessThan(u.reason.indexOf("Failed query"));
+    }
+  });
+});
 
 describe("describeError — root cause first", () => {
   it("walks the cause chain and puts the innermost cause first", () => {

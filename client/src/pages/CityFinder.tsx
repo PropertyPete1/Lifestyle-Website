@@ -87,7 +87,8 @@ const QUESTIONS: Question[] = [
 
 /* ---------- Matching logic ---------- */
 interface CityProfile {
-  name: string;
+  /** One of the five markets the server will write a narrative for. */
+  name: (typeof SITE.cities)[number];
   slug: string;
   img: string;
   medianPrice: string;
@@ -556,8 +557,8 @@ export default function CityFinder() {
             <div className="text-center mb-8">
               <h2 className="font-serif text-2xl md:text-3xl">Your matches are ready</h2>
               <p className="mt-3 text-sm text-muted-foreground max-w-md mx-auto">
-                Tell us where to send your personalized city report and we'll unlock your top
-                matches instantly.
+                Tell us a little about yourself and we'll unlock your personalized city report
+                instantly.
               </p>
             </div>
             <div className="bg-card border border-border p-6 lg:p-8">

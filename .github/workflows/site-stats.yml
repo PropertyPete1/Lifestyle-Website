@@ -43,10 +43,16 @@ jobs:
           corepack enable
           pnpm install --frozen-lockfile
 
-      # Exits non-zero ONLY if no file could be written at all. An unreachable
-      # database is not a failure of this job: the writer records the outage in
-      # `unavailable` and publishes that, which is the honest result.
+      # Exit codes (server/writeSiteStats.ts): 0 = wrote a file with at least
+      # one readable day; 1 = no file at all; 2 = file written but NO day was
+      # readable. The file is published in every case where it exists — an
+      # honest "unavailable, here is why" beats a stale copy — but a 2 must
+      # still turn the job red. From 2026-08-23 this job was green 40+ times
+      # in a row while publishing an empty `days`, and nobody noticed because
+      # the only place the outage was recorded was inside the file itself.
       - name: Write status/site_stats.json
+        id: write
+        continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: pnpm stats:site
@@ -57,6 +63,7 @@ jobs:
       # and retry. The file is a whole snapshot every run, so the newest writer
       # winning is correct — there is nothing in the old copy to preserve.
       - name: Commit and push
+        if: always() && steps.write.outcome != 'skipped'
         run: |
           set -euo pipefail
           FILE=status/site_stats.json
@@ -94,4 +101,14 @@ jobs:
           done
 
           echo "Could not publish $FILE after 3 attempts." >&2
+          exit 1
+
+      # Only now, after the honest file is on main, fail the run if the
+      # database could not be read. The reason is already printed by the
+      # write step (root cause first, e.g. "[ECONNREFUSED] ..."), and the
+      # committed file carries it under `unavailable`.
+      - name: Fail if no day was readable
+        if: steps.write.outcome == 'failure'
+        run: |
+          echo "::error::site-stats could not read any day from the database — see the 'Write status/site_stats.json' step for the root cause and status/site_stats.json → unavailable."
           exit 1

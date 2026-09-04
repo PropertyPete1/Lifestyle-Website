@@ -111,6 +111,40 @@ export interface SiteStats {
   unavailable: UnavailableEntry[];
 }
 
+/* ── errors ────────────────────────────────────────────────────────────────── */
+
+/**
+ * The reason a read failed, root cause first.
+ *
+ * Drizzle wraps a driver failure in a DrizzleQueryError whose `message` is
+ * the SQL text and its params — and nothing else. The actual failure
+ * (ECONNREFUSED, ER_ACCESS_DENIED_ERROR, an unknown column) lives only on
+ * `error.cause`. From 2026-08-23 the published file said "query failed:
+ * Failed query: select ..." on every run for eleven days, which told a
+ * reader that a SELECT had failed and nothing about why. The whole point of
+ * `unavailable` is to name the reason; this walks the cause chain and puts
+ * the innermost cause first, with the wrapper text after it.
+ */
+export function describeError(err: unknown, maxPerLevel = 300): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  while (current !== undefined && current !== null && !seen.has(current) && parts.length < 6) {
+    seen.add(current);
+    if (current instanceof Error) {
+      const code = (current as { code?: unknown }).code;
+      const codeText = typeof code === "string" && code.length > 0 ? `[${code}] ` : "";
+      parts.push(`${codeText}${current.message}`.slice(0, maxPerLevel));
+      current = (current as { cause?: unknown }).cause;
+    } else {
+      parts.push(String(current).slice(0, maxPerLevel));
+      current = undefined;
+    }
+  }
+  if (parts.length === 0) return "unknown error";
+  return parts.reverse().join(" ← ");
+}
+
 /* ── time ──────────────────────────────────────────────────────────────────── */
 
 /** Chicago-local YYYY-MM-DD. */
@@ -372,9 +406,7 @@ export async function writeSiteTelemetry({
         unavailable: [
           {
             metric: "page_views, unique_visitors, top_pages, lead_submissions",
-            reason: `could not read the site database: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
+            reason: `could not read the site database: ${describeError(err)}`,
           },
         ],
       };

@@ -397,7 +397,7 @@ export default function Home() {
           <p className="eyebrow text-gold reveal">Sellers</p>
           <h2 className="display-serif text-4xl md:text-5xl mt-3 reveal">How Much Is Your Home Worth?</h2>
           <p className="mt-5 text-muted-foreground reveal">
-            Instant property valuation · Expert advice · Sell for more
+            Free property valuation · Expert advice · Sell for more
           </p>
           <div className="mt-10 reveal">
             <Link

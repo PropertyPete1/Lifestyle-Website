@@ -27,6 +27,10 @@ export interface QualifyingField {
   options: string[];
 }
 
+/** The value shapes the server's bounded `answers` schema accepts (server/routers.ts). */
+export type LeadAnswerValue = string | number | boolean | string[] | null;
+export type LeadAnswers = Record<string, LeadAnswerValue>;
+
 interface LeadFormProps {
   sourceTag: string;
   heading?: string;
@@ -35,7 +39,7 @@ interface LeadFormProps {
   messageLabel?: string;
   qualifying?: QualifyingField[];
   /** extra static answers merged into the payload (e.g. listing address) */
-  extraAnswers?: Record<string, unknown>;
+  extraAnswers?: LeadAnswers;
   compact?: boolean;
   onSuccess?: () => void;
 }

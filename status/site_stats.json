@@ -1,6 +1,6 @@
 {
-  "date": "2026-09-04",
-  "generated_at": "2026-09-05T03:20:30Z",
+  "date": "2026-09-05",
+  "generated_at": "2026-09-05T10:03:56Z",
   "timezone": "America/Chicago",
   "days": {},
   "unavailable": [
@@ -9,12 +9,12 @@
       "reason": "page_events stores no session identifier — only anonymous per-visitor rows. A session count would have to come from an invented inactivity-timeout heuristic, which would be an estimate, not a measurement."
     },
     {
-      "metric": "page_views, unique_visitors, top_pages, lead_submissions (today 2026-09-04)",
-      "reason": "query failed: Failed query: select `path`, COUNT(*), COUNT(DISTINCT CASE WHEN `visitorId` <> '' THEN `visitorId` END) from `page_events` where (`page_events`.`kind` = ? and (`page_events`.`createdAt` >= ? and `page_events`.`createdAt` < ?)) group by `page_events`.`path` order by COUNT(*) desc limit ?\nparams: view,2026-09-04 05:00:00.000,2026-09-05 05:00:00.000,10"
+      "metric": "page_views, unique_visitors, top_pages, lead_submissions (today 2026-09-05)",
+      "reason": "query failed: Failed query: select `path`, COUNT(*), COUNT(DISTINCT CASE WHEN `visitorId` <> '' THEN `visitorId` END) from `page_events` where (`page_events`.`kind` = ? and (`page_events`.`createdAt` >= ? and `page_events`.`createdAt` < ?)) group by `page_events`.`path` order by COUNT(*) desc limit ?\nparams: view,2026-09-05 05:00:00.000,2026-09-06 05:00:00.000,10"
     },
     {
-      "metric": "page_views, unique_visitors, top_pages, lead_submissions (yesterday 2026-09-03)",
-      "reason": "query failed: Failed query: select SUM(`kind` = 'view'), COUNT(DISTINCT CASE WHEN `kind` = 'view' AND `visitorId` <> '' THEN `visitorId` END), SUM(`kind` = 'view' AND `visitorId` = '') from `page_events` where (`page_events`.`createdAt` >= ? and `page_events`.`createdAt` < ?)\nparams: 2026-09-03 05:00:00.000,2026-09-04 05:00:00.000"
+      "metric": "page_views, unique_visitors, top_pages, lead_submissions (yesterday 2026-09-04)",
+      "reason": "query failed: Failed query: select SUM(`kind` = 'view'), COUNT(DISTINCT CASE WHEN `kind` = 'view' AND `visitorId` <> '' THEN `visitorId` END), SUM(`kind` = 'view' AND `visitorId` = '') from `page_events` where (`page_events`.`createdAt` >= ? and `page_events`.`createdAt` < ?)\nparams: 2026-09-04 05:00:00.000,2026-09-05 05:00:00.000"
     }
   ]
 }

@@ -9,13 +9,37 @@
  * - Same cheapest model (claude-haiku-4-5) as Convince Your Partner
  */
 
+import { FEATURES, SITE } from "../shared/site";
 import { violatesCompliance } from "./partnerPitch";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-haiku-4-5";
 
+/**
+ * The five markets a narrative can be written for — the only cities
+ * cityFinder.generate accepts. Same tuple the client's quiz profiles are
+ * typed against (shared/site.ts), so the two cannot drift apart.
+ */
+export const CITY_NAMES = SITE.cities;
+export type CityName = (typeof CITY_NAMES)[number];
+
+/**
+ * The tools the narrative may point a visitor at. AI property search is
+ * gated off site-wide until IDX connects (FEATURES.SHOW_PROPERTY_SEARCH), so
+ * while that flag is false the prompt and the fallback copy must not promise
+ * it — a visitor who went looking for it would find a coming-soon page.
+ */
+export const LIVE_TOOLS_LINE = FEATURES.SHOW_PROPERTY_SEARCH
+  ? "City Finder, AI search, Convince Your Partner"
+  : "City Finder and Convince Your Partner";
+
+/** Fallback second paragraph — mentions only what the site actually offers today. */
+export const FALLBACK_LDR_PITCH = FEATURES.SHOW_PROPERTY_SEARCH
+  ? "We serve five Texas markets with the same tech-forward approach you just experienced — from AI-powered search to builder-negotiated incentives. Reach out and we'll respond within 30 minutes, ready to show you around."
+  : "We serve five Texas markets with the same tech-forward approach you just experienced — from personalized city matching to builder-negotiated incentives. Reach out and we'll respond within 30 minutes, ready to show you around.";
+
 /** City hard data — real facts, never AI-generated. */
-export const CITY_DATA: Record<string, { medianPrice: string; priceRange: string; vibe: string; facts: string[] }> = {
+export const CITY_DATA: Record<CityName, { medianPrice: string; priceRange: string; vibe: string; facts: string[] }> = {
   "San Antonio": {
     medianPrice: "$310K",
     priceRange: "$180K–$600K",
@@ -85,7 +109,7 @@ PART 1 — "Why this city fits YOU" (3-5 sentences):
 
 PART 2 — "Why Lifestyle Design Realty" (2-3 sentences):
 - Confident and warm, not salesy or desperate.
-- Reference: our local expertise across five Texas markets, our tech-forward tools (City Finder, AI search, Convince Your Partner), our builder relationships and negotiated rate buydowns, and our 30-minute response promise.
+- Reference: our local expertise across five Texas markets, our tech-forward tools (${LIVE_TOOLS_LINE}), our builder relationships and negotiated rate buydowns, and our 30-minute response promise.
 - Make us sound like the obvious choice — the team that already understands what matters to them.
 
 Rules:
@@ -179,18 +203,15 @@ function parseParts(text: string): { cityPitch: string; ldrPitch: string } {
     return { cityPitch: parts[0].trim(), ldrPitch: parts[1].trim() };
   }
   // If model didn't split properly, use entire text as cityPitch with a generic LDR pitch
-  return {
-    cityPitch: text,
-    ldrPitch: "We serve five Texas markets with the same tech-forward approach you just experienced — from AI-powered search to builder-negotiated incentives. Reach out and we'll respond within 30 minutes, ready to show you around.",
-  };
+  return { cityPitch: text, ldrPitch: FALLBACK_LDR_PITCH };
 }
 
 /** Fallback narratives when AI is unavailable — warm but not personalized. */
 export function fallbackNarrative(city: string): { cityPitch: string; ldrPitch: string } {
-  const data = CITY_DATA[city];
+  const data = (CITY_DATA as Record<string, (typeof CITY_DATA)[CityName] | undefined>)[city];
   const vibe = data?.vibe || "A great place to call home.";
   return {
     cityPitch: `${vibe} Between the people, the pace, and everything your new city puts within reach, this is the kind of place that makes you wonder why you didn't move sooner.`,
-    ldrPitch: "We serve five Texas markets with the same tech-forward approach you just experienced — from AI-powered search to builder-negotiated incentives. Reach out and we'll respond within 30 minutes, ready to show you around.",
+    ldrPitch: FALLBACK_LDR_PITCH,
   };
 }

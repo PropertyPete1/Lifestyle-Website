@@ -67,6 +67,15 @@ describe("admin allowlist", () => {
     await expect(caller.testimonials.listAll()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("applies the allowlist to the platform systemRouter too (notifyOwner cannot be paged by a tampered role)", async () => {
+    const caller = appRouter.createCaller(
+      ctxFor({ email: "random@gmail.com", role: "admin", openId: "random-open-id" })
+    );
+    await expect(caller.system.notifyOwner({ title: "t", content: "c" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+  });
+
   it("refuses a non-admin-role account even with an allowlisted email", async () => {
     const caller = appRouter.createCaller(
       ctxFor({ email: "steven@lifestyledesignrealty.com", role: "user", openId: "steven-open-id" })

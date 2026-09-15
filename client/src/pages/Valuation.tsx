@@ -3,7 +3,13 @@ import LeadForm from "@/components/LeadForm";
 import { IMG } from "@/lib/assets";
 import { CheckCircle2 } from "lucide-react";
 
-const PERKS = ["Instant result", "Sell for more", "Get expert advice"];
+/**
+ * Nothing on this page computes a number: the form is a request that a
+ * person answers with a comparative market analysis, and the copy says
+ * exactly that. (The old headline promised an on-the-spot figure the code
+ * never produced — server/honestClaims.test.ts keeps it retired.)
+ */
+const PERKS = ["Free, no obligation", "Sell for more", "Get expert advice"];
 
 export default function Valuation() {
   return (
@@ -16,10 +22,10 @@ export default function Valuation() {
         </div>
         <div className="relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pb-14 pt-40">
           <p className="eyebrow text-gold">Sellers</p>
-          <h1 className="display-serif text-4xl md:text-6xl mt-3">Get Your Instant Home Valuation</h1>
+          <h1 className="display-serif text-4xl md:text-6xl mt-3">Get Your Free Home Valuation</h1>
           <p className="mt-4 text-muted-foreground max-w-xl">
-            Enter your details to see how much your home is worth — and how we'd market it to sell
-            for more.
+            Tell us about your home and a Lifestyle Design Realty professional will prepare your
+            valuation — and a plan to sell for more.
           </p>
         </div>
       </section>

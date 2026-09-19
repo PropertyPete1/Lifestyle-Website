@@ -66,7 +66,10 @@ describe("fubHeaders", () => {
 });
 
 describe("FUB API key validation", () => {
-  it(
+  // Live credential check: only meaningful where the secret exists. In CI
+  // (jarvis-build) and on a laptop without .env it used to fail every run,
+  // which taught everyone to ignore a red suite.
+  it.skipIf(!process.env.FUB_API_KEY)(
     "authenticates against the FUB identity endpoint",
     { timeout: 30000 },
     async () => {

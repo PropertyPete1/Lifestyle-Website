@@ -21,6 +21,7 @@ import mysql from "mysql2/promise";
 import { leads, pageEvents } from "../drizzle/schema";
 import {
   chicagoDayBounds,
+  describeError,
   previousDay,
   todayInChicago,
   writeSiteTelemetry,
@@ -119,7 +120,12 @@ async function metricsForDay(db: Db, dateStr: string): Promise<DayMetrics> {
  * succeeds we publish today and name yesterday in `unavailable`, rather than
  * throwing away a good number because its neighbour was missing.
  */
-export async function collectSiteMetrics(now = new Date()): Promise<CollectedMetrics> {
+export async function collectSiteMetrics(
+  now = new Date(),
+  /** Test seam: a prepared drizzle handle skips the pool (and DATABASE_URL). */
+  opts: { db?: Db } = {}
+): Promise<CollectedMetrics> {
+  if (opts.db) return readBothDays(opts.db, now);
   const url = process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
@@ -163,34 +169,37 @@ export async function collectSiteMetrics(now = new Date()): Promise<CollectedMet
   });
 
   try {
-    const db = drizzle(pool);
-    const today = todayInChicago(now);
-    const yesterday = previousDay(today);
-    const unavailable: UnavailableEntry[] = [];
-
-    const read = async (dateStr: string, label: string) => {
-      try {
-        return await metricsForDay(db, dateStr);
-      } catch (err) {
-        unavailable.push({
-          metric: `page_views, unique_visitors, top_pages, lead_submissions (${label} ${dateStr})`,
-          reason: `query failed: ${err instanceof Error ? err.message : String(err)}`,
-        });
-        return null;
-      }
-    };
-
-    const [todayMetrics, yesterdayMetrics] = await Promise.all([
-      read(today, "today"),
-      read(yesterday, "yesterday"),
-    ]);
-
-    return { today: todayMetrics, yesterday: yesterdayMetrics, unavailable };
+    return await readBothDays(drizzle(pool), now);
   } finally {
     await pool.end().catch(() => {
       /* closing a pool that never opened is not a failure worth reporting */
     });
   }
+}
+
+async function readBothDays(db: Db, now: Date): Promise<CollectedMetrics> {
+  const today = todayInChicago(now);
+  const yesterday = previousDay(today);
+  const unavailable: UnavailableEntry[] = [];
+
+  const read = async (dateStr: string, label: string) => {
+    try {
+      return await metricsForDay(db, dateStr);
+    } catch (err) {
+      unavailable.push({
+        metric: `page_views, unique_visitors, top_pages, lead_submissions (${label} ${dateStr})`,
+        reason: `query failed: ${describeError(err)}`,
+      });
+      return null;
+    }
+  };
+
+  const [todayMetrics, yesterdayMetrics] = await Promise.all([
+    read(today, "today"),
+    read(yesterday, "yesterday"),
+  ]);
+
+  return { today: todayMetrics, yesterday: yesterdayMetrics, unavailable };
 }
 
 /** Reject rather than hang forever on an unreachable database. */
@@ -213,35 +222,69 @@ function withBudget<T>(work: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-async function main() {
+/**
+ * Exit codes, so the workflow can tell the three outcomes apart:
+ *   0  file written and at least one day was readable
+ *   1  no file could be written (disk, permissions) — nothing published
+ *   2  file written, but NO day was readable: the snapshot is honest (it
+ *      names the failure in `unavailable`) and still gets published, but the
+ *      job must go red. For eleven days in Aug–Sep 2026 every run reported
+ *      "success" while publishing an empty `days` — an outage nobody saw
+ *      because the only signal was inside a file nobody opened.
+ */
+export const EXIT_OK = 0;
+export const EXIT_WRITE_FAILED = 1;
+export const EXIT_NO_READABLE_DAY = 2;
+
+export async function run(
+  deps: {
+    repoRoot?: string;
+    collect?: () => Promise<CollectedMetrics>;
+    log?: (line: string) => void;
+    error?: (line: string) => void;
+  } = {}
+): Promise<number> {
+  const log = deps.log ?? ((line: string) => console.log(line));
+  const error = deps.error ?? ((line: string) => console.error(line));
   const result = await writeSiteTelemetry({
-    repoRoot: process.cwd(),
-    collect: () => withBudget(collectSiteMetrics(), QUERY_BUDGET_MS),
+    repoRoot: deps.repoRoot ?? process.cwd(),
+    collect: deps.collect ?? (() => withBudget(collectSiteMetrics(), QUERY_BUDGET_MS)),
   });
 
   if (!result.ok) {
     // The writer itself failed (disk, permissions). Report it loudly and exit
     // non-zero: unlike a missing metric, this means NO file was written.
-    console.error("[site-stats] failed to write:", result.error);
-    process.exitCode = 1;
-    return;
+    error(`[site-stats] failed to write: ${result.error}`);
+    return EXIT_WRITE_FAILED;
   }
 
   const stats = result.stats!;
   const summary = Object.entries(stats.days)
     .map(([day, m]) => `${day}: ${m.page_views ?? "?"} views, ${m.unique_visitors ?? "?"} visitors`)
     .join(" | ");
-  console.log(`[site-stats] wrote ${result.path}`);
-  console.log(`[site-stats] ${summary || "no day had readable data"}`);
+  log(`[site-stats] wrote ${result.path}`);
+  log(`[site-stats] ${summary || "no day had readable data"}`);
   for (const u of stats.unavailable) {
-    console.log(`[site-stats] unavailable — ${u.metric}: ${u.reason}`);
+    log(`[site-stats] unavailable — ${u.metric}: ${u.reason}`);
   }
+  if (Object.keys(stats.days).length === 0) {
+    error(
+      "[site-stats] NO DAY WAS READABLE — the snapshot was published with its reasons, " +
+        "but this run must not count as a success."
+    );
+    return EXIT_NO_READABLE_DAY;
+  }
+  return EXIT_OK;
 }
 
 // Only run when invoked directly, so tests can import the collector.
 if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => {
-    console.error("[site-stats] unexpected failure:", err);
-    process.exitCode = 1;
-  });
+  run()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((err) => {
+      console.error("[site-stats] unexpected failure:", err);
+      process.exitCode = EXIT_WRITE_FAILED;
+    });
 }

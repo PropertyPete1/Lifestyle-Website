@@ -43,8 +43,11 @@ const CAPABILITIES = [
     ),
   },
   {
-    title: "Instant Market Insights",
-    line: "Live valuations and neighborhood data, the moment you ask.",
+    // Honest about what /valuation is: a request a professional answers, not
+    // a calculator. The previous card described an on-demand pricing feature
+    // that does not exist in this codebase (see server/honestClaims.test.ts).
+    title: "Home Valuation & Market Insights",
+    line: "Request a professional valuation in under a minute, plus price data for every market we serve.",
     href: "/valuation",
     cta: "Value my home",
     icon: (

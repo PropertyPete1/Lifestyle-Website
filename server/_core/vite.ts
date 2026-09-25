@@ -47,21 +47,48 @@ export async function setupVite(app: Express, server: Server) {
   });
 }
 
-export function serveStatic(app: Express) {
+/**
+ * Cache policy for the production bundle:
+ * - /assets/* are content-hashed by Vite, so they are immutable for a year.
+ *   express.static's default (max-age=0) made every returning visitor
+ *   revalidate the 765 KB bundle on every page load.
+ * - index.html (and the SPA fallthrough that serves it) is `no-cache`: always
+ *   revalidated, so a deploy is picked up on the next navigation.
+ */
+export const ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
+export const HTML_CACHE_CONTROL = "no-cache";
+
+export function serveStatic(app: Express, distPathOverride?: string) {
   const distPath =
-    process.env.NODE_ENV === "development"
+    distPathOverride ??
+    (process.env.NODE_ENV === "development"
       ? path.resolve(import.meta.dirname, "../..", "dist", "public")
-      : path.resolve(import.meta.dirname, "public");
+      : path.resolve(import.meta.dirname, "public"));
   if (!fs.existsSync(distPath)) {
     console.error(
       `Could not find the build directory: ${distPath}, make sure to build the client first`
     );
   }
 
-  app.use(express.static(distPath));
+  app.use(
+    "/assets",
+    express.static(path.join(distPath, "assets"), {
+      immutable: true,
+      maxAge: "1y",
+      index: false,
+    })
+  );
+  app.use(
+    express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith(".html")) res.setHeader("Cache-Control", HTML_CACHE_CONTROL);
+      },
+    })
+  );
 
   // fall through to index.html if the file doesn't exist
   app.use("*", (_req, res) => {
+    res.setHeader("Cache-Control", HTML_CACHE_CONTROL);
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }

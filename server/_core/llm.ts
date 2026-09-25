@@ -268,9 +268,19 @@ const normalizeResponseFormat = ({
   };
 };
 
-const RETRY_MAX_RETRIES = 4;
+/**
+ * The only caller on this site is AI search criteria extraction, behind a
+ * browser request that gives up at 20 s (shared/requestTimeout.ts) and a
+ * server fallback (regex parser) that is perfectly usable. The template's
+ * four retries with up to 30 s backoff and no per-attempt deadline could hold
+ * a single public request open for minutes after the visitor had already
+ * left. Two retries, each capped, keeps the worst case near the client's own
+ * ceiling.
+ */
+const RETRY_MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 500;
-const RETRY_MAX_DELAY_MS = 30_000;
+const RETRY_MAX_DELAY_MS = 4_000;
+export const LLM_ATTEMPT_TIMEOUT_MS = 15_000;
 
 type FetchInit = NonNullable<Parameters<typeof fetch>[1]>;
 
@@ -307,7 +317,10 @@ const fetchWithBackoff = async (
 
   for (let attempt = 0; attempt <= RETRY_MAX_RETRIES; attempt++) {
     try {
-      const response = await fetch(url, init);
+      const response = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(LLM_ATTEMPT_TIMEOUT_MS),
+      });
       if (response.ok || attempt === RETRY_MAX_RETRIES) {
         return response;
       }

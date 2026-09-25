@@ -17,12 +17,19 @@ import { fubHeaders } from "./fub";
 import * as db from "./db";
 
 const FUB_BASE = "https://api.followupboss.com/v1";
+/** A stalled FUB page must not hold the cron callback open indefinitely. */
+export const FUB_SYNC_TIMEOUT_MS = 15_000;
+/** Live setting; tests shorten it. */
+export const FUB_SYNC_TIMEOUT = { ms: FUB_SYNC_TIMEOUT_MS };
 const PRICE_FLOOR = 150_000; // below this: excluded from range/avg (outlier, not representative of positioning)
 
 type FubDeal = { id: number; stageId: number; price: number };
 
 async function fubGet(path: string, apiKey: string): Promise<any> {
-  const res = await fetch(`${FUB_BASE}${path}`, { headers: fubHeaders(apiKey) });
+  const res = await fetch(`${FUB_BASE}${path}`, {
+    headers: fubHeaders(apiKey),
+    signal: AbortSignal.timeout(FUB_SYNC_TIMEOUT.ms),
+  });
   if (!res.ok) throw new Error(`FUB ${path} → ${res.status}`);
   return res.json();
 }

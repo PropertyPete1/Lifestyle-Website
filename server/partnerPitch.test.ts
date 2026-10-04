@@ -58,7 +58,8 @@ describe("fallbackPitch", () => {
 });
 
 describe("ANTHROPIC_API_KEY validation (live)", () => {
-  it(
+  // Skipped, not failed, when the key is absent — see fub.test.ts.
+  it.skipIf(!process.env.ANTHROPIC_API_KEY)(
     "authenticates and generates a short pitch via Claude",
     { timeout: 45000 },
     async () => {

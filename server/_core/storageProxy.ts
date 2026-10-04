@@ -23,6 +23,7 @@ export function registerStorageProxy(app: Express) {
 
       const forgeResp = await fetch(forgeUrl, {
         headers: { Authorization: `Bearer ${ENV.forgeApiKey}` },
+        signal: AbortSignal.timeout(10_000),
       });
 
       if (!forgeResp.ok) {

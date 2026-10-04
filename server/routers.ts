@@ -1,9 +1,9 @@
 import { COOKIE_NAME } from "@shared/const";
-import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, publicProcedure, rateLimitedProcedure, router } from "./_core/trpc";
+import { RATE_LIMITS } from "./rateLimit";
 import * as db from "./db";
 import { computeIntent, sendFubNote, sendToFub, sendWebsiteInquiryToFub, WEBSITE_INQUIRY_SOURCE, WEBSITE_INQUIRY_TAG } from "./fub";
 import { emailWebsiteInquiryCopy } from "./inquiryEmail";
@@ -20,18 +20,56 @@ import {
   matchCity,
   pickStats,
 } from "./partnerPitch";
-import { generateCityNarrative, fallbackNarrative, CITY_DATA } from "./cityNarrative";
-import { isAdminEmail } from "@shared/site";
-import { ENV } from "./_core/env";
+import { generateCityNarrative, fallbackNarrative, CITY_NAMES } from "./cityNarrative";
 
-const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
-  // Defense in depth: DB role must be admin AND the account must be on the
-  // hard allowlist (peter@/steven@lifestyledesignrealty.com, or project owner).
-  // Even a tampered DB role cannot grant admin to any other account.
-  const allowlisted = isAdminEmail(ctx.user.email) || ctx.user.openId === ENV.ownerOpenId;
-  if (ctx.user.role !== "admin" || !allowlisted) throw new TRPCError({ code: "FORBIDDEN" });
-  return next({ ctx });
-});
+/**
+ * A stored JSON column, or null when the row is corrupt. A malformed row used
+ * to throw out of getBySlug as a 500 and take the whole shared page with it;
+ * the honest answer for a link whose data cannot be read is "not found".
+ */
+function parseStoredJson<T>(raw: string, where: string): T | null {
+  try {
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    console.error(`[${where}] corrupt stored JSON:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * Lead "answers" are quiz selections and short free-text fields. Bounded so an
+ * anonymous caller cannot push megabytes into the `answers` TEXT column (a
+ * 64 KB column overflow fails the INSERT and the lead is lost) or into the
+ * FUB note. Forty short scalars is far more than any form on the site sends.
+ */
+const ANSWERS_MAX_KEYS = 40;
+const answerValue = z.union([
+  z.string().max(1000),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.array(z.string().max(200)).max(20),
+]);
+const answersInput = z
+  .record(z.string().max(60), answerValue)
+  .refine((a) => Object.keys(a).length <= ANSWERS_MAX_KEYS, {
+    message: `answers may carry at most ${ANSWERS_MAX_KEYS} fields`,
+  });
+
+/**
+ * After a lead is stored and sent to FUB, the remaining work is bookkeeping:
+ * recording the sync status, attaching activity, paging the owner. None of
+ * it may turn into a 500 for the visitor — that 500 makes the form show
+ * "try again", and the retry creates a second FUB contact for the same
+ * person. The lead itself is already safe in the DB by this point.
+ */
+async function bookkeeping(label: string, work: () => Promise<unknown>): Promise<void> {
+  try {
+    await work();
+  } catch (err) {
+    console.error(`[leads] ${label} failed after the lead was stored:`, err);
+  }
+}
 
 const listingInput = z.object({
   slug: z.string().min(1),
@@ -67,7 +105,7 @@ const leadInput = z.object({
   phone: z.string().max(40).optional(),
   message: z.string().max(5000).optional(),
   sourceTag: z.string().min(1).max(190),
-  answers: z.record(z.string(), z.unknown()).optional(),
+  answers: answersInput.optional(),
   tcpaConsent: z.literal(true, { message: "TCPA consent is required" }),
   /** Anonymous first-party visitor id — links pre-inquiry site activity. */
   visitorId: z.string().max(40).optional(),
@@ -89,7 +127,7 @@ export const appRouter = router({
 
   /** Convince Your Partner — AI dream-scene pitches, cached per shareable slug. */
   partnerPitch: router({
-    generate: publicProcedure
+    generate: rateLimitedProcedure(RATE_LIMITS.aiGenerate)
       .input(
         z.object({
           selections: z.array(z.enum(LIFESTYLE_OPTIONS)).min(1).max(8),
@@ -141,14 +179,16 @@ export const appRouter = router({
         if (!row) return null;
         // selections was stored as a plain array before Jul 2026; new rows store
         // { picks, hesitations, workSituation }. Normalize to the picks array.
-        const parsedSelections = JSON.parse(row.selections) as
-          | string[]
-          | { picks: string[]; hesitations?: string[]; workSituation?: string | null };
+        const parsedSelections = parseStoredJson<
+          string[] | { picks: string[]; hesitations?: string[]; workSituation?: string | null }
+        >(row.selections, "partnerPitch");
+        const stats = parseStoredJson<string[]>(row.stats, "partnerPitch");
+        if (!parsedSelections || !stats) return null;
         return {
           slug: row.slug,
           city: row.city,
           pitch: row.pitch,
-          stats: JSON.parse(row.stats) as string[],
+          stats,
           partnerName: row.partnerName ?? undefined,
           selections: Array.isArray(parsedSelections) ? parsedSelections : parsedSelections.picks,
         };
@@ -161,11 +201,21 @@ export const appRouter = router({
      * Generate AI narratives for the top 3 matched cities. Caches the result
      * in city_matches so shared links always reproduce the same text.
      */
-    generate: publicProcedure
+    generate: rateLimitedProcedure(RATE_LIMITS.aiGenerate)
       .input(
         z.object({
-          answers: z.record(z.string(), z.string()),
-          rankedCities: z.array(z.string().min(1)).min(1).max(5),
+          // Quiz answers are six short slugs. Bounded because every key and
+          // value is interpolated straight into the Claude prompt and stored
+          // in a TEXT column: an unbounded record was both a prompt-injection
+          // surface and a 64 KB column overflow waiting to happen.
+          answers: z
+            .record(z.string().max(40), z.string().max(120))
+            .refine((a) => Object.keys(a).length <= 12, { message: "too many answers" }),
+          // Only the five markets the narrative prompt knows how to describe.
+          // Free text here had Claude writing "why this city fits you" for
+          // whatever string the caller sent, cached forever under a share link
+          // on this domain.
+          rankedCities: z.array(z.enum(CITY_NAMES)).min(1).max(5),
         })
       )
       .mutation(async ({ input }) => {
@@ -199,12 +249,14 @@ export const appRouter = router({
       .query(async ({ input }) => {
         const row = await db.getCityMatchBySlug(input.slug);
         if (!row) return null;
-        return {
-          slug: row.slug,
-          answers: JSON.parse(row.answers) as Record<string, string>,
-          rankedCities: JSON.parse(row.rankedCities) as string[],
-          narratives: JSON.parse(row.narratives) as Record<string, { cityPitch: string; ldrPitch: string }>,
-        };
+        const answers = parseStoredJson<Record<string, string>>(row.answers, "cityFinder");
+        const rankedCities = parseStoredJson<string[]>(row.rankedCities, "cityFinder");
+        const narratives = parseStoredJson<Record<string, { cityPitch: string; ldrPitch: string }>>(
+          row.narratives,
+          "cityFinder"
+        );
+        if (!answers || !rankedCities || !narratives) return null;
+        return { slug: row.slug, answers, rankedCities, narratives };
       }),
   }),
 
@@ -223,7 +275,7 @@ export const appRouter = router({
     featured: publicProcedure.query(() => db.getFeaturedListings()),
     all: publicProcedure.query(() => db.getAllListings()),
     /** AI natural-language search: extract criteria via LLM, match against listing data */
-    aiSearch: publicProcedure
+    aiSearch: rateLimitedProcedure(RATE_LIMITS.aiSearch)
       .input(z.object({ query: z.string().min(2).max(400) }))
       .query(async ({ input }) => {
         const [criteria, listings] = await Promise.all([
@@ -326,7 +378,7 @@ export const appRouter = router({
      * record sync status. If FUB fails, the lead stays in the DB (fubStatus
      * "failed") and the owner is notified — no lead is ever lost.
      */
-    submit: publicProcedure.input(leadInput).mutation(async ({ input }) => {
+    submit: rateLimitedProcedure(RATE_LIMITS.leadSubmit).input(leadInput).mutation(async ({ input }) => {
       const intent = computeIntent(input.answers);
       const leadId = await db.createLead({
         name: input.name,
@@ -351,10 +403,12 @@ export const appRouter = router({
         answers: input.answers,
       });
 
-      await db.updateLead(leadId, {
-        fubStatus: fub.ok ? "synced" : "failed",
-        fubId: fub.fubId,
-      });
+      await bookkeeping("status update", () =>
+        db.updateLead(leadId, {
+          fubStatus: fub.ok ? "synced" : "failed",
+          fubId: fub.fubId,
+        })
+      );
 
       // Cross-session activity: if this visitor has tracked on-site activity
       // (favorites, AI searches, quiz results), attach it as a formatted note
@@ -399,7 +453,7 @@ export const appRouter = router({
    * no email-client dependency for the visitor.
    */
   websiteInquiry: router({
-    submit: publicProcedure
+    submit: rateLimitedProcedure(RATE_LIMITS.leadSubmit)
       .input(
         z.object({
           name: z.string().trim().min(1).max(190),
@@ -431,10 +485,12 @@ export const appRouter = router({
         });
 
         const fub = await sendWebsiteInquiryToFub(input);
-        await db.updateLead(leadId, {
-          fubStatus: fub.ok ? "synced" : "failed",
-          fubId: fub.fubId,
-        });
+        await bookkeeping("website inquiry status update", () =>
+          db.updateLead(leadId, {
+            fubStatus: fub.ok ? "synced" : "failed",
+            fubId: fub.fubId,
+          })
+        );
 
         // Email a copy to Peter — independent of FUB result so he always hears about it.
         const emailed = await emailWebsiteInquiryCopy(input).catch(() => ({ ok: false as const }));
@@ -456,7 +512,7 @@ export const appRouter = router({
      * only the random visitor id and what happened on-site. Forwarded to FUB
      * only if the visitor later submits a lead form.
      */
-    log: publicProcedure
+    log: rateLimitedProcedure(RATE_LIMITS.activityLog)
       .input(
         z.object({
           visitorId: z.string().min(6).max(40),
@@ -481,7 +537,7 @@ export const appRouter = router({
    */
   analytics: router({
     /** Public: record a page view, banner click, NC/lease outbound click, or /links form submission. */
-    track: publicProcedure
+    track: rateLimitedProcedure(RATE_LIMITS.analyticsTrack)
       .input(
         z.object({
           kind: z.enum([

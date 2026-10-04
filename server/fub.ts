@@ -8,6 +8,28 @@ import type { IntentLevel } from "../shared/site";
 
 const FUB_API_URL = "https://api.followupboss.com/v1";
 
+/**
+ * Ceiling on any single FUB call. The browser gives a lead submit 20 s in
+ * total (shared/requestTimeout.ts); before this, a FUB call had NO deadline,
+ * so a stalled FUB connection held the request open until the client gave
+ * up — the visitor saw a failure and retried, and the lead already in the DB
+ * got a duplicate. 10 s leaves room for the DB writes around the call.
+ */
+export const FUB_TIMEOUT_MS = 10_000;
+/** Live setting; tests shorten it (AbortSignal.timeout runs on Node-internal timers that fake timers cannot advance). */
+export const FUB_TIMEOUT = { ms: FUB_TIMEOUT_MS };
+
+/** One line a human can read from a fetch failure, naming a timeout as such. */
+export function describeFetchError(err: unknown, what: string): string {
+  if (err instanceof Error) {
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      return `${what} timed out after ${FUB_TIMEOUT.ms}ms`;
+    }
+    return err.message;
+  }
+  return `Unknown ${what} error`;
+}
+
 /** Registered system name for FUB integration attribution (X-System / body.system). */
 const FUB_SYSTEM = "Lifestyle Design Realty Website";
 
@@ -152,6 +174,7 @@ export async function sendToFub(input: FubLeadInput): Promise<FubResult> {
       method: "POST",
       headers: fubHeaders(apiKey),
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(FUB_TIMEOUT.ms),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -170,7 +193,7 @@ export async function sendToFub(input: FubLeadInput): Promise<FubResult> {
       personId: personId ? String(personId) : undefined,
     };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Unknown FUB error" };
+    return { ok: false, error: describeFetchError(err, "FUB") };
   }
 }
 
@@ -190,6 +213,7 @@ export async function sendFubNote(
       method: "POST",
       headers: fubHeaders(apiKey),
       body: JSON.stringify({ personId: Number(personId), subject, body }),
+      signal: AbortSignal.timeout(FUB_TIMEOUT.ms),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -197,7 +221,7 @@ export async function sendFubNote(
     }
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Unknown FUB error" };
+    return { ok: false, error: describeFetchError(err, "FUB notes") };
   }
 }
 
@@ -255,6 +279,7 @@ export async function sendWebsiteInquiryToFub(input: WebsiteInquiryInput): Promi
       method: "POST",
       headers: fubHeaders(apiKey),
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(FUB_TIMEOUT.ms),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -272,6 +297,6 @@ export async function sendWebsiteInquiryToFub(input: WebsiteInquiryInput): Promi
       personId: personId ? String(personId) : undefined,
     };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Unknown FUB error" };
+    return { ok: false, error: describeFetchError(err, "FUB") };
   }
 }

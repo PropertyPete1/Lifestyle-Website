@@ -4,7 +4,11 @@ import { cn } from "@/lib/utils";
 
 /**
  * Recruiting-focused visual proof of the lead system (real functionality):
- * Lead comes in → AI scores intent (Hot/Warm/Cold) → Routed to the right agent.
+ * Lead comes in → intent scored (Hot/Warm/Cold) → Routed to the right agent.
+ *
+ * The copy describes what server/fub.ts computeIntent actually does: a
+ * deterministic rule over timeline, pre-approval and license status. It is
+ * not AI and it does not read behaviour, and the step used to say both.
  * Steps light up in sequence when scrolled into view; a gold "lead dot"
  * travels along the connector between steps. Show, don't tell.
  */
@@ -16,13 +20,13 @@ const STEPS = [
   },
   {
     icon: Gauge,
-    title: "AI Scores Intent",
-    line: "Timeline, motivation, and behavior score each lead Hot, Warm, or Cold — instantly.",
+    title: "Intent Scored Instantly",
+    line: "Timeline, readiness, and license status score each lead Hot, Warm, or Cold the moment it arrives.",
   },
   {
     icon: UserCheck,
     title: "Routed to the Right Agent",
-    line: "Scored leads land in Follow Up Boss, tagged and assigned — no cherry-picking, no cold lists.",
+    line: "Scored leads land in Follow Up Boss, tagged for routing — no cherry-picking, no cold lists.",
   },
 ] as const;
 

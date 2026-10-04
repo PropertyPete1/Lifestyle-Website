@@ -3,7 +3,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
 import { Route, Switch, useLocation } from "wouter";
 import ExitIntentModal from "@/components/ExitIntentModal";
-import { useLayoutEffect } from "react";
+import { Suspense, lazy, useLayoutEffect } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
@@ -24,8 +24,13 @@ import Join from "./pages/Join";
 import Links from "./pages/Links";
 import Convince, { ConvinceShared } from "./pages/Convince";
 import Privacy from "./pages/Privacy";
-import Admin from "./pages/Admin";
 import { usePageTracking } from "./hooks/usePageTracking";
+
+/**
+ * The admin CMS is the largest page in the app and is used by three people.
+ * Code-split so the public bundle every visitor downloads does not carry it.
+ */
+const Admin = lazy(() => import("./pages/Admin"));
 import { FEATURES } from "@shared/site";
 
 /**
@@ -55,6 +60,7 @@ function Router() {
   return (
     <>
       <ScrollToTop />
+      <Suspense fallback={null}>
       <Switch>
       <Route path={"/"} component={Home} />
       <Route path={"/get-started"} component={GetStarted} />
@@ -91,6 +97,7 @@ function Router() {
       {/* Final fallback route */}
       <Route component={NotFound} />
       </Switch>
+      </Suspense>
     </>
   );
 }

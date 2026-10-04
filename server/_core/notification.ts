@@ -8,6 +8,10 @@ export type NotificationPayload = {
 
 const TITLE_MAX_LENGTH = 1200;
 const CONTENT_MAX_LENGTH = 20000;
+/** A stuck notification service must never hold a lead submission open. */
+export const NOTIFY_TIMEOUT_MS = 10_000;
+/** Live setting; tests shorten it. */
+export const NOTIFY_TIMEOUT = { ms: NOTIFY_TIMEOUT_MS };
 
 const trimValue = (value: string): string => value.trim();
 const isNonEmptyString = (value: unknown): value is string =>
@@ -94,6 +98,7 @@ export async function notifyOwner(
         "connect-protocol-version": "1",
       },
       body: JSON.stringify({ title, content }),
+      signal: AbortSignal.timeout(NOTIFY_TIMEOUT.ms),
     });
 
     if (!response.ok) {

@@ -140,22 +140,28 @@ export const siteSettings = mysqlTable("site_settings", {
 });
 export type SiteSetting = typeof siteSettings.$inferSelect;
 
-export const leads = mysqlTable("leads", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 190 }).notNull(),
-  email: varchar("email", { length: 320 }).notNull(),
-  phone: varchar("phone", { length: 40 }),
-  message: text("message"),
-  sourceTag: varchar("sourceTag", { length: 190 }).notNull(),
-  intent: mysqlEnum("intent", ["Hot", "Warm", "Cold", "Unknown"]).default("Unknown").notNull(),
-  answers: text("answers"), // JSON of qualifying/quiz answers
-  tcpaConsent: boolean("tcpaConsent").default(false).notNull(),
-  fubStatus: mysqlEnum("fubStatus", ["synced", "failed", "pending"]).default("pending").notNull(),
-  fubId: varchar("fubId", { length: 60 }),
-  /** First-party anonymous visitor id — correlates pre-inquiry site activity. */
-  visitorId: varchar("visitorId", { length: 40 }),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+export const leads = mysqlTable(
+  "leads",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    name: varchar("name", { length: 190 }).notNull(),
+    email: varchar("email", { length: 320 }).notNull(),
+    phone: varchar("phone", { length: 40 }),
+    message: text("message"),
+    sourceTag: varchar("sourceTag", { length: 190 }).notNull(),
+    intent: mysqlEnum("intent", ["Hot", "Warm", "Cold", "Unknown"]).default("Unknown").notNull(),
+    answers: text("answers"), // JSON of qualifying/quiz answers
+    tcpaConsent: boolean("tcpaConsent").default(false).notNull(),
+    fubStatus: mysqlEnum("fubStatus", ["synced", "failed", "pending"]).default("pending").notNull(),
+    fubId: varchar("fubId", { length: 60 }),
+    /** First-party anonymous visitor id — correlates pre-inquiry site activity. */
+    visitorId: varchar("visitorId", { length: 40 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  // The admin funnel, the Lead Log and the site-stats job all read leads by
+  // time window; without this every one of them scans the table.
+  (t) => [index("idx_leads_created").on(t.createdAt)]
+);
 export type Lead = typeof leads.$inferSelect;
 export type InsertLead = typeof leads.$inferInsert;
 
@@ -166,15 +172,22 @@ export type InsertLead = typeof leads.$inferInsert;
  * only ever forwarded to Follow Up Boss when the same visitor later submits a
  * lead form; if they never do, it stays here and is never sent anywhere.
  */
-export const visitorActivity = mysqlTable("visitor_activity", {
-  id: int("id").autoincrement().primaryKey(),
-  visitorId: varchar("visitorId", { length: 40 }).notNull(),
-  /** favorite | unfavorite | ai_search | convince_quiz | city_finder */
-  kind: varchar("kind", { length: 40 }).notNull(),
-  /** JSON payload — shape depends on kind (listing info, query, quiz answers…) */
-  data: text("data").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+export const visitorActivity = mysqlTable(
+  "visitor_activity",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    visitorId: varchar("visitorId", { length: 40 }).notNull(),
+    /** favorite | unfavorite | ai_search | convince_quiz | city_finder */
+    kind: varchar("kind", { length: 40 }).notNull(),
+    /** JSON payload — shape depends on kind (listing info, query, quiz answers…) */
+    data: text("data").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  // Every activity log does a per-visitor COUNT(*) before it inserts (the
+  // 200-row abuse cap) and every lead submit reads the visitor's history;
+  // both were full-table scans on a table that grows with every click.
+  (t) => [index("idx_visitor_activity_visitor").on(t.visitorId)]
+);
 export type VisitorActivity = typeof visitorActivity.$inferSelect;
 export type InsertVisitorActivity = typeof visitorActivity.$inferInsert;
 
@@ -209,6 +222,9 @@ export const pageEvents = mysqlTable(
   (t) => [
     index("idx_page_events_kind_created").on(t.kind, t.createdAt),
     index("idx_page_events_path").on(t.path),
+    // The admin summary and the site-stats job filter on createdAt alone; the
+    // (kind, createdAt) index cannot serve a range on its second column.
+    index("idx_page_events_created").on(t.createdAt),
   ]
 );
 export type PageEvent = typeof pageEvents.$inferSelect;

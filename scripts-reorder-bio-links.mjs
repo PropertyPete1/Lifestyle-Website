@@ -1,86 +1,93 @@
 /**
- * IDEMPOTENT production update for the /links buttons.
+ * Safe production bootstrap for retired /links buttons.
  *
- * Deliberately NOT part of seed-db.mjs: that script does DELETE FROM bio_links
- * and would wipe any ordering Peter has set in admin. This one only upserts the
- * intended set by URL, fixes sortOrder, and deactivates the duplicate.
+ * This script intentionally does NOT seed, sort, reactivate, or deactivate an
+ * existing bio_links row. Admin controls the active set and order; this is only
+ * a one-time-safe way to add a previously hardcoded CTA as a recoverable,
+ * deactivated row when it does not already exist.
  *
  *   node scripts-reorder-bio-links.mjs      (needs DATABASE_URL)
  *
- * Safe to run repeatedly.
+ * Safe to run repeatedly. A later Admin toggle always wins because an existing
+ * row is preserved exactly as it is.
  */
 import mysql from "mysql2/promise";
 import "dotenv/config";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 /**
- * The six live buttons, in priority order.
- *
- * Anything NOT in this list is deactivated (never deleted), so retired buttons
- * stay recoverable from admin and a future run can't resurrect them. Currently
- * retired: "Contact Us" (duplicate /contact), "Join Our Team" (the Now Hiring
- * banner at the top of /links already goes to /join) and "Home Valuation"
- * (seller intent is covered by Schedule a Consultation and the capture form).
+ * Formerly hardcoded beneath New Construction Search on /links. Sort order 1
+ * preserves that former placement if an admin explicitly re-enables it; it
+ * does not affect the live stack while inactive.
  */
-const DESIRED = [
-  ["New Construction Search", "https://a.nhb.app/u/peter-allen"],
-  ["Find Your Texas City", "/city-finder"],
-  ["Convince Your Partner", "/convince"],
-  ["Schedule a Consultation", "/contact"],
-  ["Own a Rental? List It With Us", "/lease"],
-  ["Explore Our Full Website", "/"],
+export const RETIRED_BIO_LINKS = [
+  {
+    label: "Meet Primary — Our AI",
+    url: "https://lifestyledesigntechnologies.com/?utm_source=linkpage-primary",
+    sortOrder: 1,
+  },
 ];
 
-const conn = await mysql.createConnection(process.env.DATABASE_URL);
-const [rows] = await conn.query("SELECT id, label, url, sortOrder, active FROM bio_links");
+/**
+ * Insert missing recoverable rows as inactive. Existing rows are deliberately
+ * untouched — including their active flag and sort order — so this utility can
+ * never resurrect a row an admin retired or override later admin changes.
+ */
+export async function bootstrapRetiredBioLinks(conn, log = console.log) {
+  const [rows] = await conn.query(
+    "SELECT id, label, url, sortOrder, active FROM bio_links"
+  );
+  const inserted = [];
+  const preserved = [];
 
-/** Ids this run has claimed for the desired set — see the deactivation pass. */
-const claimed = new Set();
+  for (const retired of RETIRED_BIO_LINKS) {
+    const existing = rows.find(
+      (row) => row.label === retired.label && row.url === retired.url
+    );
+    if (existing) {
+      preserved.push(existing);
+      log(`preserved ${retired.label} (active=${Boolean(existing.active)})`);
+      continue;
+    }
 
-for (let i = 0; i < DESIRED.length; i++) {
-  const [label, url] = DESIRED[i];
-  const sort = i + 1;
-  // Prefer an exact label+url match so rows sharing a url (e.g. "Contact Us"
-  // and "Schedule a Consultation" both on /contact) resolve to the right one,
-  // and skip any row already claimed by an earlier desired entry.
-  const existing =
-    rows.find((r) => r.url === url && r.label === label && !claimed.has(r.id)) ??
-    rows.find((r) => r.url === url && !claimed.has(r.id));
-  if (existing) {
-    claimed.add(existing.id);
     await conn.execute(
-      "UPDATE bio_links SET label=?, sortOrder=?, active=true WHERE id=?",
-      [label, sort, existing.id]
+      "INSERT INTO bio_links (label, url, sortOrder, active) VALUES (?,?,?,false)",
+      [retired.label, retired.url, retired.sortOrder]
     );
-    console.log(`updated  #${sort} ${label}`);
-  } else {
-    const [res] = await conn.execute(
-      "INSERT INTO bio_links (label, url, sortOrder, active) VALUES (?,?,?,true)",
-      [label, url, sort]
+    inserted.push(retired);
+    log(`inserted inactive ${retired.label}`);
+  }
+
+  return { inserted, preserved };
+}
+
+export async function main({
+  createConnection = mysql.createConnection,
+  databaseUrl = process.env.DATABASE_URL,
+  log = console.log,
+} = {}) {
+  if (!databaseUrl) throw new Error("DATABASE_URL is required");
+  const conn = await createConnection(databaseUrl);
+  try {
+    const result = await bootstrapRetiredBioLinks(conn, log);
+    const [activeRows] = await conn.query(
+      "SELECT label, url, sortOrder FROM bio_links WHERE active=true ORDER BY sortOrder, id"
     );
-    if (res?.insertId) claimed.add(res.insertId);
-    console.log(`inserted #${sort} ${label}`);
+    log("\nActive /links buttons preserved from admin:");
+    for (const row of activeRows) log(`  ${row.sortOrder}. ${row.label} -> ${row.url}`);
+    return result;
+  } finally {
+    await conn.end();
   }
 }
 
-// Anything not in the desired set is deactivated rather than deleted, so it can
-// be restored from admin. This is what retires the duplicate "Contact Us".
-//
-// Keyed on the ids claimed above, NOT on url: "Contact Us" shares /contact with
-// "Schedule a Consultation", so a url-keyed keep-set would spare the duplicate.
-const [current] = await conn.query(
-  "SELECT id, label, url FROM bio_links WHERE active=true"
-);
-for (const r of current) {
-  if (!claimed.has(r.id)) {
-    await conn.execute("UPDATE bio_links SET active=false WHERE id=?", [r.id]);
-    console.log(`deactivated  ${r.label} -> ${r.url}`);
-  }
-}
+const isDirectRun =
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
-const [after] = await conn.query(
-  "SELECT label, url, sortOrder FROM bio_links WHERE active=true ORDER BY sortOrder"
-);
-console.log("\nActive /links buttons now:");
-for (const r of after) console.log(`  ${r.sortOrder}. ${r.label} -> ${r.url}`);
-await conn.end();
-process.exit(0);
+if (isDirectRun) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

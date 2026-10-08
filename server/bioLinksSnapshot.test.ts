@@ -5,11 +5,9 @@ import { SITE, isLinkVisible } from "../shared/site";
 /**
  * Guards the /links first-paint snapshot (react-query placeholderData).
  * The snapshot only removes the pop-in if it renders EXACTLY like the live
- * data will: same ordering, nothing the visibility filter would strip, and
- * the New Construction row present so the hardcoded MEET PRIMARY row slots
- * into its final position immediately. Any row that paints and then moves
- * or vanishes when the fetch lands recreates the layout shift this exists
- * to kill.
+ * active data will: same ordering and nothing the visibility filter would
+ * strip. Any row that paints and then moves or vanishes when the fetch lands
+ * recreates the layout shift this exists to kill.
  */
 describe("BIO_LINKS_SNAPSHOT", () => {
   it("is non-empty and every row is active", () => {
@@ -39,9 +37,15 @@ describe("BIO_LINKS_SNAPSHOT", () => {
     }
   });
 
-  it("anchors MEET PRIMARY: the New Construction row is present", () => {
+  it("keeps the New Construction row as the active top CTA", () => {
     // If the admin ever removes/renames New Construction Search, regenerate
     // the snapshot (command in shared/bioLinksSnapshot.ts) and update this.
     expect(BIO_LINKS_SNAPSHOT.some((r) => r.url === SITE.newConstructionUrl)).toBe(true);
+  });
+
+  it("contains no retired PRIMARY CTA", () => {
+    expect(
+      BIO_LINKS_SNAPSHOT.some((row) => row.label === "Meet Primary — Our AI")
+    ).toBe(false);
   });
 });

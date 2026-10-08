@@ -11,7 +11,6 @@ import {
   useLeaseClickTracking,
   useLinksFormTracking,
   useLinksPromiseTracking,
-  usePrimaryClickTracking,
 } from "@/hooks/usePageTracking";
 import NowHiringBanner from "@/components/NowHiringBanner";
 import WebsiteInquiryModal from "@/components/WebsiteInquiryModal";
@@ -55,7 +54,6 @@ export default function Links() {
   const logNcClick = useNcClickTracking();
   const logLeaseClick = useLeaseClickTracking();
   const logFormSubmit = useLinksFormTracking();
-  const logPrimaryClick = usePrimaryClickTracking();
   const [inquiryOpen, setInquiryOpen] = useState(false);
   const logPromiseClick = useLinksPromiseTracking();
   const promiseRef = useRef<HTMLButtonElement>(null);
@@ -164,92 +162,56 @@ export default function Links() {
           {/* Bio links are admin-managed data, so a paused route (e.g. the
               seeded "Home Search" → /search) can still be present in the DB.
               Filter here so no customer is sent to a coming-soon dead end. */}
-          {/* Bio links are admin-managed data, so a paused route (e.g. the
-              seeded "Home Search" → /search) can still be present in the DB.
-              Filter here so no customer is sent to a coming-soon dead end.
-              EVERY button on this page is now a bio_links row (Own a Rental and
-              Explore Our Full Website used to be hardcoded below), so admin
-              ordering governs all of them and the priority order is data, not
-              markup. */}
           {(() => {
-            // First paint used to show only the hardcoded MEET PRIMARY row
-            // while the DB rows waited on a network round-trip — an ugly
-            // staggered pop-in on slow mobile, where all the bio traffic is.
-            // Until (or if ever) the fetch lands, render the build-time
-            // snapshot instead: same rows, same order, so the swap to live
-            // data is a no-op unless an admin actually edited the links.
+            // Render the build-time snapshot until the active DB rows arrive.
+            // Every visible CTA is a bio_links row: admin ordering governs the
+            // entire stack, and inactive rows never render on this public page.
             const visible = (links ?? BIO_LINKS_SNAPSHOT).filter((l) => isLinkVisible(l.url));
-            // MEET PRIMARY — the one hardcoded row in an otherwise data-driven
-            // stack. It pairs with the PRIMARY orb above (green accent instead
-            // of gold) and slots directly below New Construction Search; if the
-            // admin ever hides that row, it falls to the end of the stack.
-            // utm_source carries the "linkpage-primary" tag to the LDT site,
-            // and the click is logged first-party like every other button.
-            const primaryRow = (
-              <a
-                key="ldt-primary"
-                href="https://lifestyledesigntechnologies.com/?utm_source=linkpage-primary"
-                target="_blank"
-                rel="noopener"
-                onClick={logPrimaryClick}
-                className="group lux-lift flex items-center justify-between w-full px-6 py-4 text-xs uppercase tracking-[0.2em] transition-colors border border-[#4ADE80]/60 bg-[#4ADE80]/[0.07] text-foreground hover:bg-[#4ADE80]/[0.12] hover:border-[#4ADE80]">
-                <span className="flex flex-col items-start gap-1 text-left">
-                  <span>Meet Primary — Our AI</span>
-                  <span className="text-[8.5px] tracking-[0.18em] text-[#4ADE80]/80">
-                    24/7 AI Operations
-                  </span>
-                </span>
-                <ArrowUpRight className="h-4 w-4 text-[#4ADE80] opacity-70 group-hover:opacity-100" />
-              </a>
-            );
-            const rows = visible.map((l, i) => {
-            const isInternal = l.url.startsWith("/");
-            // Visual hierarchy: the top button carries a gold border so the eye
-            // lands on the money path first. Everything else stays neutral so
-            // the emphasis actually means something.
-            const primary = i === 0;
-            const cls = cn(
-              "group lux-lift flex items-center justify-between w-full px-6 py-4 text-xs uppercase tracking-[0.2em] transition-colors",
-              primary
-                ? "border border-gold/70 bg-gold/10 text-foreground hover:bg-gold/15 hover:border-gold"
-                : "border border-border bg-card hover:border-gold hover:text-gold"
-            );
-            const arrow = (
-              <ArrowUpRight
-                className={cn(
-                  "h-4 w-4 group-hover:opacity-100",
-                  primary ? "text-gold opacity-80" : "opacity-40"
-                )}
-              />
-            );
-            // Outbound clicks keep their existing first-party tracking.
-            const onClick =
-              l.url === SITE.newConstructionUrl
-                ? logNcClick
-                : l.url === "/lease"
-                  ? logLeaseClick
-                  : undefined;
-            return isInternal ? (
-              <Link key={l.id} href={l.url} onClick={onClick} className={cls}>
-                {l.label}
-                {arrow}
-              </Link>
-            ) : (
-              <a
-                key={l.id}
-                href={l.url}
-                target="_blank"
-                rel="noreferrer"
-                className={cls}
-                onClick={onClick}>
-                {l.label}
-                {arrow}
-              </a>
-            );
+            return visible.map((l, i) => {
+              const isInternal = l.url.startsWith("/");
+              // Visual hierarchy: the top button carries a gold border so the eye
+              // lands on the money path first. Everything else stays neutral so
+              // the emphasis actually means something.
+              const primary = i === 0;
+              const cls = cn(
+                "group lux-lift flex items-center justify-between w-full px-6 py-4 text-xs uppercase tracking-[0.2em] transition-colors",
+                primary
+                  ? "border border-gold/70 bg-gold/10 text-foreground hover:bg-gold/15 hover:border-gold"
+                  : "border border-border bg-card hover:border-gold hover:text-gold"
+              );
+              const arrow = (
+                <ArrowUpRight
+                  className={cn(
+                    "h-4 w-4 group-hover:opacity-100",
+                    primary ? "text-gold opacity-80" : "opacity-40"
+                  )}
+                />
+              );
+              // Outbound clicks keep their existing first-party tracking.
+              const onClick =
+                l.url === SITE.newConstructionUrl
+                  ? logNcClick
+                  : l.url === "/lease"
+                    ? logLeaseClick
+                    : undefined;
+              return isInternal ? (
+                <Link key={l.id} href={l.url} onClick={onClick} className={cls}>
+                  {l.label}
+                  {arrow}
+                </Link>
+              ) : (
+                <a
+                  key={l.id}
+                  href={l.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={cls}
+                  onClick={onClick}>
+                  {l.label}
+                  {arrow}
+                </a>
+              );
             });
-            const ncIdx = visible.findIndex((l) => l.url === SITE.newConstructionUrl);
-            rows.splice(ncIdx >= 0 ? ncIdx + 1 : rows.length, 0, primaryRow);
-            return rows;
           })()}
         </div>
 

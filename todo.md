@@ -599,3 +599,8 @@ Three separate bugs stacked up:
 - [x] PRIMARY orb intact: live 168×168 canvas, 11,975 painted pixels sampled; green/coral palette and `Meet Primary`, `linkpage-primary`, `primary_click` markers all present in the deployed bundle
 - [x] Live layout stability measured: CLS 0, zero layout-shift entries, zero horizontal overflow
 - [x] Deployment recorded: checkpoint 2fab49f4, settled live bundle `assets/index-BiFSG2yI.js` (764,805 bytes), routes and /links content verified live
+
+## PRIMARY CTA retirement — 2026-10-08
+- [x] Replace the hardcoded “Meet PRIMARY — Our AI” /links CTA with a recoverable, inactive `bio_links` record without changing any existing active/trash state.
+- [x] Make the first-paint snapshot and UI render only the active database order; prevent the reorder script from reviving retired rows.
+- [ ] Add regression coverage, validate types/tests, deploy, and verify live `/links` at 375px with the banner, promise chip, form, and socials unchanged.

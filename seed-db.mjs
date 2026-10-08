@@ -91,25 +91,29 @@ async function run() {
   }
 
   // ---- Bio links ----
-  await db.execute(`DELETE FROM bio_links`);
-  // Ordered by business priority — the money path first. Every /links button
-  // is a row here (including Own a Rental and Explore Our Full Website, which
-  // used to be hardcoded in the page) so admin drag-ordering governs all of
-  // them uniformly. "Contact Us" was removed: it pointed at /contact, the same
-  // destination as "Schedule a Consultation".
-  const links = [
-    ["New Construction Search", "https://a.nhb.app/u/peter-allen"],
-    ["Find Your Texas City", "/city-finder"],
-    ["Convince Your Partner", "/convince"],
-    ["Schedule a Consultation", "/contact"],
-    ["Own a Rental? List It With Us", "/lease"],
-    ["Explore Our Full Website", "/"],
-  ];
-  for (let i = 0; i < links.length; i++) {
-    await db.execute({
-      sql: `INSERT INTO bio_links (label, url, sortOrder, active) VALUES (?,?,?,true)`,
-      args: [links[i][0], links[i][1], i + 1],
-    });
+  // Unlike static sample content, this table is controlled in Admin → Bio
+  // Links. Never delete/reseed a populated table: doing so would resurrect
+  // rows an admin intentionally retired and discard their chosen ordering.
+  const [existingBioLinks] = await db.execute(`SELECT id FROM bio_links LIMIT 1`);
+  if (existingBioLinks.length === 0) {
+    // First-install defaults only. Every /links button is a row here so admin
+    // drag-ordering governs the full public stack from this point forward.
+    const links = [
+      ["New Construction Search", "https://a.nhb.app/u/peter-allen"],
+      ["Find Your Texas City", "/city-finder"],
+      ["Convince Your Partner", "/convince"],
+      ["Schedule a Consultation", "/contact"],
+      ["Own a Rental? List It With Us", "/lease"],
+      ["Explore Our Full Website", "/"],
+    ];
+    for (let i = 0; i < links.length; i++) {
+      await db.execute({
+        sql: `INSERT INTO bio_links (label, url, sortOrder, active) VALUES (?,?,?,true)`,
+        args: [links[i][0], links[i][1], i + 1],
+      });
+    }
+  } else {
+    console.log("Preserved existing admin-managed bio links");
   }
 
   // ---- Sample listings (placeholders — replace via admin CMS) ----

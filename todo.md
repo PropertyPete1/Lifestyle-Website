@@ -603,4 +603,4 @@ Three separate bugs stacked up:
 ## PRIMARY CTA retirement — 2026-10-08
 - [x] Replace the hardcoded “Meet PRIMARY — Our AI” /links CTA with a recoverable, inactive `bio_links` record without changing any existing active/trash state.
 - [x] Make the first-paint snapshot and UI render only the active database order; prevent the reorder script from reviving retired rows.
-- [ ] Add regression coverage, validate types/tests, deploy, and verify live `/links` at 375px with the banner, promise chip, form, and socials unchanged.
+- [x] Add regression coverage, validate types/tests, deploy, and verify live `/links` at 375px with the banner, promise chip, form, and socials unchanged.

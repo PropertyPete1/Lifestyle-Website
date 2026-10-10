@@ -609,4 +609,4 @@ Three separate bugs stacked up:
 - [x] Add the requested SMS opt-in, sharing, and data-rights language to `/privacy` without removing existing policy content.
 - [x] Create a public `/terms` page with the required Texas website and SMS terms, contact details, and Privacy Policy link.
 - [x] Add Terms links beside Privacy links in the site footer and all lead-form TCPA consent copy.
-- [ ] Add regression coverage, validate types/tests, publish, and verify both public live routes.
+- [x] Add regression coverage, validate types/tests, publish, and verify both public live routes.

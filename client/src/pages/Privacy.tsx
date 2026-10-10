@@ -32,6 +32,17 @@ export default function Privacy() {
             providers who assist in operating our website and business, subject to
             confidentiality obligations, or when required by law.
           </p>
+          <p>
+            We do not sell or share your SMS opt-in data or personal information with third parties for marketing purposes. Mobile information will not be shared with third parties or affiliates for marketing or promotional purposes.
+          </p>
+          <h2 className="font-serif text-2xl text-foreground">SMS Messaging</h2>
+          <p>
+            Lifestyle Design Realty sends text messages only to people who opt in by checking the consent box on our website forms. Messages may include replies to your real estate inquiry, property listings, showing and appointment reminders, and career opportunity information for licensed real estate agents. Message frequency varies. Message and data rates may apply. Reply STOP to opt out at any time or HELP for help. Text messaging originator opt-in data and consent will not be shared with any third parties.
+          </p>
+          <h2 className="font-serif text-2xl text-foreground">Data Storage and Your Rights</h2>
+          <p>
+            Your information is stored securely in our customer relationship management system and kept only as long as needed to provide our services. You may request access to or deletion of your information by emailing team@lifestyledesignrealty.com.
+          </p>
           <h2 className="font-serif text-2xl text-foreground">Platform &amp; Analytics</h2>
           <p>
             We measure how our website is used so we can improve it. Our own analytics are

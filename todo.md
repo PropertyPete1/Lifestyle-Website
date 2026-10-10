@@ -604,3 +604,9 @@ Three separate bugs stacked up:
 - [x] Replace the hardcoded “Meet PRIMARY — Our AI” /links CTA with a recoverable, inactive `bio_links` record without changing any existing active/trash state.
 - [x] Make the first-paint snapshot and UI render only the active database order; prevent the reorder script from reviving retired rows.
 - [x] Add regression coverage, validate types/tests, deploy, and verify live `/links` at 375px with the banner, promise chip, form, and socials unchanged.
+
+## SMS policy and Terms page — 2026-10-10
+- [x] Add the requested SMS opt-in, sharing, and data-rights language to `/privacy` without removing existing policy content.
+- [x] Create a public `/terms` page with the required Texas website and SMS terms, contact details, and Privacy Policy link.
+- [x] Add Terms links beside Privacy links in the site footer and all lead-form TCPA consent copy.
+- [ ] Add regression coverage, validate types/tests, publish, and verify both public live routes.

@@ -155,7 +155,8 @@ export default function RecruitForm() {
         <Checkbox id="rc-consent" checked={consent} onCheckedChange={(v) => setConsent(v === true)} className="mt-0.5" />
         <label htmlFor="rc-consent" className="text-[11px] leading-relaxed text-muted-foreground cursor-pointer">
           {SITE.tcpaConsent}{" "}
-          <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>.
+          <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>{" "}
+          and <Link href="/terms" className="underline underline-offset-2 hover:text-gold">Terms</Link>.
         </label>
       </div>
 

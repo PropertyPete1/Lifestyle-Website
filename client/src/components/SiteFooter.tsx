@@ -102,6 +102,11 @@ export default function SiteFooter() {
               className="underline underline-offset-4 hover:text-gold">
               Privacy Policy
             </Link>
+            <Link
+              href="/terms"
+              className="underline underline-offset-4 hover:text-gold">
+              Terms and Conditions
+            </Link>
           </div>
           <p>{SITE.disclaimer}</p>
           <div className="flex items-center justify-between flex-wrap gap-4 pt-2">

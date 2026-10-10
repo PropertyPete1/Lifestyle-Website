@@ -103,7 +103,8 @@ export default function NewsletterForm() {
         <Checkbox id="nl-consent" checked={consent} onCheckedChange={(v) => setConsent(v === true)} className="mt-0.5" />
         <label htmlFor="nl-consent" className="text-[10px] leading-relaxed text-muted-foreground/80 cursor-pointer">
           {SITE.tcpaConsent}{" "}
-          <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>.
+          <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>{" "}
+          and <Link href="/terms" className="underline underline-offset-2 hover:text-gold">Terms</Link>.
         </label>
       </div>
     </form>

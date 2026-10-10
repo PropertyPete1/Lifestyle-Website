@@ -24,6 +24,7 @@ import Join from "./pages/Join";
 import Links from "./pages/Links";
 import Convince, { ConvinceShared } from "./pages/Convince";
 import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
 import Admin from "./pages/Admin";
 import { usePageTracking } from "./hooks/usePageTracking";
 import { FEATURES } from "@shared/site";
@@ -83,6 +84,7 @@ function Router() {
       <Route path={"/convince"} component={Convince} />
       <Route path={"/convince/:slug"} component={ConvinceShared} />
       <Route path={"/privacy"} component={Privacy} />
+      <Route path={"/terms"} component={Terms} />
       <Route path={"/admin"} component={Admin} />
       <Route path={"/admin/:tab"} component={Admin} />
       <Route path={"/404"} component={NotFound} />

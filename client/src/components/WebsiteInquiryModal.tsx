@@ -138,8 +138,8 @@ export default function WebsiteInquiryModal({
                   {SITE.tcpaConsentWebDesign}{" "}
                   <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">
                     Privacy Policy
-                  </Link>
-                  .
+                  </Link>{" "}
+                  and <Link href="/terms" className="underline underline-offset-2 hover:text-gold">Terms</Link>.
                 </label>
               </div>
               {error && (

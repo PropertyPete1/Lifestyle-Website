@@ -18,8 +18,10 @@ await db.end();
 const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true, args: ["--no-sandbox"] });
 const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
 const page = await context.newPage();
+let startRequests = 0;
 page.on("response", (response) => {
   if (response.url().includes("deals.start")) {
+    startRequests += 1;
     const names = (response.headers()["set-cookie"] || "").split(/, (?=[A-Za-z_]+=)/).map((value) => value.split("=")[0]).filter(Boolean);
     console.log(`start-set-cookie:${names.join(",") || "none"}`);
   }
@@ -35,6 +37,10 @@ try {
   console.log(`start-response:${startBody.includes('"ok":true') ? "ok" : "not-ok"}`);
   await expectVisible(page, "#deals-code");
   assert((await context.cookies(base)).some((cookie) => cookie.name === "ldr_deals_pending" && cookie.path === "/"), "pending cookie must be sent to the verification form");
+  await page.reload({ waitUntil: "networkidle" });
+  await expectVisible(page, "#deals-code");
+  assert.equal(startRequests, 1, "reloading a pending code step must not send another verification code");
+  console.log("PASS Pending verification reload resumes at code step without a second send.");
   await page.locator("#deals-code").fill(otp);
   await page.waitForTimeout(250);
   assert.equal(await page.locator("#deals-code").inputValue(), otp.trim(), "the controlled verification input must retain the test code");

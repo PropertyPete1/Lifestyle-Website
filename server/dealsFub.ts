@@ -7,7 +7,7 @@ const PETER_EMAIL = "peter@lifestyledesignrealty.com";
 const FUB_PAGE_SIZE = 100;
 const MAX_FUB_PAGES = 100;
 
-type FubValue = { value?: string; email?: string; phone?: string; number?: string };
+type FubValue = { value?: string; email?: string; phone?: string; number?: string; [key: string]: unknown };
 type FubPerson = {
   id?: string | number;
   tags?: Array<string | { name?: string; value?: string }> | string;
@@ -51,25 +51,42 @@ function fubTags(person?: FubPerson | null): string[] {
   if (!Array.isArray(tags)) return [];
   return tags.flatMap((tag) => typeof tag === "string" ? [tag] : fubValues(tag.name ?? tag.value));
 }
-function unionValues(values: Array<string | null | undefined>, kind: "email" | "phone") {
+function contactValueKey(value: string, kind: "email" | "phone") {
+  if (kind === "email") return value.trim().toLowerCase();
+  const digits = value.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+  return digits.length === 10 ? digits : value.replace(/\D/g, "");
+}
+function unionValues(existing: unknown, additions: Array<string | null | undefined>, kind: "email" | "phone") {
   const seen = new Set<string>();
-  return values.flatMap((value) => {
-    const trimmed = value?.trim();
-    if (!trimmed) return [];
-    const key = kind === "email" ? trimmed.toLowerCase() : trimmed.replace(/\D/g, "");
-    if (!key || seen.has(key)) return [];
+  const kept: FubValue[] = [];
+  const original = Array.isArray(existing) ? existing : [];
+  for (const entry of original) {
+    const value = fubValues(entry)[0]?.trim();
+    if (!value) continue;
+    const key = contactValueKey(value, kind);
+    if (!key || seen.has(key)) continue;
     seen.add(key);
-    return [{ value: trimmed }];
-  });
+    // Never reduce FUB's typed/primary/status objects to a bare `{value}`.
+    kept.push(typeof entry === "object" && entry !== null ? { ...(entry as FubValue) } : { value });
+  }
+  for (const value of additions) {
+    const trimmed = value?.trim();
+    if (!trimmed) continue;
+    const key = contactValueKey(trimmed, kind);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    kept.push({ value: trimmed });
+  }
+  return kept;
 }
 /** Exported for regression tests: no FUB update is allowed to discard a known contact value. */
 export function unionFubContactValues(person: FubPerson | null | undefined, lead: Pick<BuilderLead, "phone" | "email">) {
   return {
-    phones: unionValues([...(person ? fubValues(person.phones) : []), lead.phone], "phone"),
-    emails: unionValues([...(person ? fubValues(person.emails) : []), lead.email ?? undefined], "email"),
+    phones: unionValues(person?.phones, [lead.phone], "phone"),
+    emails: unionValues(person?.emails, [lead.email ?? undefined], "email"),
   };
 }
-function unionFubTags(person: FubPerson | null | undefined, lead: BuilderLead) {
+export function unionFubTags(person: FubPerson | null | undefined, lead: BuilderLead) {
   return Array.from(new Set([...fubTags(person), ...tagsFor(lead)]));
 }
 
@@ -77,8 +94,8 @@ function unionFubTags(person: FubPerson | null | undefined, lead: BuilderLead) {
 export function builderDealsLeadMarker(leadId: number) {
   return `BDL-${hashSecret(`builder-deals-lead:${leadId}`).slice(0, 20)}`;
 }
-function builderDealsOperationMarker(leadId: number, operation: "first_unlock" | "reverify") {
-  return `${builderDealsLeadMarker(leadId)}:${operation}`;
+function builderDealsOperationMarker(leadId: number, operation: "first_unlock" | "reverify", occurrenceId?: string) {
+  return `${builderDealsLeadMarker(leadId)}:${operation}${occurrenceId ? `:${occurrenceId}` : ""}`;
 }
 function nationalPhone(phone: string) {
   const digits = phone.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
@@ -154,7 +171,9 @@ export async function peterUserId() {
       cachedPeter = { id, expiresAt: Date.now() + 5 * 60_000 };
       return id;
     }
-    if (users.length < FUB_PAGE_SIZE) break;
+    // Some FUB accounts return pages smaller than the requested limit while
+    // still exposing a following offset page; only an empty page is terminal.
+    if (users.length === 0) break;
   }
   // Short negative cache avoids a thundering herd, while allowing a newly added
   // user to become visible shortly afterwards.
@@ -162,9 +181,9 @@ export async function peterUserId() {
   return null;
 }
 
-function leadNote(lead: BuilderLead, action: string, operation: "first_unlock" | "reverify") {
+function leadNote(lead: BuilderLead, action: string, operation: "first_unlock" | "reverify", occurrenceId?: string) {
   return [
-    `Builder Deals ${builderDealsOperationMarker(lead.id, operation)}`, action, `Source: ${lead.sourceCode}`,
+    `Builder Deals ${builderDealsOperationMarker(lead.id, operation, occurrenceId)}`, action, `Source: ${lead.sourceCode}`,
     lead.instagramHandle ? `Instagram: @${lead.instagramHandle}` : undefined,
     lead.isTest ? "TEST RECORD - eligible for Builder Deals cleanup" : undefined,
     `TCPA consent captured: ${lead.consentAt.toISOString()}`,
@@ -239,18 +258,18 @@ export async function sendBuilderDealsLeadToFub(lead: BuilderLead): Promise<FubD
 }
 
 /** Later device/expiry rechecks update and note an existing person, never re-fire events. */
-export async function updateBuilderDealsLeadInFub(lead: BuilderLead, reason: "re-verified on a second device" | "returned for a new link"): Promise<FubDeliveryResult> {
+export async function updateBuilderDealsLeadInFub(lead: BuilderLead, reason: "re-verified on a second device" | "returned for a new link", occurrenceId?: string): Promise<FubDeliveryResult> {
   try {
     const person = await findPerson(lead);
     // Search both phone forms before this fallback. It remains necessary when a
     // former contact has been deleted, and the first-unlock path is marker-safe.
     if (!person?.id) return sendBuilderDealsLeadToFub(lead);
     const personId = String(person.id);
-    if (await personHasLeadMarker(personId, builderDealsOperationMarker(lead.id, "reverify"))) {
+    if (occurrenceId && await personHasLeadMarker(personId, builderDealsOperationMarker(lead.id, "reverify", occurrenceId))) {
       return { ok: true, personId, records: [{ kind: "person", fubId: personId, createdByUs: false }] };
     }
     await putPersonUnion(personId, person, lead);
-    const note = await postFubNote(personId, "Builder Deals access", leadNote(lead, reason, "reverify"));
+    const note = await postFubNote(personId, "Builder Deals access", leadNote(lead, reason, "reverify", occurrenceId));
     return note.ok
       ? { ok: true, personId, records: [{ kind: "person", fubId: personId, createdByUs: false }, ...(note.id ? [{ kind: "note" as const, fubId: note.id, createdByUs: true }] : [])] }
       : { ok: false, error: note.error };

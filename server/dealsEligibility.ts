@@ -1,7 +1,7 @@
-import { and, eq, or } from "drizzle-orm";
-import { dealDoNotAutoImport, dealKnownAgents, dealTeamAllowlist } from "../drizzle/schema";
+import { and, eq, inArray, or } from "drizzle-orm";
+import { dealAccessTokens, dealDoNotAutoImport, dealKnownAgents, dealLeads, dealTeamAllowlist } from "../drizzle/schema";
 import { getDb } from "./db";
-import { getActiveBlock } from "./dealsService";
+import { getActiveBlock, getDealSettings } from "./dealsService";
 import { fubHeaders } from "./fub";
 
 export type DealEligibility = {
@@ -14,6 +14,90 @@ export type DealEligibility = {
 
 const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase() || null;
 const emailDomain = (email?: string | null) => normalizeEmail(email)?.split("@").at(-1) || null;
+
+export type DealIdentity = { phoneE164?: string | null; email?: string | null; deviceHash?: string | null };
+type DealsDb = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+
+function identityPredicates(identity: DealIdentity) {
+  return [
+    identity.phoneE164 ? eq(dealLeads.phoneE164, identity.phoneE164) : undefined,
+    identity.email ? eq(dealLeads.email, normalizeEmail(identity.email)!) : undefined,
+    identity.deviceHash ? eq(dealLeads.deviceHash, identity.deviceHash) : undefined,
+  ].filter(Boolean) as any[];
+}
+
+function teamIdentityMatch(
+  lead: { phoneE164: string; email: string | null },
+  members: Array<{ phoneE164: string | null; email: string | null }>,
+  testTeamNumbers: readonly string[],
+) {
+  return testTeamNumbers.includes(lead.phoneE164) || members.some((member) =>
+    member.phoneE164 === lead.phoneE164 || Boolean(lead.email && member.email === lead.email),
+  );
+}
+
+/**
+ * Revokes current buyer access for an identity that is newly classified as an
+ * agent. Team previews are deliberately excluded: team has precedence at the
+ * gate and an automatic known-agent import may never invalidate staff access.
+ */
+export async function revokeNonTeamMatchingDealLinks(db: DealsDb, identity: DealIdentity): Promise<number> {
+  const predicates = identityPredicates(identity);
+  if (!predicates.length) return 0;
+  const matches = await db.select({ id: dealLeads.id, status: dealLeads.status })
+    .from(dealLeads)
+    .where(or(...predicates));
+  const ids = matches.filter((lead) => lead.status === "verified").map((lead) => lead.id);
+  if (!ids.length) return 0;
+  const now = new Date();
+  await db.update(dealLeads).set({ status: "blocked", revokedAt: now }).where(inArray(dealLeads.id, ids));
+  await db.update(dealAccessTokens).set({ revokedAt: now }).where(inArray(dealAccessTokens.leadId, ids));
+  return ids.length;
+}
+
+/** Explicit administrator blocks override every prior status, including team previews. */
+export async function revokeAllMatchingDealLinks(db: DealsDb, identity: DealIdentity): Promise<number> {
+  const predicates = identityPredicates(identity);
+  if (!predicates.length) return 0;
+  const matches = await db.select({ id: dealLeads.id }).from(dealLeads).where(or(...predicates));
+  const ids = matches.map((lead) => lead.id);
+  if (!ids.length) return 0;
+  const now = new Date();
+  await db.update(dealLeads).set({ status: "blocked", revokedAt: now }).where(inArray(dealLeads.id, ids));
+  await db.update(dealAccessTokens).set({ revokedAt: now }).where(inArray(dealAccessTokens.leadId, ids));
+  return ids.length;
+}
+
+/** Marks matching existing leads as team previews without restoring any revoked access token. */
+export async function makeMatchingLeadsTeam(db: DealsDb, identity: DealIdentity): Promise<number> {
+  const predicates = identityPredicates(identity);
+  if (!predicates.length) return 0;
+  const matches = await db.select({ id: dealLeads.id }).from(dealLeads).where(or(...predicates));
+  if (!matches.length) return 0;
+  await db.update(dealLeads).set({ status: "team" }).where(inArray(dealLeads.id, matches.map((lead) => lead.id)));
+  return matches.length;
+}
+
+/**
+ * A reverse team cascade never reactivates a prior link. When the last active
+ * team identity disappears, the lead is expired and every existing token is
+ * revoked; a future preview requires fresh verification.
+ */
+export async function revokeOrphanedTeamPreviewLinks(db: DealsDb): Promise<number> {
+  const settings = await getDealSettings();
+  const [teamLeads, members] = await Promise.all([
+    db.select({ id: dealLeads.id, phoneE164: dealLeads.phoneE164, email: dealLeads.email }).from(dealLeads).where(eq(dealLeads.status, "team")),
+    db.select({ phoneE164: dealTeamAllowlist.phoneE164, email: dealTeamAllowlist.email }).from(dealTeamAllowlist).where(eq(dealTeamAllowlist.active, true)),
+  ]);
+  const ids = teamLeads
+    .filter((lead) => !teamIdentityMatch(lead, members, settings.testTeamNumbers))
+    .map((lead) => lead.id);
+  if (!ids.length) return 0;
+  const now = new Date();
+  await db.update(dealLeads).set({ status: "expired", revokedAt: now }).where(inArray(dealLeads.id, ids));
+  await db.update(dealAccessTokens).set({ revokedAt: now }).where(inArray(dealAccessTokens.leadId, ids));
+  return ids.length;
+}
 
 /** Checks are intentionally ordered: test/team, block, known agent, FUB, domain. */
 export async function classifyDealsAccess(input: {
@@ -94,7 +178,7 @@ export async function profileRealtorFlags(input: { name?: string | null; instagr
     const { lookupTrecName } = await import("./dealsTrec");
     if ((await lookupTrecName(input.name, input.trecCounties)).length) flags.push("Possible Agent - TREC Name Match");
   }
-  const tokens = new Set((input.instagramHandle ?? "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  const tokens = new Set([input.instagramHandle ?? "", input.name ?? ""].join(" ").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
   if (tokens.size && input.handleKeywords.some((keyword) => tokens.has(keyword.trim().toLowerCase()))) flags.push("Possible Agent - Handle");
   return flags;
 }

@@ -24,4 +24,4 @@ ALTER TABLE `deal_photos` ADD `next_processing_attempt_at` timestamp;--> stateme
 ALTER TABLE `deal_photos` ADD `processing_started_at` timestamp;--> statement-breakpoint
 ALTER TABLE `deal_photos` ADD `last_processing_error` varchar(80);--> statement-breakpoint
 ALTER TABLE `deal_photos` ADD `processed_at` timestamp;--> statement-breakpoint
-CREATE INDEX `idx_deal_photos_queue` ON `deal_photos` (`processing_state`,`next_processing_attempt_at`);--> statement-breakpoint
+CREATE INDEX `idx_deal_photos_queue` ON `deal_photos` (`processing_state`,`next_processing_attempt_at`);

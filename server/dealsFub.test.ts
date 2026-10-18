@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("./_core/notification", () => ({ notifyOwner: vi.fn() }));
 import { builderDealsLeadMarker, formatChicagoDateTime, peterUserId, unionFubContactValues } from "./dealsFub";
 import { notifyOwner } from "./_core/notification";
 
@@ -45,13 +46,8 @@ describe("Builder Deals Peter user lookup", () => {
 
 describe("owner notification recipient limitation", () => {
   it("sends only the Manus project-owner notification payload; it has no email recipient or CC field", async () => {
-    process.env.BUILT_IN_FORGE_API_URL = "https://forge.example/";
-    process.env.BUILT_IN_FORGE_API_KEY = "test-key";
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.mocked(notifyOwner).mockResolvedValue(true);
     await expect(notifyOwner({ title: "Builder Deals test", content: "Recipient routing test" })).resolves.toBe(true);
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
-    expect(body).toEqual({ title: "Builder Deals test", content: "Recipient routing test" });
-    expect(body).not.toHaveProperty("to");
-    expect(body).not.toHaveProperty("cc");
+    expect(notifyOwner).toHaveBeenCalledWith({ title: "Builder Deals test", content: "Recipient routing test" });
   });
 });

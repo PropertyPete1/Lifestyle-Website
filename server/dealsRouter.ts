@@ -5,7 +5,7 @@ import { DEALS_CONSENT_TEXT, maskPhone, sanitizeInstagramHandle, sanitizeSourceC
 import { ENV } from "./_core/env";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { dealAccessTokens, dealBlocklist, dealCommunities, dealCommunityViews, dealDoNotAutoImport, dealEvents, dealFubJobs, dealHomes, dealIncentives, dealKnownAgents, dealLeads, dealPhotos, dealTeamAllowlist, dealTourRequests, dealTrecImports, dealTrecLicenses, dealTrecVerifications } from "../drizzle/schema";
+import { dealAccessTokens, dealAlerts, dealBlocklist, dealCommunities, dealCommunityViews, dealDoNotAutoImport, dealEmailLogs, dealEvents, dealFubJobs, dealHomes, dealIncentives, dealKnownAgents, dealLeads, dealPhotos, dealTeamAllowlist, dealTourRequests, dealTrecImports, dealTrecLicenses, dealTrecVerifications } from "../drizzle/schema";
 import { checkTwilioVerify, sendTwilioVerify } from "./dealsVerification";
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import {
@@ -57,6 +57,7 @@ export const dealsRouter = router({
       consentText: DEALS_CONSENT_TEXT,
       commentKeyword: settings.commentKeyword,
       textLine: settings.textLine,
+      blockedMessage: safeBlockedMessage(settings),
     };
   }),
   start: publicProcedure.input(gateInput).mutation(async ({ input, ctx }) => {
@@ -66,7 +67,7 @@ export const dealsRouter = router({
     const sourceCode = currentDealSource(sanitizeSourceCode(input.src), settings);
     const ip = ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0";
     if (!cookieState.hasProbe || !(await reserveGateSubmit({ ip, deviceHash: cookieState.deviceHash, sourceCode }))) {
-      return { ok: false as const, kind: cookieState.hasProbe ? "rate_limited" : "cookie_blocked", message: cookieState.hasProbe ? "We're getting a lot of traffic, so please try again in a bit." : "Your browser is blocking cookies. Open this link in Safari or Chrome" };
+      return { ok: false as const, kind: cookieState.hasProbe ? "rate_limited" : "cookie_blocked", message: cookieState.hasProbe ? `We're getting a lot of traffic, so please try again in a bit. Or text ${settings.commentKeyword} to ${settings.textLine}.` : `Your browser is blocking cookies. Open this link in Safari or Chrome. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
     }
     const result = await createPendingVerification({ req: ctx.req, res: ctx.res, rawPhone: input.phone, choice: input.choice, source: sanitizeSourceCode(input.src), ig: sanitizeInstagramHandle(input.ig) });
     if (!result.ok) {
@@ -83,7 +84,7 @@ export const dealsRouter = router({
     });
     if (!reserved.ok) {
       await removePending(ctx.req, ctx.res);
-      return { ok: false as const, kind: reserved.kind, message: "We're getting a lot of traffic, so please try again in a bit." };
+      return { ok: false as const, kind: reserved.kind, message: `We're getting a lot of traffic, so please try again in a bit. Or text ${result.settings.commentKeyword} to ${result.settings.textLine}.` };
     }
     if (result.isTest && result.settings.skipTwilioForTestNumbers) return { ok: true as const, status: "code_sent", displayPhone: result.displayPhone, test: true };
     const sent = await sendTwilioVerify(result.phone, "sms");
@@ -105,7 +106,7 @@ export const dealsRouter = router({
       phone: pending.phoneE164, sourceCode: pending.sourceCode, deviceHash: pending.deviceHash,
       ip: pending.clientIp, channel: input.channel, isTest,
     });
-    if (!reserved.ok) return { ok: false as const, kind: reserved.kind, message: "We're getting a lot of traffic, so please try again in a bit." };
+    if (!reserved.ok) return { ok: false as const, kind: reserved.kind, message: `We're getting a lot of traffic, so please try again in a bit. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
     if (isTest && settings.skipTwilioForTestNumbers) return { ok: true as const, test: true };
     const sent = await sendTwilioVerify(pending.phoneE164, input.channel);
     if (!sent.ok && sent.reason === "twilio") await recordTwilioVerifyFailure({ sourceCode: pending.sourceCode, deviceHash: pending.deviceHash, ip: pending.clientIp });
@@ -165,7 +166,16 @@ export const dealsRouter = router({
     const { profileRealtorFlags } = await import("./dealsEligibility");
     const profileFlags = await profileRealtorFlags({ name: input.name ?? session.lead.name, instagramHandle: session.lead.instagramHandle, handleKeywords: settings.handleKeywords, trecCounties: settings.trecCounties });
     const storedFlags = (() => { try { const value = JSON.parse(session.lead.flags); return Array.isArray(value) ? value : value.flags ?? []; } catch { return []; } })();
-    await connection.update(dealLeads).set({ name: input.name ?? session.lead.name, timeline: input.timeline ?? session.lead.timeline, flags: JSON.stringify(Array.from(new Set([...storedFlags, ...profileFlags]))) }).where(eq(dealLeads.id, session.leadId));
+    const newProfileFlags = profileFlags.filter((flag) => !storedFlags.includes(flag));
+    const nextLead = { ...session.lead, name: input.name ?? session.lead.name, timeline: input.timeline ?? session.lead.timeline };
+    await connection.update(dealLeads).set({ name: nextLead.name, timeline: nextLead.timeline, flags: JSON.stringify(Array.from(new Set([...storedFlags, ...profileFlags]))) }).where(eq(dealLeads.id, session.leadId));
+    // Flags are review signals, not silent access revocations. Queue an alert
+    // only for a newly discovered signal; test flows stay quiet unless staff
+    // deliberately enable the existing full-pipeline test setting.
+    if (newProfileFlags.length && (!settings.testNumbers.includes(session.lead.phoneE164) || settings.testModeFullPipeline)) {
+      const { queueProfileFlagAlert } = await import("./dealsAlerts");
+      await queueProfileFlagAlert(nextLead, newProfileFlags);
+    }
     return { ok: true as const };
   }),
   admin: router({
@@ -178,17 +188,21 @@ export const dealsRouter = router({
         db.select().from(dealBlocklist),
         db.select().from(dealTrecVerifications).orderBy(dealTrecVerifications.verifiedAt).limit(40),
       ]);
-      const [homes, photos, agents, team, tours, imports, fubJobs, doNotAutoImport] = await Promise.all([
-        db.select().from(dealHomes), db.select().from(dealPhotos), db.select().from(dealKnownAgents), db.select().from(dealTeamAllowlist), db.select().from(dealTourRequests).orderBy(desc(dealTourRequests.createdAt)), db.select().from(dealTrecImports).orderBy(desc(dealTrecImports.createdAt)).limit(1), db.select().from(dealFubJobs).orderBy(desc(dealFubJobs.createdAt)), db.select().from(dealDoNotAutoImport),
+      const [homes, photos, agents, team, tours, imports, fubJobs, doNotAutoImport, alerts, emailLogs] = await Promise.all([
+        db.select().from(dealHomes), db.select().from(dealPhotos), db.select().from(dealKnownAgents), db.select().from(dealTeamAllowlist), db.select().from(dealTourRequests).orderBy(desc(dealTourRequests.createdAt)), db.select().from(dealTrecImports).orderBy(desc(dealTrecImports.createdAt)).limit(1), db.select().from(dealFubJobs).orderBy(desc(dealFubJobs.createdAt)), db.select().from(dealDoNotAutoImport), db.select().from(dealAlerts).orderBy(desc(dealAlerts.createdAt)).limit(100), db.select().from(dealEmailLogs).orderBy(desc(dealEmailLogs.createdAt)).limit(100),
       ]);
-      return { communities, leads, blocks, checks, homes, photos, agents, team, tours, fubJobs, doNotAutoImport, import: imports[0] ?? null };
+      const [{ builderDealsEmailStatus }, { trecImportSummary }] = await Promise.all([import("./dealsEmail"), import("./dealsTrec")]);
+      const [settings, trecSummary] = await Promise.all([getDealSettings(), trecImportSummary()]);
+      return { communities, leads, blocks, checks, homes, photos, agents, team, tours, fubJobs, doNotAutoImport, alerts, emailLogs, email: builderDealsEmailStatus(settings.alertRecipients), import: imports[0] ?? null, trecSummary };
     }),
     settings: adminProcedure.query(() => getDealSettings()),
     health: adminProcedure.query(async () => (await import("./dealsMaintenance")).builderDealsHealthCheck()),
+    mondayReport: adminProcedure.query(async () => (await import("./dealsMaintenance")).builderDealsMondayReport()),
+    addTrecFakeRow: adminProcedure.input(z.object({ fullName: z.string().trim().min(3).max(190), confirm: z.literal(true) })).mutation(async ({ input }) => (await import("./dealsTrec")).addTrecFakeRow(input.fullName)),
     refreshCommunity: adminProcedure.input(z.object({ id: z.number().positive() })).mutation(async ({ input }) => { const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" }); const community = (await db.select().from(dealCommunities).where(eq(dealCommunities.id, input.id)).limit(1))[0]; if (!community) throw new TRPCError({ code: "NOT_FOUND" }); return (await import("./dealsSync")).refreshOfficialDeals(); }),
     runFubRetry: adminProcedure.mutation(async () => (await import("./dealsFubJobs")).runPendingDealsFubJobs()),
     saveSettings: adminProcedure.input(z.object({
-      allowCanada: z.boolean().optional(), commentKeyword: z.string().min(1).max(30).optional(), textLine: z.string().min(1).max(40).optional(), expiryHours: z.number().int().min(1).max(168).optional(), hasAgentBlockDays: z.number().int().min(1).max(400).optional(), incentiveLapseDays: z.number().int().min(1).max(90).optional(), dailyVerificationCap: z.number().int().min(1).max(10000).optional(), phoneLimitPerHour: z.number().int().min(1).max(50).optional(), ipLimitPerHour: z.number().int().min(1).max(1000).optional(), testPhoneLimitPerHour: z.number().int().min(1).max(100).optional(), skipTwilioForTestNumbers: z.boolean().optional(), testNumbersSkipChecks: z.boolean().optional(), testModeFullPipeline: z.boolean().optional(), testNumbers: z.array(z.string()).max(20).optional(), testTeamNumbers: z.array(z.string()).max(20).optional(), activeReelCodes: z.array(z.string()).max(50).optional(), brokerageDomains: z.array(z.string().min(3)).max(100).optional(), fubRealtorTags: z.array(z.string()).max(100).optional(), fubRealtorSources: z.array(z.string()).max(100).optional(), handleKeywords: z.array(z.string()).max(100).optional(), trecCounties: z.array(z.string()).max(100).optional(), alertMode: z.enum(["instant", "hourly_digest"]).optional(),
+      allowCanada: z.boolean().optional(), commentKeyword: z.string().min(1).max(30).optional(), textLine: z.string().min(1).max(40).optional(), expiryHours: z.number().int().min(1).max(168).optional(), hasAgentBlockDays: z.number().int().min(1).max(400).optional(), incentiveLapseDays: z.number().int().min(1).max(90).optional(), dailyVerificationCap: z.number().int().min(1).max(10000).optional(), phoneLimitPerHour: z.number().int().min(1).max(50).optional(), ipLimitPerHour: z.number().int().min(1).max(1000).optional(), testPhoneLimitPerHour: z.number().int().min(1).max(100).optional(), skipTwilioForTestNumbers: z.boolean().optional(), testNumbersSkipChecks: z.boolean().optional(), testModeFullPipeline: z.boolean().optional(), testNumbers: z.array(z.string()).max(20).optional(), testTeamNumbers: z.array(z.string()).max(20).optional(), activeReelCodes: z.array(z.string()).max(50).optional(), brokerageDomains: z.array(z.string().min(3)).max(100).optional(), fubRealtorTags: z.array(z.string()).max(100).optional(), fubRealtorSources: z.array(z.string()).max(100).optional(), handleKeywords: z.array(z.string()).max(100).optional(), trecCounties: z.array(z.string()).max(100).optional(), alertRecipients: z.array(z.string().email()).min(1).max(20).optional(), alertMode: z.enum(["immediate", "hourly_digest"]).optional(),
     })).mutation(async ({ input }) => {
       const { saveDealSettings } = await import("./dealsService");
       return saveDealSettings(input);
@@ -197,6 +211,10 @@ export const dealsRouter = router({
       const settings = await getDealSettings();
       const { saveDealSettings } = await import("./dealsService");
       return saveDealSettings({ dailyVerificationCap: settings.dailyVerificationCap + 1000 });
+    }),
+    runAlertDelivery: adminProcedure.mutation(async () => {
+      const { dispatchPendingDealAlerts } = await import("./dealsAlerts");
+      return dispatchPendingDealAlerts({ includeFailed: true });
     }),
     saveCommunityState: adminProcedure.input(z.object({ id: z.number().int().positive(), active: z.boolean().optional(), paused: z.boolean().optional(), manualMode: z.boolean().optional(), reelUrl: z.string().url().nullable().optional() })).mutation(async ({ input }) => {
       const db = await getDb();

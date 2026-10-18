@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import mysql from "mysql2/promise";
 import { chromium } from "playwright";
 
-const missingSecrets = ["DEALS_TEST_OTP", "DATABASE_URL"].filter((name) => !process.env[name]?.trim());
+const missingSecrets = ["DEALS_TEST_OTP", "DATABASE_URL", "DEALS_E2E_BASE_URL"].filter((name) => !process.env[name]?.trim());
 if (missingSecrets.length) {
   console.warn(`SKIP protected Builder Deals browser regression: missing required secret${missingSecrets.length === 1 ? "" : "s"} ${missingSecrets.join(", ")}.`);
-  process.exit(0);
+  // CI must distinguish an intentional skip from a tested passing funnel.
+  process.exit(2);
 }
 const base = configuredUrl("DEALS_E2E_BASE_URL");
 const otp = process.env.DEALS_TEST_OTP!.trim();
@@ -21,7 +22,7 @@ const originalSettings = JSON.stringify(settings);
 settings.skipTwilioForTestNumbers = true;
 await db.query("UPDATE deal_settings SET value=? WHERE `key`='builder_deals'", [JSON.stringify(settings)]);
 await db.end();
-const browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true, args: ["--no-sandbox"] });
+const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || process.env.CHROMIUM_PATH || undefined, headless: true, args: ["--no-sandbox"] });
 const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
 const page = await context.newPage();
 let startRequests = 0;

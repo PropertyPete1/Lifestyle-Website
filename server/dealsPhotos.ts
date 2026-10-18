@@ -1,14 +1,16 @@
 import crypto from "node:crypto";
+import path from "node:path";
 import sharp, { type Metadata } from "sharp";
 import { and, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealPhotoRenders, dealPhotos, dealLeads } from "../drizzle/schema";
 import { getDb } from "./db";
 import { storagePut, storageReadPrivate } from "./storage";
+import { displayForLead } from "../shared/deals";
 
 const PRIVATE_PREFIX = "builder-deals-private/";
 const MAX_DOWNLOAD_BYTES = 18 * 1024 * 1024;
 const MAX_INPUT_PIXELS = 50_000_000;
-const MAX_ORIGINAL_EDGE = 2_400;
+const MAX_ORIGINAL_EDGE = 1_600;
 const MIN_OCR_WORD_CONFIDENCE = 75;
 const MAX_PROCESSING_ATTEMPTS = 5;
 const PROCESSING_LEASE_MS = 15 * 60_000;
@@ -75,7 +77,9 @@ function xmlText(value: string) {
 export function tiledWatermarkSvg(text: string, width: number, height: number) {
   const safe = xmlText(text).slice(0, 240);
   const fontSize = Math.max(13, Math.round(width / 42));
-  const columnGap = Math.max(220, Math.round(width / 2.2));
+  // Keep adjacent labels from overlapping even on narrow/mobile renders.
+  const estimatedLabelWidth = Math.ceil(safe.length * fontSize * 0.6);
+  const columnGap = Math.max(estimatedLabelWidth + fontSize * 2, Math.round(width / 2.2));
   const rowGap = Math.max(56, Math.round(height / 5));
   const labels: string[] = [];
   for (let y = -height; y < height * 2; y += rowGap) {
@@ -155,7 +159,14 @@ async function runOcrExclusively<T>(work: () => Promise<T>): Promise<T> {
 async function ocrTerms(bytes: Buffer, terms: string[]): Promise<OcrMatch[]> {
   try {
     const { createWorker } = await import("tesseract.js");
-    ocrWorkerPromise ??= createWorker("eng", 1, { logger: () => undefined }) as unknown as Promise<OcrWorker>;
+    ocrWorkerPromise ??= createWorker("eng", 1, {
+      logger: () => undefined,
+      // Keep OCR deterministic and offline: this vendored tessdata_fast model
+      // is committed under server/ocr, so Tesseract never fetches language data.
+      langPath: path.join(process.cwd(), "server", "ocr"),
+      cachePath: path.join(process.cwd(), ".cache", "builder-deals-ocr"),
+      gzip: false,
+    }) as unknown as Promise<OcrWorker>;
     const result = await runOcrExclusively(async () => (await ocrWorkerPromise!).recognize(bytes));
     if (!Array.isArray(result.data?.words)) throw new Error("OCR returned no word data");
     return findExactOcrMatches(
@@ -406,10 +417,6 @@ export function dealPhotoRenderCacheVersion(photoVersion: string, leadId: number
   return digest(`watermark-v1\u0000${photoVersion}\u0000${leadId}\u0000${identity}`).slice(0, 64);
 }
 
-function leadWatermarkIdentity(lead: { instagramHandle: string | null; name: string | null; phoneE164: string }) {
-  return lead.instagramHandle ? `@${lead.instagramHandle}` : lead.name?.trim() || `••••${lead.phoneE164.replace(/\D/g, "").slice(-4)}`;
-}
-
 /** Produces only per-lead watermarked image bytes; no object URL leaves the server. */
 export async function renderDealPhotoForLead(photoId: number, leadId: number) {
   try {
@@ -433,7 +440,7 @@ export async function renderDealPhotoForLead(photoId: number, leadId: number) {
       )).limit(1))[0];
     if (!row?.photo.processedStorageKey || !row.photo.processedVersion) return null;
 
-    const identity = leadWatermarkIdentity(row.lead);
+    const identity = displayForLead(row.lead);
     const cacheVersion = dealPhotoRenderCacheVersion(row.photo.processedVersion, leadId, identity);
     const cached = (await db.select().from(dealPhotoRenders).where(and(
       eq(dealPhotoRenders.photoId, photoId),

@@ -50,7 +50,7 @@ describe("Builder Deals private photo primitives", () => {
 
     expect(first.equals(second)).toBe(true);
     expect(metadata.format).toBe("webp");
-    expect(Math.max(metadata.width ?? 0, metadata.height ?? 0)).toBeLessThanOrEqual(2_400);
+    expect(Math.max(metadata.width ?? 0, metadata.height ?? 0)).toBeLessThanOrEqual(1_600);
     expect(metadata.exif).toBeUndefined();
     expect(metadata.xmp).toBeUndefined();
   });

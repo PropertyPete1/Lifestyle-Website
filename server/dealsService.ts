@@ -9,6 +9,7 @@ import {
   dealEvents,
   dealHomes,
   dealIncentives,
+  dealJobRuns,
   dealLeads,
   dealPendingVerifications,
   dealPhotos,
@@ -54,7 +55,9 @@ export type DealSettings = {
   fubRealtorSources: string[];
   handleKeywords: string[];
   trecCounties: string[];
-  alertMode: "instant" | "hourly_digest";
+  /** Resend recipient list; used by owner-notification fallback only as context. */
+  alertRecipients: string[];
+  alertMode: "immediate" | "hourly_digest";
 };
 
 const DEFAULT_SETTINGS: DealSettings = {
@@ -79,7 +82,8 @@ const DEFAULT_SETTINGS: DealSettings = {
   fubRealtorSources: ["New Agent Inquiry", "Agent Scouting"],
   handleKeywords: ["realtor", "realty", "homes", "sells", "estate", "broker", "exprealty", "kw", "compass"],
   trecCounties: ["Bexar", "Comal", "Guadalupe", "Wilson", "Medina", "Kendall", "Atascosa", "Bandera", "Travis", "Williamson", "Hays", "Bastrop", "Caldwell"],
-  alertMode: "instant",
+  alertRecipients: ["peter@lifestyledesignrealty.com", "steven@lifestyledesignrealty.com"],
+  alertMode: "immediate",
 };
 
 const SETTINGS_KEY = "builder_deals";
@@ -185,7 +189,11 @@ export async function getDealSettings(): Promise<DealSettings> {
   const row = (await db.select().from(dealSettings).where(eq(dealSettings.key, SETTINGS_KEY)).limit(1))[0];
   if (!row) return { ...DEFAULT_SETTINGS };
   try {
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(row.value) };
+    const parsed = JSON.parse(row.value) as Partial<DealSettings> & { alertMode?: unknown };
+    const alertMode = parsed.alertMode === "hourly_digest" ? "hourly_digest" : "immediate";
+    // Preserve the previous stored label while exposing only the clearer,
+    // requested immediate/hourly modes to the current admin surface.
+    return { ...DEFAULT_SETTINGS, ...parsed, alertMode };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -197,6 +205,13 @@ export async function saveDealSettings(settings: Partial<DealSettings>) {
   const merged = { ...(await getDealSettings()), ...settings };
   if (settings.testNumbers) merged.testNumbers = normalizeTestNumbers(settings.testNumbers, merged.allowCanada);
   if (settings.testTeamNumbers) merged.testTeamNumbers = normalizeTestNumbers(settings.testTeamNumbers, merged.allowCanada);
+  if (settings.alertRecipients) {
+    const recipients = Array.from(new Set(settings.alertRecipients.map((value) => value.trim().toLowerCase()).filter(Boolean)));
+    if (!recipients.length || recipients.length > 20 || recipients.some((value) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))) {
+      throw new Error("Enter one to twenty valid Builder Deals alert email addresses");
+    }
+    merged.alertRecipients = recipients;
+  }
   await db.insert(dealSettings).values({ key: SETTINGS_KEY, value: JSON.stringify(merged) }).onDuplicateKeyUpdate({ set: { value: JSON.stringify(merged) } });
   return merged;
 }
@@ -265,6 +280,20 @@ export function chicagoDayStart(now = new Date()): Date {
   return chicagoDate(get("year"), get("month"), get("day"));
 }
 
+/** Stable Chicago calendar identity used for jobs, requests, and daily caps. */
+export function chicagoDay(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+  const value = (key: string) => parts.find((part) => part.type === key)?.value || "00";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
+/** Chicago wall-clock values; never derive schedules from fixed UTC offsets. */
+export function chicagoClock(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "2-digit", minute: "2-digit", hourCycle: "h23", weekday: "short" }).formatToParts(now);
+  const value = (key: string) => parts.find((part) => part.type === key)?.value || "";
+  return { hour: Number(value("hour")), minute: Number(value("minute")), weekday: value("weekday") };
+}
+
 export function chicagoEndOfDay(year: number, month: number, day: number): Date {
   return chicagoDate(year, month, day, 23, 59, 59);
 }
@@ -310,7 +339,14 @@ export async function reserveVerificationAttempt(input: {
     phone: input.phone, detail: `channel:${input.channel};${input.isTest ? "TEST" : "live"}`,
   });
   const nextCount = dailyCount + 1;
-  if (nextCount === Math.min(300, settings.dailyVerificationCap)) void notifyOwner({ title: "Builder Deals Verify threshold reached", content: `Builder Deals reached ${nextCount} verification sends today. Review safety settings or raise the cap in Admin → Builder Deals: /admin/deals.` }).catch(console.error);
+  if (nextCount === Math.min(300, settings.dailyVerificationCap)) {
+    // `deal_job_runs` has a (job, Chicago day) unique key. Claiming it first
+    // makes a simultaneous 300th request produce exactly one owner alert.
+    try {
+      await db.insert(dealJobRuns).values({ jobName: "builder-deals-verify-threshold", chicagoDay: chicagoDay(), status: "running" });
+      void notifyOwner({ title: "Builder Deals Verify threshold reached", content: `Builder Deals reached ${nextCount} verification sends today. Review safety settings or raise the cap in Admin → Builder Deals: /admin/deals.` }).finally(() => db.update(dealJobRuns).set({ status: "ok", completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, "builder-deals-verify-threshold"), eq(dealJobRuns.chicagoDay, chicagoDay())))).catch(console.error);
+    } catch { /* an already-claimed daily threshold alert is intentionally silent */ }
+  }
   return { ok: true, dailyCount: nextCount };
 }
 

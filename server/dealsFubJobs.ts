@@ -11,7 +11,8 @@ import {
   type FubDeliveryResult,
   updateBuilderDealsLeadInFub,
 } from "./dealsFub";
-import { notifyOwner } from "./_core/notification";
+import { sendBuilderDealsEmail } from "./dealsEmail";
+import { getDealSettings } from "./dealsService";
 
 export type FubOperation =
   | "first_unlock"
@@ -20,7 +21,7 @@ export type FubOperation =
   | `request_note:${number}`
   | `request_email:${number}`;
 
-type LeadJobMetadata = { reason?: "re-verified on a second device" | "returned for a new link" };
+type LeadJobMetadata = { reason?: "re-verified on a second device" | "returned for a new link"; occurrenceId?: string };
 type RequestJobMetadata = { requestId: number };
 type JobMetadata = LeadJobMetadata | RequestJobMetadata;
 
@@ -56,7 +57,10 @@ export async function enqueueDealsFubJob(
   const db = await getDb();
   if (!db) return;
   const now = new Date();
-  const payload = typeof metadata === "string" ? { reason: metadata } : metadata;
+  const payload = {
+    ...(typeof metadata === "string" ? { reason: metadata } : metadata),
+    ...(operation === "reverify" ? { occurrenceId: new Date().toISOString() } : {}),
+  };
   await db.insert(dealFubJobs).values({ leadId, operation, payload: JSON.stringify(payload), status: "pending", nextAttemptAt: now })
     .onDuplicateKeyUpdate({ set: {
       payload: JSON.stringify(payload),
@@ -165,13 +169,14 @@ async function executeRequestEmail(job: typeof dealFubJobs.$inferSelect): Promis
   const loaded = await loadRequestJob(job);
   if (!db) return { ok: false, error: "Database unavailable" };
   if (!loaded || loaded.request.emailSentAt) return { ok: true, records: [] };
-  const sent = await notifyOwner({
-    title: loaded.request.requestType === "tour" ? "Builder Deals tour request" : "Builder Deals question",
-    // notifyOwner is a project-owner notification, not SMTP; recipient text is
-    // explicit so staff do not infer that a second mailbox has been mailed.
-    content: `Builder Deals lead ${loaded.lead.id} requested ${loaded.privateDescription}.\nPreferred: ${formatChicagoDateTime(loaded.request.preferredAt)}\nNotification route: project owner only (not a direct email to Steven).`,
+  const settings = await getDealSettings();
+  const sent = await sendBuilderDealsEmail({
+    category: "tour_request",
+    recipients: settings.alertRecipients,
+    subject: loaded.request.requestType === "tour" ? "Builder Deals tour request" : "Builder Deals question",
+    content: `Builder Deals lead ${loaded.lead.id} requested ${loaded.privateDescription}.\nPreferred: ${formatChicagoDateTime(loaded.request.preferredAt)}\nReview the protected request in Admin → Builder Deals.`,
   });
-  if (!sent) return { ok: false, error: "Owner notification was not accepted" };
+  if (!sent.ok) return { ok: false, error: sent.error ?? "Builder Deals email was not accepted" };
   await db.update(dealTourRequests).set({ emailSentAt: new Date() }).where(eq(dealTourRequests.id, loaded.request.id));
   return { ok: true, records: [] };
 }
@@ -191,7 +196,7 @@ async function executeLeasedJob(job: typeof dealFubJobs.$inferSelect): Promise<F
     const metadata = parseMetadata(job.payload) as LeadJobMetadata;
     return job.operation === "first_unlock"
       ? sendBuilderDealsLeadToFub(payload)
-      : updateBuilderDealsLeadInFub(payload, metadata.reason ?? "returned for a new link");
+      : updateBuilderDealsLeadInFub(payload, metadata.reason ?? "returned for a new link", metadata.occurrenceId);
   }
   if (job.operation.startsWith("request_task:")) return executeRequestTask(job);
   if (job.operation.startsWith("request_note:")) return executeRequestNote(job);
@@ -225,7 +230,20 @@ export async function runPendingDealsFubJobs(limit = 25) {
     if (!leaseToken) continue;
     leased += 1;
     try {
-      const result = await executeLeasedJob(job);
+      // An enqueue can update the only per-operation outbox row while this
+      // worker holds it. Re-read after claiming so the newest reason wins.
+      const current = (await db.select().from(dealFubJobs).where(and(eq(dealFubJobs.id, job.id), eq(dealFubJobs.status, "leased"), eq(dealFubJobs.leaseToken, leaseToken))).limit(1))[0];
+      if (!current) continue;
+      if (current.payload !== job.payload) {
+        await db.update(dealFubJobs).set({ status: "pending", nextAttemptAt: new Date(), leaseToken: null, leasedAt: null }).where(and(eq(dealFubJobs.id, job.id), eq(dealFubJobs.leaseToken, leaseToken)));
+        continue;
+      }
+      const result = await executeLeasedJob(current);
+      const afterDelivery = (await db.select({ payload: dealFubJobs.payload }).from(dealFubJobs).where(and(eq(dealFubJobs.id, job.id), eq(dealFubJobs.status, "leased"), eq(dealFubJobs.leaseToken, leaseToken))).limit(1))[0];
+      if (afterDelivery && afterDelivery.payload !== current.payload) {
+        await db.update(dealFubJobs).set({ status: "pending", nextAttemptAt: new Date(), leaseToken: null, leasedAt: null }).where(and(eq(dealFubJobs.id, job.id), eq(dealFubJobs.leaseToken, leaseToken)));
+        continue;
+      }
       if (result.ok) {
         await recordFubDelivery(job.leadId, result);
         await db.update(dealFubJobs).set({ status: "synced", completedAt: new Date(), attempts: job.attempts + 1, leaseToken: null, leasedAt: null, lastError: result.warning ?? null })

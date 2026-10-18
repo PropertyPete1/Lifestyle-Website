@@ -67,6 +67,9 @@ export function maskPhone(e164: string): string {
 export function normalizedText(input: string): string {
   return input
     .toLowerCase()
+    // Presentation punctuation at a token boundary must not create a distinct
+    // incentive/source identity. Decimal points followed by digits remain.
+    .replace(/[.,;:!?]+(?=\s|$)/g, " ")
     .replace(/[^a-z0-9%+.]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();

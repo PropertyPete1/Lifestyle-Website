@@ -40,6 +40,11 @@ function originOf(url: string): string {
   }
 }
 
+/** Builder Deals is intentionally telemetry-free, including host-injected Umami markup. */
+function stripDealsTelemetry(html: string) {
+  return html.replace(/\s*<script\b[^>]*\bsrc=["'][^"']*\/umami[^"']*["'][\s\S]*?<\/script>/gi, "");
+}
+
 export function buildTags(opts: {
   title: string;
   description: string;
@@ -175,7 +180,8 @@ export function registerOgMeta(app: Express) {
     const originalSend = res.send.bind(res);
     res.send = ((body: unknown) => {
       if (typeof body === "string" && body.includes("<!--og-meta-->")) {
-        body = body.replace("<!--og-meta-->", tags);
+        if (isDealsLanding || isDealsPrivateDocument) body = stripDealsTelemetry(body as string);
+        body = (body as string).replace("<!--og-meta-->", tags);
       }
       return originalSend(body as never);
     }) as typeof res.send;
@@ -184,7 +190,8 @@ export function registerOgMeta(app: Express) {
     const originalEnd = res.end.bind(res);
     res.end = ((chunk?: unknown, ...rest: unknown[]) => {
       if (typeof chunk === "string" && chunk.includes("<!--og-meta-->")) {
-        chunk = chunk.replace("<!--og-meta-->", tags);
+        if (isDealsLanding || isDealsPrivateDocument) chunk = stripDealsTelemetry(chunk as string);
+        chunk = (chunk as string).replace("<!--og-meta-->", tags);
       }
       return (originalEnd as (...args: unknown[]) => Response)(chunk, ...rest);
     }) as typeof res.end;
@@ -197,7 +204,8 @@ export function registerOgMeta(app: Express) {
           .readFile(filePath, "utf-8")
           .then((html) => {
             if (html.includes("<!--og-meta-->")) {
-              res.type("html").send(html.replace("<!--og-meta-->", tags));
+              const safeHtml = isDealsLanding || isDealsPrivateDocument ? stripDealsTelemetry(html) : html;
+              res.type("html").send(safeHtml.replace("<!--og-meta-->", tags));
             } else {
               originalSendFile(filePath, ...rest);
             }

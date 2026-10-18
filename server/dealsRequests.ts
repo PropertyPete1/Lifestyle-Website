@@ -1,14 +1,8 @@
 import { and, asc, eq } from "drizzle-orm";
 import { dealHomes, dealLeads, dealTourRequests } from "../drizzle/schema";
 import { getDb } from "./db";
-import { hashSecret, logDealEvent } from "./dealsService";
+import { chicagoDay, hashSecret, logDealEvent } from "./dealsService";
 import { enqueueDealsRequestJobs, runPendingDealsFubJobs } from "./dealsFubJobs";
-
-function chicagoDay(value: Date) {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(value);
-  const part = (name: string) => parts.find((item) => item.type === name)?.value || "00";
-  return `${part("year")}-${part("month")}-${part("day")}`;
-}
 
 /** The opaque card is resolved only after session authentication; no private mapping enters the browser. */
 export async function createDealsHomeRequest(input: { leadId: number; card: string; requestType: "tour" | "ask"; preferredAt: Date; sourceCode: string; deviceHash: string }) {

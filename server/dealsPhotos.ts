@@ -1,23 +1,24 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import sharp, { type Metadata } from "sharp";
-import { and, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm";
-import { dealCommunities, dealHomes, dealPhotoRenders, dealPhotos, dealLeads } from "../drizzle/schema";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { dealCommunities, dealHomes, dealPhotoRenders, dealPhotos, dealLeads, dealSettings } from "../drizzle/schema";
 import { getDb } from "./db";
-import { storagePut, storageReadPrivate } from "./storage";
+import { storageDelete, storageDeleteCapability, storagePut, storageReadPrivate } from "./storage";
 import { displayForLead } from "../shared/deals";
 
 const PRIVATE_PREFIX = "builder-deals-private/";
 const MAX_DOWNLOAD_BYTES = 18 * 1024 * 1024;
 const MAX_INPUT_PIXELS = 50_000_000;
 const MAX_ORIGINAL_EDGE = 1_600;
-const MIN_OCR_WORD_CONFIDENCE = 75;
+const MIN_OCR_WORD_CONFIDENCE = 70;
 const MAX_PROCESSING_ATTEMPTS = 5;
 const PROCESSING_LEASE_MS = 15 * 60_000;
 const APPROVED_IMAGE_HOSTS = new Set([
   "www.mihomes.com",
   "mihomes.com",
   "dam.mihomes.com",
+  "cdn.mihomes.com",
   "www.chesmar.com",
   "chesmar.com",
   "images.ctfassets.net",
@@ -39,12 +40,109 @@ type PhotoProcessingErrorCode =
   | "invalid_image"
   | "image_too_large"
   | "invalid_crop"
+  | "image_too_small"
+  | "watermark_region_missing"
+  | "watermark_settings_invalid"
+  | "queue_unavailable"
   | "storage_unavailable"
   | "ocr_unavailable"
   | "processing_failed";
 
-export type OcrWord = { text: string; confidence: number };
-export type OcrMatch = { term: string; confidence: number; words: string[] };
+export type PhotoRegion = { x: number; y: number; width: number; height: number };
+export type OcrBox = { x0: number; y0: number; x1: number; y1: number };
+export type OcrWord = { text: string; confidence: number; bbox?: OcrBox; lineId?: string };
+export type OcrMatch = { term: string; confidence: number; words: string[]; bbox?: OcrBox };
+export type BuilderPhotoSettings = {
+  enabled: boolean;
+  region: PhotoRegion | null;
+  keywords: string[];
+  reviewedSampleIds: number[];
+  revision: string;
+};
+export const DEFAULT_PHOTO_HIDE_KEYWORDS = ["Homes", "Realty", "Realtors", "Real Estate", "MLS", "Photography", "Copyright"];
+const LAUNCH_BUILDERS = new Set(["chesmar", "chesmar homes", "m/i homes"]);
+const builderKey = (builder: string) => builder.trim().toLowerCase().replace(/\s+/g, " ");
+const builderSettingsKey = (builder: string) => `photos.builder.${digest(builderKey(builder)).slice(0, 32)}`;
+
+/** Stored in the existing private settings table; no migration is required. */
+export function validatePhotoRegion(value: unknown): PhotoRegion {
+  if (!value || typeof value !== "object") throw new PhotoProcessingError("watermark_settings_invalid");
+  const { x, y, width, height } = value as PhotoRegion;
+  if (![x, y, width, height].every((n) => typeof n === "number" && Number.isFinite(n)) || x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 100 || y + height > 100) {
+    throw new PhotoProcessingError("watermark_settings_invalid");
+  }
+  return { x, y, width, height };
+}
+
+function defaultBuilderPhotoSettings(builder: string): BuilderPhotoSettings {
+  // Launch removal is ON, but an unreviewed/legacy "bottom" string is NEVER
+  // guessed into a rectangle. Publication waits for five reviewed samples.
+  return { enabled: LAUNCH_BUILDERS.has(builderKey(builder)), region: null, keywords: [...DEFAULT_PHOTO_HIDE_KEYWORDS], reviewedSampleIds: [], revision: "unconfigured-v1" };
+}
+
+export async function getBuilderPhotoSettings(builder: string): Promise<BuilderPhotoSettings> {
+  const db = await getDb();
+  if (!db) throw new PhotoProcessingError("queue_unavailable");
+  const key = builderSettingsKey(builder);
+  const stored = (await db.select().from(dealSettings).where(eq(dealSettings.key, key)).limit(1))[0];
+  if (!stored) {
+    const settings = defaultBuilderPhotoSettings(builder);
+    await db.insert(dealSettings).values({ key, value: JSON.stringify(settings) }).onDuplicateKeyUpdate({ set: { key } });
+    // Re-read a concurrent admin write rather than use stale defaults.
+    const actual = (await db.select().from(dealSettings).where(eq(dealSettings.key, key)).limit(1))[0];
+    if (!actual) return settings;
+    return parseBuilderPhotoSettings(actual.value);
+  }
+  return parseBuilderPhotoSettings(stored.value);
+}
+
+function parseBuilderPhotoSettings(value: string): BuilderPhotoSettings {
+  try {
+    const parsed = JSON.parse(value) as BuilderPhotoSettings;
+    if (typeof parsed.enabled !== "boolean" || !Array.isArray(parsed.keywords) || !parsed.keywords.every((s) => typeof s === "string") || typeof parsed.revision !== "string" || !Array.isArray(parsed.reviewedSampleIds)) throw new Error("invalid settings");
+    return { ...parsed, region: parsed.region ? validatePhotoRegion(parsed.region) : null, keywords: Array.from(new Set([...DEFAULT_PHOTO_HIDE_KEYWORDS, ...parsed.keywords])) };
+  } catch { throw new PhotoProcessingError("watermark_settings_invalid"); }
+}
+
+/** Read a builder image with strict redirects and a streaming download cap. */
+export async function downloadDealPhoto(raw: string, fetcher: typeof fetch = fetch): Promise<Buffer> {
+  let url = safeDealImageUrl(raw);
+  const initialHost = url.hostname;
+  const signal = AbortSignal.timeout(20_000);
+  for (let redirects = 0; redirects <= 3; redirects++) {
+    const response = await fetcher(url, { redirect: "manual", signal });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      await response.body?.cancel();
+      const location = response.headers.get("location");
+      if (!location || redirects === 3) throw new PhotoProcessingError("source_unavailable");
+      url = safeDealImageUrl(new URL(location, url).toString());
+      if (url.hostname !== initialHost) throw new PhotoProcessingError("unapproved_source");
+      continue;
+    }
+    if (!response.ok || !response.headers.get("content-type")?.toLowerCase().startsWith("image/") || !response.body) {
+      await response.body?.cancel();
+      throw new PhotoProcessingError("source_unavailable");
+    }
+    if (Number(response.headers.get("content-length")) > MAX_DOWNLOAD_BYTES) {
+      await response.body.cancel();
+      throw new PhotoProcessingError("image_too_large");
+    }
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let length = 0;
+    try {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        length += next.value.byteLength;
+        if (length > MAX_DOWNLOAD_BYTES) throw new PhotoProcessingError("image_too_large");
+        chunks.push(Buffer.from(next.value));
+      }
+    } finally { await reader.cancel().catch(() => undefined); }
+    return Buffer.concat(chunks, length);
+  }
+  throw new PhotoProcessingError("source_unavailable");
+}
 
 /** Only explicitly reviewed HTTPS builder/CDN origins may supply a Deals image. */
 export function safeDealImageUrl(raw: string): URL {
@@ -111,7 +209,7 @@ export function normalizedOcrTokens(value: string): string[] {
  * e.g. treating "chester" as an occurrence of "Chesmar".
  */
 export function findExactOcrMatches(words: OcrWord[], terms: string[], minimumConfidence = MIN_OCR_WORD_CONFIDENCE): OcrMatch[] {
-  const expandedWords = words.flatMap((word) => normalizedOcrTokens(word.text).map((text) => ({ text, confidence: Number(word.confidence) })));
+  const expandedWords = words.flatMap((word) => normalizedOcrTokens(word.text).map((text) => ({ ...word, text, confidence: Number(word.confidence) })));
   const uniqueTerms = new Map<string, { term: string; tokens: string[] }>();
   for (const rawTerm of terms) {
     const term = rawTerm.trim();
@@ -123,11 +221,13 @@ export function findExactOcrMatches(words: OcrWord[], terms: string[], minimumCo
   for (const { term, tokens } of Array.from(uniqueTerms.values())) {
     for (let start = 0; start <= expandedWords.length - tokens.length; start++) {
       const candidate = expandedWords.slice(start, start + tokens.length);
-      if (candidate.every((word, index) => word.text === tokens[index] && Number.isFinite(word.confidence) && word.confidence >= minimumConfidence)) {
+      if (candidate.every((word, index) => word.text === tokens[index] && Number.isFinite(word.confidence) && word.confidence >= minimumConfidence && (!word.lineId || !candidate[0].lineId || word.lineId === candidate[0].lineId))) {
+        const boxes = candidate.map((word) => word.bbox).filter((box): box is OcrBox => Boolean(box));
         matches.push({
           term,
           confidence: Math.round(Math.min(...candidate.map((word) => word.confidence)) * 100) / 100,
           words: candidate.map((word) => word.text),
+          ...(boxes.length === candidate.length ? { bbox: { x0: Math.min(...boxes.map((b) => b.x0)), y0: Math.min(...boxes.map((b) => b.y0)), x1: Math.max(...boxes.map((b) => b.x1)), y1: Math.max(...boxes.map((b) => b.y1)) } } : {}),
         });
         break;
       }
@@ -136,13 +236,45 @@ export function findExactOcrMatches(words: OcrWord[], terms: string[], minimumCo
   return matches;
 }
 
+/** Step 6: full words/phrases only; short builder names need adjacent Homes. */
+export function findDealPhotoHideMatches(words: OcrWord[], terms: string[], keywords: string[] = DEFAULT_PHOTO_HIDE_KEYWORDS): OcrMatch[] {
+  const longTerms: string[] = [];
+  for (const term of terms) {
+    const tokens = normalizedOcrTokens(term);
+    if (!tokens.length) continue;
+    if (tokens.join("").length >= 4) longTerms.push(term);
+    else longTerms.push(`${term} Homes`, `Homes ${term}`);
+  }
+  // Keywords intentionally include the short term MLS. Homes is independently
+  // prohibited even if a short builder name was missed by OCR.
+  return findExactOcrMatches(words, [...longTerms, ...DEFAULT_PHOTO_HIDE_KEYWORDS, ...keywords]);
+}
+
+export function dealPhotoHouseNumber(address: string | null | undefined): string | null {
+  return /^\s*(\d+[a-z]?)\b/i.exec(address ?? "")?.[1] ?? null;
+}
+
 type OcrWorker = {
-  recognize(bytes: Buffer): Promise<{ data?: { words?: Array<{ text?: string; confidence?: number }> } }>;
+  recognize(bytes: Buffer, options: object, output: { blocks: boolean }): Promise<{ data?: { blocks?: Array<{ paragraphs: Array<{ lines: Array<{ words: OcrWord[] }> }> }> | null } }>;
   terminate(): Promise<unknown>;
 };
 
 let ocrWorkerPromise: Promise<OcrWorker> | null = null;
 let ocrWork: Promise<void> = Promise.resolve();
+const OCR_TIMEOUT_MS = 30_000;
+
+async function withDeadline<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([promise, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new PhotoProcessingError("ocr_unavailable")), milliseconds); })]);
+  } finally { if (timer) clearTimeout(timer); }
+}
+
+async function resetOcrWorker() {
+  const previous = ocrWorkerPromise;
+  ocrWorkerPromise = null;
+  if (previous) void previous.then((worker) => withDeadline(worker.terminate(), 2_000)).catch(() => undefined);
+}
 
 async function runOcrExclusively<T>(work: () => Promise<T>): Promise<T> {
   const previous = ocrWork;
@@ -156,44 +288,43 @@ async function runOcrExclusively<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-async function ocrTerms(bytes: Buffer, terms: string[]): Promise<OcrMatch[]> {
-  try {
-    const { createWorker } = await import("tesseract.js");
-    ocrWorkerPromise ??= createWorker("eng", 1, {
-      logger: () => undefined,
-      // Keep OCR deterministic and offline: this vendored tessdata_fast model
-      // is committed under server/ocr, so Tesseract never fetches language data.
-      langPath: path.join(process.cwd(), "server", "ocr"),
-      cachePath: path.join(process.cwd(), ".cache", "builder-deals-ocr"),
-      gzip: false,
-    }) as unknown as Promise<OcrWorker>;
-    const result = await runOcrExclusively(async () => (await ocrWorkerPromise!).recognize(bytes));
-    if (!Array.isArray(result.data?.words)) throw new Error("OCR returned no word data");
-    return findExactOcrMatches(
-      result.data.words
-        .filter((word): word is { text: string; confidence: number } => typeof word.text === "string" && typeof word.confidence === "number")
-        .map((word) => ({ text: word.text, confidence: word.confidence })),
-      terms,
-    );
-  } catch {
-    // A failed screen is not a clear screen. The queue retries this state and
-    // the asset remains unavailable until a later scan succeeds.
-    throw new PhotoProcessingError("ocr_unavailable");
-  }
+export async function recognizeDealPhotoWords(bytes: Buffer): Promise<OcrWord[]> {
+  return runOcrExclusively(async () => {
+    try {
+      if (!ocrWorkerPromise) {
+        const { createWorker } = await import("tesseract.js");
+        ocrWorkerPromise = createWorker("eng", 1, {
+          logger: () => undefined,
+          langPath: path.join(process.cwd(), "server", "ocr"),
+          cachePath: path.join(process.cwd(), ".cache", "builder-deals-ocr"),
+          gzip: false,
+        }) as unknown as Promise<OcrWorker>;
+      }
+      // Tesseract 7 defaults to text-only and has no data.words. Request blocks
+      // explicitly and flatten their line words, preserving spatial adjacency.
+      const worker = await withDeadline(ocrWorkerPromise, OCR_TIMEOUT_MS);
+      const result = await withDeadline(worker.recognize(bytes, {}, { blocks: true }), OCR_TIMEOUT_MS);
+      if (!result.data || !(result.data.blocks === null || Array.isArray(result.data.blocks))) throw new Error("missing OCR blocks");
+      return (result.data.blocks ?? []).flatMap((block, b) => block.paragraphs.flatMap((paragraph, p) => paragraph.lines.flatMap((line, l) => line.words
+        .filter((word) => typeof word.text === "string" && Number.isFinite(word.confidence))
+        .map((word) => ({ text: word.text, confidence: word.confidence, bbox: word.bbox, lineId: `${b}:${p}:${l}` })))));
+    } catch {
+      await resetOcrWorker();
+      throw new PhotoProcessingError("ocr_unavailable");
+    }
+  });
 }
 
 export async function closeDealPhotoOcrWorker() {
-  await ocrWork;
-  const worker = ocrWorkerPromise;
-  ocrWorkerPromise = null;
-  ocrWork = Promise.resolve();
-  if (worker) await (await worker).terminate();
+  await withDeadline(ocrWork, OCR_TIMEOUT_MS + 2_000).catch(() => undefined);
+  await resetOcrWorker();
 }
 
 function safeScrubList(value: string): string[] {
   try {
     const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+    const values = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" ? Object.values(parsed).flat() : [];
+    return values.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
   } catch {
     return [];
   }
@@ -318,6 +449,8 @@ export async function processDealPhoto(photoId: number): Promise<{ ok: boolean; 
       throw new PhotoProcessingError("source_unavailable");
     }
     const normalizedOriginal = await normalizeDealPhotoOriginal(Buffer.from(await response.arrayBuffer()));
+    const builderSettings = await getBuilderPhotoSettings(row.community.builder);
+    if (builderSettings.enabled && !builderSettings.region) throw new PhotoProcessingError("watermark_region_missing");
     const master = await makeDealPhotoMaster(normalizedOriginal, row.photo.bottomCrop, row.community.watermarkRemovalApproved);
     const configuredTerms = Array.from(new Set([
       row.community.builder,
@@ -326,7 +459,7 @@ export async function processDealPhoto(photoId: number): Promise<{ ok: boolean; 
       row.home.privatePlanName ?? "",
       ...safeScrubList(row.community.scrubList),
     ].filter((term): term is string => Boolean(term.trim()))));
-    const matches = await ocrTerms(master, configuredTerms);
+    const matches = findDealPhotoHideMatches(await recognizeDealPhotoWords(master), configuredTerms, builderSettings.keywords);
     if (matches.length) {
       await db.update(dealPhotos).set({
         automaticHidden: true,

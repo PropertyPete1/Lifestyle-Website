@@ -109,6 +109,12 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
   return { key, url: `/manus-storage/${key}` };
 }
 
+// Forge exposes only PUT and signed GET for this project. Builder Deals uses
+// deterministic overwrite keys and prunes database render rows instead of
+// pretending a destructive object API exists.
+export const storageDeleteCapability = false;
+export async function storageDelete(_relKey: string): Promise<false> { return false; }
+
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const { forgeUrl, forgeKey } = getForgeConfig();
   const key = normalizeStorageKey(relKey);

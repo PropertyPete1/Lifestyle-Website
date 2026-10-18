@@ -32,6 +32,7 @@ describe("Builder Deals private photo primitives", () => {
 
     expect(findExactOcrMatches(words, ["Sienna Lakes", "Chesmar", "Ches"])).toEqual([
       { term: "Sienna Lakes", confidence: 76, words: ["sienna", "lakes"] },
+      { term: "Chesmar", confidence: 74, words: ["chesmar"] },
     ]);
     expect(normalizedOcrTokens("M/I Homes — #42")).toEqual(["m", "i", "homes", "42"]);
   });

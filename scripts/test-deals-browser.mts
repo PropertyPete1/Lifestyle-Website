@@ -1,80 +1,62 @@
 import assert from "node:assert/strict";
-import mysql from "mysql2/promise";
 import { chromium } from "playwright";
+import { assertMobileGeometry, browserExecutable, configuredBaseUrl, demoOtp, demoPhone, installDemoFixtures } from "./deals-browser-fixtures.mts";
 
-const missingSecrets = ["DEALS_TEST_OTP", "DATABASE_URL", "DEALS_E2E_BASE_URL"].filter((name) => !process.env[name]?.trim());
-if (missingSecrets.length) {
-  console.warn(`SKIP protected Builder Deals browser regression: missing required secret${missingSecrets.length === 1 ? "" : "s"} ${missingSecrets.join(", ")}.`);
-  // CI must distinguish an intentional skip from a tested passing funnel.
-  process.exit(2);
-}
-const base = configuredUrl("DEALS_E2E_BASE_URL");
-const otp = process.env.DEALS_TEST_OTP!.trim();
-const databaseUrl = process.env.DATABASE_URL!.trim();
-
-const db = await mysql.createConnection(databaseUrl);
-const [rows] = await db.query<any[]>("SELECT value FROM deal_settings WHERE `key`='builder_deals'");
-const settings = JSON.parse(rows[0]?.value || "{}");
-if (!settings.testNumbers?.[0]) throw new Error("A normalized test number is required for this preview-only browser test");
-const originalSettings = JSON.stringify(settings);
-// The saved admin setting remains intact. Only this isolated browser test gets
-// a local test-code transport because preview runtime credentials are absent.
-settings.skipTwilioForTestNumbers = true;
-await db.query("UPDATE deal_settings SET value=? WHERE `key`='builder_deals'", [JSON.stringify(settings)]);
-await db.end();
-const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || process.env.CHROMIUM_PATH || undefined, headless: true, args: ["--no-sandbox"] });
-const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
-const page = await context.newPage();
-let startRequests = 0;
-page.on("response", (response) => {
-  if (response.url().includes("deals.start")) {
-    startRequests += 1;
-    const names = (response.headers()["set-cookie"] || "").split(/, (?=[A-Za-z_]+=)/).map((value) => value.split("=")[0]).filter(Boolean);
-    console.log(`start-set-cookie:${names.join(",") || "none"}`);
-  }
-});
+const base = configuredBaseUrl();
+const browser = await chromium.launch({ executablePath: browserExecutable(), headless: true, args: ["--no-sandbox"] });
 try {
-  await page.goto(new URL("/deals?src=e2e", base).toString(), { waitUntil: "networkidle" });
-  await expectVisible(page, "#deals-phone");
-  await page.locator("#deals-phone").fill(settings.testNumbers[0]);
-  await page.getByRole("button", { name: "No, just me" }).click();
-  const startResponse = page.waitForResponse((response) => response.url().includes("deals.start"));
-  await page.getByRole("button", { name: /continue/i }).click();
-  const startBody = await (await startResponse).text();
-  console.log(`start-response:${startBody.includes('"ok":true') ? "ok" : "not-ok"}`);
-  await expectVisible(page, "#deals-code");
-  assert((await context.cookies(base.toString())).some((cookie) => cookie.name === "ldr_deals_pending" && cookie.path === "/"), "pending cookie must be sent to the verification form");
-  await page.reload({ waitUntil: "networkidle" });
-  await expectVisible(page, "#deals-code");
-  assert.equal(startRequests, 1, "reloading a pending code step must not send another verification code");
-  console.log("PASS Pending verification reload resumes at code step without a second send.");
-  await page.locator("#deals-code").fill(otp);
-  await page.waitForTimeout(250);
-  assert.equal(await page.locator("#deals-code").inputValue(), otp.trim(), "the controlled verification input must retain the test code");
-  await Promise.all([page.waitForURL(/\/deals\/mine/), page.getByRole("button", { name: /unlock my list/i }).click()]);
-  await expectVisible(page, "text=Private buyer list");
-  const cookies = await context.cookies(base.toString());
-  assert(cookies.some((cookie) => cookie.name === "ldr_deals_session" && cookie.path === "/"), "session cookie must be available to /api/trpc");
-  console.log("PASS Browser funnel: landing → gate → test OTP → token exchange → gated list; root session cookie present.");
+  const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
+  const state = await installDemoFixtures(context);
+  const page = await context.newPage();
+  await page.goto(new URL("/deals?src=fixture", base).toString(), { waitUntil: "domcontentloaded" });
+  await page.locator("#deals-phone").waitFor({ state: "visible" });
+  await assertMobileGeometry(page, "landing gate");
+  await page.locator("#deals-phone").fill(demoPhone);
+  await page.getByRole("button", { name: "No, just me", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.locator("#deals-code").waitFor({ state: "visible" });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator("#deals-code").waitFor({ state: "visible" });
+  assert.equal(state.startRequests, 1, "pending reload must not send a second start request");
+  console.log("PASS UI: pending reload resumes code step; exactly one start request.");
+  await page.locator("#deals-code").fill(demoOtp);
+  await Promise.all([page.waitForURL(/\/deals\/mine/), page.getByRole("button", { name: "Unlock my list", exact: true }).click()]);
+  await page.getByText("Private buyer list", { exact: true }).waitFor();
+  assert.equal(state.verifyRequests, 1);
+  await assertMobileGeometry(page, "name prompt and gated catalog");
+  console.log("PASS UI: fixture OTP form → exchange → personal list, 375px viewport and no oversized cards.");
+  await page.goto(new URL("/deals", base).toString(), { waitUntil: "domcontentloaded" });
+  await page.waitForURL(/\/deals\/mine/);
+  await page.getByText("Private buyer list", { exact: true }).waitFor();
+  assert.equal(await page.locator("#deals-phone").count(), 0);
+  console.log("PASS UI: active session bypasses gate.");
+  const second = await browser.newContext({ viewport: { width: 375, height: 812 } });
+  await installDemoFixtures(second, { sameDevice: false });
+  const otherPage = await second.newPage();
+  await otherPage.goto(new URL(`/deals/v/${state.exchangeToken}`, base).toString());
+  await otherPage.locator("#deals-phone").waitFor({ state: "visible" });
+  assert.equal(await otherPage.getByText("Private buyer list", { exact: true }).count(), 0);
+  console.log("PASS UI: other-device exchange rejection returns gate, not personal list.");
+  await page.getByRole("button", { name: "Dismiss name prompt" }).click();
+  const carousel = page.getByRole("region", { name: "" }).filter({ has: page.getByRole("button", { name: "Next home photo" }) }).first();
+  const next = page.getByRole("button", { name: "Next home photo" }).first();
+  await next.scrollIntoViewIfNeeded();
+  assert((await next.boundingBox())!.x >= 0, "next carousel control must not be clipped off-screen");
+  await next.click();
+  await assertMobileGeometry(page, "gallery after navigation");
+  await page.getByText("Photos on request — ask us for the latest gallery.", { exact: true }).waitFor();
+  await page.getByText(/Approximate area map unavailable/).waitFor();
+  assert.equal(await page.locator("[aria-label='Approximate area map'] circle").count(), 1, "missing-coordinate map must not render a fake circle");
+  console.log("PASS UI: gallery controls stay in card; missing map fails closed; To Be Built photo-request copy.");
+  const team = await browser.newContext({ viewport: { width: 375, height: 812 } });
+  await installDemoFixtures(team, { authenticated: true, team: true });
+  const teamPage = await team.newPage();
+  await teamPage.goto(new URL("/deals/mine", base).toString());
+  await teamPage.getByText("Private buyer list · Team preview", { exact: true }).waitFor();
+  assert.equal(await teamPage.getByRole("button", { name: /Tour this home|Ask about this one/ }).count(), 0);
+  await assertMobileGeometry(teamPage, "team preview");
+  console.log("PASS UI: team preview has no buyer request controls.");
+  console.log("6 browser UI checks passed. SYNTHETIC API fixtures only; not proof of runtime OTP/session security. No database/settings/CRM writes.");
 } finally {
   await browser.close();
-  const restore = await mysql.createConnection(databaseUrl);
-  await restore.query("UPDATE deal_settings SET value=? WHERE `key`='builder_deals'", [originalSettings]);
-  await restore.end();
-}
-
-async function expectVisible(page: import("playwright").Page, selector: string) {
-  await page.locator(selector).first().waitFor({ state: "visible", timeout: 15_000 });
-}
-
-function configuredUrl(name: string): URL {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required; no external preview URL is hardcoded.`);
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("must use HTTP(S)");
-    return url;
-  } catch (error) {
-    throw new Error(`${name} is invalid: ${error instanceof Error ? error.message : String(error)}`);
-  }
 }

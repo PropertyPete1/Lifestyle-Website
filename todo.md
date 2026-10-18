@@ -621,3 +621,9 @@ Three separate bugs stacked up:
 - [x] Deliver the code review branch, mobile screenshots, public API/privacy evidence, and preview admin URL. Do not checkpoint or publish Builder Deals until explicit user approval.
 - [ ] Before launch approval, complete live Twilio Verify delivery/Attempts confirmation once runtime secrets are accessible and obtain an authenticated admin-tab screenshot.
 - [ ] Complete the remaining original image-ingestion, FUB/team/realtor detection, cleanup, health-alert, and scheduled-maintenance requirements before live custom-domain publication.
+
+## Builder Deals Round 2 review — 2026-10-18
+- [ ] Repair cookie scope/probe, rate caps, official builder adapters, dated incentives, Instagram embeds, tour requests, re-verification FUB behavior, sync timestamps, and test evidence.
+- [ ] Build private photo ingestion and delivery, galleries, area treatment, complete realtor/team/known-agent/blocklist workflows, admin controls, funnel events, and live runtime privacy checks.
+- [ ] Build idempotent Chicago-time alerts, health, import, refresh, cleanup, and source-change schedules without registering them before deployment approval.
+- [ ] Re-run the full real-browser funnel and runtime privacy evidence, commit review screenshots and tests, then push only `builder-deals-preview` without checkpointing or publishing.

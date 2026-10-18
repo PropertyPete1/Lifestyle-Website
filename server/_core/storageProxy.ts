@@ -9,6 +9,13 @@ export function registerStorageProxy(app: Express) {
       return;
     }
 
+    // Builder Deals originals, masters and per-lead renders are never exposed
+    // through the general redirecting storage proxy.
+    if (key.startsWith("builder-deals-private/")) {
+      res.status(404).end();
+      return;
+    }
+
     if (!ENV.forgeApiUrl || !ENV.forgeApiKey) {
       res.status(500).send("Storage proxy not configured");
       return;

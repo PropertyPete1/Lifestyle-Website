@@ -95,3 +95,20 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const { url } = (await resp.json()) as { url: string };
   return url;
 }
+
+/**
+ * Server-only reader for private Builder Deals assets. The signed object URL
+ * remains inside the server process and the caller receives bytes, never it.
+ */
+export async function storageReadPrivate(relKey: string): Promise<{ data: Buffer; contentType: string }> {
+  if (!normalizeKey(relKey).startsWith("builder-deals-private/")) {
+    throw new Error("Private Deals storage key required");
+  }
+  const url = await storageGetSignedUrl(relKey);
+  const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+  if (!response.ok) throw new Error(`Private storage read failed (${response.status})`);
+  return {
+    data: Buffer.from(await response.arrayBuffer()),
+    contentType: response.headers.get("content-type") || "image/webp",
+  };
+}

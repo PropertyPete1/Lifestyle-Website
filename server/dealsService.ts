@@ -30,6 +30,7 @@ import {
   scrubPrivateNames,
 } from "../shared/deals";
 import { getDb } from "./db";
+import { notifyOwner } from "./_core/notification";
 
 export type DealSettings = {
   allowCanada: boolean;
@@ -46,7 +47,14 @@ export type DealSettings = {
   testNumbersSkipChecks: boolean;
   testModeFullPipeline: boolean;
   testNumbers: string[];
+  testTeamNumbers: string[];
   activeReelCodes: string[];
+  brokerageDomains: string[];
+  fubRealtorTags: string[];
+  fubRealtorSources: string[];
+  handleKeywords: string[];
+  trecCounties: string[];
+  alertMode: "instant" | "hourly_digest";
 };
 
 const DEFAULT_SETTINGS: DealSettings = {
@@ -64,7 +72,14 @@ const DEFAULT_SETTINGS: DealSettings = {
   testNumbersSkipChecks: true,
   testModeFullPipeline: false,
   testNumbers: [],
+  testTeamNumbers: [],
   activeReelCodes: ["sl1", "vg1"],
+  brokerageDomains: ["exprealty.com", "kw.com", "kwrealty.com", "compass.com", "redfin.com", "remax.net", "coldwellbanker.com", "c21.com", "century21.com", "bhhs.com", "jpar.com", "realbrokerage.com", "therealbrokerage.com", "lptrealty.com", "fathomrealty.com", "homesmart.com", "sothebysrealty.com", "douglaselliman.com", "elliman.com", "realtyaustin.com", "kuperrealty.com", "phyllisbrowning.com"],
+  fubRealtorTags: ["Recruit - Website", "Agent - Blocked", "Agent - FUB Match", "Recruit"],
+  fubRealtorSources: ["New Agent Inquiry", "Agent Scouting"],
+  handleKeywords: ["realtor", "realty", "homes", "sells", "estate", "broker", "exprealty", "kw", "compass"],
+  trecCounties: ["Bexar", "Comal", "Guadalupe", "Wilson", "Medina", "Kendall", "Atascosa", "Bandera", "Travis", "Williamson", "Hays", "Bastrop", "Caldwell"],
+  alertMode: "instant",
 };
 
 const SETTINGS_KEY = "builder_deals";
@@ -117,16 +132,24 @@ export function dealDeviceHash(req: Request): string | null {
   return device ? hashSecret(device) : null;
 }
 
-function cookieBase(maxAgeSeconds: number) {
-  return { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" as const, path: "/deals", maxAge: maxAgeSeconds };
+function cookieBase(maxAgeSeconds: number, path = "/") {
+  // The private data APIs live under /api/trpc, so Deals cookies must be
+  // same-origin—not /deals-scoped—or the browser will silently omit them.
+  // Express expects `maxAge` in milliseconds; call sites intentionally use
+  // seconds to match token/verification expiry calculations.
+  return { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax" as const, path, maxAge: maxAgeSeconds * 1000 };
 }
 
 export function setDealCookie(res: Response, name: string, value: string, maxAgeSeconds: number) {
   res.cookie(name, value, cookieBase(maxAgeSeconds));
+  // Retire the previous /deals-only value so duplicate-name ordering cannot
+  // make a stale device/pending cookie win during migration.
+  res.clearCookie(name, cookieBase(0, "/deals"));
 }
 
 export function clearDealCookie(res: Response, name: string) {
   res.clearCookie(name, cookieBase(0));
+  res.clearCookie(name, cookieBase(0, "/deals"));
 }
 
 export function ensureDealsCookies(req: Request, res: Response): { deviceHash: string; hasProbe: boolean } {
@@ -136,12 +159,24 @@ export function ensureDealsCookies(req: Request, res: Response): { deviceHash: s
     device = randomOpaqueToken(32);
     setDealCookie(res, DEALS_COOKIE.device, device, 400 * 24 * 60 * 60);
   }
-  let hasProbe = Boolean(cookies[DEALS_COOKIE.probe]);
+  // Return only an *incoming* probe. A cookie emitted in this response does
+  // not prove this browser will retain it for Continue or token exchange.
+  const hasProbe = Boolean(cookies[DEALS_COOKIE.probe]);
   if (!hasProbe) {
     setDealCookie(res, DEALS_COOKIE.probe, randomOpaqueToken(16), 24 * 60 * 60);
-    hasProbe = true;
   }
   return { deviceHash: hashSecret(device), hasProbe };
+}
+
+/** Normalize admin-entered test numbers at the server trust boundary. */
+export function normalizeTestNumbers(values: readonly string[], allowCanada = false): string[] {
+  const result = new Set<string>();
+  for (const value of values) {
+    const parsed = normalizeUsPhone(value, { allowCanada });
+    if (!parsed.ok) throw new Error(`Invalid test number: ${value}`);
+    result.add(parsed.e164);
+  }
+  return Array.from(result);
 }
 
 export async function getDealSettings(): Promise<DealSettings> {
@@ -160,6 +195,8 @@ export async function saveDealSettings(settings: Partial<DealSettings>) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const merged = { ...(await getDealSettings()), ...settings };
+  if (settings.testNumbers) merged.testNumbers = normalizeTestNumbers(settings.testNumbers, merged.allowCanada);
+  if (settings.testTeamNumbers) merged.testTeamNumbers = normalizeTestNumbers(settings.testTeamNumbers, merged.allowCanada);
   await db.insert(dealSettings).values({ key: SETTINGS_KEY, value: JSON.stringify(merged) }).onDuplicateKeyUpdate({ set: { value: JSON.stringify(merged) } });
   return merged;
 }
@@ -195,6 +232,94 @@ export async function rateLimitCount(kind: string, since: Date, fields: { phone?
   return Number(rows[0]?.n ?? 0);
 }
 
+function chicagoDayStart(now = new Date()): Date {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(now);
+  const get = (name: string) => Number(parts.find((part) => part.type === name)?.value ?? 0);
+  // Start only bounds an event count. A 30-hour window safely contains the
+  // current Chicago calendar day through both DST transitions.
+  return new Date(Date.UTC(get("year"), get("month") - 1, get("day")) - 6 * 60 * 60_000);
+}
+
+/**
+ * Reserve exactly one verification attempt before it is sent. This makes test
+ * OTP, SMS and voice requests share the same auditable safety limits.
+ */
+export async function reserveVerificationAttempt(input: {
+  phone: string;
+  sourceCode: string;
+  deviceHash: string;
+  ip: string;
+  channel: "sms" | "call";
+  isTest: boolean;
+}): Promise<{ ok: true; dailyCount: number } | { ok: false; kind: "rate_limited" | "daily_cap" }> {
+  const settings = await getDealSettings();
+  const sinceHour = new Date(Date.now() - 60 * 60_000);
+  const dayStart = chicagoDayStart();
+  const perPhoneLimit = input.isTest ? settings.testPhoneLimitPerHour : settings.phoneLimitPerHour;
+  const [perPhone, perIp, daily] = await Promise.all([
+    rateLimitCount("code_sent", sinceHour, { phone: input.phone }),
+    rateLimitCount("code_sent", sinceHour, { ip: input.ip }),
+    rateLimitCount("code_sent", dayStart, { deviceHash: "__all__" }).catch(() => 0),
+  ]);
+  // `rateLimitCount` needs a predicate, so obtain the daily total explicitly.
+  const db = await getDb();
+  if (!db) return { ok: false, kind: "daily_cap" };
+  const dayRows = await db.select({ n: sql<number>`count(*)` }).from(dealEvents)
+    .where(and(eq(dealEvents.kind, "code_sent"), gt(dealEvents.createdAt, dayStart)));
+  const dailyCount = Number(dayRows[0]?.n ?? daily);
+  if (perPhone >= perPhoneLimit || perIp >= settings.ipLimitPerHour) return { ok: false, kind: "rate_limited" };
+  if (dailyCount >= settings.dailyVerificationCap) {
+    void notifyOwner({ title: "Builder Deals verification cap reached", content: `To: peter@lifestyledesignrealty.com, steven@lifestyledesignrealty.com\n\nThe Builder Deals daily Verify cap (${settings.dailyVerificationCap}) refused a code request. Review or raise the cap in Admin → Builder Deals: /admin/deals.` });
+    return { ok: false, kind: "daily_cap" };
+  }
+  await logDealEvent({
+    kind: "code_sent", sourceCode: input.sourceCode, deviceHash: input.deviceHash, ip: input.ip,
+    detail: `phone:${input.phone};channel:${input.channel};${input.isTest ? "TEST" : "live"}`,
+  });
+  const nextCount = dailyCount + 1;
+  if (nextCount === Math.min(300, settings.dailyVerificationCap)) void notifyOwner({ title: "Builder Deals Verify threshold reached", content: `To: peter@lifestyledesignrealty.com, steven@lifestyledesignrealty.com\n\nBuilder Deals reached ${nextCount} verification sends today. Review safety settings or raise the cap in Admin → Builder Deals: /admin/deals.` });
+  return { ok: true, dailyCount: nextCount };
+}
+
+/** Server-side de-duplication prevents focus/remount activity inflating funnel data. */
+export async function recordGateFocus(input: { sourceCode: string; deviceHash: string; ip: string }) {
+  const db = await getDb();
+  if (!db) return;
+  const recent = (await db.select({ id: dealEvents.id }).from(dealEvents).where(and(
+    eq(dealEvents.kind, "started_gate"), eq(dealEvents.deviceHash, input.deviceHash),
+    eq(dealEvents.sourceCode, input.sourceCode), gt(dealEvents.createdAt, new Date(Date.now() - 60 * 60_000)),
+  )).limit(1))[0];
+  if (!recent) await logDealEvent({ kind: "started_gate", ...input });
+}
+
+/** Account/API failures only: caller omits normal landline and STOP outcomes. */
+export async function recordTwilioVerifyFailure(input: { sourceCode: string; deviceHash: string; ip: string }) {
+  const db = await getDb(); if (!db) return;
+  await logDealEvent({ kind: "twilio_api_error", ...input });
+  const recent = await db.select({ kind: dealEvents.kind }).from(dealEvents).where(gt(dealEvents.createdAt, new Date(Date.now() - 60 * 60_000))).orderBy(desc(dealEvents.createdAt)).limit(400);
+  const sends = recent.filter((row) => row.kind === "code_sent").length;
+  const errors = recent.filter((row) => row.kind === "twilio_api_error").length;
+  const consecutive = recent.slice(0, 3).length === 3 && recent.slice(0, 3).every((row) => row.kind === "twilio_api_error");
+  const alertSent = (await db.select({ id: dealEvents.id }).from(dealEvents).where(and(eq(dealEvents.kind, "twilio_alert"), gt(dealEvents.createdAt, new Date(Date.now() - 6 * 60 * 60_000)))).limit(1))[0];
+  if (!alertSent && (consecutive || (sends >= 10 && errors / sends > 0.2))) {
+    await logDealEvent({ kind: "twilio_alert", sourceCode: input.sourceCode, deviceHash: input.deviceHash, ip: input.ip, detail: `sends:${sends};errors:${errors}` });
+    void notifyOwner({ title: "Builder Deals Twilio Verify alert", content: `To: peter@lifestyledesignrealty.com, steven@lifestyledesignrealty.com\n\nVerify API/account errors need attention. Last hour: ${errors} API errors across ${sends} attempts. Review Admin → Builder Deals: /admin/deals.` });
+  }
+}
+
+/** Records a browser landing once per device/source/hour; callers exclude HEAD and crawlers. */
+export async function recordDealsLanding(input: { sourceCode: string; deviceHash: string; ip: string }) {
+  const db = await getDb();
+  if (!db) return;
+  const recent = (await db.select({ id: dealEvents.id }).from(dealEvents).where(and(
+    eq(dealEvents.kind, "landed"), eq(dealEvents.deviceHash, input.deviceHash),
+    eq(dealEvents.sourceCode, input.sourceCode), gt(dealEvents.createdAt, new Date(Date.now() - 60 * 60_000)),
+  )).limit(1))[0];
+  if (!recent) await logDealEvent({ kind: "landed", ...input });
+}
+
 export async function getActiveBlock(input: { phone?: string; email?: string; deviceHash?: string }) {
   const db = await getDb();
   if (!db) return undefined;
@@ -226,7 +351,7 @@ export async function publicDealsCatalog() {
   if (!db) return [];
   const now = new Date();
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
-  const result = [] as Array<{ label: string; area: string; fromPrice: number | null; reelUrl: string | null; homesAvailable: number; incentive: ReturnType<typeof publicIncentive> | null }>;
+  const result = [] as Array<{ label: string; area: string; fromPrice: number | null; reelUrl: string | null; homesAvailable: number; incentive: ReturnType<typeof publicIncentive> | null; updatedAt: string | null }>;
   for (const community of communities) {
     const [homes, incentives] = await Promise.all([
       db.select({ n: sql<number>`count(*)` }).from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.status, "available"), eq(dealHomes.kind, "quick_move_in"))),
@@ -239,6 +364,7 @@ export async function publicDealsCatalog() {
       reelUrl: community.reelUrl,
       homesAvailable: Number(homes[0]?.n ?? 0),
       incentive: incentives[0] ? publicIncentive(incentives[0]) : null,
+      updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
     });
   }
   return result;
@@ -270,7 +396,7 @@ export async function gatedDealsCatalog(leadId: number) {
   const db = await getDb();
   if (!db) return [];
   const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, leadId)).limit(1))[0];
-  if (!lead || lead.status !== "verified" || lead.expiresAt <= new Date()) return [];
+  if (!lead || !["verified", "team"].includes(lead.status) || lead.expiresAt <= new Date()) return [];
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
   const data = [] as unknown[];
   for (const community of communities) {
@@ -294,8 +420,9 @@ export async function gatedDealsCatalog(leadId: number) {
         previousPrice: home.previousPrice,
         moveInDate: home.moveInDate,
         lotSize: home.lotSize,
-        // Photo identifiers are deliberately not returned until the protected
-        // image route has its signed per-lead resolver in place.
+        // The server route checks the active session again before streaming a
+        // per-lead derivative; neither storage nor builder URLs are exposed.
+        photos: photos.map((photo) => `/deals/mine/img/${photo.id}`),
         photoCount: photos.length,
         photosOnRequest: photos.length === 0,
       });
@@ -306,8 +433,10 @@ export async function gatedDealsCatalog(leadId: number) {
       schoolDistrict: scrubPrivateNames(community.schoolDistrict ?? "", scrubNames),
       lotSizes: scrubPrivateNames(community.lotSizes ?? "", scrubNames),
       amenities: (JSON.parse(community.amenities ?? "[]") as string[]).map((v) => scrubPrivateNames(v, scrubNames)),
+      driveTimes: (JSON.parse(community.driveTimeChips ?? "[]") as string[]).map((v) => scrubPrivateNames(v, scrubNames)),
       fromPrice: community.fromPrice,
       reelUrl: community.reelUrl,
+      updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       incentive: incentiveRows[0] ? publicIncentive(incentiveRows[0]) : null,
       homes,
     });
@@ -324,7 +453,7 @@ export async function isLiveDealSession(req: Request): Promise<{ leadId: number;
   if (!db) return null;
   const tokenRow = (await db.select().from(dealAccessTokens).where(and(eq(dealAccessTokens.tokenHash, hashSecret(token)), eq(dealAccessTokens.deviceHash, deviceHash), isNull(dealAccessTokens.revokedAt), gt(dealAccessTokens.expiresAt, new Date()))).limit(1))[0];
   if (!tokenRow) return null;
-  const lead = (await db.select().from(dealLeads).where(and(eq(dealLeads.id, tokenRow.leadId), eq(dealLeads.status, "verified"), gt(dealLeads.expiresAt, new Date()))).limit(1))[0];
+  const lead = (await db.select().from(dealLeads).where(and(eq(dealLeads.id, tokenRow.leadId), or(eq(dealLeads.status, "verified"), eq(dealLeads.status, "team")), gt(dealLeads.expiresAt, new Date()))).limit(1))[0];
   return lead ? { leadId: lead.id, lead, deviceHash } : null;
 }
 
@@ -336,16 +465,17 @@ export async function issueAccessToken(leadId: number, deviceHash: string, expir
   return token;
 }
 
-export async function exchangeAccessToken(req: Request, res: Response, rawToken: string): Promise<"ok" | "needs_gate" | "expired"> {
-  const deviceHash = dealDeviceHash(req);
-  if (!deviceHash) return "needs_gate";
+export async function exchangeAccessToken(req: Request, res: Response, rawToken: string): Promise<"ok" | "needs_gate" | "expired" | "cookie_blocked"> {
+  const cookieState = ensureDealsCookies(req, res);
+  if (!cookieState.hasProbe) return "cookie_blocked";
+  const deviceHash = cookieState.deviceHash;
   const db = await getDb();
   if (!db) return "needs_gate";
   const token = (await db.select().from(dealAccessTokens).where(eq(dealAccessTokens.tokenHash, hashSecret(rawToken))).limit(1))[0];
   if (!token || token.revokedAt || token.expiresAt <= new Date()) return "expired";
   if (token.deviceHash !== deviceHash) return "needs_gate";
   const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, token.leadId)).limit(1))[0];
-  if (!lead || lead.expiresAt <= new Date() || lead.status !== "verified") return "expired";
+  if (!lead || lead.expiresAt <= new Date() || !["verified", "team"].includes(lead.status)) return "expired";
   const session = randomOpaqueToken(32);
   await db.insert(dealAccessTokens).values({ leadId: lead.id, tokenHash: hashSecret(session), deviceHash, expiresAt: lead.expiresAt });
   if (!token.consumedAt) await db.update(dealAccessTokens).set({ consumedAt: new Date() }).where(eq(dealAccessTokens.id, token.id));
@@ -357,7 +487,8 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   const settings = await getDealSettings();
   const normalized = normalizeUsPhone(input.rawPhone, { allowCanada: settings.allowCanada });
   if (!normalized.ok) return { ok: false as const, kind: normalized.reason === "outside_us" ? "outside_us" : "invalid_phone" };
-  const { deviceHash } = ensureDealsCookies(input.req, input.res);
+  const { deviceHash, hasProbe } = ensureDealsCookies(input.req, input.res);
+  if (!hasProbe) return { ok: false as const, kind: "cookie_blocked" };
   const ip = realClientIp(input.req);
   const sourceCode = currentDealSource(input.source, settings);
   const ig = sanitizeInstagramHandle(input.ig);
@@ -365,37 +496,46 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   const isTest = settings.testNumbers.includes(normalized.e164);
 
   if (input.choice === "has_agent") {
-    await blockDealAccess({ searchPhone: normalized.e164, deviceHash, reason: "Confirmed working with an agent", expiresAt: new Date(Date.now() + settings.hasAgentBlockDays * 86400_000) });
+    await blockDealAccess({ searchPhone: normalized.e164, deviceHash, reason: "Confirmed working with an agent", expiresAt: new Date(Date.now() + (isTest ? 10 * 60_000 : settings.hasAgentBlockDays * 86400_000)) });
     await logDealEvent({ kind: "has_agent", sourceCode, deviceHash, ip, detail: `phone:${normalized.e164}` });
     return { ok: false as const, kind: "has_agent" };
   }
 
-  if (!(isTest && settings.testNumbersSkipChecks)) {
-    const block = await getActiveBlock({ phone: normalized.e164, deviceHash });
-    if (block) {
-      await logDealEvent({ kind: "blocked", sourceCode, deviceHash, ip, detail: "blocklist" });
-      return { ok: false as const, kind: "blocked" };
+  const { classifyDealsAccess } = await import("./dealsEligibility");
+  const eligibility = await classifyDealsAccess({
+    phone: normalized.e164, email: google?.email, deviceHash, isTest,
+    testSkipChecks: settings.testNumbersSkipChecks, testTeamNumbers: settings.testTeamNumbers,
+    brokerageDomains: settings.brokerageDomains, fubRealtorTags: settings.fubRealtorTags,
+    fubRealtorSources: settings.fubRealtorSources,
+  });
+  if (!eligibility.allowed) {
+    if (eligibility.blockedBy !== "blocklist") {
+      // Before SMS verification, never permanently block an unverified typed
+      // phone because of an email-only match. A matching phone can be blocked.
+      await blockDealAccess({ phone: eligibility.matchOn === "phone" ? normalized.e164 : null, email: eligibility.matchOn === "email" ? google?.email ?? null : null, reason: eligibility.blockedBy ?? "realtor screening" });
+      await blockDealAccess({ deviceHash, reason: `${eligibility.blockedBy ?? "realtor screening"} device cooldown`, expiresAt: new Date(Date.now() + 24 * 60 * 60_000) });
     }
+    await logDealEvent({ kind: "blocked", sourceCode, deviceHash, ip, detail: eligibility.blockedBy ?? "screening" });
+    return { ok: false as const, kind: "blocked" };
   }
 
-  const hourAgo = new Date(Date.now() - 60 * 60_000);
-  const phoneLimit = isTest ? settings.testPhoneLimitPerHour : settings.phoneLimitPerHour;
-  const [perPhone, perIp] = await Promise.all([
-    rateLimitCount("code_sent", hourAgo, { phone: normalized.e164 }),
-    rateLimitCount("code_sent", hourAgo, { ip }),
-  ]);
-  if (perPhone >= phoneLimit || perIp >= settings.ipLimitPerHour) return { ok: false as const, kind: "rate_limited" };
+  const { profileRealtorFlags } = await import("./dealsEligibility");
+  const profileFlags = eligibility.team ? [] : await profileRealtorFlags({
+    name: google?.name,
+    instagramHandle: ig,
+    handleKeywords: settings.handleKeywords,
+    trecCounties: settings.trecCounties,
+  });
 
   const db = await getDb();
   if (!db) return { ok: false as const, kind: "unavailable" };
   const opaque = randomOpaqueToken(24);
   await db.insert(dealPendingVerifications).values({
     opaqueIdHash: hashSecret(opaque), phoneE164: normalized.e164, choice: "buyer", sourceCode, instagramHandle: ig,
-    deviceHash, clientIp: ip, flags: JSON.stringify(google ? { google } : {}), expiresAt: new Date(Date.now() + PENDING_MINUTES * 60_000),
+    deviceHash, clientIp: ip, flags: JSON.stringify({ google, flags: [...eligibility.flags, ...profileFlags], team: eligibility.team }), expiresAt: new Date(Date.now() + PENDING_MINUTES * 60_000),
   });
   setDealCookie(input.res, DEALS_COOKIE.pending, opaque, PENDING_MINUTES * 60);
-  await logDealEvent({ kind: "started_gate", sourceCode, deviceHash, ip, detail: null });
-  return { ok: true as const, pendingId: opaque, phone: normalized.e164, displayPhone: normalized.display, isTest, settings };
+  return { ok: true as const, pendingId: opaque, phone: normalized.e164, displayPhone: normalized.display, isTest, settings, sourceCode, deviceHash, ip };
 }
 
 export async function currentPending(req: Request) {
@@ -420,7 +560,7 @@ export async function completeVerification(input: { req: Request; res: Response;
   if (!pending || !deviceHash) return { ok: false as const, kind: "expired" };
   const settings = await getDealSettings();
   const isTest = settings.testNumbers.includes(pending.phoneE164);
-  const expectedTestCode = process.env.DEALS_TEST_OTP;
+  const expectedTestCode = process.env.DEALS_TEST_OTP?.trim();
   if (isTest && input.code === expectedTestCode) {
     input.verifiedBy = "test";
   } else if (input.verifiedBy !== "twilio") {
@@ -432,23 +572,38 @@ export async function completeVerification(input: { req: Request; res: Response;
 
   const db = await getDb();
   if (!db) return { ok: false as const, kind: "unavailable" };
+  const identity = JSON.parse(pending.flags || "{}") as { google?: GoogleDealsIdentity; flags?: string[]; team?: boolean };
+  // Re-evaluate the mutable checks after the code is approved and before any
+  // token is created. A discovered match cannot inherit an issued link.
+  const eligibility = await (await import("./dealsEligibility")).classifyDealsAccess({
+    phone: pending.phoneE164, email: identity.google?.email, deviceHash,
+    isTest, testSkipChecks: settings.testNumbersSkipChecks, testTeamNumbers: settings.testTeamNumbers,
+    brokerageDomains: settings.brokerageDomains, fubRealtorTags: settings.fubRealtorTags,
+    fubRealtorSources: settings.fubRealtorSources,
+  });
+  if (!eligibility.allowed) {
+    await db.delete(dealPendingVerifications).where(eq(dealPendingVerifications.id, pending.id));
+    clearDealCookie(input.res, DEALS_COOKIE.pending);
+    await logDealEvent({ kind: "blocked", sourceCode: pending.sourceCode, deviceHash, ip: pending.clientIp, detail: eligibility.blockedBy ?? "post_verification" });
+    return { ok: false as const, kind: "blocked" };
+  }
   const old = (await db.select().from(dealLeads).where(eq(dealLeads.phoneE164, pending.phoneE164)).limit(1))[0];
+  const reverifiedActive = Boolean(old && old.expiresAt > new Date());
   const expiresAt = old && old.expiresAt > new Date() ? old.expiresAt : new Date(Date.now() + settings.expiryHours * 60 * 60_000);
+  const flags = Array.from(new Set([...(identity.flags ?? []), ...eligibility.flags]));
   let leadId: number;
   if (old) {
-    const identity = JSON.parse(pending.flags || "{}") as { google?: GoogleDealsIdentity };
-    await db.update(dealLeads).set({ status: "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? pending.instagramHandle, email: old.email ?? identity.google?.email ?? null, name: old.name ?? identity.google?.name ?? null }).where(eq(dealLeads.id, old.id));
+    await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? pending.instagramHandle, email: old.email ?? identity.google?.email ?? null, name: old.name ?? identity.google?.name ?? null, flags: JSON.stringify(flags) }).where(eq(dealLeads.id, old.id));
     leadId = old.id;
   } else {
-    const identity = JSON.parse(pending.flags || "{}") as { google?: GoogleDealsIdentity };
-    const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle: pending.instagramHandle, email: identity.google?.email ?? null, name: identity.google?.name ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentIp: pending.clientIp, deviceHash, expiresAt });
+    const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle: pending.instagramHandle, email: identity.google?.email ?? null, name: identity.google?.name ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentIp: pending.clientIp, deviceHash, expiresAt, status: eligibility.team ? "team" : "verified", flags: JSON.stringify(flags) });
     leadId = Number((result as unknown as [{ insertId: number }])[0].insertId);
   }
   const token = await issueAccessToken(leadId, deviceHash, expiresAt);
   await db.delete(dealPendingVerifications).where(eq(dealPendingVerifications.id, pending.id));
   clearDealCookie(input.res, DEALS_COOKIE.pending);
   await logDealEvent({ leadId, kind: "verified", sourceCode: pending.sourceCode, deviceHash, ip: pending.clientIp, detail: input.verifiedBy });
-  return { ok: true as const, token, leadId, expiresAt };
+  return { ok: true as const, token, leadId, expiresAt, firstUnlock: !old, reverifiedActive, isTeam: eligibility.team };
 }
 
 export function dealsPublicHeaders(res: Response) {
@@ -476,5 +631,5 @@ export function safeBlockedMessage(settings: DealSettings) {
 }
 
 export function leadPresentation(lead: typeof dealLeads.$inferSelect) {
-  return { display: displayForLead(lead), expiresAt: lead.expiresAt.toISOString(), name: lead.name, timeline: lead.timeline };
+  return { display: displayForLead(lead), expiresAt: lead.expiresAt.toISOString(), name: lead.name, timeline: lead.timeline, teamPreview: lead.status === "team" };
 }

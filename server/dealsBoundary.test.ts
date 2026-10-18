@@ -39,7 +39,7 @@ describe("Builder Deals public boundary", () => {
   });
 
   it("does not embed private identity in the public Builder Deals image bytes", () => {
-    const cardBytes = readFileSync("/home/ubuntu/webdev-static-assets/builder-deals-og-card.png").toString("latin1").toLowerCase();
+    const cardBytes = readFileSync(join(root, "docs/assets/builder-deals-og-card.png")).toString("latin1").toLowerCase();
     for (const term of privateTerms) expect(cardBytes).not.toContain(term.toLowerCase());
   });
 });

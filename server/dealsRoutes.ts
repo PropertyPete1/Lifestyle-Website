@@ -1,11 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
-import { completeVerification, currentPending, dealsCsp, dealsPublicHeaders, ensureDealsCookies, exchangeAccessToken, getDealSettings, logDealEvent, randomOpaqueToken, setDealCookie, setGoogleDealsIdentity } from "./dealsService";
+import { completeVerification, currentDealSource, currentPending, dealsCsp, dealsPublicHeaders, ensureDealsCookies, exchangeAccessToken, getDealSettings, isDealsCrawler, logDealEvent, randomOpaqueToken, recordDealsLanding, setDealCookie, setGoogleDealsIdentity } from "./dealsService";
 import { parse as parseCookie } from "cookie";
 import { checkTwilioVerify } from "./dealsVerification";
-import { sendBuilderDealsLeadToFub } from "./dealsFub";
-import { getDb } from "./db";
-import { dealLeads } from "../drizzle/schema";
-import { eq } from "drizzle-orm";
 
 /**
  * Express-level routes are deliberately separate from tRPC. They exchange the
@@ -16,6 +12,14 @@ export function registerDealsRoutes(app: Express) {
   app.use("/deals", (req: Request, res: Response, next: NextFunction) => {
     dealsPublicHeaders(res);
     dealsCsp(res);
+    // The landing response—not a later API response—must establish the device
+    // and probe cookies. A blocked browser is detected on the next request.
+    if (req.method === "GET") {
+      const cookies = ensureDealsCookies(req, res);
+      if (req.path === "/" && !isDealsCrawler(req)) {
+        void getDealSettings().then((settings) => recordDealsLanding({ sourceCode: currentDealSource(String(req.query.src ?? ""), settings), deviceHash: cookies.deviceHash, ip: req.ip || req.socket.remoteAddress || "0.0.0.0" }));
+      }
+    }
     next();
   });
 
@@ -27,10 +31,10 @@ export function registerDealsRoutes(app: Express) {
       res.redirect(302, "/deals?expired=1");
       return;
     }
-    ensureDealsCookies(req, res);
     const result = await exchangeAccessToken(req, res, token);
     if (result === "ok") res.redirect(302, "/deals/mine");
     else if (result === "needs_gate") res.redirect(302, "/deals?gate=1");
+    else if (result === "cookie_blocked") res.redirect(302, "/deals?cookieBlocked=1");
     else res.redirect(302, "/deals?expired=1");
   });
 
@@ -44,19 +48,14 @@ export function registerDealsRoutes(app: Express) {
       ? "test"
       : await checkTwilioVerify(pending.phoneE164, code) ? "twilio" : "test";
     const completed = await completeVerification({ req, res, code, verifiedBy });
-    if (!completed.ok) return res.redirect(302, completed.kind === "expired" ? "/deals?expired=1" : "/deals?codeError=1");
-    // FUB is best-effort and happens after access so CRM downtime never traps
-    // a verified buyer. Test contacts are explicitly marked and are eligible
-    // for the scheduled cleanup job.
-    void (async () => {
-      const db = await getDb();
-      const lead = db ? (await db.select().from(dealLeads).where(eq(dealLeads.id, completed.leadId)).limit(1))[0] : undefined;
-      if (!lead || !db || (isTest && !settings.testModeFullPipeline)) return;
-      if (isTest) await db.update(dealLeads).set({ flags: JSON.stringify(["TEST"]) }).where(eq(dealLeads.id, lead.id));
-      const delivered = await sendBuilderDealsLeadToFub({ phone: lead.phoneE164, instagramHandle: lead.instagramHandle, sourceCode: lead.sourceCode, consentText: lead.consentText, consentAt: lead.consentAt, consentIp: lead.consentIp, isTest });
-      await db.update(dealLeads).set({ fubStatus: delivered.ok ? "synced" : "failed", fubPersonId: delivered.personId ?? null }).where(eq(dealLeads.id, lead.id));
-      await logDealEvent({ leadId: lead.id, kind: delivered.ok ? "fub_synced" : "fub_failed", sourceCode: lead.sourceCode, deviceHash: lead.deviceHash, detail: isTest ? "TEST" : delivered.ok ? "verified_buyer" : "retry_required" });
-    })();
+    if (!completed.ok) return res.redirect(302, completed.kind === "expired" ? "/deals?expired=1" : completed.kind === "blocked" ? "/deals?gate=1&blocked=1" : `/deals?codeError=${encodeURIComponent(completed.kind)}`);
+    // Access is never held hostage by CRM availability. A durable job re-reads
+    // the lead before every attempt, so a later block/team change suppresses it.
+    if (!completed.isTeam && (!isTest || settings.testModeFullPipeline)) {
+      const { enqueueDealsFubJob, runPendingDealsFubJobs } = await import("./dealsFubJobs");
+      await enqueueDealsFubJob(completed.leadId, completed.firstUnlock ? "first_unlock" : "reverify", completed.reverifiedActive ? "re-verified on a second device" : "returned for a new link");
+      void runPendingDealsFubJobs(1);
+    }
     // The browser redirects through an opaque, device-bound, one-time token;
     // that exchange sets the HTTP-only session and immediately removes it from
     // the displayed URL.
@@ -74,8 +73,16 @@ export function registerDealsRoutes(app: Express) {
   });
   app.get("/deals/mine/img/:photoId", async (req, res) => {
     const { isLiveDealSession } = await import("./dealsService");
-    if (!(await isLiveDealSession(req))) return res.status(401).end();
-    return res.status(404).end(); // No processed image is seeded for the launch preview.
+    const session = await isLiveDealSession(req);
+    if (!session) return res.status(401).end();
+    const id = Number(req.params.photoId);
+    if (!Number.isSafeInteger(id) || id < 1) return res.status(404).end();
+    const rendered = await (await import("./dealsPhotos")).renderDealPhotoForLead(id, session.leadId);
+    if (!rendered) return res.status(404).end();
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    res.type(rendered.contentType).send(rendered.data);
   });
 
   app.get("/deals/auth/google", (req, res) => {
@@ -105,7 +112,8 @@ export function registerDealsRoutes(app: Express) {
       const profile = await profileRes.json() as { email?: string; email_verified?: boolean; name?: string };
       if (!profileRes.ok || !profile.email_verified || !profile.email) return res.redirect(302, "/deals?google=failed");
       setGoogleDealsIdentity(res, { email: profile.email, name: profile.name?.slice(0, 190) || null });
-      res.clearCookie("ldr_deals_google_state", { path: "/deals" });
+      const { clearDealCookie } = await import("./dealsService");
+      clearDealCookie(res, "ldr_deals_google_state");
       res.redirect(302, "/deals?google=connected");
     } catch { res.redirect(302, "/deals?google=failed"); }
   });

@@ -22,6 +22,7 @@ import {
 import { Home, Building2, Quote, Users, Map as MapIcon, BarChart3, Link2, Inbox, Loader2, Plus, Pencil, Trash2, LogOut, TrendingUp, LockKeyhole } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Listing } from "../../../drizzle/schema";
+import BuilderDealsAdminPanel from "@/components/BuilderDealsAdminPanel";
 
 /* ================= Admin shell (role-protected) ================= */
 
@@ -120,7 +121,7 @@ export default function Admin() {
         {tab === "stats" && <StatsManager />}
         {tab === "links" && <LinksManager />}
         {tab === "leads" && <LeadsViewer />}
-        {tab === "deals" && <DealsManager />}
+        {tab === "deals" && <BuilderDealsAdminPanel />}
       </main>
     </div>
   );

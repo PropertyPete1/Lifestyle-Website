@@ -15,11 +15,11 @@ export interface CommunitySourceConfig {
   privateCommunityName: string;
   /** Every private community, plan, or other term that must not reach a public DTO. */
   scrubList: readonly string[];
-  /** Optional official M/I incentive URL. A discovered official incentive link is used otherwise. */
+  /** Optional official M/I incentive URL. Chesmar always uses its current /incentives/ page. */
   incentiveSourceUrl?: string;
   /** Explicit records for the Manual adapter. No network request is made for these. */
   manualEntries?: readonly ManualEntry[];
-  /** Bounded discovery protects the official sites from an unbounded sitemap crawl. */
+  /** Bounds sitemap/link discovery, not the complete M/I QMI catalog or its galleries. */
   maxDetailPages?: number;
 }
 
@@ -44,6 +44,10 @@ export type DealHoldReason =
   | "sitemap_fetch_failed"
   | "detail_fetch_failed"
   | "incentive_fetch_failed"
+  | "missing_community_guid"
+  | "inventory_fetch_failed"
+  | "invalid_inventory_response"
+  | "incomplete_inventory"
   | "expected_community_container_not_found"
   | "expected_detail_container_not_found"
   | "expected_incentive_container_not_found"
@@ -68,6 +72,8 @@ export interface DeadlineFact {
 
 export interface PromotionalRateFacts {
   normalizedText: string;
+  rateKind: "promotional" | "fixed";
+  /** Historical field name: the headline rate, including a full-term fixed offer. */
   promotionalRatePercent: number | null;
   promotionalPeriod: string | null;
   followOnRatePercent: number | null;
@@ -83,9 +89,17 @@ export interface PromotionalRateFacts {
 }
 
 export interface PrivateSourcePage {
-  kind: "community" | "plan" | "home" | "incentive" | "sitemap" | "manual";
+  kind: "community" | "plan" | "home" | "incentive" | "sitemap" | "inventory" | "manual";
   sourceUrl: string;
   privateName: string | null;
+}
+
+export interface PrivateGalleryImage {
+  sourceUrl: string;
+  caption: string | null;
+  width: number | null;
+  height: number | null;
+  srcSet: string | null;
 }
 
 export interface PrivatePlanOrHome {
@@ -96,6 +110,17 @@ export interface PrivatePlanOrHome {
   bedrooms: number | null;
   bathrooms: number | null;
   squareFeet: number | null;
+  /** M/I card/detail metadata: never copied into PublicPlanOrHome. */
+  privateAddress?: string | null;
+  privatePlanName?: string | null;
+  previousPrice?: number | null;
+  priceDrop?: number | null;
+  readyNow?: boolean;
+  moveInDate?: string | null;
+  garage?: number | null;
+  homesite?: string | null;
+  geo?: { latitude: number; longitude: number } | null;
+  gallery?: PrivateGalleryImage[];
 }
 
 /**
@@ -130,10 +155,11 @@ export interface PublicDealSnapshot {
   homes: PublicPlanOrHome[];
   incentive: {
     text: string;
+    rateKind: "promotional" | "fixed";
     promotionalRatePercent: number;
-    promotionalPeriod: string;
-    followOnRatePercent: number;
-    followOnPeriod: string;
+    promotionalPeriod: string | null;
+    followOnRatePercent: number | null;
+    followOnPeriod: string | null;
     aprPercent: number;
     loanType: string;
     repaymentTermYears: number;
@@ -145,7 +171,10 @@ export interface PublicDealSnapshot {
 }
 
 export interface DealAdapterResult {
+  /** Whole-snapshot publication status; incentive holds do not imply a failed catalog. */
   ok: boolean;
+  catalogOk: boolean;
+  incentiveHoldReasons: DealHoldReason[];
   fetchedAt: string;
   /** Server-only data, including private names and official source URLs. */
   private: PrivateDealSnapshot;
@@ -175,6 +204,10 @@ const CHESMAR_SITEMAPS = [
 const DEFAULT_DETAIL_LIMIT = 24;
 const MAX_DETAIL_LIMIT = 48;
 const FETCH_TIMEOUT_MS = 20_000;
+const CHESMAR_INCENTIVES_URL = "https://www.chesmar.com/incentives/";
+const MI_INVENTORY_PATH = "/sitecore/api/ssc/MIHomes-Project-Website-Api-Controllers/PlansQmi/";
+const MAX_MI_CATALOG_ITEMS = 500;
+const MAX_MI_CATALOG_PAGES = 170;
 
 const EMPTY_PUBLIC: PublicDealSnapshot = {
   plans: [],
@@ -208,6 +241,8 @@ function failedResult(
   const holdReasons = uniqueReasons(reasons);
   return {
     ok: false,
+    catalogOk: false,
+    incentiveHoldReasons: [],
     fetchedAt,
     private: privateSnapshot,
     public: { ...EMPTY_PUBLIC, holdReasons },
@@ -218,11 +253,14 @@ function failedResult(
 function successfulResult(
   fetchedAt: string,
   privateSnapshot: PrivateDealSnapshot,
-  publicSnapshot: PublicDealSnapshot,
+  converted: { snapshot: PublicDealSnapshot; catalogHolds: DealHoldReason[]; incentiveHolds: DealHoldReason[] },
 ): DealAdapterResult {
+  const publicSnapshot = converted.snapshot;
   const holdReasons = uniqueReasons(publicSnapshot.holdReasons);
   return {
     ok: holdReasons.length === 0,
+    catalogOk: converted.catalogHolds.length === 0,
+    incentiveHoldReasons: uniqueReasons(converted.incentiveHolds),
     fetchedAt,
     private: privateSnapshot,
     public: { ...publicSnapshot, holdReasons },
@@ -344,15 +382,13 @@ function numericValue(value: string): number | null {
 
 function normalizeMonthDate(raw: string): string | null {
   const compact = raw.trim().replace(/\.$/, "");
-  const numeric = compact.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const numeric = compact.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})$/);
   if (numeric) {
     const month = Number(numeric[1]);
     const day = Number(numeric[2]);
-    const year = Number(numeric[3]);
-    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-      return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
-    }
-    return null;
+    // Official MM/DD/YY campaign dates explicitly supply a year, not a scrape-year guess.
+    const year = numeric[3].length === 2 ? 2000 + Number(numeric[3]) : Number(numeric[3]);
+    return validIsoDate(year, month, day);
   }
   const monthNames: Record<string, number> = {
     january: 1,
@@ -373,7 +409,12 @@ function normalizeMonthDate(raw: string): string | null {
   const month = monthNames[named[1].toLowerCase()];
   const day = Number(named[2]);
   const year = Number(named[3]);
-  if (!month || day < 1 || day > 31) return null;
+  return validIsoDate(year, month, day);
+}
+
+function validIsoDate(year: number, month: number, day: number): string | null {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (year < 1000 || date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
   return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
 }
 
@@ -394,16 +435,21 @@ function numberMatch(text: string, pattern: RegExp, group = 1): number | null {
 }
 
 function findContractDeadline(text: string): DeadlineFact | null {
-  const between = /\b(?:contracts?|contract\s+sales?|full\s+priced\s+contracts?)\b[^.]{0,140}?\bbetween\s+(\d{1,2}\/\d{1,2}\/\d{4}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\s+(?:and|to|through|-)\s+(\d{1,2}\/\d{1,2}\/\d{4}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})/i.exec(text);
+  const between = new RegExp(`\\b(?:purchase\\s+agreements?|contracts?|contract\\s+sales?)\\b[^.]{0,160}?(?:between\\s+|written\\s+|from\\s+)(${DEADLINE_DATE})\\s*,?\\s*(?:and|to|through|-)\\s+(${DEADLINE_DATE})`, "i").exec(text);
   if (between) return deadlineFromMatch(between[2]);
-  const ending = /(?:contract(?:s|\s+signing)?|offer)[^.]{0,90}?\b(?:by|through|until)\s+(\d{1,2}\/\d{1,2}\/\d{4}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})/i.exec(text);
+  const ending = new RegExp(`(?:purchase\\s+agreements?|contract(?:s|\\s+signing)?|offer)[^.]{0,90}?\\b(?:by|through|until)\\s+(${DEADLINE_DATE})`, "i").exec(text);
   return ending ? deadlineFromMatch(ending[1]) : null;
 }
 
 function findClosingDeadline(text: string): DeadlineFact | null {
-  const match = /\b(?:must\s+)?close(?:\s+on)?\s+(?:by|before|no\s+later\s+than)\s+(\d{1,2}\/\d{1,2}\/\d{4}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})/i.exec(text);
+  const pattern = new RegExp(`\\b(?:must\\s+)?close(?:\\s+on)?\\s+(?:by|(?:or\\s+)?before|no\\s+later\\s+than)\\s+(${DEADLINE_DATE})`, "gi");
+  const matches = Array.from(text.matchAll(pattern));
+  // Prefer the fully dated fine print over a shortened banner date when both exist.
+  const match = matches.find((item) => /\b\d{4}$/.test(item[1])) ?? matches[0];
   return match ? deadlineFromMatch(match[1]) : null;
 }
+
+const DEADLINE_DATE = "(?:\\d{1,2}/\\d{1,2}/(?:\\d{4}|\\d{2})(?!\\d)|(?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{1,2},?\\s+\\d{4})";
 
 function rateNear(text: string, pattern: RegExp): number | null {
   const match = pattern.exec(text);
@@ -416,7 +462,11 @@ function rateNear(text: string, pattern: RegExp): number | null {
  */
 export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const text = normalizeIncentiveText(input);
+  const fixedHeadline = /(\d+(?:\.\d+)?)%\s*\(\s*\d+(?:\.\d+)?%\s*APR\s*\)\s*(?:FHA|VA|USDA|conventional|jumbo)\s+\d{1,2}(?:[- ]year|\s*yr)\s*,?\s*fixed[- ]rate/i.exec(text);
+  const hasTemporaryRate = /\b(?:buydown|first[- ]year|year\s*1|temporarily|introductory)\b/i.test(text);
+  const rateKind = fixedHeadline && !hasTemporaryRate ? "fixed" : "promotional";
   const promotionalRatePercent =
+    (rateKind === "fixed" ? numericValue(fixedHeadline![1]) : null) ??
     rateNear(text, /(?:first[- ]year|year\s*1)[^.]{0,110}?(\d+(?:\.\d+)?)%\s*(?:interest\s+)?rate\b/i) ??
     rateNear(text, /(?:rates?\s+as\s+low\s+as|as\s+low\s+as)\s+(\d+(?:\.\d+)?)%\s*(?:interest\s+)?rate\b/i) ??
     rateNear(text, /(?:temporarily\s+reduced\s+to)\s+(\d+(?:\.\d+)?)%/i);
@@ -429,12 +479,14 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const followOnPeriod =
     firstMatch(text, /\b(year(?:s)?\s*2\s*(?:-|to)\s*\d+|after\s+(?:the\s+)?first\s+year)\b/i) ??
     firstMatch(text, /\b(years?\s*2[^.]{0,22})\b/i);
-  const aprPercent = rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:annual\s+percentage\s+rate|apr)\b/i);
-  const repaymentTermYears = numberMatch(text, /\b(\d{1,2})[- ]year\s+fixed\b/i);
+  const aprPercent = rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:annual\s+percentage\s+rate|apr)\b/i) ??
+    rateNear(text, /\bAPR\s*[:=]\s*(\d+(?:\.\d+)?)%/i);
+  const repaymentTermYears = numberMatch(text, /\b(\d{1,2})(?:[- ]year|\s*yr)\s*,?\s*fixed(?:[- ]rate)?\b/i);
   const loanType =
-    firstMatch(text, /\b\d{1,2}[- ]year\s+fixed\s+(FHA|VA|USDA|conventional|jumbo)\s+loan\b/i) ??
+    firstMatch(text, /\b(FHA|VA|USDA|conventional|jumbo)\s+\d{1,2}(?:[- ]year|\s*yr)\s*,?\s*fixed[- ]rate\b/i) ??
+    firstMatch(text, /\b\d{1,2}[- ]year\s*,?\s*fixed(?:[- ]rate)?\s+(FHA|VA|USDA|conventional|jumbo)\s+loan\b/i) ??
     firstMatch(text, /\b(FHA|VA|USDA|conventional|jumbo)\s+loan\b/i);
-  const downPaymentPercent = numberMatch(text, /(\d+(?:\.\d+)?)%\s+down\s+payment\b/i);
+  const downPaymentPercent = numberMatch(text, /(\d+(?:\.\d+)?)%\s+(?:minimum\s+)?down(?:\s+payment)?\b/i);
   const contractDeadline = findContractDeadline(text);
   const closingDeadline = findClosingDeadline(text);
 
@@ -443,15 +495,18 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   if (aprPercent === null) holdReasons.push("missing_apr");
   if (!loanType) holdReasons.push("missing_loan_type");
   if (repaymentTermYears === null) holdReasons.push("missing_repayment_term");
-  if (!promotionalPeriod) holdReasons.push("missing_promotional_period");
-  if (followOnRatePercent === null) holdReasons.push("missing_follow_on_rate");
-  if (!followOnPeriod) holdReasons.push("missing_follow_on_period");
+  if (rateKind === "promotional") {
+    if (!promotionalPeriod) holdReasons.push("missing_promotional_period");
+    if (followOnRatePercent === null) holdReasons.push("missing_follow_on_rate");
+    if (!followOnPeriod) holdReasons.push("missing_follow_on_period");
+  }
   if (downPaymentPercent === null) holdReasons.push("missing_down_payment");
   if (!contractDeadline?.isoDate) holdReasons.push("missing_contract_deadline");
   if (!closingDeadline?.isoDate) holdReasons.push("missing_closing_deadline");
 
   return {
     normalizedText: text,
+    rateKind,
     promotionalRatePercent,
     promotionalPeriod,
     followOnRatePercent,
@@ -521,6 +576,108 @@ function extractFirstHeading(html: string): string | null {
   return heading || null;
 }
 
+interface HtmlElement {
+  tag: string;
+  attributes: Record<string, string>;
+  children: HtmlElement[];
+  contentStart: number;
+  contentEnd: number;
+}
+
+/** Limited server-only tree: quoted >/<, nested same-name elements, void tags and raw scripts. */
+function parseHtmlElements(html: string): HtmlElement | null {
+  if (html.length > 8_000_000) return null;
+  const root: HtmlElement = { tag: "root", attributes: {}, children: [], contentStart: 0, contentEnd: html.length };
+  const stack = [root];
+  const tokens = /<!--[\s\S]*?-->|<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
+  const voidTags = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
+  let count = 0;
+  let match: RegExpExecArray | null;
+  while ((match = tokens.exec(html))) {
+    const token = match[0];
+    const tagMatch = /^<\s*(\/?)\s*([a-z][\w:-]*)\b/i.exec(token);
+    if (!tagMatch) continue;
+    const tag = tagMatch[2].toLowerCase();
+    if (tagMatch[1]) {
+      const index = stack.findLastIndex((element) => element.tag === tag);
+      if (index > 0) {
+        while (stack.length > index) stack.pop()!.contentEnd = match.index;
+      }
+      continue;
+    }
+    if (++count > 100_000 || stack.length > 128) return null;
+    const attributes: Record<string, string> = Object.create(null);
+    const attributePattern = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+    const attributeText = token.slice(tagMatch[0].length, token.length - 1);
+    let attribute: RegExpExecArray | null;
+    while ((attribute = attributePattern.exec(attributeText))) {
+      const name = attribute[1].toLowerCase();
+      if (!(name in attributes)) attributes[name] = decodeHtmlEntities(attribute[2] ?? attribute[3] ?? attribute[4] ?? "");
+    }
+    const element: HtmlElement = { tag, attributes, children: [], contentStart: tokens.lastIndex, contentEnd: html.length };
+    stack[stack.length - 1].children.push(element);
+    if (["script", "style", "textarea", "title"].includes(tag)) {
+      const closing = new RegExp(`</${tag}\\s*>`, "gi");
+      closing.lastIndex = tokens.lastIndex;
+      const end = closing.exec(html);
+      if (!end) return null;
+      element.contentEnd = end.index;
+      tokens.lastIndex = closing.lastIndex;
+    } else if (!voidTags.has(tag) && !/\/\s*>$/.test(token)) stack.push(element);
+    else element.contentEnd = tokens.lastIndex;
+  }
+  return root;
+}
+
+function descendants(element: HtmlElement): HtmlElement[] {
+  return element.children.flatMap((child) => [child, ...descendants(child)]);
+}
+
+function elementClass(element: HtmlElement, token: string): boolean {
+  return (element.attributes.class ?? "").split(/\s+/).includes(token);
+}
+
+function elementText(element: HtmlElement, html: string): string {
+  return htmlToText(html.slice(element.contentStart, element.contentEnd));
+}
+
+function classText(elements: readonly HtmlElement[], html: string, token: string): string | null {
+  const element = elements.find((item) => elementClass(item, token));
+  return element ? elementText(element, html) || null : null;
+}
+
+function jsonLdObjects(elements: readonly HtmlElement[], html: string): Record<string, unknown>[] {
+  const objects: Record<string, unknown>[] = [];
+  function collect(value: unknown): void {
+    if (Array.isArray(value)) value.forEach(collect);
+    else if (value && typeof value === "object") {
+      const object = value as Record<string, unknown>;
+      objects.push(object);
+      if (Array.isArray(object["@graph"])) object["@graph"].forEach(collect);
+    }
+  }
+  for (const element of elements) {
+    if (element.tag !== "script" || element.attributes.type?.toLowerCase() !== "application/ld+json") continue;
+    const json = html.slice(element.contentStart, element.contentEnd).trim();
+    try { collect(JSON.parse(json)); } catch {
+      try { collect(JSON.parse(decodeHtmlEntities(json))); } catch { /* Invalid metadata is not a Product. */ }
+    }
+  }
+  return objects;
+}
+
+function schemaType(object: Record<string, unknown>, type: string): boolean {
+  return object["@type"] === type || (Array.isArray(object["@type"]) && object["@type"].includes(type));
+}
+
+function schemaNumber(value: unknown): number | null {
+  if (value && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    return schemaNumber(object.value ?? object.minValue);
+  }
+  return typeof value === "number" || typeof value === "string" ? numericValue(String(value)) : null;
+}
+
 function extractPrice(text: string): number | null {
   const labelled = /(?:priced\s+from|starting\s+from|price(?:\s+from)?|from)\s*:?\s*\$\s*([\d,]+(?:\.\d{2})?)/i.exec(text);
   const fallback = /\$\s*([\d,]+(?:\.\d{2})?)/.exec(text);
@@ -546,6 +703,19 @@ function extractStatus(text: string): string | null {
   return match ? normalizeWhitespace(match[1]) : null;
 }
 
+function chesmarGallery(sourceUrl: string, html: string): PrivateGalleryImage[] {
+  const result = new Map<string, PrivateGalleryImage>();
+  const srcPattern = /<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = srcPattern.exec(html)) !== null) {
+    const url = absoluteUrl(match[1], new URL(sourceUrl));
+    if (!url || !["www.chesmar.com", "chesmar.com", "images.ctfassets.net", "cdn.sanity.io"].includes(url.hostname.toLowerCase())) continue;
+    if (/logo|icon|avatar|thumbnail/i.test(url.pathname)) continue;
+    result.set(url.toString(), { sourceUrl: url.toString(), caption: null, width: null, height: null, srcSet: null });
+  }
+  return Array.from(result.values()).slice(0, 12);
+}
+
 function parsePrivateProperty(sourceUrl: string, html: string): PrivatePlanOrHome {
   const text = htmlToText(html);
   return {
@@ -556,6 +726,7 @@ function parsePrivateProperty(sourceUrl: string, html: string): PrivatePlanOrHom
     bedrooms: extractBedrooms(text),
     bathrooms: extractBathrooms(text),
     squareFeet: extractSquareFeet(text),
+    gallery: chesmarGallery(sourceUrl, html),
   };
 }
 
@@ -595,7 +766,7 @@ async function mapWithConcurrency<T, R>(
 }
 
 function privateTerms(config: CommunitySourceConfig, discovered: readonly string[] = []): string[] {
-  const builderTerms = config.builder === "M/I Homes" ? ["M/I Homes", "M/I Financial"] : config.builder === "Chesmar" ? ["Chesmar Homes"] : [];
+  const builderTerms = config.builder === "M/I Homes" ? ["M/I Homes", "M/I Financial"] : config.builder === "Chesmar" ? ["Chesmar Homes", "HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HMC"] : [];
   return Array.from(new Set([config.privateCommunityName, ...config.scrubList, ...discovered, ...builderTerms].map((term) => term.trim()).filter(Boolean)));
 }
 
@@ -649,9 +820,7 @@ function publicIncentive(
   // publishable narrows all of the following facts at runtime; explicit checks keep strict TS honest.
   if (
     facts.promotionalRatePercent === null ||
-    !facts.promotionalPeriod ||
-    facts.followOnRatePercent === null ||
-    !facts.followOnPeriod ||
+    (facts.rateKind === "promotional" && (!facts.promotionalPeriod || facts.followOnRatePercent === null || !facts.followOnPeriod)) ||
     facts.aprPercent === null ||
     !facts.loanType ||
     facts.repaymentTermYears === null ||
@@ -664,6 +833,7 @@ function publicIncentive(
   return {
     incentive: {
       text: cleanedText,
+      rateKind: facts.rateKind,
       promotionalRatePercent: facts.promotionalRatePercent,
       promotionalPeriod: facts.promotionalPeriod,
       followOnRatePercent: facts.followOnRatePercent,
@@ -680,8 +850,8 @@ function publicIncentive(
   };
 }
 
-function makePublicSnapshot(privateSnapshot: PrivateDealSnapshot, config: CommunitySourceConfig): PublicDealSnapshot {
-  const discoveredNames = [...privateSnapshot.plans, ...privateSnapshot.homes].flatMap((item) => (item.privateName ? [item.privateName] : []));
+function makePublicSnapshot(privateSnapshot: PrivateDealSnapshot, config: CommunitySourceConfig, incentiveHolds: readonly DealHoldReason[] = []): { snapshot: PublicDealSnapshot; catalogHolds: DealHoldReason[]; incentiveHolds: DealHoldReason[] } {
+  const discoveredNames = [...privateSnapshot.plans, ...privateSnapshot.homes].flatMap((item) => [item.privateName, item.privateAddress, item.privatePlanName].filter((name): name is string => Boolean(name)));
   const terms = privateTerms(config, discoveredNames);
   const reasons: DealHoldReason[] = [];
   const plans: PublicPlanOrHome[] = [];
@@ -697,8 +867,12 @@ function makePublicSnapshot(privateSnapshot: PrivateDealSnapshot, config: Commun
     else if (converted.record) homes.push(converted.record);
   }
   const incentive = publicIncentive(privateSnapshot.incentive, config, terms);
-  reasons.push(...incentive.reasons);
-  return { plans, homes, incentive: incentive.incentive, holdReasons: uniqueReasons(reasons) };
+  const heldIncentiveReasons = uniqueReasons([...incentiveHolds, ...incentive.reasons]);
+  return {
+    snapshot: { plans, homes, incentive: heldIncentiveReasons.length ? null : incentive.incentive, holdReasons: uniqueReasons([...reasons, ...heldIncentiveReasons]) },
+    catalogHolds: uniqueReasons(reasons),
+    incentiveHolds: heldIncentiveReasons,
+  };
 }
 
 function validatedOfficialCommunity(config: CommunitySourceConfig, host: string): URL | null {
@@ -748,6 +922,43 @@ async function fetchDiscoveredProperties(
   return holds;
 }
 
+function chesmarFhaIncentiveText(html: string): string | null {
+  const root = parseHtmlElements(html);
+  if (!root) return null;
+  const elements = descendants(root);
+  const headline = elements
+    .filter((element) => ["strong", "b", "h1", "h2", "p"].includes(element.tag))
+    .map((element) => elementText(element, html))
+    .filter((text) => /\d+(?:\.\d+)?%\s*\(\s*\d+(?:\.\d+)?%\s*APR\s*\)\s*FHA\s+\d{1,2}(?:[- ]year|\s*yr)\s*,?\s*fixed[- ]rate/i.test(text))
+    .sort((a, b) => a.length - b.length)[0];
+  if (!headline) return null;
+  const disclosure = elements
+    .filter((element) => ["small", "em", "p"].includes(element.tag))
+    .map((element) => elementText(element, html))
+    .filter((text) => /\*\s*Loan promotions/i.test(text) && /fixed[- ]rate FHA loan/i.test(text))
+    .sort((a, b) => a.length - b.length)[0] ?? "";
+  const start = disclosure.search(/\*\s*Loan promotions/i);
+  const fhaTerms = start < 0 ? "" : disclosure.slice(start).split(/\*{2,}\s*Loan promotions/i)[0];
+  // Exclude the conventional/VA footnotes and unrelated lender licensing/navigation.
+  return normalizeIncentiveText(`${headline} ${fhaTerms}`);
+}
+
+async function fetchOfficialIncentive(
+  url: URL,
+  fetcher: HtmlFetcher,
+  privateSnapshot: PrivateDealSnapshot,
+  chesmar = false,
+): Promise<DealHoldReason[]> {
+  const page = await getDocument(url.toString(), fetcher, "text/html,application/xhtml+xml");
+  if (!page.ok) return ["incentive_fetch_failed"];
+  if (!containsExpectedIncentiveContainer(page.text)) return ["expected_incentive_container_not_found"];
+  const text = chesmar ? chesmarFhaIncentiveText(page.text) : htmlToText(page.text);
+  if (!text) return ["expected_incentive_container_not_found"];
+  privateSnapshot.pages.push(sourcePage("incentive", url.toString(), extractFirstHeading(page.text)));
+  privateSnapshot.incentive = { sourceUrl: url.toString(), text, facts: parsePromotionalRate(text) };
+  return [];
+}
+
 class ChesmarAdapter implements DealAdapter {
   readonly builder = "Chesmar" as const;
 
@@ -794,7 +1005,9 @@ class ChesmarAdapter implements DealAdapter {
     ];
     if (detailHolds.length > 0) return failedResult(config, fetchedAt, privateSnapshot, detailHolds);
 
-    return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config));
+    // Ignore stale configured /campaigns/... URLs: only this official page has the current window.
+    const incentiveHolds = await fetchOfficialIncentive(new URL(CHESMAR_INCENTIVES_URL), fetcher, privateSnapshot, true);
+    return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));
   }
 }
 
@@ -832,6 +1045,192 @@ function discoverMiCommunityUrls(html: string, community: URL): { planUrls: stri
   };
 }
 
+function miCommunityGuid(html: string): string | null {
+  const root = parseHtmlElements(html);
+  if (!root) return null;
+  const elements = descendants(root);
+  const inventoryMarker = elements.find((element) => element.attributes.id?.toLowerCase() === "pqmb");
+  const values = [
+    inventoryMarker?.attributes["data-guid"],
+    ...elements.map((element) => element.attributes["data-community-guid"]),
+    ...elements.filter((element) => element.attributes.id?.toLowerCase() === "itemid").map((element) => element.attributes.value),
+  ];
+  for (const value of values) {
+    if (!value) continue;
+    let decoded: string;
+    try { decoded = decodeURIComponent(value).replace(/^\{|\}$/g, ""); } catch { continue; }
+    if (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(decoded)) return decoded.toLowerCase();
+  }
+  return null;
+}
+
+function miProductUrl(product: Record<string, unknown>, community: URL, type: "homes" | "plans" | "models"): URL | null {
+  if (!schemaType(product, type === "plans" ? "ProductModel" : "Product")) return null;
+  if (typeof product.url !== "string") return null;
+  const url = absoluteUrl(product.url, community);
+  if (!url || !sameOfficialHost(url, MI_HOST) || !(type === "plans" ? isMiPlan(url, community) : isMiHome(url, community))) return null;
+  url.search = "";
+  url.hash = "";
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  return url;
+}
+
+function miCardProperty(card: HtmlElement, html: string, product: Record<string, unknown>, url: URL, type: "homes" | "plans" | "models"): PrivatePlanOrHome {
+  const elements = descendants(card);
+  const meta = new Map<string, string>();
+  for (const element of elements.filter((item) => elementClass(item, "home-card-meta-item"))) {
+    const value = descendants(element).find((item) => elementClass(item, "home-card-meta-value"));
+    if (!value) continue;
+    const label = htmlToText(html.slice(element.contentStart, value.contentStart).replace(/<[^>]*>$/, "")).toLowerCase();
+    meta.set(label, elementText(value, html));
+  }
+  const offers = Array.isArray(product.offers) ? product.offers[0] : product.offers;
+  const offer = offers && typeof offers === "object" ? offers as Record<string, unknown> : {};
+  const price = extractPrice(classText(elements, html, "home-card-price-new") ?? "") ?? schemaNumber(offer.price) ??
+    extractPrice(classText(elements, html, "home-card-price") ?? "");
+  const previousPrice = extractPrice(classText(elements, html, "home-card-price-old") ?? "");
+  const name = typeof product.name === "string" ? normalizeWhitespace(decodeHtmlEntities(product.name)) : null;
+  const address = classText(elements, html, "home-card-name") ?? name;
+  const moveInDate = meta.get("estimated move in date") ?? meta.get("estimated move-in date") ?? null;
+  const readyNow = /\bready\s+now\b/i.test(classText(elements, html, "home-card__flags") ?? moveInDate ?? "");
+  const fullBaths = schemaNumber(product.numberOfFullBathrooms);
+  const partialBaths = schemaNumber(product.numberOfPartialBathrooms);
+  const geo = product.geo && typeof product.geo === "object" ? product.geo as Record<string, unknown> : {};
+  const latitude = schemaNumber(geo.latitude);
+  const longitude = schemaNumber(geo.longitude);
+  return {
+    sourceUrl: url.toString(),
+    privateName: name ?? address,
+    status: /\/(?:SoldOut|OutOfStock)$/i.test(String(offer.availability ?? "")) ? "Sold" : type === "plans" ? null : type === "models" ? "Model For Tour" : readyNow ? "Available Now" : "Quick Move-In",
+    price,
+    previousPrice,
+    priceDrop: previousPrice !== null && price !== null && previousPrice > price ? previousPrice - price : null,
+    bedrooms: schemaNumber(meta.get("bed") ?? meta.get("beds")) ?? schemaNumber(product.numberOfBedrooms),
+    bathrooms: schemaNumber(meta.get("bath") ?? meta.get("baths")) ?? (fullBaths === null ? null : fullBaths + (partialBaths ?? 0) / 2),
+    squareFeet: schemaNumber(meta.get("sq ft")) ?? schemaNumber(product.floorSize),
+    privateAddress: type === "plans" ? null : address,
+    privatePlanName: type === "plans" ? name : meta.get("plan") ?? null,
+    readyNow,
+    moveInDate,
+    garage: schemaNumber(meta.get("garage")),
+    homesite: meta.get("homesite") ?? null,
+    geo: latitude !== null && longitude !== null && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180 ? { latitude, longitude } : null,
+    gallery: [],
+  };
+}
+
+async function fetchMiCatalog(
+  community: URL,
+  guid: string,
+  type: "homes" | "plans" | "models",
+  fetcher: HtmlFetcher,
+  privateSnapshot: PrivateDealSnapshot,
+): Promise<{ properties: PrivatePlanOrHome[]; holds: DealHoldReason[] }> {
+  const properties = new Map<string, PrivatePlanOrHome>();
+  let expectedTotal: number | null = null;
+  let offset = 0;
+  for (let pageIndex = 0; pageIndex < MAX_MI_CATALOG_PAGES; pageIndex++) {
+    const url = new URL(MI_INVENTORY_PATH, community);
+    url.searchParams.set("id", `{${guid}}`);
+    url.searchParams.set("type", type);
+    url.searchParams.set("items", String(offset));
+    const response = await getDocument(url.toString(), fetcher, "application/json");
+    if (!response.ok) return { properties: [], holds: ["inventory_fetch_failed"] };
+    let payload: unknown;
+    try { payload = JSON.parse(response.text); } catch { return { properties: [], holds: ["invalid_inventory_response"] }; }
+    if (!payload || typeof payload !== "object") return { properties: [], holds: ["invalid_inventory_response"] };
+    const { TotalItems: total, Html: html } = payload as Record<string, unknown>;
+    if (typeof total !== "number" || !Number.isInteger(total) || total < 0 || total > MAX_MI_CATALOG_ITEMS || typeof html !== "string") {
+      return { properties: [], holds: ["invalid_inventory_response"] };
+    }
+    if (expectedTotal !== null && total !== expectedTotal) return { properties: [], holds: ["incomplete_inventory"] };
+    expectedTotal = total;
+    const root = parseHtmlElements(html);
+    if (!root) return { properties: [], holds: ["invalid_inventory_response"] };
+    const elements = descendants(root);
+    const cards = elements.filter((element) => elementClass(element, "home-card"));
+    if (total === 0 && cards.length === 0 && (html.trim() === "" || elements.some((element) => elementClass(element, "row")))) {
+      privateSnapshot.pages.push(sourcePage("inventory", url.toString(), null));
+      return { properties: [], holds: [] };
+    }
+    if (total === 0) return { properties: [], holds: ["invalid_inventory_response"] };
+    const before = properties.size;
+    for (const card of cards) {
+      const products = jsonLdObjects(descendants(card), html).filter((product) => schemaType(product, type === "plans" ? "ProductModel" : "Product"));
+      if (products.length !== 1) return { properties: [], holds: ["invalid_inventory_response"] };
+      const product = products[0];
+      const productUrl = miProductUrl(product, community, type);
+      if (!productUrl) return { properties: [], holds: ["invalid_inventory_response"] };
+      if (!properties.has(productUrl.toString())) properties.set(productUrl.toString(), miCardProperty(card, html, product, productUrl, type));
+    }
+    privateSnapshot.pages.push(sourcePage("inventory", url.toString(), null));
+    if (properties.size > total) return { properties: [], holds: ["invalid_inventory_response"] };
+    if (properties.size === total) return { properties: Array.from(properties.values()), holds: [] };
+    // A missing card container, malformed Product, or stuck endpoint is never a zero-homes update.
+    if (properties.size === before) return { properties: [], holds: ["incomplete_inventory"] };
+    offset = offset === 0 ? 5 : offset + 3;
+  }
+  return { properties: [], holds: ["incomplete_inventory"] };
+}
+
+function officialMiImage(value: string, base: URL): URL | null {
+  const url = absoluteUrl(value, base);
+  return url && url.protocol === "https:" && [MI_HOST, "dam.mihomes.com", "cdn.mihomes.com"].includes(url.hostname.toLowerCase()) ? url : null;
+}
+
+function miDetailGallery(html: string, property: PrivatePlanOrHome): PrivateGalleryImage[] | null {
+  const root = parseHtmlElements(html);
+  if (!root) return null;
+  const elements = descendants(root);
+  const base = new URL(property.sourceUrl);
+  const product = jsonLdObjects(elements, html).find((item) => {
+    if (!schemaType(item, "Product") || typeof item.url !== "string") return false;
+    const url = absoluteUrl(item.url, base);
+    return url?.hostname === base.hostname && normalizePathname(url.pathname) === normalizePathname(base.pathname);
+  });
+  const slides = elements.filter((element) => elementClass(element, "gallery-slide-container"));
+  const images = new Map<string, PrivateGalleryImage>();
+  for (const slide of slides) {
+    const image = descendants(slide).find((element) => element.tag === "img");
+    if (!image) continue;
+    const url = officialMiImage(image.attributes.src ?? image.attributes["data-src"] ?? "", base);
+    if (!url || images.has(url.toString())) continue;
+    images.set(url.toString(), {
+      sourceUrl: url.toString(),
+      caption: slide.attributes["data-caption"] || image.attributes.alt || null,
+      width: schemaNumber(image.attributes.width),
+      height: schemaNumber(image.attributes.height),
+      srcSet: image.attributes.srcset ?? null,
+    });
+  }
+  const schemaImages = product ? (Array.isArray(product.image) ? product.image : [product.image]) : [];
+  for (const image of schemaImages) {
+    const source = typeof image === "string" ? image : image && typeof image === "object" ? (image as Record<string, unknown>).url : null;
+    if (typeof source !== "string") continue;
+    const url = officialMiImage(source, base);
+    if (url && !images.has(url.toString())) images.set(url.toString(), { sourceUrl: url.toString(), caption: null, width: null, height: null, srcSet: null });
+  }
+  return product || slides.length ? Array.from(images.values()) : null;
+}
+
+async function fetchMiHomeGalleries(properties: readonly PrivatePlanOrHome[], fetcher: HtmlFetcher, privateSnapshot: PrivateDealSnapshot): Promise<DealHoldReason[]> {
+  const results = await mapWithConcurrency(properties, 4, async (property) => {
+    const page = await getDocument(property.sourceUrl, fetcher, "text/html,application/xhtml+xml");
+    if (!page.ok) return { property, gallery: null, hold: "detail_fetch_failed" as const };
+    const gallery = miDetailGallery(page.text, property);
+    return { property, gallery, hold: gallery === null ? "expected_detail_container_not_found" as const : null };
+  });
+  const holds: DealHoldReason[] = [];
+  for (const result of results) {
+    if (result.hold) holds.push(result.hold);
+    else {
+      result.property.gallery = result.gallery!;
+      privateSnapshot.pages.push(sourcePage("home", result.property.sourceUrl, result.property.privateName));
+    }
+  }
+  return uniqueReasons(holds);
+}
+
 class MiHomesAdapter implements DealAdapter {
   readonly builder = "M/I Homes" as const;
 
@@ -849,35 +1248,29 @@ class MiHomesAdapter implements DealAdapter {
     }
 
     const discovered = discoverMiCommunityUrls(communityPage.text, community);
-    const maxDetails = detailLimit(config);
-    const planUrls = discovered.planUrls.slice(0, maxDetails);
-    const homeUrls = discovered.homeUrls.slice(0, Math.max(0, maxDetails - planUrls.length));
-    const detailHolds = [
-      ...(await fetchDiscoveredProperties(planUrls, "plan", fetcher, privateSnapshot)),
-      ...(await fetchDiscoveredProperties(homeUrls, "home", fetcher, privateSnapshot)),
-    ];
+    const guid = miCommunityGuid(communityPage.text);
+    if (!guid) return failedResult(config, fetchedAt, privateSnapshot, ["missing_community_guid"]);
+    // maxDetailPages must not truncate this catalog: an incomplete snapshot could mark real homes sold.
+    const homes = await fetchMiCatalog(community, guid, "homes", fetcher, privateSnapshot);
+    if (homes.holds.length) return failedResult(config, fetchedAt, privateSnapshot, homes.holds);
+    const plans = await fetchMiCatalog(community, guid, "plans", fetcher, privateSnapshot);
+    if (plans.holds.length) return failedResult(config, fetchedAt, privateSnapshot, plans.holds);
+    privateSnapshot.homes = homes.properties;
+    privateSnapshot.plans = plans.properties;
+    for (const plan of plans.properties) privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privateName));
+    const detailHolds = await fetchMiHomeGalleries(homes.properties, fetcher, privateSnapshot);
     if (detailHolds.length > 0) return failedResult(config, fetchedAt, privateSnapshot, detailHolds);
 
     const configuredIncentive = config.incentiveSourceUrl ? asUrl(config.incentiveSourceUrl) : null;
-    const incentiveUrl = configuredIncentive && sameOfficialHost(configuredIncentive, MI_HOST)
-      ? configuredIncentive
+    const incentiveUrl = config.incentiveSourceUrl
+      ? configuredIncentive && sameOfficialHost(configuredIncentive, MI_HOST) ? configuredIncentive : null
       : discovered.incentiveUrls[0] ? asUrl(discovered.incentiveUrls[0]) : null;
-    if (config.incentiveSourceUrl && !incentiveUrl) {
-      return failedResult(config, fetchedAt, privateSnapshot, ["invalid_source_url"]);
-    }
+    const incentiveHolds: DealHoldReason[] = config.incentiveSourceUrl && !incentiveUrl ? ["invalid_source_url"] : [];
     if (incentiveUrl) {
-      const incentivePage = await getDocument(incentiveUrl.toString(), fetcher, "text/html,application/xhtml+xml");
-      if (!incentivePage.ok) return failedResult(config, fetchedAt, privateSnapshot, ["incentive_fetch_failed"]);
-      if (!containsExpectedIncentiveContainer(incentivePage.text)) {
-        return failedResult(config, fetchedAt, privateSnapshot, ["expected_incentive_container_not_found"]);
-      }
-      const incentiveText = htmlToText(incentivePage.text);
-      const facts = parsePromotionalRate(incentiveText);
-      privateSnapshot.pages.push(sourcePage("incentive", incentiveUrl.toString(), extractFirstHeading(incentivePage.text)));
-      privateSnapshot.incentive = { sourceUrl: incentiveUrl.toString(), text: incentiveText, facts };
+      incentiveHolds.push(...await fetchOfficialIncentive(incentiveUrl, fetcher, privateSnapshot));
     }
 
-    return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config));
+    return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));
   }
 }
 

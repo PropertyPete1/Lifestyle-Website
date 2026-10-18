@@ -20,6 +20,22 @@ export const DEALS_STANDARD_CRON_EXPRESSION = "0 0 0 * * *";
 export const DEALS_CRON_PATH = "/api/scheduled/refreshDeals";
 
 /**
+ * Definitions only. The approved launch owner must register/enable these
+ * independently; no Builder Deals schedule is created on server boot.
+ */
+export const DEALS_JOB_DEFINITIONS = [
+  { name: "builder-deals-health", cron: "0 0 12,13 * * *", path: DEALS_CRON_PATH, payload: { job: "health" }, description: "7:00 AM Central health-check candidates; handler enforces America/Chicago time" },
+  { name: "builder-deals-incentive-revalidate", cron: "0 15 0,23 * * *", path: DEALS_CRON_PATH, payload: { job: "incentive" }, description: "6:15 PM Central incentive revalidation candidates for DST" },
+  { name: "builder-deals-catalog-refresh", cron: "0 45 0,23 * * *", path: DEALS_CRON_PATH, payload: { job: "catalog" }, description: "6:45 PM Central official catalog refresh candidates for DST" },
+  { name: "builder-deals-trec-import", cron: "0 15 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "trec" }, description: "1:15 AM Central TREC import candidates for DST" },
+  { name: "builder-deals-team-sync", cron: "0 30 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "team" }, description: "1:30 AM Central FUB team mirror candidates for DST" },
+  { name: "builder-deals-known-agent-sync", cron: "0 45 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "agents" }, description: "1:45 AM Central FUB recruiter mirror candidates for DST" },
+  { name: "builder-deals-fub-retry", cron: "0 0 * * * *", path: DEALS_CRON_PATH, payload: { job: "fub" }, description: "Hourly Builder Deals CRM retry" },
+  { name: "builder-deals-weekly-system-ok", cron: "0 5 12,13 * * 1", path: DEALS_CRON_PATH, payload: { job: "weekly" }, description: "Monday 7:05 AM Central System OK candidates for DST" },
+  { name: "builder-deals-maintenance", cron: "0 30 12,13 * * 1", path: DEALS_CRON_PATH, payload: { job: "maintenance" }, description: "Monday 7:30 AM Central candidate: test record and cached render maintenance" },
+] as const;
+
+/**
  * Idempotently ensure the daily stats-sync cron exists. Safe to call on every
  * boot: if a job with our name is already registered it is left untouched.
  * Never throws — if the heartbeat service is unavailable (e.g. Forge env not

@@ -1,8 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
-import { dealCommunities, dealHomes, dealIncentives } from "../drizzle/schema";
+import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealPhotos } from "../drizzle/schema";
 import { getDb } from "./db";
 import { hashSecret } from "./dealsService";
 import { loadOfficialDeals } from "./dealsAdapters";
+import { scrubPrivateNames } from "../shared/deals";
+import { processDealPhoto } from "./dealsPhotos";
 
 /** Private operational source configurations. Never import this module into client code. */
 export const LAUNCH_DEALS = [
@@ -18,7 +20,6 @@ export const LAUNCH_DEALS = [
     amenities: ["Walking trails", "Lakes"],
     fromPrice: 499990,
     reelCode: "sl1",
-    incentiveSourceUrl: "https://www.chesmar.com/campaigns/2553",
     scrubList: ["Chesmar", "Chesmar Homes", "Sienna Lakes", "Arroyo Grove", "HomeAmerican"],
   },
   {
@@ -65,22 +66,46 @@ async function upsertCommunity(config: (typeof LAUNCH_DEALS)[number]) {
   return Number((result as unknown as [{ insertId: number }])[0].insertId);
 }
 
-async function upsertHome(input: { communityId: number; sourceUrl: string; privatePlanName?: string | null; privateAddress?: string | null; kind: "quick_move_in" | "to_be_built"; beds?: string | null; baths?: string | null; sqft?: number | null; price?: number | null; previousPrice?: number | null; moveInDate?: string | null; lotSize?: string | null; status?: "available" | "sold" | "hidden" }) {
+async function upsertHome(input: { communityId: number; sourceUrl: string; privatePlanName?: string | null; privateAddress?: string | null; kind: "quick_move_in" | "to_be_built"; beds?: string | null; baths?: string | null; sqft?: number | null; price?: number | null; previousPrice?: number | null; moveInDate?: string | null; lotSize?: string | null; garage?: string | null; homesite?: string | null; readyNow?: boolean; status?: "available" | "sold" | "hidden"; origin?: "official" | "manual" }) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const sourceKey = hashSecret(input.sourceUrl);
   const existing = (await db.select().from(dealHomes).where(eq(dealHomes.sourceKey, sourceKey)).limit(1))[0];
-  const values = { ...input, sourceKey, status: input.status ?? "available" };
-  if (existing) await db.update(dealHomes).set(values).where(eq(dealHomes.id, existing.id));
-  else await db.insert(dealHomes).values(values);
+  const values = { ...input, sourceKey, status: input.status ?? "available", origin: input.origin ?? "official" };
+  if (existing) {
+    if (input.price && existing.price !== input.price) {
+      await db.insert(dealHomePriceHistory).values({ homeId: existing.id, price: existing.price ?? input.price });
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86400_000);
+      const history = await db.select({ price: dealHomePriceHistory.price }).from(dealHomePriceHistory).where(sql`${dealHomePriceHistory.homeId} = ${existing.id} AND ${dealHomePriceHistory.observedAt} >= ${thirtyDaysAgo}`);
+      const high = Math.max(input.price, existing.price ?? 0, ...history.map((row) => row.price));
+      values.previousPrice = high > input.price ? high : null;
+    }
+    await db.update(dealHomes).set(values).where(eq(dealHomes.id, existing.id));
+    return existing.id;
+  }
+  const result = await db.insert(dealHomes).values(values);
+  return Number((result as unknown as [{ insertId: number }])[0].insertId);
 }
 
-async function replaceIncentive(input: { communityId: number; normalizedText: string; publicText: string; headlineRate?: string; followOnRate?: string; followOnPeriod?: string; apr?: string; loanType?: string; downPayment?: string; repaymentTerms?: string; contractBy?: Date | null; closeBy?: Date | null; reconfirmNoDate?: boolean; held?: boolean; holdReason?: string | null; manual?: boolean }) {
+async function upsertPhotos(homeId: number, gallery: Array<{ sourceUrl: string }> | undefined) {
+  if (!gallery?.length) return;
+  const db = await getDb(); if (!db) return;
+  for (let sortOrder = 0; sortOrder < gallery.length; sortOrder++) {
+    const image = gallery[sortOrder];
+    const sourceHash = hashSecret(image.sourceUrl);
+    const existing = (await db.select({ id: dealPhotos.id }).from(dealPhotos).where(and(eq(dealPhotos.homeId, homeId), eq(dealPhotos.sourceHash, sourceHash))).limit(1))[0];
+    if (existing) continue;
+    const result = await db.insert(dealPhotos).values({ homeId, sourceUrl: image.sourceUrl, sourceHash, sortOrder, processingState: "pending" });
+    const id = Number((result as unknown as [{ insertId: number }])[0].insertId);
+    void processDealPhoto(id);
+  }
+}
+
+async function replaceIncentive(input: { communityId: number; normalizedText: string; publicText: string; headlineRate?: string; followOnRate?: string; followOnPeriod?: string; apr?: string; loanType?: string; downPayment?: string; repaymentTerms?: string; contractBy?: Date | null; closeBy?: Date | null; held?: boolean; holdReason?: string | null; manual?: boolean }) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const prior = (await db.select().from(dealIncentives).where(and(eq(dealIncentives.communityId, input.communityId), eq(dealIncentives.normalizedText, input.normalizedText))).limit(1))[0];
-  const { reconfirmNoDate, ...record } = input;
-  const values = { ...record, active: true, held: input.held ?? false, holdReason: input.holdReason ?? null, manual: input.manual ?? false, expiresAt: input.contractBy && input.closeBy ? (input.contractBy < input.closeBy ? input.contractBy : input.closeBy) : input.contractBy ?? input.closeBy ?? (reconfirmNoDate ? new Date(Date.now() + 14 * 86400_000) : null), confirmedAt: new Date() };
+  const values = { ...input, active: true, held: input.held ?? false, holdReason: input.holdReason ?? null, manual: input.manual ?? false, expiresAt: input.contractBy && input.closeBy ? (input.contractBy < input.closeBy ? input.contractBy : input.closeBy) : input.contractBy ?? input.closeBy ?? null, confirmedAt: new Date() };
   if (prior) await db.update(dealIncentives).set(values).where(eq(dealIncentives.id, prior.id));
   else await db.insert(dealIncentives).values(values);
 }
@@ -94,7 +119,7 @@ async function replaceIncentive(input: { communityId: number; normalizedText: st
 export async function seedLaunchDeals(): Promise<{ communities: number; homes: number; heldIncentives: number }> {
   const [chesmar, mi] = await Promise.all(LAUNCH_DEALS.map(upsertCommunity));
 
-  const chesmarIncentive = "4.999% (5.737% APR) FHA 30yr, fixed-rate special financing on select homes! 3.5% minimum down payment. 360 monthly payments.";
+  const chesmarIncentive = "4.999% (5.737% APR) FHA 30-year, fixed-rate financing on select homes that close by 12/31/26. Available 10/1/26 through 10/18/26. 3.50% down payment. 360 monthly payments.";
   await replaceIncentive({
     communityId: chesmar,
     normalizedText: chesmarIncentive.toLowerCase().replace(/[^a-z0-9%]+/g, " ").trim(),
@@ -104,12 +129,11 @@ export async function seedLaunchDeals(): Promise<{ communities: number; homes: n
     loanType: "FHA",
     downPayment: "3.5% minimum down payment",
     repaymentTerms: "360 monthly payments · 30-year fixed",
-    // A verified no-date offer is re-confirmed by the scheduled source check.
-    // It fails closed after 14 days if those core published terms disappear.
-    reconfirmNoDate: true,
+    contractBy: new Date("2026-10-18T23:59:59-05:00"),
+    closeBy: new Date("2026-12-31T23:59:59-06:00"),
     held: false,
     holdReason: null,
-    manual: true,
+    manual: false,
   });
 
   const miIncentive = "Fall Into Savings: Great Rates, Paid Closing Costs, Homesite Savings, and More. Year 1 4.25% interest rate | Years 2 to 30 5.25% interest rate | 6.051% APR. Selected Quick Move-In homes: 30-year fixed FHA loan with a 1/0 buydown and up to $10,000 toward allowable closing costs. 3.5% down payment and a minimum 640 credit score required. Valid on full-priced contracts written 10/12/2026 to 11/8/2026 on selected Quick Move-In homes; must close by 11/30/2026. New contracts only; does not apply to cancellations, rewrites, or transfers; buyer must occupy as primary residence; cannot be combined with any other offer. FHA county loan limits apply. Rate is not guaranteed until locked with the builder's lender.";
@@ -159,7 +183,7 @@ export async function seedLaunchDeals(): Promise<{ communities: number; homes: n
   });
   if (fetched.ok) {
     for (const plan of fetched.private.plans) {
-      await upsertHome({
+      const homeId = await upsertHome({
         communityId: chesmar,
         sourceUrl: plan.sourceUrl,
         privatePlanName: plan.privateName,
@@ -169,30 +193,13 @@ export async function seedLaunchDeals(): Promise<{ communities: number; homes: n
         sqft: plan.squareFeet,
         price: plan.price,
       });
+      await upsertPhotos(homeId, plan.gallery);
     }
   }
 
   const db = await getDb();
   const homeCount = db ? Number((await db.select({ n: sql<number>`count(*)` }).from(dealHomes))[0]?.n ?? 0) : 0;
   return { communities: 2, homes: homeCount, heldIncentives: 0 };
-}
-
-async function reconfirmNoDateChesmarIncentive(communityId: number, sourceUrl: string) {
-  const db = await getDb();
-  if (!db) return false;
-  try {
-    const response = await fetch(sourceUrl, { headers: { Accept: "text/html", "User-Agent": "LifestyleDesignRealtyDeals/1.0 (read-only official-page parser)" }, signal: AbortSignal.timeout(20_000) });
-    if (!response.ok) return false;
-    const source = (await response.text()).toLowerCase();
-    // The exact public source must still contain every rate trigger. This is
-    // only a re-confirmation signal; it never publishes newly parsed terms.
-    const confirmed = ["4.999%", "5.737%", "3.5%", "30-year"].every((term) => source.includes(term));
-    if (!confirmed) return false;
-    await db.update(dealIncentives)
-      .set({ confirmedAt: new Date(), expiresAt: new Date(Date.now() + 14 * 86400_000), held: false, holdReason: null })
-      .where(and(eq(dealIncentives.communityId, communityId), eq(dealIncentives.manual, true), eq(dealIncentives.active, true)));
-    return true;
-  } catch { return false; }
 }
 
 /**
@@ -216,23 +223,29 @@ export async function refreshOfficialDeals() {
       scrubList: config.scrubList,
       maxDetailPages: 12,
     });
-    if (config.builder === "Chesmar" && "incentiveSourceUrl" in config && config.incentiveSourceUrl) {
-      await reconfirmNoDateChesmarIncentive(community.id, config.incentiveSourceUrl);
-    }
-    if (!snapshot.ok) {
+    if (!snapshot.catalogOk) {
       await db.update(dealCommunities).set({ holdReason: snapshot.holdReasons.join(", ") }).where(eq(dealCommunities.id, community.id));
       results.push({ reelCode: config.reelCode, ok: false, reason: snapshot.holdReasons.join(", ") });
       continue;
     }
+    const discovered = new Set(snapshot.private.homes.map((item) => hashSecret(item.sourceUrl)));
+    const existingHomes = await db.select().from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.origin, "official"), eq(dealHomes.status, "available")));
+    for (const missing of existingHomes) if (!discovered.has(missing.sourceKey) && missing.kind === "quick_move_in") await db.update(dealHomes).set({ status: "sold" }).where(eq(dealHomes.id, missing.id));
     for (const plan of snapshot.private.plans) {
-      await upsertHome({ communityId: community.id, sourceUrl: plan.sourceUrl, privatePlanName: plan.privateName, kind: "to_be_built", beds: plan.bedrooms === null ? null : String(plan.bedrooms), baths: plan.bathrooms === null ? null : String(plan.bathrooms), sqft: plan.squareFeet, price: plan.price });
+      const homeId = await upsertHome({ communityId: community.id, sourceUrl: plan.sourceUrl, privatePlanName: plan.privatePlanName ?? plan.privateName, privateAddress: plan.privateAddress ?? null, kind: "to_be_built", beds: plan.bedrooms === null ? null : String(plan.bedrooms), baths: plan.bathrooms === null ? null : String(plan.bathrooms), sqft: plan.squareFeet, price: plan.price, previousPrice: plan.previousPrice ?? null, moveInDate: plan.moveInDate ?? null, garage: plan.garage ? String(plan.garage) : null, homesite: plan.homesite ?? null, readyNow: plan.readyNow ?? false });
+      await upsertPhotos(homeId, plan.gallery);
     }
     // Only publish a QMI when the official page explicitly labels it as such.
     for (const home of snapshot.private.homes) {
       if (!/quick\s+move|available\s+now/i.test(home.status ?? "")) continue;
-      await upsertHome({ communityId: community.id, sourceUrl: home.sourceUrl, privatePlanName: home.privateName, kind: "quick_move_in", beds: home.bedrooms === null ? null : String(home.bedrooms), baths: home.bathrooms === null ? null : String(home.bathrooms), sqft: home.squareFeet, price: home.price });
+      const homeId = await upsertHome({ communityId: community.id, sourceUrl: home.sourceUrl, privatePlanName: home.privatePlanName ?? home.privateName, privateAddress: home.privateAddress ?? null, kind: "quick_move_in", beds: home.bedrooms === null ? null : String(home.bedrooms), baths: home.bathrooms === null ? null : String(home.bathrooms), sqft: home.squareFeet, price: home.price, previousPrice: home.previousPrice ?? null, moveInDate: home.moveInDate ?? null, garage: home.garage ? String(home.garage) : null, homesite: home.homesite ?? null, readyNow: home.readyNow ?? false });
+      await upsertPhotos(homeId, home.gallery);
     }
-    await db.update(dealCommunities).set({ lastSuccessfulSyncAt: new Date(), holdReason: null }).where(eq(dealCommunities.id, community.id));
+    if (snapshot.private.incentive?.facts.publishable) {
+      const fact = snapshot.private.incentive.facts;
+      await replaceIncentive({ communityId: community.id, normalizedText: fact.normalizedText, publicText: scrubPrivateNames(snapshot.private.incentive.text, JSON.parse(community.scrubList)), headlineRate: `${fact.promotionalRatePercent}%`, followOnRate: fact.followOnRatePercent ? `${fact.followOnRatePercent}%` : undefined, followOnPeriod: fact.followOnPeriod ?? undefined, apr: `${fact.aprPercent}% APR`, loanType: fact.loanType ?? undefined, downPayment: fact.downPaymentPercent ? `${fact.downPaymentPercent}% down payment` : undefined, repaymentTerms: fact.repaymentTermYears ? `${fact.repaymentTermYears}-year fixed` : undefined, contractBy: fact.contractDeadline?.isoDate ? new Date(`${fact.contractDeadline.isoDate}T23:59:59-06:00`) : null, closeBy: fact.closingDeadline?.isoDate ? new Date(`${fact.closingDeadline.isoDate}T23:59:59-06:00`) : null, held: false, holdReason: null });
+    }
+    await db.update(dealCommunities).set({ lastSuccessfulSyncAt: new Date(), catalogUpdatedAt: new Date(), holdReason: snapshot.incentiveHoldReasons.length ? snapshot.incentiveHoldReasons.join(", ") : null }).where(eq(dealCommunities.id, community.id));
     results.push({ reelCode: config.reelCode, ok: true });
   }
   return results;

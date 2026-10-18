@@ -8,7 +8,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { registerOgMeta } from "../ogMeta";
 import { appRouter } from "../routers";
 import { syncStatsHandler } from "../scheduledStatsHandler";
-import { ensureDealsRefreshCron, ensureStatsSyncCron } from "../registerCron";
+import { ensureStatsSyncCron } from "../registerCron";
 import { registerDealsRoutes } from "../dealsRoutes";
 import { scheduledDealsHandler } from "../scheduledDealsHandler";
 import { createContext } from "./context";
@@ -77,7 +77,8 @@ async function startServer() {
     // never touches the shared cron registry; idempotent and non-blocking.
     if (process.env.NODE_ENV === "production") {
       void ensureStatsSyncCron();
-      void ensureDealsRefreshCron();
+      // Builder Deals job definitions are intentionally not self-registered
+      // until this separately reviewed funnel is approved for launch.
     }
   });
 }

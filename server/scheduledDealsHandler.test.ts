@@ -6,7 +6,8 @@ const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
   chicagoClock: vi.fn(),
   chicagoDay: vi.fn(),
-  refreshOfficialDeals: vi.fn(),
+  refreshOfficialDealsIfDue: vi.fn(),
+  revalidateDealIncentives: vi.fn(),
   importTrecLicenses: vi.fn(),
   builderDealsHealthCheck: vi.fn(),
   builderDealsMondayReport: vi.fn(),
@@ -30,8 +31,10 @@ vi.mock("./dealsService", () => ({
   chicagoDay: (...args: unknown[]) => mocks.chicagoDay(...args),
 }));
 vi.mock("./dealsSync", () => ({
-  refreshOfficialDeals: (...args: unknown[]) =>
-    mocks.refreshOfficialDeals(...args),
+  refreshOfficialDealsIfDue: (...args: unknown[]) =>
+    mocks.refreshOfficialDealsIfDue(...args),
+  revalidateDealIncentives: (...args: unknown[]) =>
+    mocks.revalidateDealIncentives(...args),
 }));
 vi.mock("./dealsTrec", () => ({
   importTrecLicenses: (...args: unknown[]) => mocks.importTrecLicenses(...args),
@@ -83,9 +86,10 @@ beforeEach(() => {
     isCron: true,
     taskUid: "cron-task",
   });
-  mocks.chicagoClock.mockReturnValue({ hour: 18, minute: 45, weekday: "Mon" });
+  mocks.chicagoClock.mockReturnValue({ hour: 6, minute: 0, weekday: "Mon" });
   mocks.chicagoDay.mockReturnValue("2026-10-18");
-  mocks.refreshOfficialDeals.mockResolvedValue({ ok: true });
+  mocks.refreshOfficialDealsIfDue.mockResolvedValue({ ok: true });
+  mocks.revalidateDealIncentives.mockResolvedValue({ ok: true });
 });
 
 afterEach(() => {
@@ -128,7 +132,7 @@ describe("Builder Deals scheduled handler helpers", () => {
       ok: true,
       result: { skipped: "already_running" },
     });
-    expect(mocks.refreshOfficialDeals).not.toHaveBeenCalled();
+    expect(mocks.refreshOfficialDealsIfDue).not.toHaveBeenCalled();
     expect(db.insert).not.toHaveBeenCalled();
     expect(db.update).not.toHaveBeenCalled();
   });

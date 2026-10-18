@@ -259,3 +259,37 @@ export async function refreshOfficialDeals() {
   void processPendingDealPhotos(10).catch((error) => console.warn("[deals-photo] retry queue drain failed", error));
   return results;
 }
+
+/**
+ * The scheduled catalog job intentionally does not scrape every morning. A
+ * community is due only when it has never completed an official refresh or
+ * its last success is at least three calendar days old. Manual/paused rows
+ * are not candidates.
+ */
+export async function refreshOfficialDealsIfDue(now = new Date()) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
+  const threshold = now.getTime() - 3 * 24 * 60 * 60_000;
+  const due = communities.some((community) => !community.lastSuccessfulSyncAt || community.lastSuccessfulSyncAt.getTime() <= threshold);
+  if (!due) return [{ reelCode: "scheduled", ok: true, skipped: "fresh_within_three_days" }];
+  return refreshOfficialDeals();
+}
+
+/**
+ * The evening incentive job is deliberately network-free. It retires an
+ * expired dated offer or an undated offer that exceeds the configured lapse
+ * period; the next catalog refresh is responsible for discovering a current
+ * official promotion.
+ */
+export async function revalidateDealIncentives(now = new Date()) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const { getDealSettings } = await import("./dealsService");
+  const settings = await getDealSettings();
+  const rows = await db.select().from(dealIncentives).where(eq(dealIncentives.active, true));
+  const lapseBefore = now.getTime() - settings.incentiveLapseDays * 24 * 60 * 60_000;
+  const stale = rows.filter((row) => (row.expiresAt && row.expiresAt <= now) || (!row.expiresAt && row.confirmedAt.getTime() <= lapseBefore));
+  for (const row of stale) await db.update(dealIncentives).set({ active: false, holdReason: row.expiresAt ? "expired" : "lapsed_unconfirmed" }).where(eq(dealIncentives.id, row.id));
+  return { ok: true as const, expired: stale.filter((row) => Boolean(row.expiresAt)).length, lapsed: stale.filter((row) => !row.expiresAt).length, checked: rows.length };
+}

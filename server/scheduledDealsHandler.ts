@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { dealJobRuns } from "../drizzle/schema";
 import { sdk } from "./_core/sdk";
 import { getDb } from "./db";
-import { refreshOfficialDeals } from "./dealsSync";
+import { refreshOfficialDealsIfDue, revalidateDealIncentives } from "./dealsSync";
 import { importTrecLicenses } from "./dealsTrec";
 import { builderDealsHealthCheck, builderDealsMondayReport, cleanupDealsTestRecords, syncKnownAgentsFromFub, syncTeamAllowlistFromFub } from "./dealsMaintenance";
 import { runPendingDealsFubJobs } from "./dealsFubJobs";
@@ -40,8 +40,8 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
   try {
     const user = await sdk.authenticateRequest(req); if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
     const job = typeof req.body?.job === "string" ? req.body.job : "catalog";
-    if (job === "incentive") return res.json({ ok: true, result: await whenDue(dueAt(18, 15), "builder-deals-incentive-revalidate", refreshOfficialDeals) });
-    if (job === "catalog") return res.json({ ok: true, result: await whenDue(dueAt(18, 45), "builder-deals-catalog-refresh", refreshOfficialDeals) });
+    if (job === "incentive") return res.json({ ok: true, result: await whenDue(dueAt(18, 15), "builder-deals-incentive-revalidate", revalidateDealIncentives) });
+    if (job === "catalog") return res.json({ ok: true, result: await whenDue(dueAt(6, 0), "builder-deals-catalog-refresh", refreshOfficialDealsIfDue) });
     if (job === "trec") return res.json({ ok: true, result: await whenDue(dueAt(1, 15), "builder-deals-trec-import", importTrecLicenses) });
     if (job === "team") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-team-sync", syncTeamAllowlistFromFub) });
     if (job === "agents") return res.json({ ok: true, result: await whenDue(dueAt(1, 45), "builder-deals-known-agent-sync", syncKnownAgentsFromFub) });

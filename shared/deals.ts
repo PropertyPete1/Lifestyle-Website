@@ -72,6 +72,30 @@ export function normalizedText(input: string): string {
     .trim();
 }
 
+/**
+ * Stable private identity input for a builder record. Tracking parameters,
+ * fragments, host case, and an incidental trailing slash must not create a
+ * second listing row. Invalid values stay distinguishable rather than being
+ * silently treated as a URL.
+ */
+export function normalizedDealSourceKey(input: string): string {
+  const trimmed = input.trim();
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return `invalid:${normalizedText(trimmed)}`;
+    url.protocol = url.protocol.toLowerCase();
+    url.hostname = url.hostname.toLowerCase();
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+    url.search = "";
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return url.toString();
+  } catch {
+    return `invalid:${normalizedText(trimmed)}`;
+  }
+}
+
 /** Public storage/output scrubber. It purposely performs no guessing. */
 export function scrubPrivateNames(
   input: string,

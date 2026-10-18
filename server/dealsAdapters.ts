@@ -282,7 +282,7 @@ function normalizePathname(pathname: string): string {
 }
 
 function sameOfficialHost(url: URL, expectedHost: string): boolean {
-  return url.protocol === "https:" && url.hostname.toLowerCase() === expectedHost;
+  return url.protocol === "https:" && !url.port && !url.username && !url.password && url.hostname.toLowerCase() === expectedHost;
 }
 
 function absoluteUrl(href: string, base: URL): URL | null {
@@ -303,7 +303,8 @@ async function getDocument(
   url: string,
   fetcher: HtmlFetcher,
   accept: string,
-): Promise<{ ok: true; text: string } | { ok: false }> {
+  expectedHost: string,
+): Promise<{ ok: true; text: string } | { ok: false; redirectedOffOfficialHost: boolean }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -316,11 +317,19 @@ async function getDocument(
         "User-Agent": "LifestyleDesignRealtyDeals/1.0 (read-only official-page parser)",
       },
     });
-    if (!response.ok) return { ok: false };
+    // `redirect: follow` is convenient for canonical paths but a followed
+    // redirect is a fresh trust boundary. Native fetch exposes the final URL;
+    // fixture Response objects leave it blank, so only a supplied final URL is
+    // validated here.
+    if (response.url) {
+      const finalUrl = asUrl(response.url);
+      if (!finalUrl || !sameOfficialHost(finalUrl, expectedHost)) return { ok: false, redirectedOffOfficialHost: true };
+    }
+    if (!response.ok) return { ok: false, redirectedOffOfficialHost: false };
     return { ok: true, text: await response.text() };
   } catch {
     // Do not include url in logs or errors: it is private source metadata.
-    return { ok: false };
+    return { ok: false, redirectedOffOfficialHost: false };
   } finally {
     clearTimeout(timer);
   }
@@ -730,7 +739,11 @@ function parsePrivateProperty(sourceUrl: string, html: string): PrivatePlanOrHom
   };
 }
 
-function parseSitemapUrls(xml: string): string[] {
+function parseSitemapUrls(xml: string): string[] | null {
+  // A branded error page can still be HTTP 200. Do not interpret it as a
+  // genuine empty inventory sitemap. Both documents used by this adapter are
+  // URL sets, so reject any other payload before extracting incidental <loc>s.
+  if (!/^\s*(?:<\?xml\b[^>]*>\s*)?<urlset\b[^>]*>/i.test(xml) || !/<\/urlset\s*>\s*$/i.test(xml)) return null;
   const urls: string[] = [];
   const locPattern = /<loc\b[^>]*>\s*([\s\S]*?)\s*<\/loc>/gi;
   let match: RegExpExecArray | null;
@@ -788,7 +801,12 @@ export function toPublicSafeText(
 ): string | null {
   const terms = privateTerms({ ...config, builder: "Manual", sourceUrl: "https://manual.invalid" });
   const allTerms = Array.from(new Set([...terms, ...extraPrivateTerms]));
-  const scrubbed = scrubPrivateNames(input, allTerms, { planField });
+  // Incentive text can originate from a Manual review entry as well as parsed
+  // HTML. Normalize it as text first so markup and executable-content tags do
+  // not become a public DTO. Public offers do not need outbound source links;
+  // reject rather than trying to redact an arbitrary URL.
+  const scrubbed = scrubPrivateNames(htmlToText(input), allTerms, { planField });
+  if (!scrubbed || /\b(?:https?:\/\/|www\.)\S+/i.test(scrubbed)) return null;
   return remainingPrivateTerm(scrubbed, allTerms) ? null : scrubbed;
 }
 
@@ -901,12 +919,22 @@ async function fetchDiscoveredProperties(
   kind: "plan" | "home",
   fetcher: HtmlFetcher,
   privateSnapshot: PrivateDealSnapshot,
+  expectedHost: string,
 ): Promise<DealHoldReason[]> {
   const results = await mapWithConcurrency(urls, 4, async (url) => {
-    const page = await getDocument(url, fetcher, "text/html,application/xhtml+xml");
-    if (!page.ok) return { hold: "detail_fetch_failed" as const, property: null };
+    const page = await getDocument(url, fetcher, "text/html,application/xhtml+xml", expectedHost);
+    if (!page.ok) {
+      const hold: DealHoldReason = page.redirectedOffOfficialHost ? "unsupported_official_host" : "detail_fetch_failed";
+      return { hold, property: null };
+    }
     if (!containsExpectedDetailContainer(page.text)) return { hold: "expected_detail_container_not_found" as const, property: null };
-    return { hold: null, property: parsePrivateProperty(url, page.text) };
+    const property = parsePrivateProperty(url, page.text);
+    // A plan or home record must contain at least one first-party property
+    // fact; an arbitrary branded detail page is not a successful discovery.
+    if (property.price === null && property.bedrooms === null && property.bathrooms === null && property.squareFeet === null) {
+      return { hold: "expected_detail_container_not_found" as const, property: null };
+    }
+    return { hold: null, property };
   });
   const holds: DealHoldReason[] = [];
   for (const result of results) {
@@ -947,10 +975,11 @@ async function fetchOfficialIncentive(
   url: URL,
   fetcher: HtmlFetcher,
   privateSnapshot: PrivateDealSnapshot,
+  expectedHost: string,
   chesmar = false,
 ): Promise<DealHoldReason[]> {
-  const page = await getDocument(url.toString(), fetcher, "text/html,application/xhtml+xml");
-  if (!page.ok) return ["incentive_fetch_failed"];
+  const page = await getDocument(url.toString(), fetcher, "text/html,application/xhtml+xml", expectedHost);
+  if (!page.ok) return [page.redirectedOffOfficialHost ? "unsupported_official_host" : "incentive_fetch_failed"];
   if (!containsExpectedIncentiveContainer(page.text)) return ["expected_incentive_container_not_found"];
   const text = chesmar ? chesmarFhaIncentiveText(page.text) : htmlToText(page.text);
   if (!text) return ["expected_incentive_container_not_found"];
@@ -965,11 +994,13 @@ class ChesmarAdapter implements DealAdapter {
   async load(config: CommunitySourceConfig, options: AdapterRunOptions = {}): Promise<DealAdapterResult> {
     const fetchedAt = (options.now ?? (() => new Date()))().toISOString();
     const privateSnapshot = emptyPrivate(config);
-    const community = validatedOfficialCommunity(config, CHESMAR_HOST);
-    if (!community) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_source_url"]);
+    const configuredCommunity = asUrl(config.sourceUrl);
+    if (!configuredCommunity) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_source_url"]);
+    if (!sameOfficialHost(configuredCommunity, CHESMAR_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
+    const community = configuredCommunity;
     const fetcher = options.fetcher ?? fetch;
-    const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml");
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, ["community_fetch_failed"]);
+    const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", CHESMAR_HOST);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     if (!containsExpectedChesmarCommunityContainer(page.text)) {
       return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
@@ -977,16 +1008,21 @@ class ChesmarAdapter implements DealAdapter {
 
     const sitemapResults = await mapWithConcurrency(CHESMAR_SITEMAPS, 2, async (sitemapUrl) => ({
       sitemapUrl,
-      page: await getDocument(sitemapUrl, fetcher, "application/xml,text/xml;q=0.9,*/*;q=0.1"),
+      page: await getDocument(sitemapUrl, fetcher, "application/xml,text/xml;q=0.9,*/*;q=0.1", CHESMAR_HOST),
     }));
-    if (sitemapResults.some((result) => !result.page.ok)) {
-      return failedResult(config, fetchedAt, privateSnapshot, ["sitemap_fetch_failed"]);
+    const failedSitemap = sitemapResults.find((result) => !result.page.ok);
+    if (failedSitemap && !failedSitemap.page.ok) {
+      return failedResult(config, fetchedAt, privateSnapshot, [failedSitemap.page.redirectedOffOfficialHost ? "unsupported_official_host" : "sitemap_fetch_failed"]);
     }
     for (const sitemap of sitemapResults) {
       privateSnapshot.pages.push(sourcePage("sitemap", sitemap.sitemapUrl, null));
     }
 
-    const candidates = sitemapResults.flatMap((result) => (result.page.ok ? parseSitemapUrls(result.page.text) : []));
+    const parsedSitemaps = sitemapResults.map((result) => result.page.ok ? parseSitemapUrls(result.page.text) : null);
+    if (parsedSitemaps.some((sitemap) => sitemap === null)) {
+      return failedResult(config, fetchedAt, privateSnapshot, ["sitemap_fetch_failed"]);
+    }
+    const candidates = parsedSitemaps.flatMap((sitemap) => sitemap ?? []);
     const planUrls: string[] = [];
     const homeUrls: string[] = [];
     for (const raw of candidates) {
@@ -1000,13 +1036,13 @@ class ChesmarAdapter implements DealAdapter {
     const remaining = Math.max(0, maxDetails - distinctPlanUrls.length);
     const distinctHomeUrls = Array.from(new Set(homeUrls)).slice(0, remaining);
     const detailHolds = [
-      ...(await fetchDiscoveredProperties(distinctPlanUrls, "plan", fetcher, privateSnapshot)),
-      ...(await fetchDiscoveredProperties(distinctHomeUrls, "home", fetcher, privateSnapshot)),
+      ...(await fetchDiscoveredProperties(distinctPlanUrls, "plan", fetcher, privateSnapshot, CHESMAR_HOST)),
+      ...(await fetchDiscoveredProperties(distinctHomeUrls, "home", fetcher, privateSnapshot, CHESMAR_HOST)),
     ];
     if (detailHolds.length > 0) return failedResult(config, fetchedAt, privateSnapshot, detailHolds);
 
     // Ignore stale configured /campaigns/... URLs: only this official page has the current window.
-    const incentiveHolds = await fetchOfficialIncentive(new URL(CHESMAR_INCENTIVES_URL), fetcher, privateSnapshot, true);
+    const incentiveHolds = await fetchOfficialIncentive(new URL(CHESMAR_INCENTIVES_URL), fetcher, privateSnapshot, CHESMAR_HOST, true);
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));
   }
 }
@@ -1134,7 +1170,7 @@ async function fetchMiCatalog(
     url.searchParams.set("id", `{${guid}}`);
     url.searchParams.set("type", type);
     url.searchParams.set("items", String(offset));
-    const response = await getDocument(url.toString(), fetcher, "application/json");
+    const response = await getDocument(url.toString(), fetcher, "application/json", MI_HOST);
     if (!response.ok) return { properties: [], holds: ["inventory_fetch_failed"] };
     let payload: unknown;
     try { payload = JSON.parse(response.text); } catch { return { properties: [], holds: ["invalid_inventory_response"] }; }
@@ -1215,7 +1251,7 @@ function miDetailGallery(html: string, property: PrivatePlanOrHome): PrivateGall
 
 async function fetchMiHomeGalleries(properties: readonly PrivatePlanOrHome[], fetcher: HtmlFetcher, privateSnapshot: PrivateDealSnapshot): Promise<DealHoldReason[]> {
   const results = await mapWithConcurrency(properties, 4, async (property) => {
-    const page = await getDocument(property.sourceUrl, fetcher, "text/html,application/xhtml+xml");
+    const page = await getDocument(property.sourceUrl, fetcher, "text/html,application/xhtml+xml", MI_HOST);
     if (!page.ok) return { property, gallery: null, hold: "detail_fetch_failed" as const };
     const gallery = miDetailGallery(page.text, property);
     return { property, gallery, hold: gallery === null ? "expected_detail_container_not_found" as const : null };
@@ -1237,11 +1273,13 @@ class MiHomesAdapter implements DealAdapter {
   async load(config: CommunitySourceConfig, options: AdapterRunOptions = {}): Promise<DealAdapterResult> {
     const fetchedAt = (options.now ?? (() => new Date()))().toISOString();
     const privateSnapshot = emptyPrivate(config);
-    const community = validatedOfficialCommunity(config, MI_HOST);
-    if (!community) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_source_url"]);
+    const configuredCommunity = asUrl(config.sourceUrl);
+    if (!configuredCommunity) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_source_url"]);
+    if (!sameOfficialHost(configuredCommunity, MI_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
+    const community = configuredCommunity;
     const fetcher = options.fetcher ?? fetch;
-    const communityPage = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml");
-    if (!communityPage.ok) return failedResult(config, fetchedAt, privateSnapshot, ["community_fetch_failed"]);
+    const communityPage = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", MI_HOST);
+    if (!communityPage.ok) return failedResult(config, fetchedAt, privateSnapshot, [communityPage.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     if (!containsExpectedMiCommunityContainer(communityPage.text)) {
       return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
@@ -1265,9 +1303,9 @@ class MiHomesAdapter implements DealAdapter {
     const incentiveUrl = config.incentiveSourceUrl
       ? configuredIncentive && sameOfficialHost(configuredIncentive, MI_HOST) ? configuredIncentive : null
       : discovered.incentiveUrls[0] ? asUrl(discovered.incentiveUrls[0]) : null;
-    const incentiveHolds: DealHoldReason[] = config.incentiveSourceUrl && !incentiveUrl ? ["invalid_source_url"] : [];
+    const incentiveHolds: DealHoldReason[] = config.incentiveSourceUrl && !incentiveUrl ? [configuredIncentive ? "unsupported_official_host" : "invalid_source_url"] : [];
     if (incentiveUrl) {
-      incentiveHolds.push(...await fetchOfficialIncentive(incentiveUrl, fetcher, privateSnapshot));
+      incentiveHolds.push(...await fetchOfficialIncentive(incentiveUrl, fetcher, privateSnapshot, MI_HOST));
     }
 
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));

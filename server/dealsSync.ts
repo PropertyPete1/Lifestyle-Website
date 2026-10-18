@@ -2,9 +2,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealPhotos } from "../drizzle/schema";
 import { getDb } from "./db";
 import { chicagoEndOfDay, hashSecret } from "./dealsService";
-import { loadOfficialDeals } from "./dealsAdapters";
-import { scrubPrivateNames } from "../shared/deals";
-import { processDealPhoto } from "./dealsPhotos";
+import { loadOfficialDeals, toPublicSafeText, type BuilderId, type CommunitySourceConfig } from "./dealsAdapters";
+import { normalizedDealSourceKey, normalizedText } from "../shared/deals";
+import { processDealPhoto, processPendingDealPhotos } from "./dealsPhotos";
 
 /** Private operational source configurations. Never import this module into client code. */
 export const LAUNCH_DEALS = [
@@ -58,27 +58,87 @@ async function upsertCommunity(config: (typeof LAUNCH_DEALS)[number]) {
     scrubList: JSON.stringify(config.scrubList),
     active: true,
   };
-  if (existing) {
-    await db.update(dealCommunities).set(values).where(eq(dealCommunities.id, existing.id));
-    return existing.id;
-  }
+  // These source fields already live in deal_communities. Preserve an existing
+  // reviewed row instead of overwriting database configuration on every seed.
+  if (existing) return existing.id;
   const result = await db.insert(dealCommunities).values(values);
   return Number((result as unknown as [{ insertId: number }])[0].insertId);
+}
+
+function storedPrice(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647 ? value : null;
+}
+
+function isBuilderId(value: string): value is BuilderId {
+  return value === "Chesmar" || value === "M/I Homes" || value === "Manual";
+}
+
+function storedScrubList(value: string, fallback: readonly string[]): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) return [...fallback];
+    return Array.from(new Set([...fallback, ...parsed.map((item) => item.trim()).filter(Boolean)]));
+  } catch {
+    return [...fallback];
+  }
+}
+
+/** Uses only existing deal_communities fields; no schema migration is implied. */
+function storedCommunitySourceConfig(
+  fallback: (typeof LAUNCH_DEALS)[number],
+  community: typeof dealCommunities.$inferSelect,
+): CommunitySourceConfig | null {
+  if (!isBuilderId(community.builder) || !community.sourceUrl.trim() || !community.privateName.trim()) return null;
+  return {
+    builder: community.builder,
+    sourceUrl: community.sourceUrl,
+    privateCommunityName: community.privateName,
+    scrubList: storedScrubList(community.scrubList, fallback.scrubList),
+    // There is no incentive URL column. M/I discovers a current official link
+    // from its configured community rather than retaining a stale campaign.
+    maxDetailPages: 12,
+  };
 }
 
 async function upsertHome(input: { communityId: number; sourceUrl: string; privatePlanName?: string | null; privateAddress?: string | null; kind: "quick_move_in" | "to_be_built"; beds?: string | null; baths?: string | null; sqft?: number | null; price?: number | null; previousPrice?: number | null; moveInDate?: string | null; lotSize?: string | null; garage?: string | null; homesite?: string | null; readyNow?: boolean; status?: "available" | "sold" | "hidden"; origin?: "official" | "manual" }) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
-  const sourceKey = hashSecret(input.sourceUrl);
-  const existing = (await db.select().from(dealHomes).where(eq(dealHomes.sourceKey, sourceKey)).limit(1))[0];
-  const values = { ...input, sourceKey, status: input.status ?? "available", origin: input.origin ?? "official" };
+  const sourceUrl = normalizedDealSourceKey(input.sourceUrl);
+  const sourceKey = hashSecret(sourceUrl);
+  // Let raw historical rows converge to the canonical key once, preserving
+  // their existing record and price history instead of creating a duplicate.
+  const legacySourceKey = hashSecret(input.sourceUrl);
+  const existing =
+    (await db.select().from(dealHomes).where(eq(dealHomes.sourceKey, sourceKey)).limit(1))[0] ??
+    (legacySourceKey === sourceKey ? undefined : (await db.select().from(dealHomes).where(eq(dealHomes.sourceKey, legacySourceKey)).limit(1))[0]);
+  const incomingPrice = storedPrice(input.price);
+  const values = {
+    ...input,
+    sourceUrl,
+    sourceKey,
+    price: incomingPrice,
+    previousPrice: storedPrice(input.previousPrice),
+    status: input.status ?? "available",
+    origin: input.origin ?? "official",
+  };
   if (existing) {
-    if (input.price && existing.price !== input.price) {
-      await db.insert(dealHomePriceHistory).values({ homeId: existing.id, price: existing.price ?? input.price });
+    // A failed or incomplete card parse must never erase a good price. Record
+    // only a real prior observed price; never manufacture a history point.
+    values.price = incomingPrice ?? existing.price;
+    if (incomingPrice !== null && existing.price !== null && incomingPrice !== existing.price) {
+      await db.insert(dealHomePriceHistory).values({ homeId: existing.id, price: existing.price });
+    }
+    if (values.price !== null) {
       const thirtyDaysAgo = new Date(Date.now() - 30 * 86400_000);
       const history = await db.select({ price: dealHomePriceHistory.price }).from(dealHomePriceHistory).where(sql`${dealHomePriceHistory.homeId} = ${existing.id} AND ${dealHomePriceHistory.observedAt} >= ${thirtyDaysAgo}`);
-      const high = Math.max(input.price, existing.price ?? 0, ...history.map((row) => row.price));
-      values.previousPrice = high > input.price ? high : null;
+      const candidates = [
+        ...history.map((row) => storedPrice(row.price)).filter((price): price is number => price !== null),
+        storedPrice(input.previousPrice),
+      ].filter((price): price is number => price !== null);
+      const high = candidates.length ? Math.max(...candidates) : null;
+      values.previousPrice = high !== null && high > values.price ? high : null;
+    } else {
+      values.previousPrice = existing.previousPrice;
     }
     await db.update(dealHomes).set(values).where(eq(dealHomes.id, existing.id));
     return existing.id;
@@ -95,9 +155,19 @@ async function upsertPhotos(homeId: number, gallery: Array<{ sourceUrl: string }
     const sourceHash = hashSecret(image.sourceUrl);
     const existing = (await db.select({ id: dealPhotos.id }).from(dealPhotos).where(and(eq(dealPhotos.homeId, homeId), eq(dealPhotos.sourceHash, sourceHash))).limit(1))[0];
     if (existing) continue;
-    const result = await db.insert(dealPhotos).values({ homeId, sourceUrl: image.sourceUrl, sourceHash, sortOrder, processingState: "pending" });
+    const result = await db.insert(dealPhotos).values({
+      homeId,
+      sourceUrl: image.sourceUrl,
+      sourceHash,
+      sortOrder,
+      processingState: "pending",
+      nextProcessingAttemptAt: new Date(),
+    });
     const id = Number((result as unknown as [{ insertId: number }])[0].insertId);
-    void processDealPhoto(id);
+    // The DB row is the source of truth. Best-effort immediate work improves
+    // freshness but a restart cannot lose it: scheduled/sync queue draining
+    // picks up due pending records and expired processing leases.
+    void processDealPhoto(id).catch((error) => console.warn("[deals-photo] initial queue drain failed", error));
   }
 }
 
@@ -110,96 +180,15 @@ async function replaceIncentive(input: { communityId: number; normalizedText: st
   else await db.insert(dealIncentives).values(values);
 }
 
-/**
- * First launch import uses only verified official-page facts plus the incentive
- * details supplied by the brokerage. The M/I record stays held until its page
- * or flyer provides the missing triggering-term disclosure; it cannot leak to
- * the public page before then.
- */
+/** First launch uses a current read-only official refresh, never a saved capture. */
 export async function seedLaunchDeals(): Promise<{ communities: number; homes: number; heldIncentives: number }> {
-  const [chesmar, mi] = await Promise.all(LAUNCH_DEALS.map(upsertCommunity));
-
-  const chesmarIncentive = "4.999% (5.737% APR) FHA 30-year, fixed-rate financing on select homes that close by 12/31/26. Available 10/1/26 through 10/18/26. 3.50% down payment. 360 monthly payments.";
-  await replaceIncentive({
-    communityId: chesmar,
-    normalizedText: chesmarIncentive.toLowerCase().replace(/[^a-z0-9%]+/g, " ").trim(),
-    publicText: chesmarIncentive,
-    headlineRate: "4.999%",
-    apr: "5.737% APR",
-    loanType: "FHA",
-    downPayment: "3.5% minimum down payment",
-    repaymentTerms: "360 monthly payments · 30-year fixed",
-    contractBy: chicagoEndOfDay(2026, 10, 18),
-    closeBy: chicagoEndOfDay(2026, 12, 31),
-    held: false,
-    holdReason: null,
-    manual: false,
-  });
-
-  const miIncentive = "Fall Into Savings: Great Rates, Paid Closing Costs, Homesite Savings, and More. Year 1 4.25% interest rate | Years 2 to 30 5.25% interest rate | 6.051% APR. Selected Quick Move-In homes: 30-year fixed FHA loan with a 1/0 buydown and up to $10,000 toward allowable closing costs. 3.5% down payment and a minimum 640 credit score required. Valid on full-priced contracts written 10/12/2026 to 11/8/2026 on selected Quick Move-In homes; must close by 11/30/2026. New contracts only; does not apply to cancellations, rewrites, or transfers; buyer must occupy as primary residence; cannot be combined with any other offer. FHA county loan limits apply. Rate is not guaranteed until locked with the builder's lender.";
-  await replaceIncentive({
-    communityId: mi,
-    normalizedText: miIncentive.toLowerCase().replace(/[^a-z0-9%]+/g, " ").trim(),
-    publicText: miIncentive,
-    headlineRate: "4.25%",
-    followOnRate: "5.25%",
-    followOnPeriod: "Years 2 to 30",
-    apr: "6.051% APR",
-    loanType: "FHA",
-    downPayment: "3.5% down payment · minimum 640 credit score",
-    repaymentTerms: "30-year fixed FHA · 1/0 buydown · selected Quick Move-In homes",
-    contractBy: chicagoEndOfDay(2026, 11, 8),
-    closeBy: chicagoEndOfDay(2026, 11, 30),
-    held: false,
-    holdReason: null,
-  });
-
-  // M/I confirmed this available home, current and prior price, 5 beds, 4.5
-  // baths, 4,099 sq. ft., and a March 21, 2027 ready date on its official page.
-  await upsertHome({
-    communityId: mi,
-    sourceUrl: "https://www.mihomes.com/new-homes/texas/greater-san-antonio/southeast-san-antonio/vista-gardens/rio-grande-plan/7711-hanging-basket",
-    privatePlanName: "Rio Grande",
-    privateAddress: "7711 Hanging Basket, San Antonio, TX",
-    kind: "quick_move_in",
-    beds: "5",
-    baths: "4.5",
-    sqft: 4099,
-    price: 689990,
-    previousPrice: 713622,
-    moveInDate: "March 21, 2027",
-  });
-
-  // A live official Chesmar page currently renders no unambiguous quick move-in
-  // entries. Populate the to-be-built catalog from its official plan pages.
-  const fetched = await loadOfficialDeals({
-    builder: "Chesmar",
-    sourceUrl: LAUNCH_DEALS[0].sourceUrl,
-    privateCommunityName: LAUNCH_DEALS[0].privateName,
-    scrubList: LAUNCH_DEALS[0].scrubList,
-    // Current official sitemap has ten plan pages. Keep the first import
-    // bounded to twelve detail GETs, avoiding a long-lived connection sweep.
-    maxDetailPages: 12,
-  });
-  if (fetched.ok) {
-    for (const plan of fetched.private.plans) {
-      const homeId = await upsertHome({
-        communityId: chesmar,
-        sourceUrl: plan.sourceUrl,
-        privatePlanName: plan.privateName,
-        kind: "to_be_built",
-        beds: plan.bedrooms === null ? null : String(plan.bedrooms),
-        baths: plan.bathrooms === null ? null : String(plan.bathrooms),
-        sqft: plan.squareFeet,
-        price: plan.price,
-      });
-      await upsertPhotos(homeId, plan.gallery);
-    }
-  }
+  await Promise.all(LAUNCH_DEALS.map(upsertCommunity));
+  await refreshOfficialDeals();
 
   const db = await getDb();
   const homeCount = db ? Number((await db.select({ n: sql<number>`count(*)` }).from(dealHomes))[0]?.n ?? 0) : 0;
-  return { communities: 2, homes: homeCount, heldIncentives: 0 };
+  const heldIncentives = db ? Number((await db.select({ n: sql<number>`count(*)` }).from(dealIncentives).where(eq(dealIncentives.held, true)))[0]?.n ?? 0) : 0;
+  return { communities: LAUNCH_DEALS.length, homes: homeCount, heldIncentives };
 }
 
 /**
@@ -210,27 +199,38 @@ export async function seedLaunchDeals(): Promise<{ communities: number; homes: n
 export async function refreshOfficialDeals() {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
+  // A prior refresh may have ended between claiming and processing an image.
+  // Drain a small bounded batch before doing network-heavy catalog work.
+  void processPendingDealPhotos(5).catch((error) => console.warn("[deals-photo] retry queue drain failed", error));
   const results: Array<{ reelCode: string; ok: boolean; reason?: string }> = [];
   for (const config of LAUNCH_DEALS) {
     const community = (await db.select().from(dealCommunities).where(eq(dealCommunities.reelCode, config.reelCode)).limit(1))[0];
     if (!community || community.paused || community.manualMode) continue;
     await db.update(dealCommunities).set({ lastAttemptAt: new Date() }).where(eq(dealCommunities.id, community.id));
-    const snapshot = await loadOfficialDeals({
-      builder: config.builder,
-      sourceUrl: config.sourceUrl,
-      incentiveSourceUrl: "incentiveSourceUrl" in config ? config.incentiveSourceUrl : undefined,
-      privateCommunityName: config.privateName,
-      scrubList: config.scrubList,
-      maxDetailPages: 12,
-    });
+    const sourceConfig = storedCommunitySourceConfig(config, community);
+    if (!sourceConfig) {
+      await db.update(dealCommunities).set({ holdReason: "invalid_source_url" }).where(eq(dealCommunities.id, community.id));
+      results.push({ reelCode: config.reelCode, ok: false, reason: "invalid_source_url" });
+      continue;
+    }
+    const snapshot = await loadOfficialDeals(sourceConfig);
     if (!snapshot.catalogOk) {
       await db.update(dealCommunities).set({ holdReason: snapshot.holdReasons.join(", ") }).where(eq(dealCommunities.id, community.id));
       results.push({ reelCode: config.reelCode, ok: false, reason: snapshot.holdReasons.join(", ") });
       continue;
     }
-    const discovered = new Set(snapshot.private.homes.map((item) => hashSecret(item.sourceUrl)));
-    const existingHomes = await db.select().from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.origin, "official"), eq(dealHomes.status, "available")));
-    for (const missing of existingHomes) if (!discovered.has(missing.sourceKey) && missing.kind === "quick_move_in") await db.update(dealHomes).set({ status: "sold" }).where(eq(dealHomes.id, missing.id));
+    // M/I's paged API is enumerated to its declared total. Chesmar discovery
+    // is deliberately bounded and therefore cannot prove a previously stored
+    // QMI is sold. Do not turn an incomplete observation into sold inventory.
+    if (sourceConfig.builder === "M/I Homes") {
+      const discovered = new Set(snapshot.private.homes.map((item) => normalizedDealSourceKey(item.sourceUrl)));
+      const existingHomes = await db.select().from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.origin, "official"), eq(dealHomes.status, "available")));
+      for (const missing of existingHomes) {
+        if (missing.kind === "quick_move_in" && !discovered.has(normalizedDealSourceKey(missing.sourceUrl))) {
+          await db.update(dealHomes).set({ status: "sold" }).where(eq(dealHomes.id, missing.id));
+        }
+      }
+    }
     for (const plan of snapshot.private.plans) {
       const homeId = await upsertHome({ communityId: community.id, sourceUrl: plan.sourceUrl, privatePlanName: plan.privatePlanName ?? plan.privateName, privateAddress: plan.privateAddress ?? null, kind: "to_be_built", beds: plan.bedrooms === null ? null : String(plan.bedrooms), baths: plan.bathrooms === null ? null : String(plan.bathrooms), sqft: plan.squareFeet, price: plan.price, previousPrice: plan.previousPrice ?? null, moveInDate: plan.moveInDate ?? null, garage: plan.garage ? String(plan.garage) : null, homesite: plan.homesite ?? null, readyNow: plan.readyNow ?? false });
       await upsertPhotos(homeId, plan.gallery);
@@ -241,12 +241,21 @@ export async function refreshOfficialDeals() {
       const homeId = await upsertHome({ communityId: community.id, sourceUrl: home.sourceUrl, privatePlanName: home.privatePlanName ?? home.privateName, privateAddress: home.privateAddress ?? null, kind: "quick_move_in", beds: home.bedrooms === null ? null : String(home.bedrooms), baths: home.bathrooms === null ? null : String(home.bathrooms), sqft: home.squareFeet, price: home.price, previousPrice: home.previousPrice ?? null, moveInDate: home.moveInDate ?? null, garage: home.garage ? String(home.garage) : null, homesite: home.homesite ?? null, readyNow: home.readyNow ?? false });
       await upsertPhotos(homeId, home.gallery);
     }
-    if (snapshot.private.incentive?.facts.publishable) {
+    if (snapshot.private.incentive?.facts.publishable && snapshot.public.incentive) {
       const fact = snapshot.private.incentive.facts;
-      await replaceIncentive({ communityId: community.id, normalizedText: fact.normalizedText, publicText: snapshot.public.incentive?.text ?? scrubPrivateNames(snapshot.private.incentive.text, JSON.parse(community.scrubList)), headlineRate: `${fact.promotionalRatePercent}%`, followOnRate: fact.followOnRatePercent ? `${fact.followOnRatePercent}%` : undefined, followOnPeriod: fact.followOnPeriod ?? undefined, apr: `${fact.aprPercent}% APR`, loanType: fact.loanType ?? undefined, downPayment: fact.downPaymentPercent ? `${fact.downPaymentPercent}% down payment` : undefined, repaymentTerms: fact.repaymentTermYears ? `${fact.repaymentTermYears}-year fixed` : undefined, contractBy: fact.contractDeadline?.isoDate ? chicagoEndOfDay(...fact.contractDeadline.isoDate.split("-").map(Number) as [number, number, number]) : null, closeBy: fact.closingDeadline?.isoDate ? chicagoEndOfDay(...fact.closingDeadline.isoDate.split("-").map(Number) as [number, number, number]) : null, held: false, holdReason: null });
+      const publicText = toPublicSafeText(snapshot.public.incentive.text, sourceConfig);
+      if (!publicText) {
+        await db.update(dealCommunities).set({ holdReason: "private_text_remaining" }).where(eq(dealCommunities.id, community.id));
+        results.push({ reelCode: config.reelCode, ok: false, reason: "private_text_remaining" });
+        continue;
+      }
+      await replaceIncentive({ communityId: community.id, normalizedText: normalizedText(publicText), publicText, headlineRate: `${fact.promotionalRatePercent}%`, followOnRate: fact.followOnRatePercent ? `${fact.followOnRatePercent}%` : undefined, followOnPeriod: fact.followOnPeriod ?? undefined, apr: `${fact.aprPercent}% APR`, loanType: fact.loanType ?? undefined, downPayment: fact.downPaymentPercent ? `${fact.downPaymentPercent}% down payment` : undefined, repaymentTerms: fact.repaymentTermYears ? `${fact.repaymentTermYears}-year fixed` : undefined, contractBy: fact.contractDeadline?.isoDate ? chicagoEndOfDay(...fact.contractDeadline.isoDate.split("-").map(Number) as [number, number, number]) : null, closeBy: fact.closingDeadline?.isoDate ? chicagoEndOfDay(...fact.closingDeadline.isoDate.split("-").map(Number) as [number, number, number]) : null, held: false, holdReason: null });
     }
     await db.update(dealCommunities).set({ lastSuccessfulSyncAt: new Date(), catalogUpdatedAt: new Date(), holdReason: snapshot.incentiveHoldReasons.length ? snapshot.incentiveHoldReasons.join(", ") : null }).where(eq(dealCommunities.id, community.id));
     results.push({ reelCode: config.reelCode, ok: true });
   }
+  // Also make newly discovered records eligible without making catalog refresh
+  // depend on OCR throughput. Each entry is atomically leased by the worker.
+  void processPendingDealPhotos(10).catch((error) => console.warn("[deals-photo] retry queue drain failed", error));
   return results;
 }

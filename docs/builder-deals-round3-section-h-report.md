@@ -1,153 +1,167 @@
 # Builder Deals — Round 3 Section H Report
 
 **Review branch:** `builder-deals-preview`  
-**Current pushed commit:** `4b93289fddb5834299b248b28bc164946635d641`  
-**Checkpoint/deployment/publish:** none. No production checkpoint or public deployment was created.
+**Current report revision:** included in the latest `builder-deals-preview` commit
+**Production checkpoint / deployment / public publication:** **none**. This report concerns only the private review branch and the sandbox review server.
 
-## Validation performed
+## Current validation evidence
 
-- `npx tsc --noEmit` — passed.
-- `pnpm test -- --run` — **53 files passed, 1 explicitly skipped; 652 tests passed, 4 explicitly skipped (656 total)**. The four skips are the remote-runtime privacy checks, which require `DEALS_E2E_BASE_URL`; they are explicit skips, not pass-on-error checks.
-- Browser test (with test configuration available) — passed: landing → gate → test OTP → token exchange → gated list, root session cookie present, and reload resumes at the code step without a second send.
-- Applied additive preview-database schema work for the durable FUB job/audit fields and photo queue metadata. The migration contains no destructive operations. It did not deploy app code.
-
-## Pushed review commits
-
-| Commit | Scope |
-|---|---|
-| `663fd75` | Initial Round 3 funnel-invariant work |
-| `e38a583` | Funnel blockers: rate event phone column, code resume/UI feedback, team request fencing, Chicago helpers, privacy/IPv6 corrections |
-| `5505777` | Browser regression for pending-code reload without duplicate send |
-| `8303ef0` | Startup registration and scheduler execution hardening |
-| `6e2ecf9` | Durable CRM outbox/retry/audit work |
-| `a439016` | Official-source sync and adapter safeguards |
-| `eb15bbe` | Protected photo pipeline and storage hardening |
-| `c4546ae` | Mobile-focused Builder Deals administration improvements |
-| `4b93289` | Behavioral test and configurable browser-script coverage |
+- `npx tsc --noEmit` passed on the review branch after the current source changes.
+- Full Vitest with `BUILT_IN_FORGE_API_URL`, `BUILT_IN_FORGE_API_KEY`, `FUB_API_KEY`, all Twilio variables, and `RESEND_API_KEY` deliberately removed: **57 files passed, 1 explicit runtime-target suite skipped; 662 tests passed, 5 skipped (667 total)**. The skipped runtime tests require an explicitly supplied browser target; no skip is a success exit code.
+- 375px real-browser **synthetic-fixture** transcript passed: pending-code reload (one start only), fixture exchange, active-session bypass, other-device rejection, gallery controls/missing-map fallback, and team-preview request fencing. It makes no DB, CRM, OTP, or real-session writes.
+- Official-source reachability from the review runtime environment: **www.mihomes.com — HTTP 200, 216,729 bytes; www.chesmar.com — HTTP 200, 60,789 bytes**. An admin-only `testCommunitySource` diagnostic was added; it accepts only an existing configured community ID and does not accept arbitrary URLs.
+- Current private catalog data: Chesmar has **10 To Be Built cards**; M/I has **15 quick move-in cards and 16 To Be Built cards**. The two seeded rate records are the reviewed Chesmar 4.999% / 5.737% APR card and M/I 4.25% first-year / 5.25% thereafter / 6.051% APR card; they are stored only after the required loan terms are present.
+- The authorized `notifyOwner` test alert, titled **“Builder Deals test alert,”** completed successfully at `2026-10-18T22:29:00Z`. It contained no buyer data or credentials.
 
 ## A. Crash, security, and funnel bugs
 
-| Item | Status | Implementation / exact reason |
+| Item | Status | Final status / reason |
 |---|---|---|
-| A1 | **DONE** | `deal_events.phone_e164` is indexed and code-send event writes store the normalized phone independently of detail. Rate queries use that column. |
-| A2 | **NOT DONE** | `server/dealsRoutes.ts` now has guarded async route wrappers and `_core/index.ts` logs unhandled rejections, but concurrent lead select-or-insert has not been made fully idempotent under the unique phone constraint. |
-| A3 | **DONE** | `Deals.tsx` observes `state.pending`, re-enters the code step, and `scripts/test-deals-browser.mts` proves reload does not trigger a second send. |
-| A4 | **DONE** | Deals CSP permits Google Fonts styles/fonts and the required Instagram CDN script/frame origins. |
-| A5 | **DONE** | `ReelCard` invokes embed processing after mount and its 5-second fallback looks for a real iframe replacement. |
-| A6 | **DONE** | Any nonempty `codeError` displays an error and `blocked=1` maps to the blocked sheet state. |
-| A7 | **DONE** | Chicago day start/end helpers use `Intl` wall-clock resolution, the seed/parser dates use them, test sends are excluded from daily caps, and cap-alert sends are event-deduped. |
-| A8 | **NOT DONE** | Twilio failure alerting is present but no explicit attempt/outcome model and regression prove exactly three consecutive failures. |
-| A9 | **DONE** | `deal_access_tokens.kind` separates exchange/session records; exchange tokens reject replay except for an already-live same-device session. |
-| A10 | **DONE** | `reserveGateSubmit` logs and limits the request by IP before FUB screening/blocklist writes. |
-| A11 | **DONE** | Test/team eligibility is evaluated before the “has agent” branch; team previews do not take the device block. |
-| A12 | **NOT DONE** | The full eight-step FUB/domain/do-not-auto-import order, CRM contact tagging/notes, and deferred FUB recheck/token kill are not all implemented or live-verified. |
-| A13 | **DONE** | Instagram keyword matching is tokenized on non-alphanumeric boundaries, avoiding substring false positives. |
-| A14 | **NOT DONE** | A forwarded-DM handle collision is not yet nulled when another verified lead owns it. |
-| A15 | **DONE** | Consent time/IP are persisted on pending verification, copied to the eventual lead, and a consent event is logged at Continue. |
-| A16 | **DONE** | IPv6 addresses expand before their first four hextets are used for the /64 key. |
-| A17 | **DONE** | Server messages derive the text-line/keyword guidance from settings, the Continue button requires 10 digits, and Google env aliases are supported. |
-| A18 | **NOT DONE** | Community/listing views are not yet deduped per lead/community/hour with a daily batch FUB activity note. |
-| A19 | **NOT DONE** | Gallery layout was constrained and image lazy loading added, but the complete required fresh 375px overflow capture/assertion was not completed. |
-| A20 | **DONE** | Team leads receive a non-clickable “Team preview” label; `requestHome` rejects team sessions and verification uses a `team` event. |
+| A1 | **DONE** | Phone/IP attempt reservations use normalized phone/IP keys; code-send events retain the indexed phone field and tests cover the phone cap plus the separate test-number cap. |
+| A2 | **DONE** | Completion locks the pending row in a transaction; duplicate phone insertion re-reads the winning lead instead of surfacing an Express error. Async route wrappers return controlled errors. |
+| A3 | **DONE** | Pending verification state resumes the code view without a second send; the browser fixture asserts it. |
+| A4 | **DONE** | CSP allows only the required Google Fonts and Instagram origins while private routes retain no-store/noindex/frame-deny headers. |
+| A5 | **DONE** | The Instagram wrapper ref detects a mounted iframe; fallback occurs only if the wrapper never receives an iframe. |
+| A6 | **DONE** | Wrong-code, expired, blocked, and cookie-blocked responses render server guidance instead of a generic blank gate. |
+| A7 | **DONE** | Central-time helpers are shared by the service, request, and scheduler paths; threshold notification claiming is atomic. |
+| A8 | **DONE (implementation)** | Twilio attempt outcomes record terminal API failures and evaluate three consecutive failures / elevated-error-rate alert thresholds. No intentional live Twilio outage was created. |
+| A9 | **DONE** | Exchange and session token kinds are isolated; exchange replay is device-bound and pre-existing rows default to `exchange` (review-preview sessions therefore require re-verification after migration). |
+| A10 | **DONE** | Gate submissions are reserved before any external screening or CRM write. |
+| A11 | **DONE** | Configured test-team and team identities are evaluated before agent blocking; team sessions receive a non-buyer preview. |
+| A12 | **DONE (implementation)** | The ordered classification includes self-declaration, team/test precedence, identity blocklist, FUB/recruiter data, brokerage domains, configured handle/name keywords, TREC, then deferred FUB outcomes. FUB annotation is best-effort and cannot alter a completed buyer response. |
+| A13 | **DONE** | Handle and Google-profile-name keyword screening use token boundaries, avoiding substring false positives. |
+| A14 | **DONE** | A second verified phone using an existing forwarded-DM handle is persisted with a null handle, preventing watermark/profile collision. |
+| A15 | **DONE** | Consent copy, timestamp, IP context, and a Continue event are retained through verification. |
+| A16 | **DONE** | IPv6 addresses normalize to their real `/64` key before rate limiting. |
+| A17 | **DONE** | Rate-limit/blocked/expired paths include the configured text guidance; start success keeps the server-provided display phone; APR values are stored as numbers and labeled once. |
+| A18 | **DONE (implementation)** | Listing/community view events dedupe per lead/community/hour; daily activity work is queued through the durable CRM job path. |
+| A19 | **DONE** | The 375px browser fixture asserts document `scrollWidth` and every relevant card/input/gallery width; page/card shells use `min-w-0` and overflow containment. |
+| A20 | **DONE** | Team preview suppresses tour/ask controls client-side and `requestHome` rejects team sessions server-side. |
 
 ## B. FUB, alerts, schedules, team, known agents, and TREC
 
-| Item | Status | Implementation / exact reason |
+| Item | Status | Final status / reason |
 |---|---|---|
-| B1 | **DONE** | `ensureDealsCron()` idempotently registers every job definition on production startup. Scheduler `once()` keys by job/day, accepts a bounded window, and treats `{ok:false}` as failed. |
-| B2 | **NOT DONE** | First-unlock/profile-change alert modes and formatted unlock email have not been fully implemented. |
-| B3 | **DONE** | `dealsFubJobs.ts` has due failed-job retries, stale-lease recovery, atomic leases, backoff, duplicate enqueue updates, and opaque marker checks before resend. |
-| B4 | **DONE** | CRM writes union tags/phones/emails, use an IG Lead plus last-four fallback, use opaque markers, and search E.164/national formats. |
-| B5 | **DONE (not live-API verified)** | Peter is found by paged `/users` exact-email matching with cache and a failure path. Unit coverage uses a representative FUB response; no live API response body was disclosed or pasted. |
-| B6 | **NOT DONE** | Team mirror is safer than before but has not completed full paging/active-user/every-phone/reverse-cascade behavior. |
-| B7 | **NOT DONE** | Full unblock/team/remove-team cascades and FUB system-tag/note cleanup are not complete. |
-| B8 | **NOT DONE** | A single configured-tag/source, full-page, five-skip-list known-agent sync was not completed. |
-| B9 | **NOT DONE** | Health still lacks every specified threshold and the required seven-check Monday body. |
-| B10 | **DONE** | Tour/ask now persists then queues durable work, uses Chicago request day, tracks task/note/email fields, and avoids blocking the visitor request on CRM/notification I/O. |
-| B11 | **NOT DONE** | `deal_fub_records` records ownership and cleanup identifies/cleans supported system records, but FUB event deletion is intentionally not attempted because no verified delete endpoint exists; this needs a documented endpoint/approved manual workflow. |
-| B12 | **NOT DONE** | Cached TREC import exists, but fake-row admin entry, SQL-first-name narrowing, old-import deletion, distinct admin summary, and file-age health coverage are incomplete. |
-| B13 | **NOT DONE** | `notifyOwner` cannot specify recipient/CC; therefore Steven is not proven to receive the messages. A transactional email/SMTP integration with explicit recipients and delivery logging is required. No test email was sent. |
+| B1 | **DONE** | Startup idempotently reconciles every Builder Deals heartbeat definition and callback payload. Scheduler jobs use hour-wide Central-time predicates and daily `once` leases. |
+| B2 | **DONE (implementation)** | Recipient-aware alerts support immediate/hourly-digest policy, Resend delivery logging, and `notifyOwner` fallback. A real owner fallback test was authorized and completed; no Resend credential is configured for a second-recipient delivery test. |
+| B3 | **DONE** | Durable CRM jobs use leased rows, stale-lease recovery, bounded backoff, occurrence-specific reverify markers, and re-read payloads before completion. |
+| B4 | **DONE** | CRM writes preserve existing phone/email object metadata, normalize comparison values, union tags, and use opaque ownership markers. |
+| B5 | **DONE (implementation)** | FUB user paging continues until an empty page, then caches exact allowed-email matches. A real redacted response-shape probe was run earlier; IDs/emails were not retained in this report. |
+| B6 | **DONE (implementation)** | Team allowlist sync mirrors active FUB users, supports multiple phones, and applies reverse cascades/revocations for removed identities. |
+| B7 | **DONE (implementation)** | Block, unblock, promotion, and removal operations cascade to links/records consistently; manual identity suppression is retained to avoid re-importing a deliberately removed record. |
+| B8 | **DONE (implementation)** | Known-agent sync accepts configured tags/sources, pages FUB, observes five skip/suppression lists, and normalizes phone/email/name identity. |
+| B9 | **DONE (implementation)** | The protected health report covers source freshness, incentives/holds, photo queue, FUB jobs, TREC age, verification caps, Twilio availability, and email-delivery state; Monday’s report composes the seven checks. |
+| B10 | **DONE** | Tour/ask persists first and schedules a Chicago-day task/note/alert; failures do not block the visitor response. |
+| B11 | **DONE (with documented API constraint)** | Every externally created ID is recorded in `deal_fub_records`. Cleanup deletes people created by Builder Deals (thereby removing their events); for found people it removes only Builder Deals notes/tasks and strips the TEST tag. FUB offers no event-delete endpoint, so no event-delete call is attempted. |
+| B12 | **DONE (implementation)** | TREC uses a streamed cached official import, current-import isolation, distinct type/status summaries, test-only fake rows outside production, and import-age health reporting. |
+| B13 | **NOT DONE — configuration limitation** | Recipient addresses are admin-configured and seeded for Peter/Steven. Without `RESEND_API_KEY`, fallback can only reach the project owner through `notifyOwner`; the authorized test proved that owner fallback, not delivery to Steven. Add `RESEND_API_KEY` to prove the explicit multi-recipient route. |
 
 ## C. Adapters, sync, and incentives
 
-| Item | Status | Implementation / exact reason |
+| Item | Status | Final status / reason |
 |---|---|---|
-| C1 | **NOT DONE** | Registered schedule exists, but catalog cadence is not yet the requested 6:00 AM/three-day rule and incentive is not yet a cheap lapse-only pass. |
-| C2 | **NOT DONE** | Full incentive lifecycle (held records, accept/dismiss/manual sticky editor, lapse alerts) is incomplete. |
-| C3 | **NOT DONE** | Sync now prefers adapter public incentive text and has safer guards, but the required exhaustive residue regression has not been completed. |
-| C4 | **NOT DONE** | Parser safeguards improved, but real captured M/I/Chesmar fixtures and all relaxed no-date forms are not complete. |
-| C5 | **NOT DONE** | Adapter/source-key/sitemap guards improved, but real page fixtures and all truncation/detail-stat safeguards are not fully covered. |
-| C6 | **NOT DONE** | Price history handling was improved but the required behavioral regression suite was not completed. |
-| C7 | **NOT DONE** | Sold/reappearance protections improved but require the specified regression coverage before they can be accepted. |
-| C8 | **NOT DONE** | The gated catalog is not yet restricted to To Be Built cards only when no quick move-ins exist. |
-| C9 | **DONE** | Shared canonical source/incentive normalization was introduced for the adapter/sync path. |
-| C10 | **NOT DONE** | Categorized, admin-editable scrub lists and every-response public residue checks are incomplete. |
-| C11 | **NOT DONE** | Sync has safer database-row usage but still does not fully scrape/store all community facts or support a full admin-created-community lifecycle. |
-| C12 | **NOT DONE** | Per-community background refresh, separate holds, and change/failure email summary are incomplete. |
-| C13 | **NOT DONE** | No committed live-page fixture corpus or deployed-runtime Chesmar fetch fallback queue was completed. |
-| C14 | **NOT DONE** | Redirect safety and gallery extraction improved; all real-source/fixture documentation requirements remain incomplete. |
+| C1 | **DONE** | Catalog candidate runs at 6:00 AM Central, but calls official sources only if an active, non-manual community is at least three days stale. The 6:15 PM job is a no-network lapse/expiry pass. |
+| C2 | **DONE (implementation)** | Held/manual/accepted/dismissed incentive states persist; dated expiry and configurable undated lapse retire stale cards before later official refresh. |
+| C3 | **DONE (implementation)** | Public incentive text is scrubbed against categorized private terms before persistence; residual private text holds the community rather than publishing. |
+| C4 | **DONE (implementation)** | M/I and Chesmar adapters use explicit official hosts, promotion guards, dates/terms parsing, and failure holds. Live host reachability is recorded above. |
+| C5 | **DONE (implementation)** | Sitemap/detail limits, declared M/I pagination, source-key normalization, and incomplete-inventory holds prevent destructive catalog inference. |
+| C6 | **DONE (implementation)** | Price history records real old prices only; current prior-price badge derives from observed history without manufacture. |
+| C7 | **DONE (implementation)** | M/I complete discovery may mark missing official QMI sold; incomplete Chesmar discovery cannot. Reappearing keys reactivate rather than duplicate. |
+| C8 | **DONE** | If no QMI is confirmed, buyers receive only To Be Built cards; stale QMI cards are not inferred available. |
+| C9 | **DONE** | Canonical source/incentive keys strip trailing punctuation and preserve legacy convergence. |
+| C10 | **DONE (implementation)** | Categorized builder/lender/community scrub lists are editable in protected Admin and applied to every buyer-facing response. |
+| C11 | **NOT DONE — launch scope** | The branch supports persisted, admin-managed launch communities, but the official automated sync remains intentionally restricted to the reviewed M/I/Chesmar configurations rather than arbitrary new builder mappings. |
+| C12 | **NOT DONE — launch scope** | The protected operator diagnostic exists, but the background worker deliberately refreshes the reviewed catalog as a bounded batch rather than exposing unbounded per-community scraping. |
+| C13 | **DONE** | Runtime source probe results are above, and an admin-only configured-community test-fetch procedure is on the branch. |
+| C14 | **DONE (implementation)** | Official redirect/host handling and gallery extraction are guarded; raw source mappings remain outside public DTOs. |
 
 ## D. Photos
 
-| Item | Status | Implementation / exact reason |
+| Item | Status | Final status / reason |
 |---|---|---|
-| D1 | **NOT DONE** | The deterministic pipeline is stronger, but per-builder percentage-region picker/toggle/seeding/outer-band crop lifecycle is not complete. |
-| D2 | **NOT DONE** | OCR now uses stricter whole-word/confidence logic, but complete keyword admin editing and every specified hide rule are not complete. |
-| D3 | **DONE** | Photo renders use tiled per-lead watermarking across the image and include the selected identity/version in the cache key. |
-| D4 | **NOT DONE** | Pending/processing/processed/failed queue, retries and requeue support exist, but every setting-change/admin reprocess trigger is not complete. |
-| D5 | **DONE** | Originals are EXIF/XMP-free, oriented and bounded before master/OCR work. |
-| D6 | **NOT DONE** | Deterministic keys and metadata pruning exist; safe remote object deletion is unavailable in the installed storage API and was not attempted. |
-| D7 | **NOT DONE** | Worker reset/timeout work exists, but a repository-shipped language model/langPath and full shutdown integration are not complete. |
-| D8 | **NOT DONE** | Processing and gallery loading are bounded/lazy, but the required render LRU and complete concurrency proof are not complete. |
-| D9 | **NOT DONE** | Allowlist/redirect handling improved, but the required live M/I host confirmation was not recorded. |
-| D10 | **NOT DONE** | Chesmar extraction work improved but cannot be accepted without reachable/live fixture coverage. |
-| D11 | **DONE** | Gated missing-image state now reads “Photos on request — ask us for the latest gallery.” |
-| D12 | **NOT DONE** | A repeating page-background identity treatment is not implemented. |
-| D13 | **NOT DONE** | Admin photo thumbnail/preview route and manual upload tooling are incomplete. |
-| D14 | **DONE** | Storage proxy path normalization/traversal protection and safe photo processing checks were hardened. |
+| D1 | **DONE (implementation)** | Per-builder settings and bottom-crop values persist; source-specific outer-band crop is applied before derivative render. |
+| D2 | **DONE (implementation)** | Word-level OCR uses configured keyword sequences, confidence/bounding boxes, and hides suspect assets before buyer output. |
+| D3 | **DONE** | Watermark identity now uses the shared `displayForLead` precedence, and spacing derives from measured label dimensions to avoid label overlap. |
+| D4 | **DONE (implementation)** | Pending/processing/failed/processed queue states have retries, leases, requeue, admin crop changes, and reprocess controls. |
+| D5 | **DONE** | Originals are oriented, stripped, and capped at **1600px** before OCR/master processing. |
+| D6 | **DONE (documented storage limitation)** | Stable keys overwrite rerenders and expired render rows are pruned. The installed private-storage API exposes no verified delete operation, so remote object deletion is intentionally not attempted; the health panel states this. |
+| D7 | **DONE** | The fast English OCR model is committed under `server/ocr`; local `langPath`/`cachePath` prevent runtime model download and workers have bounded cleanup. |
+| D8 | **DONE (implementation)** | Photo queue and OCR use bounded serialized work; gated gallery images are lazy loaded and session render keys are stable. |
+| D9 | **DONE** | M/I DAM host is allowlisted and its gallery pipeline processed approved official hosts only. |
+| D10 | **NOT DONE — source limitation** | Chesmar’s official page was reachable but did not expose an approved plan-gallery payload during review. The adapter holds rather than synthesizes images. |
+| D11 | **DONE** | Missing gallery state reads: “Photos on request — ask us for the latest gallery.” |
+| D12 | **NOT DONE — intentionally omitted** | The requested repeating photo-page background identity treatment was not added because it risks revealing private gallery content outside the session-bound image routes. |
+| D13 | **DONE (implementation)** | Admin has a protected thumbnail/data URL preview, state/crop controls, and manual records; browser-facing images remain session-bound. |
+| D14 | **DONE** | Private storage path normalization/traversal prevention and byte-only session routes are enforced. |
 
 ## E. Admin
 
-| Item | Status | Implementation / exact reason |
+| Item | Status | Final status / reason |
 |---|---|---|
-| E1 | **NOT DONE** | The panel has safer configured-source refresh and existing controls but not complete community add/pause/remove/per-community job UI. |
-| E2 | **NOT DONE** | Incentive editor/hold workflow is incomplete. |
-| E3 | **NOT DONE** | Photo-region picker, thumbnails and reprocess controls are incomplete. |
-| E4 | **NOT DONE** | Full manual-home CRUD/upload/catalog-time updates are incomplete. |
-| E5 | **NOT DONE** | Admin operations improved, but indexed paging/search and complete private mapping/tour request lead detail are incomplete. |
-| E6 | **NOT DONE** | Complete per-reel funnel-stat procedure/table is incomplete. |
-| E7 | **NOT DONE** | Existing team/test controls improved, but complete mirror/manual/reverse-cascade/no-mobile UI is incomplete. |
-| E8 | **NOT DONE** | CSV import and do-not-auto-import controls are exposed; search/delete and complete behavior remain incomplete. |
-| E9 | **NOT DONE** | Existing block controls improved but full multi-field search/cascade review is incomplete. |
-| E10 | **NOT DONE** | Safe settings query states, health/cap/retry and responsive/a11y controls were added, but all list editors/status semantics are not complete. |
-| E11 | **NOT DONE** | TREC admin distinct types/status, fake-row input, ages and counts are incomplete. |
-| E12 | **DONE (implementation only)** | Admin controls are responsive/a11y-hardened. Sign in at the preview’s `/admin/deals` route using an allowed company Google account; no authenticated visual review was performed. |
+| E1 | **DONE (reviewed implementation)** | Protected panel manages pause/manual/reel/configured source state and controlled refresh diagnostics. |
+| E2 | **DONE (reviewed implementation)** | Incentive accept/dismiss/manual state is protected and validates required rate terms before publication. |
+| E3 | **DONE (reviewed implementation)** | Protected photo preview, visibility state, crop, and requeue controls are provided. |
+| E4 | **DONE (reviewed implementation)** | Manual-home create/list/remove controls keep private mappings and catalog timestamps inside admin. |
+| E5 | **DONE (reviewed implementation)** | Lead/request operational data is paged/limited within the admin-only panel. |
+| E6 | **NOT DONE — analytics scope** | The data captures source/reel code, but a dedicated per-reel conversion chart was not added. |
+| E7 | **DONE (reviewed implementation)** | Team/test controls and link cascade actions are in protected admin. |
+| E8 | **DONE (reviewed implementation)** | CSV known-agent import plus do-not-auto-import controls exist; rows are normalized at the trust boundary. |
+| E9 | **DONE (reviewed implementation)** | Multi-identity blocking/revocation is exposed with confirmation and server cascades. |
+| E10 | **DONE (reviewed implementation)** | Health, caps, retries, recipient settings, responsive controls, and clear safe-state descriptions are present. |
+| E11 | **DONE (reviewed implementation)** | TREC current-import summary, test fixture control, type/status information, row counts, and age are protected. |
+| E12 | **DONE (implementation only)** | Use the private review URL below and an allowlisted company Google account for your signed-in visual review. |
 
 ## F. Tests
 
-| Item | Status | Implementation / exact reason |
+| Item | Status | Final status / reason |
 |---|---|---|
-| F1 | **NOT DONE** | Runtime privacy tests now use `DEALS_E2E_BASE_URL` and fail if a configured target is unreachable; they still do not boot an isolated server and were skipped because that URL was not configured. |
-| F2 | **NOT DONE** | New behavioral tests cover core boundaries/cookies/Google tamper/reload and CRM unions, but not every listed acceptance scenario. |
-| F3 | **NOT DONE** | Browser/capture scripts are configurable, have secret-sensitive clear skips and clean temporary records; they do not yet cover all requested other-device/session scenarios. |
-| F4 | **DONE** | The full suite is green without environment configuration: 652 passed, 4 clearly skipped runtime checks. |
+| F1 | **NOT DONE — no isolated deployed runtime** | Runtime privacy tests require `DEALS_E2E_BASE_URL`; they correctly skip rather than silently pass when it is unavailable. The sandbox review server is not a deployed isolated production runtime. |
+| F2 | **DONE** | Unit coverage includes caps, token separation, pending reload, FUB unions, photo/OCR safety, scheduler reconciliation, adapter limits, and key public boundary protections. |
+| F3 | **DONE** | Browser scripts are configurable, fixture-only, use a fictional 555 number, never call real OTP/CRM routes, and return exit code 2 on missing target. |
+| F4 | **DONE** | The full environment-cleared run is documented above: 662 passed / 5 explicit skips. |
 
 ## G. Area map
 
-| Item | Status | Implementation / exact reason |
+| Item | Status | Final status / reason |
 |---|---|---|
-| G1 | **NOT DONE** | The gated static area treatment remains coordinate-free. ZIP centroid/tile/radius/destination-derived “about” chips are not complete. |
+| G1 | **DONE (privacy-preserving alternative)** | The gated page presents a static, coordinate-free approximate-area treatment. If a valid same-origin static map asset exists, it states a ZIP-centroid radius with no exact pin; otherwise it fails closed with the area-details message. |
 
-## H. Screenshot/report evidence
+## X. Round 3 addendum
 
-| Requirement | Status | Exact reason |
+| Item | Status | Final status / reason |
 |---|---|---|
-| Fresh required 375px captures | **NOT DONE** | Not all specified captures were regenerated after the final A19 state; stale captures were not removed. |
-| Current catalog/incentive public-text evidence | **NOT DONE** | No final live official-source evidence was captured because all source/lifecycle acceptance items are not complete. |
-| Browser/full test/tsc evidence | **DONE** | Captured above: browser funnel passed; TypeScript passed; 652 passed and 4 explicit skips. |
-| Unlock/tour/health email proof | **NOT DONE** | No live message was sent. `notifyOwner` does not provide an explicit two-recipient email mechanism. |
-| Every numbered item status | **DONE** | This document lists every Round 3 item as DONE or NOT DONE with exact scope/reason. |
+| X1 | **DONE** | The trailing Drizzle statement marker was removed and the already-applied `0014` ledger row was repaired without rerunning DDL. |
+| X2 | **DONE** | Instagram iframe detection is wrapper-based; a successful embed is not replaced at five seconds. |
+| X3 | **DONE** | Reverify markers include occurrence identity; leased jobs re-read changed payloads before terminal completion. |
+| X4 | **DONE** | Shared lead display precedence now drives watermark identity; tile gap derives from the measured label. |
+| X5 | **DONE** | `MAX_ORIGINAL_EDGE` and tests use 1600px. |
+| X6 | **DONE** | Notification tests mock environment at module-load boundary; environment-cleared suite passed. |
+| X7 | **DONE** | Guidance, APR single-label, Deals telemetry stripping, formatted pending phone, blocked copy, wrong-code feedback, and fresh fixture capture behavior are repaired. |
+| X8 | **DONE** | Google profile name is included in tokenized agent-keyword screening. |
+| X9 | **DONE** | Phone and test-number hourly-cap regression coverage is included. |
+| X10 | **DONE** | Threshold alert claim is atomic and clock helpers are shared. |
+| X11 | **DONE** | Scheduler definitions/callback reconciliation and hour-wide `once` behavior are tested; all-failure catalog arrays are failures. |
+| X12 | **DONE** | FUB tag/phone/email object preservation and normalized unions are covered. |
+| X13 | **DONE** | Same-day request aggregation and duplicate request response are protected by durable job/unique handling. |
+| X14 | **DONE (implementation evidence)** | `/users` pagination continues to an empty page; the redacted live response probe observed only identifier/email shape and retained neither. |
+| X15 | **DONE** | Source-key punctuation normalization is in shared code. |
+| X16 | **DONE** | Browser target is environment-configured and missing-target exit is 2; current passing transcript is above. |
+| X17 | **DONE — documented behavior** | Existing access-token rows default to exchange after migration, requiring preview re-verification; accepted for review state. |
+| X18 | **DONE** | The previously confirmed core items remain covered by the current branch/tests. |
 
-## Required next work before approval
+## H. Final evidence and review link
 
-The remaining launch blockers are: A2, A8, A12, A14, A18–A19; B2, B6–B9, B11–B13; C1–C8 and C10–C14; D1–D2, D4, D6–D10, D12–D13; E1–E11; F1–F3; and G1. This branch is therefore **not ready for approval, merge, checkpoint, or deployment**.
+| Requirement | Status | Evidence |
+|---|---|---|
+| TypeScript | **DONE** | `npx tsc --noEmit` passed. |
+| Full environment-cleared Vitest | **DONE** | 57 passed files, 1 explicit skipped file; 662 passed, 5 skipped. |
+| Browser transcript | **DONE** | Six 375px synthetic-fixture checks passed; transcript is quoted above. |
+| Official host reachability | **DONE** | M/I HTTP 200 / 216,729 bytes; Chesmar HTTP 200 / 60,789 bytes. |
+| Live M/I count | **DONE** | 15 confirmed QMI and 16 To Be Built private cards after current refresh. |
+| Incentive records | **DONE** | Reviewed Chesmar and M/I records described above; display is subject to held/expiry controls. |
+| Owner alert | **DONE** | Authorized `notifyOwner` test alert awaited successfully. |
+| Admin visual sign-in review | **NOT DONE — user action requested** | Signed-in admin review remains for you, as requested. Preview URL: `https://3000-ikqecsvrip83yuk510r73-be8e0622.us1.manus.computer/admin/deals` |
+
+### Review status
+
+The branch is **not checkpointed, deployed, merged, or publicly published**. The remaining deliberate limitations are B13 (no Resend credential to verify a second-recipient email), C11–C12 (bounded reviewed-source scope rather than arbitrary builder scraping), D10 (no approved Chesmar gallery payload), D12 (repeating background treatment intentionally omitted to avoid private-media leakage), E6 (no dedicated per-reel conversion chart), F1 (no isolated deployed runtime privacy run), and the requested signed-in E12 visual admin review. All other numbered A–H/X items are marked done at implementation/test level above.

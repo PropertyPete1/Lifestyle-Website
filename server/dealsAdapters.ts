@@ -1,4 +1,4 @@
-import { scrubPrivateNames } from "../shared/deals";
+import { dealScrubTerms, emptyDealScrubConfig, hasPrivateTerm, normalizedText, parseDealScrubConfig, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
 
 /**
  * Official, read-only builders supported by this module.  These display names
@@ -17,6 +17,10 @@ export interface CommunitySourceConfig {
   scrubList: readonly string[];
   /** Optional official M/I incentive URL. Chesmar always uses its current /incentives/ page. */
   incentiveSourceUrl?: string;
+  /** Categorized private configuration; legacy flat terms remain supported. */
+  scrubConfig?: DealScrubConfig;
+  /** Explicit reviewed plan slugs (not arbitrary child pages). */
+  planSlugs?: readonly string[];
   /** Explicit records for the Manual adapter. No network request is made for these. */
   manualEntries?: readonly ManualEntry[];
   /** Bounds sitemap/link discovery, not the complete M/I QMI catalog or its galleries. */
@@ -72,7 +76,7 @@ export interface DeadlineFact {
 
 export interface PromotionalRateFacts {
   normalizedText: string;
-  rateKind: "promotional" | "fixed";
+  rateKind: "promotional" | "fixed" | "none";
   /** Historical field name: the headline rate, including a full-term fixed offer. */
   promotionalRatePercent: number | null;
   promotionalPeriod: string | null;
@@ -135,6 +139,9 @@ export interface PrivateDealSnapshot {
   plans: PrivatePlanOrHome[];
   homes: PrivatePlanOrHome[];
   incentive: { sourceUrl: string; text: string; facts: PromotionalRateFacts } | null;
+  /** First-party facts and discoveries remain operational/server-only. */
+  communityFacts?: { fromPrice: number | null; schoolDistrict: string | null; lotSizes: string | null; amenities: string[] };
+  discoveredScrubConfig?: DealScrubConfig;
 }
 
 /** A public record has neither a name nor a URL. */
@@ -155,17 +162,17 @@ export interface PublicDealSnapshot {
   homes: PublicPlanOrHome[];
   incentive: {
     text: string;
-    rateKind: "promotional" | "fixed";
-    promotionalRatePercent: number;
+    rateKind: "promotional" | "fixed" | "none";
+    promotionalRatePercent: number | null;
     promotionalPeriod: string | null;
     followOnRatePercent: number | null;
     followOnPeriod: string | null;
-    aprPercent: number;
-    loanType: string;
-    repaymentTermYears: number;
-    downPaymentPercent: number;
-    contractDeadline: DeadlineFact;
-    closingDeadline: DeadlineFact;
+    aprPercent: number | null;
+    loanType: string | null;
+    repaymentTermYears: number | null;
+    downPaymentPercent: number | null;
+    contractDeadline: DeadlineFact | null;
+    closingDeadline: DeadlineFact | null;
   } | null;
   holdReasons: DealHoldReason[];
 }
@@ -197,10 +204,7 @@ export interface DealAdapter {
 
 const CHESMAR_HOST = "www.chesmar.com";
 const MI_HOST = "www.mihomes.com";
-const CHESMAR_SITEMAPS = [
-  "https://www.chesmar.com/sitemap5.xml",
-  "https://www.chesmar.com/sitemap6.xml",
-] as const;
+const CHESMAR_SITEMAP_INDEX = "https://www.chesmar.com/sitemap.xml";
 const DEFAULT_DETAIL_LIMIT = 24;
 const MAX_DETAIL_LIMIT = 48;
 const FETCH_TIMEOUT_MS = 20_000;
@@ -308,25 +312,27 @@ async function getDocument(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetcher(url, {
-      method: "GET",
-      redirect: "follow",
-      signal: controller.signal,
-      headers: {
-        Accept: accept,
-        "User-Agent": "LifestyleDesignRealtyDeals/1.0 (read-only official-page parser)",
-      },
-    });
-    // `redirect: follow` is convenient for canonical paths but a followed
-    // redirect is a fresh trust boundary. Native fetch exposes the final URL;
-    // fixture Response objects leave it blank, so only a supplied final URL is
-    // validated here.
-    if (response.url) {
-      const finalUrl = asUrl(response.url);
-      if (!finalUrl || !sameOfficialHost(finalUrl, expectedHost)) return { ok: false, redirectedOffOfficialHost: true };
+    let target = asUrl(url);
+    for (let hop = 0; hop <= 5; hop++) {
+      if (!target || !sameOfficialHost(target, expectedHost)) return { ok: false, redirectedOffOfficialHost: true };
+      const response = await fetcher(target.toString(), {
+        method: "GET", redirect: "manual", signal: controller.signal,
+        headers: { Accept: accept, "User-Agent": "LifestyleDesignRealtyDeals/1.0 (read-only official-page parser)" },
+      });
+      // Check BEFORE the next request; checking only Response.url is too late for SSRF.
+      if (response.url && !sameOfficialHost(new URL(response.url), expectedHost)) return { ok: false, redirectedOffOfficialHost: true };
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        target = location ? absoluteUrl(location, target) : null;
+        if (!target || !sameOfficialHost(target, expectedHost)) return { ok: false, redirectedOffOfficialHost: true };
+        continue;
+      }
+      if (!response.ok) return { ok: false, redirectedOffOfficialHost: false };
+      const text = await response.text();
+      if (text.length > 8_000_000) return { ok: false, redirectedOffOfficialHost: false };
+      return { ok: true, text };
     }
-    if (!response.ok) return { ok: false, redirectedOffOfficialHost: false };
-    return { ok: true, text: await response.text() };
+    return { ok: false, redirectedOffOfficialHost: false };
   } catch {
     // Do not include url in logs or errors: it is private source metadata.
     return { ok: false, redirectedOffOfficialHost: false };
@@ -471,50 +477,47 @@ function rateNear(text: string, pattern: RegExp): number | null {
  */
 export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const text = normalizeIncentiveText(input);
-  const fixedHeadline = /(\d+(?:\.\d+)?)%\s*\(\s*\d+(?:\.\d+)?%\s*APR\s*\)\s*(?:FHA|VA|USDA|conventional|jumbo)\s+\d{1,2}(?:[- ]year|\s*yr)\s*,?\s*fixed[- ]rate/i.exec(text);
-  const hasTemporaryRate = /\b(?:buydown|first[- ]year|year\s*1|temporarily|introductory)\b/i.test(text);
-  const rateKind = fixedHeadline && !hasTemporaryRate ? "fixed" : "promotional";
-  const promotionalRatePercent =
-    (rateKind === "fixed" ? numericValue(fixedHeadline![1]) : null) ??
-    rateNear(text, /(?:first[- ]year|year\s*1)[^.]{0,110}?(\d+(?:\.\d+)?)%\s*(?:interest\s+)?rate\b/i) ??
-    rateNear(text, /(?:rates?\s+as\s+low\s+as|as\s+low\s+as)\s+(\d+(?:\.\d+)?)%\s*(?:interest\s+)?rate\b/i) ??
-    rateNear(text, /(?:temporarily\s+reduced\s+to)\s+(\d+(?:\.\d+)?)%/i);
-  const promotionalPeriod =
-    firstMatch(text, /\b(first[- ]year|year\s*1)\b/i) ??
-    firstMatch(text, /temporarily\s+reduced[^.]{0,100}?\b(for\s+year\s*\d+)\b/i);
-  const followOnRatePercent =
-    rateNear(text, /(?:year(?:s)?\s*2\s*(?:-|to)\s*\d+|after\s+(?:the\s+)?first\s+year)[^.]{0,110}?(\d+(?:\.\d+)?)%\s*(?:interest\s+)?rate\b/i) ??
-    rateNear(text, /(?:reduced\s+to\s+\d+(?:\.\d+)?%[^.]{0,100}?)(\d+(?:\.\d+)?)%\s+for\s+years?\s*2/i);
-  const followOnPeriod =
-    firstMatch(text, /\b(year(?:s)?\s*2\s*(?:-|to)\s*\d+|after\s+(?:the\s+)?first\s+year)\b/i) ??
-    firstMatch(text, /\b(years?\s*2[^.]{0,22})\b/i);
+  const hasTemporaryRate = /\b(?:buy[- ]?down|first[- ]year|year\s*1|temporarily|introductory)\b/i.test(text);
+  const headline = rateNear(text, /(?:first[- ]year|year\s*1)[\s\S]{0,100}?(\d+(?:\.\d+)?)%/i) ??
+    rateNear(text, /(?:rates?\s+as\s+low\s+as|as\s+low\s+as|reduced\s+to)\s+(\d+(?:\.\d+)?)%/i) ??
+    rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:\(\s*\d+(?:\.\d+)?%\s*APR|\/\s*\d+(?:\.\d+)?%\s*APR|(?:interest\s+)?rate\b)/i);
+  const rateMentioned = headline !== null || /\b(?:interest\s+rates?|APR|buy[- ]?down)\b|\d+(?:\.\d+)?%\s*(?:fixed|financing)/i.test(text);
+  const rateKind = !rateMentioned ? "none" : hasTemporaryRate ? "promotional" : "fixed";
+  const promotionalRatePercent = headline;
+  const promotionalPeriod = firstMatch(text, /\b(first[- ]year|year\s*1)\b/i) ?? firstMatch(text, /\b(for\s+year\s*\d+)\b/i);
+  const followOnPeriod = firstMatch(text, /\b(years?\s*2\s*(?:-|to|through)\s*\d+|after\s+(?:the\s+)?first\s+year)\b/i);
+  const followOnRatePercent = rateNear(text, /(?:years?\s*2\s*(?:-|to|through)\s*\d+|after\s+(?:the\s+)?first\s+year)[\s\S]{0,80}?(\d+(?:\.\d+)?)%/i) ??
+    rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:interest\s+rate\s*)?for\s+years?\s*2/i);
   const aprPercent = rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:annual\s+percentage\s+rate|apr)\b/i) ??
-    rateNear(text, /\bAPR\s*[:=]\s*(\d+(?:\.\d+)?)%/i);
-  const repaymentTermYears = numberMatch(text, /\b(\d{1,2})(?:[- ]year|\s*yr)\s*,?\s*fixed(?:[- ]rate)?\b/i);
-  const loanType =
-    firstMatch(text, /\b(FHA|VA|USDA|conventional|jumbo)\s+\d{1,2}(?:[- ]year|\s*yr)\s*,?\s*fixed[- ]rate\b/i) ??
-    firstMatch(text, /\b\d{1,2}[- ]year\s*,?\s*fixed(?:[- ]rate)?\s+(FHA|VA|USDA|conventional|jumbo)\s+loan\b/i) ??
-    firstMatch(text, /\b(FHA|VA|USDA|conventional|jumbo)\s+loan\b/i);
-  const downPaymentPercent = numberMatch(text, /(\d+(?:\.\d+)?)%\s+(?:minimum\s+)?down(?:\s+payment)?\b/i);
+    rateNear(text, /\b(?:APR|ANNUAL\s+PERCENTAGE\s+RATE)\s*(?::|=|is)?\s*(\d+(?:\.\d+)?)%/i);
+  const repaymentTermYears = numberMatch(text, /\b(\d{1,2})(?:[- ]year|\s*yr)\b/i);
+  const loanType = firstMatch(text, /\b(FHA|VA|USDA|conventional|jumbo)\b/i);
+  const downPaymentPercent = numberMatch(text, /(\d+(?:\.\d+)?)%\s+(?:minimum\s+)?down(?:\s+payment)?\b/i) ?? (/\bno\s+down\s+payment\b/i.test(text) ? 0 : null);
   const contractDeadline = findContractDeadline(text);
   const closingDeadline = findClosingDeadline(text);
-
+  const triggersTerms = /\b(?:payments?|down|\d+[- ]year|years?|months?|repayment|term)\b/i.test(text);
+  const namesContractDeadline = /\b(?:contracts?|purchase\s+agreements?|contract\s+sales?)\b[^.]{0,100}\b(?:by|through|until|between|from|written)\b/i.test(text);
+  const namesClosingDeadline = /\b(?:clos(?:e|ing))\b[^.]{0,35}\b(?:by|before|than|through)\b/i.test(text);
   const holdReasons: DealHoldReason[] = [];
-  if (promotionalRatePercent === null) holdReasons.push("missing_promotional_rate");
-  if (aprPercent === null) holdReasons.push("missing_apr");
-  if (!loanType) holdReasons.push("missing_loan_type");
-  if (repaymentTermYears === null) holdReasons.push("missing_repayment_term");
-  if (rateKind === "promotional") {
-    if (!promotionalPeriod) holdReasons.push("missing_promotional_period");
-    if (followOnRatePercent === null) holdReasons.push("missing_follow_on_rate");
-    if (!followOnPeriod) holdReasons.push("missing_follow_on_period");
+  if (rateKind !== "none") {
+    if (promotionalRatePercent === null) holdReasons.push("missing_promotional_rate");
+    if (aprPercent === null) holdReasons.push("missing_apr");
+    if (triggersTerms) {
+      if (!loanType) holdReasons.push("missing_loan_type");
+      if (repaymentTermYears === null) holdReasons.push("missing_repayment_term");
+      if (downPaymentPercent === null) holdReasons.push("missing_down_payment");
+    }
+    if (rateKind === "promotional") {
+      if (!promotionalPeriod) holdReasons.push("missing_promotional_period");
+      if (followOnRatePercent === null) holdReasons.push("missing_follow_on_rate");
+      if (!followOnPeriod) holdReasons.push("missing_follow_on_period");
+    }
   }
-  if (downPaymentPercent === null) holdReasons.push("missing_down_payment");
-  if (!contractDeadline?.isoDate) holdReasons.push("missing_contract_deadline");
-  if (!closingDeadline?.isoDate) holdReasons.push("missing_closing_deadline");
+  if (namesContractDeadline && !contractDeadline?.isoDate) holdReasons.push("missing_contract_deadline");
+  if (namesClosingDeadline && !closingDeadline?.isoDate) holdReasons.push("missing_closing_deadline");
 
   return {
-    normalizedText: text,
+    normalizedText: normalizedText(text),
     rateKind,
     promotionalRatePercent,
     promotionalPeriod,
@@ -778,36 +781,38 @@ async function mapWithConcurrency<T, R>(
   return output;
 }
 
+export function categorizedPrivateTerms(config: Pick<CommunitySourceConfig, "builder" | "privateCommunityName" | "scrubList" | "scrubConfig">, discovered?: PrivateDealSnapshot): DealScrubConfig {
+  const result = parseDealScrubConfig(config.scrubConfig ?? emptyDealScrubConfig());
+  const builder = config.builder === "M/I Homes" ? ["M/I Homes", "M/I"] : config.builder === "Chesmar" ? ["Chesmar Homes", "Chesmar"] : [];
+  const lender = config.builder === "M/I Homes" ? ["M/I Financial, LLC", "M/I Financial"] : config.builder === "Chesmar" ? ["HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HomeAmerican", "HMC"] : [];
+  result.builder.push(...builder); result.lender.push(...lender); result.community.push(config.privateCommunityName);
+  const known = new Set(dealScrubTerms(result).map((term) => term.toLowerCase()));
+  result.other.push(...config.scrubList.filter((term) => !known.has(term.toLowerCase())));
+  for (const item of [...(discovered?.plans ?? []), ...(discovered?.homes ?? [])]) {
+    const plan = item.privatePlanName ?? (discovered?.plans.includes(item) ? item.privateName : null);
+    if (plan) result.plan.push(plan, plan.replace(/\s*[-–]\s*[A-Z]$/i, ""));
+    const address = item.privateAddress ?? (!discovered?.plans.includes(item) ? item.privateName : null);
+    if (address) result.street.push(address, address.replace(/^\d+\s+/, "").split(",")[0].trim());
+  }
+  return parseDealScrubConfig(result);
+}
 function privateTerms(config: CommunitySourceConfig, discovered: readonly string[] = []): string[] {
-  const builderTerms = config.builder === "M/I Homes" ? ["M/I Homes", "M/I Financial"] : config.builder === "Chesmar" ? ["Chesmar Homes", "HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HMC"] : [];
-  return Array.from(new Set([config.privateCommunityName, ...config.scrubList, ...discovered, ...builderTerms].map((term) => term.trim()).filter(Boolean)));
+  return Array.from(new Set([...dealScrubTerms(categorizedPrivateTerms(config)), ...discovered]));
 }
-
-function remainingPrivateTerm(text: string, terms: readonly string[]): boolean {
-  const normalizedText = text.toLocaleLowerCase();
-  return terms.some((raw) => {
-    const term = raw.trim().toLocaleLowerCase();
-    if (!term) return false;
-    return normalizedText.includes(term);
-  });
-}
-
-/** Uses the shared canonical scrubber first, then holds output if a configured private term remains. */
+function remainingPrivateTerm(text: string, terms: readonly string[]): boolean { return hasPrivateTerm(text, terms); }
+/** Scrub checked text only; never publish markup, outbound source links or private residue. */
 export function toPublicSafeText(
   input: string,
-  config: Pick<CommunitySourceConfig, "privateCommunityName" | "scrubList">,
+  config: Pick<CommunitySourceConfig, "privateCommunityName" | "scrubList" | "scrubConfig">,
   planField = false,
   extraPrivateTerms: readonly string[] = [],
 ): string | null {
-  const terms = privateTerms({ ...config, builder: "Manual", sourceUrl: "https://manual.invalid" });
-  const allTerms = Array.from(new Set([...terms, ...extraPrivateTerms]));
-  // Incentive text can originate from a Manual review entry as well as parsed
-  // HTML. Normalize it as text first so markup and executable-content tags do
-  // not become a public DTO. Public offers do not need outbound source links;
-  // reject rather than trying to redact an arbitrary URL.
-  const scrubbed = scrubPrivateNames(htmlToText(input), allTerms, { planField });
+  const categories = categorizedPrivateTerms({ ...config, builder: "Manual" });
+  const known = new Set(dealScrubTerms(categories));
+  categories.other.push(...extraPrivateTerms.filter((term) => !known.has(term)));
+  const scrubbed = scrubPrivateNames(htmlToText(input), categories, { planField });
   if (!scrubbed || /\b(?:https?:\/\/|www\.)\S+/i.test(scrubbed)) return null;
-  return remainingPrivateTerm(scrubbed, allTerms) ? null : scrubbed;
+  return remainingPrivateTerm(scrubbed, dealScrubTerms(categories)) ? null : scrubbed;
 }
 
 function publicProperty(value: PrivatePlanOrHome, config: CommunitySourceConfig, terms: readonly string[]): { record: PublicPlanOrHome | null; held: boolean } {
@@ -835,19 +840,6 @@ function publicIncentive(
   if (!cleanedText) return { incentive: null, held: true, reasons: ["private_text_remaining"] };
   if (!value.facts.publishable) return { incentive: null, held: true, reasons: value.facts.holdReasons };
   const facts = value.facts;
-  // publishable narrows all of the following facts at runtime; explicit checks keep strict TS honest.
-  if (
-    facts.promotionalRatePercent === null ||
-    (facts.rateKind === "promotional" && (!facts.promotionalPeriod || facts.followOnRatePercent === null || !facts.followOnPeriod)) ||
-    facts.aprPercent === null ||
-    !facts.loanType ||
-    facts.repaymentTermYears === null ||
-    facts.downPaymentPercent === null ||
-    !facts.contractDeadline?.isoDate ||
-    !facts.closingDeadline?.isoDate
-  ) {
-    return { incentive: null, held: true, reasons: facts.holdReasons };
-  }
   return {
     incentive: {
       text: cleanedText,
@@ -870,7 +862,10 @@ function publicIncentive(
 
 function makePublicSnapshot(privateSnapshot: PrivateDealSnapshot, config: CommunitySourceConfig, incentiveHolds: readonly DealHoldReason[] = []): { snapshot: PublicDealSnapshot; catalogHolds: DealHoldReason[]; incentiveHolds: DealHoldReason[] } {
   const discoveredNames = [...privateSnapshot.plans, ...privateSnapshot.homes].flatMap((item) => [item.privateName, item.privateAddress, item.privatePlanName].filter((name): name is string => Boolean(name)));
-  const terms = privateTerms(config, discoveredNames);
+  const categories = categorizedPrivateTerms(config, privateSnapshot);
+  privateSnapshot.discoveredScrubConfig = categories;
+  const terms = Array.from(new Set([...dealScrubTerms(categories), ...discoveredNames]));
+  config = { ...config, scrubConfig: categories };
   const reasons: DealHoldReason[] = [];
   const plans: PublicPlanOrHome[] = [];
   const homes: PublicPlanOrHome[] = [];
@@ -920,6 +915,7 @@ async function fetchDiscoveredProperties(
   fetcher: HtmlFetcher,
   privateSnapshot: PrivateDealSnapshot,
   expectedHost: string,
+  approvedPlanSlugs: ReadonlySet<string> = new Set(),
 ): Promise<DealHoldReason[]> {
   const results = await mapWithConcurrency(urls, 4, async (url) => {
     const page = await getDocument(url, fetcher, "text/html,application/xhtml+xml", expectedHost);
@@ -927,6 +923,7 @@ async function fetchDiscoveredProperties(
       const hold: DealHoldReason = page.redirectedOffOfficialHost ? "unsupported_official_host" : "detail_fetch_failed";
       return { hold, property: null };
     }
+    if (kind === "plan" && !approvedPlanSlugs.has(new URL(url).pathname.split("/").filter(Boolean).at(-1)!.toLowerCase()) && !/<a\b[^>]*\btitle=["']FloorPlan["']/i.test(page.text)) return { hold: "expected_detail_container_not_found" as const, property: null };
     if (!containsExpectedDetailContainer(page.text)) return { hold: "expected_detail_container_not_found" as const, property: null };
     const property = parsePrivateProperty(url, page.text);
     // A plan or home record must contain at least one first-party property
@@ -971,6 +968,38 @@ function chesmarFhaIncentiveText(html: string): string | null {
   return normalizeIncentiveText(`${headline} ${fhaTerms}`);
 }
 
+function miIncentiveText(html: string): string | null {
+  const root = parseHtmlElements(html); if (!root) return null;
+  const elements = descendants(root);
+  const heading = elements.find((item) => elementClass(item, "single-incentive__headline"));
+  if (heading) {
+    const container = elements.filter((item) => elementClass(item, "content-inner-content") && descendants(item).includes(heading))
+      .sort((a, b) => (a.contentEnd - a.contentStart) - (b.contentEnd - b.contentStart))[0];
+    return container ? elementText(container, html) : null;
+  }
+  // Reviewed fragments contain only campaign content; refuse whole site fallback.
+  if (!elements.some((item) => ["nav", "footer", "form"].includes(item.tag)) && elements.some((item) => item.tag === "h1")) return htmlToText(html);
+  return null;
+}
+/** Full sitemap-index traversal, with strict official-host validation and a fail-closed bound. */
+async function chesmarSitemapCandidates(fetcher: HtmlFetcher, snapshot: PrivateDealSnapshot): Promise<{ urls: string[]; holds: DealHoldReason[] }> {
+  const pending = [CHESMAR_SITEMAP_INDEX]; const seen = new Set<string>(); const urls: string[] = [];
+  while (pending.length) {
+    if (seen.size >= 32) return { urls: [], holds: ["incomplete_inventory"] };
+    const url = pending.shift()!; if (seen.has(url)) continue; seen.add(url);
+    const page = await getDocument(url, fetcher, "application/xml,text/xml", CHESMAR_HOST);
+    if (!page.ok) return { urls: [], holds: [page.redirectedOffOfficialHost ? "unsupported_official_host" : "sitemap_fetch_failed"] };
+    snapshot.pages.push(sourcePage("sitemap", url, null));
+    const locations = Array.from(page.text.matchAll(/<loc\b[^>]*>\s*([\s\S]*?)\s*<\/loc>/gi), (match) => decodeHtmlEntities(match[1]).trim());
+    if (/^\s*(?:<\?xml\b[^>]*>\s*)?<sitemapindex\b/i.test(page.text) && /<\/sitemapindex\s*>\s*$/i.test(page.text)) {
+      if (!locations.length) return { urls: [], holds: ["sitemap_fetch_failed"] };
+      for (const raw of locations) { const next = asUrl(raw); if (!next || !sameOfficialHost(next, CHESMAR_HOST)) return { urls: [], holds: ["unsupported_official_host"] }; if (!seen.has(next.toString())) pending.push(next.toString()); }
+    } else {
+      const parsed = parseSitemapUrls(page.text); if (!parsed) return { urls: [], holds: ["sitemap_fetch_failed"] }; urls.push(...parsed);
+    }
+  }
+  return { urls: Array.from(new Set(urls)), holds: [] };
+}
 async function fetchOfficialIncentive(
   url: URL,
   fetcher: HtmlFetcher,
@@ -981,7 +1010,7 @@ async function fetchOfficialIncentive(
   const page = await getDocument(url.toString(), fetcher, "text/html,application/xhtml+xml", expectedHost);
   if (!page.ok) return [page.redirectedOffOfficialHost ? "unsupported_official_host" : "incentive_fetch_failed"];
   if (!containsExpectedIncentiveContainer(page.text)) return ["expected_incentive_container_not_found"];
-  const text = chesmar ? chesmarFhaIncentiveText(page.text) : htmlToText(page.text);
+  const text = chesmar ? chesmarFhaIncentiveText(page.text) : miIncentiveText(page.text);
   if (!text) return ["expected_incentive_container_not_found"];
   privateSnapshot.pages.push(sourcePage("incentive", url.toString(), extractFirstHeading(page.text)));
   privateSnapshot.incentive = { sourceUrl: url.toString(), text, facts: parsePromotionalRate(text) };
@@ -1006,37 +1035,32 @@ class ChesmarAdapter implements DealAdapter {
       return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     }
 
-    const sitemapResults = await mapWithConcurrency(CHESMAR_SITEMAPS, 2, async (sitemapUrl) => ({
-      sitemapUrl,
-      page: await getDocument(sitemapUrl, fetcher, "application/xml,text/xml;q=0.9,*/*;q=0.1", CHESMAR_HOST),
-    }));
-    const failedSitemap = sitemapResults.find((result) => !result.page.ok);
-    if (failedSitemap && !failedSitemap.page.ok) {
-      return failedResult(config, fetchedAt, privateSnapshot, [failedSitemap.page.redirectedOffOfficialHost ? "unsupported_official_host" : "sitemap_fetch_failed"]);
+    const sitemap = await chesmarSitemapCandidates(fetcher, privateSnapshot);
+    if (sitemap.holds.length) return failedResult(config, fetchedAt, privateSnapshot, sitemap.holds);
+    const candidates = sitemap.urls;
+    // Plan links must be whitelisted by official floor-plan breadcrumbs, reviewed slugs,
+    // or explicit plan links inside the community's floorplans container.
+    const approved = new Set((config.planSlugs ?? []).map((slug) => slug.toLowerCase()));
+    const tree = parseHtmlElements(page.text);
+    const planContainer = tree ? descendants(tree).find((item) => item.attributes.id === "floorplans") : null;
+    if (planContainer) for (const href of extractHrefValues(page.text.slice(planContainer.contentStart, planContainer.contentEnd))) {
+      const link = absoluteUrl(href, community); if (link && isChesmarPlan(link, community)) approved.add(link.pathname.split("/").filter(Boolean).at(-1)!.toLowerCase());
     }
-    for (const sitemap of sitemapResults) {
-      privateSnapshot.pages.push(sourcePage("sitemap", sitemap.sitemapUrl, null));
-    }
-
-    const parsedSitemaps = sitemapResults.map((result) => result.page.ok ? parseSitemapUrls(result.page.text) : null);
-    if (parsedSitemaps.some((sitemap) => sitemap === null)) {
-      return failedResult(config, fetchedAt, privateSnapshot, ["sitemap_fetch_failed"]);
-    }
-    const candidates = parsedSitemaps.flatMap((sitemap) => sitemap ?? []);
+    for (const raw of candidates) { const link = asUrl(raw); if (link && isChesmarHome(link, community)) approved.add(link.pathname.split("/").filter(Boolean).at(-2)!.toLowerCase()); }
     const planUrls: string[] = [];
     const homeUrls: string[] = [];
     for (const raw of candidates) {
       const url = asUrl(raw);
       if (!url || !sameOfficialHost(url, CHESMAR_HOST)) continue;
-      if (isChesmarPlan(url, community)) planUrls.push(url.toString());
+      if (isChesmarPlan(url, community) && !/^(?:gallery|map|location|overview|photos|models|incentives|contact)$/i.test(url.pathname.split("/").filter(Boolean).at(-1)!)) planUrls.push(url.toString());
       else if (isChesmarHome(url, community)) homeUrls.push(url.toString());
     }
-    const maxDetails = detailLimit(config);
-    const distinctPlanUrls = Array.from(new Set(planUrls)).slice(0, maxDetails);
-    const remaining = Math.max(0, maxDetails - distinctPlanUrls.length);
-    const distinctHomeUrls = Array.from(new Set(homeUrls)).slice(0, remaining);
+    const distinctPlanUrls = Array.from(new Set(planUrls));
+    const distinctHomeUrls = Array.from(new Set(homeUrls));
+    if (!distinctPlanUrls.length && !distinctHomeUrls.length) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    if (distinctPlanUrls.length + distinctHomeUrls.length > detailLimit(config)) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     const detailHolds = [
-      ...(await fetchDiscoveredProperties(distinctPlanUrls, "plan", fetcher, privateSnapshot, CHESMAR_HOST)),
+      ...(await fetchDiscoveredProperties(distinctPlanUrls, "plan", fetcher, privateSnapshot, CHESMAR_HOST, approved)),
       ...(await fetchDiscoveredProperties(distinctHomeUrls, "home", fetcher, privateSnapshot, CHESMAR_HOST)),
     ];
     if (detailHolds.length > 0) return failedResult(config, fetchedAt, privateSnapshot, detailHolds);
@@ -1072,7 +1096,7 @@ function discoverMiCommunityUrls(html: string, community: URL): { planUrls: stri
     if (!url || !sameOfficialHost(url, MI_HOST)) continue;
     if (isMiPlan(url, community)) planUrls.push(url.toString());
     else if (isMiHome(url, community)) homeUrls.push(url.toString());
-    else if (/\/incentives?(?:\/|$)/i.test(url.pathname)) incentiveUrls.push(url.toString());
+    else if (/\/incentives?\/[^/]+\/?$/i.test(url.pathname)) incentiveUrls.push(url.toString());
   }
   return {
     planUrls: Array.from(new Set(planUrls)),
@@ -1101,7 +1125,7 @@ function miCommunityGuid(html: string): string | null {
 }
 
 function miProductUrl(product: Record<string, unknown>, community: URL, type: "homes" | "plans" | "models"): URL | null {
-  if (!schemaType(product, type === "plans" ? "ProductModel" : "Product")) return null;
+  if (!(type === "plans" ? schemaType(product, "ProductModel") || schemaType(product, "Product") : schemaType(product, "Product"))) return null;
   if (typeof product.url !== "string") return null;
   const url = absoluteUrl(product.url, community);
   if (!url || !sameOfficialHost(url, MI_HOST) || !(type === "plans" ? isMiPlan(url, community) : isMiHome(url, community))) return null;
@@ -1192,7 +1216,9 @@ async function fetchMiCatalog(
     if (total === 0) return { properties: [], holds: ["invalid_inventory_response"] };
     const before = properties.size;
     for (const card of cards) {
-      const products = jsonLdObjects(descendants(card), html).filter((product) => schemaType(product, type === "plans" ? "ProductModel" : "Product"));
+      const local = jsonLdObjects(descendants(card), html).filter((product) => miProductUrl(product, community, type));
+      const linkUrls = extractHrefValues(html.slice(card.contentStart, card.contentEnd)).map((href) => absoluteUrl(href, community)?.toString());
+      const products = local.length ? local : jsonLdObjects(elements, html).filter((product) => typeof product.url === "string" && linkUrls.includes(absoluteUrl(product.url, community)?.toString()) && miProductUrl(product, community, type));
       if (products.length !== 1) return { properties: [], holds: ["invalid_inventory_response"] };
       const product = products[0];
       const productUrl = miProductUrl(product, community, type);
@@ -1220,11 +1246,11 @@ function miDetailGallery(html: string, property: PrivatePlanOrHome): PrivateGall
   const elements = descendants(root);
   const base = new URL(property.sourceUrl);
   const product = jsonLdObjects(elements, html).find((item) => {
-    if (!schemaType(item, "Product") || typeof item.url !== "string") return false;
+    if ((!schemaType(item, "Product") && !schemaType(item, "ProductModel")) || typeof item.url !== "string") return false;
     const url = absoluteUrl(item.url, base);
     return url?.hostname === base.hostname && normalizePathname(url.pathname) === normalizePathname(base.pathname);
   });
-  const slides = elements.filter((element) => elementClass(element, "gallery-slide-container"));
+  const slides = elements.filter((element) => elementClass(element, "gallery-slide-container") || element.attributes["data-gallery"] === "simple-gallery-modal");
   const images = new Map<string, PrivateGalleryImage>();
   for (const slide of slides) {
     const image = descendants(slide).find((element) => element.tag === "img");
@@ -1261,7 +1287,7 @@ async function fetchMiHomeGalleries(properties: readonly PrivatePlanOrHome[], fe
     if (result.hold) holds.push(result.hold);
     else {
       result.property.gallery = result.gallery!;
-      privateSnapshot.pages.push(sourcePage("home", result.property.sourceUrl, result.property.privateName));
+      privateSnapshot.pages.push(sourcePage(privateSnapshot.plans.includes(result.property) ? "plan" : "home", result.property.sourceUrl, result.property.privateName));
     }
   }
   return uniqueReasons(holds);
@@ -1296,13 +1322,11 @@ class MiHomesAdapter implements DealAdapter {
     privateSnapshot.homes = homes.properties;
     privateSnapshot.plans = plans.properties;
     for (const plan of plans.properties) privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privateName));
-    const detailHolds = await fetchMiHomeGalleries(homes.properties, fetcher, privateSnapshot);
+    const detailHolds = await fetchMiHomeGalleries([...homes.properties, ...plans.properties], fetcher, privateSnapshot);
     if (detailHolds.length > 0) return failedResult(config, fetchedAt, privateSnapshot, detailHolds);
 
     const configuredIncentive = config.incentiveSourceUrl ? asUrl(config.incentiveSourceUrl) : null;
-    const incentiveUrl = config.incentiveSourceUrl
-      ? configuredIncentive && sameOfficialHost(configuredIncentive, MI_HOST) ? configuredIncentive : null
-      : discovered.incentiveUrls[0] ? asUrl(discovered.incentiveUrls[0]) : null;
+    const incentiveUrl = discovered.incentiveUrls[0] ? asUrl(discovered.incentiveUrls[0]) : configuredIncentive && sameOfficialHost(configuredIncentive, MI_HOST) ? configuredIncentive : null;
     const incentiveHolds: DealHoldReason[] = config.incentiveSourceUrl && !incentiveUrl ? [configuredIncentive ? "unsupported_official_host" : "invalid_source_url"] : [];
     if (incentiveUrl) {
       incentiveHolds.push(...await fetchOfficialIncentive(incentiveUrl, fetcher, privateSnapshot, MI_HOST));

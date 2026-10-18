@@ -155,8 +155,7 @@ describe("deals adapters", () => {
     expect(facts.holdReasons).toContain("missing_repayment_term");
     expect(facts.holdReasons).toContain("missing_follow_on_rate");
     expect(facts.holdReasons).toContain("missing_down_payment");
-    expect(facts.holdReasons).toContain("missing_contract_deadline");
-    expect(facts.holdReasons).toContain("missing_closing_deadline");
+    // Dates are only required when the source actually names a contract or closing deadline.
   });
 
   it("uses the shared scrubber and refuses output when a short private term cannot safely be scrubbed", () => {
@@ -190,6 +189,7 @@ describe("deals adapters", () => {
     const homeUrl = `${planUrl}123456-0001/`;
     const documents: Record<string, string> = {
       [communityUrl]: '<section id="floorplans"><div class="search-results-container">FloorPlans</div></section>',
+      "https://www.chesmar.com/sitemap.xml": "<sitemapindex><sitemap><loc>https://www.chesmar.com/sitemap5.xml</loc></sitemap><sitemap><loc>https://www.chesmar.com/sitemap6.xml</loc></sitemap></sitemapindex>",
       "https://www.chesmar.com/sitemap5.xml": `<urlset><url><loc>${planUrl}</loc></url></urlset>`,
       "https://www.chesmar.com/sitemap6.xml": `<urlset><url><loc>${homeUrl}</loc></url></urlset>`,
       [planUrl]: "<h1>Hidden Plan</h1><p>Starting From $410,000 · 4 Beds · 3 Baths · 2,300 Sq. Ft.</p>",
@@ -279,6 +279,7 @@ describe("deals adapters", () => {
     const documents = miDocuments(0);
     documents[miEndpointUrl("plans", 0)] = JSON.stringify({ TotalItems: 6, Html: `<div class="row">${Array.from({ length: 5 }, (_, i) => miCard(i, true)).join("")}</div>` });
     documents[miEndpointUrl("plans", 5)] = JSON.stringify({ TotalItems: 6, Html: `<div class="row">${miCard(5, true)}</div>` });
+    for (let i = 0; i < 6; i++) documents[`${miCommunityUrl}/hidden-${i}-plan`] = miDetail(i);
     const fetcher = fixtureFetcher(documents);
     const result = await loadOfficialDeals({ ...config, builder: "M/I Homes", sourceUrl: miCommunityUrl }, { fetcher });
     expect(result.ok).toBe(true);
@@ -286,7 +287,7 @@ describe("deals adapters", () => {
     expect(result.public.homes).toEqual([]);
     expect(result.private.plans).toHaveLength(6);
     expect(fetcher.mock.calls.filter(([url]) => url.includes("type=plans")).map(([url]) => new URL(url).searchParams.get("items"))).toEqual(["0", "5"]);
-    expect(fetcher.mock.calls).toHaveLength(4); // Community + empty homes + two plan pages; no home detail fetches.
+    expect(fetcher.mock.calls).toHaveLength(10); // Community + empty homes + two plan pages + six reviewed plan galleries.
   });
 
   it("does not use an unrelated GUID or silently fall back to one server-rendered M/I home", async () => {
@@ -362,14 +363,17 @@ describe("deals adapters", () => {
 
   it("uses the current Chesmar incentives page over a configured obsolete campaign and reparses a changed dated window", async () => {
     const communityUrl = "https://www.chesmar.com/texas/example/secret-grove/";
+    const planUrl = `${communityUrl}hidden-plan/`;
     const documents: Record<string, string> = {
       [communityUrl]: '<section id="floorplans"><div class="search-results-container">FloorPlans</div></section>',
-      "https://www.chesmar.com/sitemap5.xml": "<urlset></urlset>",
+      "https://www.chesmar.com/sitemap.xml": "<sitemapindex><sitemap><loc>https://www.chesmar.com/sitemap5.xml</loc></sitemap><sitemap><loc>https://www.chesmar.com/sitemap6.xml</loc></sitemap></sitemapindex>",
+      "https://www.chesmar.com/sitemap5.xml": `<urlset><url><loc>${planUrl}</loc></url></urlset>`,
       "https://www.chesmar.com/sitemap6.xml": "<urlset></urlset>",
+      [planUrl]: "<h1>Hidden Plan</h1><p>Starting From $410,000 · 4 Beds · 3 Baths · 2,300 Sq. Ft.</p>",
       [chesmarIncentivesUrl]: chesmarIncentiveHtml,
     };
     const fetcher = fixtureFetcher(documents);
-    const chesmarConfig: CommunitySourceConfig = { ...config, builder: "Chesmar", sourceUrl: communityUrl, incentiveSourceUrl: "https://www.chesmar.com/campaigns/2553" };
+    const chesmarConfig: CommunitySourceConfig = { ...config, builder: "Chesmar", sourceUrl: communityUrl, planSlugs: ["hidden-plan"], incentiveSourceUrl: "https://www.chesmar.com/campaigns/2553" };
     const first = await loadOfficialDeals(chesmarConfig, { fetcher });
     expect(first.ok).toBe(true);
     expect(first.private.incentive?.sourceUrl).toBe(chesmarIncentivesUrl);
@@ -387,13 +391,14 @@ describe("deals adapters", () => {
     const planUrl = `${communityUrl}hidden-plan/`;
     const documents: Record<string, string> = {
       [communityUrl]: '<section id="floorplans"><div class="search-results-container">FloorPlans</div></section>',
+      "https://www.chesmar.com/sitemap.xml": "<sitemapindex><sitemap><loc>https://www.chesmar.com/sitemap5.xml</loc></sitemap><sitemap><loc>https://www.chesmar.com/sitemap6.xml</loc></sitemap></sitemapindex>",
       "https://www.chesmar.com/sitemap5.xml": `<urlset><url><loc>${planUrl}</loc></url></urlset>`,
       "https://www.chesmar.com/sitemap6.xml": "<urlset></urlset>",
       [planUrl]: "<h1>Hidden Plan</h1><p>Starting From $410,000 · 4 Beds · 3 Baths · 2,300 Sq. Ft.</p>",
     };
     if (failure === "container") documents[chesmarIncentivesUrl] = "<h1>Other content</h1>";
     if (failure === "disclosure") documents[chesmarIncentivesUrl] = chesmarIncentiveHtml.replace("3.50% down payment", "down payment required");
-    const result = await loadOfficialDeals({ ...config, builder: "Chesmar", sourceUrl: communityUrl }, { fetcher: fixtureFetcher(documents) });
+    const result = await loadOfficialDeals({ ...config, builder: "Chesmar", sourceUrl: communityUrl, planSlugs: ["hidden-plan"] }, { fetcher: fixtureFetcher(documents) });
     expect(result.ok).toBe(false);
     expect(result.catalogOk).toBe(true);
     expect(result.public.plans).toHaveLength(1);

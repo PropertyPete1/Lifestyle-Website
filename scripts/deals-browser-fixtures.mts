@@ -58,7 +58,11 @@ export async function installDemoFixtures(context: BrowserContext, options: { au
     });
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(responses) });
   });
-  await context.route("**/deals/verify", async (route) => {
+  // Vite and the deployed proxy may add a query string during a document-form
+  // navigation, so match the path explicitly rather than relying on an exact
+  // glob. This remains a local synthetic fixture: no runtime verification
+  // endpoint is ever reached.
+  await context.route(/\/deals\/verify(?:\?.*)?$/, async (route) => {
     state.verifyRequests += 1;
     assert.equal(new URLSearchParams(route.request().postData() ?? "").get("code"), demoOtp);
     state.pending = false;

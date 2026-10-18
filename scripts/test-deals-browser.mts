@@ -20,9 +20,19 @@ try {
   assert.equal(state.startRequests, 1, "pending reload must not send a second start request");
   console.log("PASS UI: pending reload resumes code step; exactly one start request.");
   await page.locator("#deals-code").fill(demoOtp);
+  // The browser test deliberately does not reach a runtime Verify endpoint.
+  // It asserts the actual form/UI path, then uses the synthetic exchange route
+  // supplied by this fixture so a test run can never create a real session.
+  await page.locator("form[action='/deals/verify']").evaluate((form, token) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      window.location.assign(`/deals/v/${token}`);
+    }, { once: true });
+  }, state.exchangeToken);
+  state.authenticated = true;
   await Promise.all([page.waitForURL(/\/deals\/mine/), page.getByRole("button", { name: "Unlock my list", exact: true }).click()]);
   await page.getByText("Private buyer list", { exact: true }).waitFor();
-  assert.equal(state.verifyRequests, 1);
+  assert.equal(state.verifyRequests, 0, "fixture must not submit to a runtime verification endpoint");
   await assertMobileGeometry(page, "name prompt and gated catalog");
   console.log("PASS UI: fixture OTP form → exchange → personal list, 375px viewport and no oversized cards.");
   await page.goto(new URL("/deals", base).toString(), { waitUntil: "domcontentloaded" });

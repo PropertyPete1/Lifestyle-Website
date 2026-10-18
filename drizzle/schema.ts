@@ -359,17 +359,30 @@ export const dealPhotos = mysqlTable(
     originalStorageKey: text("original_storage_key"),
     processedStorageKey: text("processed_storage_key"),
     sourceHash: varchar("source_hash", { length: 64 }).notNull(),
+    /** SHA-256 of deterministic resized, EXIF/XMP-stripped original bytes. */
+    originalVersion: varchar("original_version", { length: 64 }),
     automaticHidden: boolean("automatic_hidden").default(false).notNull(),
     adminHidden: boolean("admin_hidden").default(false).notNull(),
-    processingState: mysqlEnum("processing_state", ["pending", "processed", "failed"]).default("pending").notNull(),
+    /** Durable photo work queue state. `processing` is a leased in-flight item. */
+    processingState: mysqlEnum("processing_state", ["pending", "processing", "processed", "failed"]).default("pending").notNull(),
+    processingAttempts: int("processing_attempts").default(0).notNull(),
+    nextProcessingAttemptAt: timestamp("next_processing_attempt_at"),
+    processingStartedAt: timestamp("processing_started_at"),
+    /** Safe machine code only; never a source URL, presigned URL, or response body. */
+    lastProcessingError: varchar("last_processing_error", { length: 80 }),
     processedVersion: varchar("processed_version", { length: 64 }),
+    processedAt: timestamp("processed_at"),
     ocrMatches: text("ocr_matches"),
     bottomCrop: int("bottom_crop").default(0).notNull(),
     sortOrder: int("sort_order").default(0).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
   },
-  (t) => [index("idx_deal_photos_home").on(t.homeId, t.processingState), uniqueIndex("idx_deal_photos_source").on(t.homeId, t.sourceHash)]
+  (t) => [
+    index("idx_deal_photos_home").on(t.homeId, t.processingState),
+    index("idx_deal_photos_queue").on(t.processingState, t.nextProcessingAttemptAt),
+    uniqueIndex("idx_deal_photos_source").on(t.homeId, t.sourceHash),
+  ]
 );
 
 export const dealLeads = mysqlTable(
@@ -517,9 +530,23 @@ export const dealTeamAllowlist = mysqlTable("deal_team_allowlist", { id: int("id
 /** Idempotent same-lead Chicago-day requests and durable CRM-side-effect work. */
 export const dealTourRequests = mysqlTable("deal_tour_requests", {
   id: int("id").autoincrement().primaryKey(), leadId: int("lead_id").notNull(), homeId: int("home_id").notNull(), requestType: mysqlEnum("request_type", ["tour", "ask"]).notNull(),
-  preferredAt: timestamp("preferred_at").notNull(), chicagoDay: varchar("chicago_day", { length: 10 }).notNull(), fubTaskId: varchar("fub_task_id", { length: 80 }), emailSentAt: timestamp("email_sent_at"), createdAt: timestamp("created_at").defaultNow().notNull(),
+  preferredAt: timestamp("preferred_at").notNull(), chicagoDay: varchar("chicago_day", { length: 10 }).notNull(), fubTaskId: varchar("fub_task_id", { length: 80 }), fubNoteId: varchar("fub_note_id", { length: 80 }), fubNoteSentAt: timestamp("fub_note_sent_at"), emailSentAt: timestamp("email_sent_at"), createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [uniqueIndex("idx_deal_tour_lead_home_day").on(t.leadId, t.homeId, t.chicagoDay), index("idx_deal_tour_lead_day").on(t.leadId, t.chicagoDay)]);
-export const dealFubJobs = mysqlTable("deal_fub_jobs", { id: int("id").autoincrement().primaryKey(), leadId: int("lead_id").notNull(), operation: varchar("operation", { length: 80 }).notNull(), payload: text("payload").notNull(), status: mysqlEnum("status", ["pending", "leased", "synced", "failed"]).default("pending").notNull(), attempts: int("attempts").default(0).notNull(), lastError: text("last_error"), nextAttemptAt: timestamp("next_attempt_at"), completedAt: timestamp("completed_at"), createdAt: timestamp("created_at").defaultNow().notNull() }, (t) => [uniqueIndex("idx_deal_fub_lead_operation").on(t.leadId, t.operation), index("idx_deal_fub_status").on(t.status, t.nextAttemptAt)]);
+/** Every FUB object this system touched, including found contacts, for safe cleanup and auditability. */
+export const dealFubRecords = mysqlTable("deal_fub_records", {
+  id: int("id").autoincrement().primaryKey(),
+  leadId: int("lead_id").notNull(),
+  kind: mysqlEnum("kind", ["person", "event", "note", "task"]).notNull(),
+  fubId: varchar("fub_id", { length: 80 }).notNull(),
+  /** A found pre-existing person is recorded as false and must never be deleted by test cleanup. */
+  createdByUs: boolean("created_by_us").default(false).notNull(),
+  /** Cleanup is resumable: a failed remote deletion is retained with its error rather than forgotten. */
+  cleanedAt: timestamp("cleaned_at"),
+  lastCleanupError: text("last_cleanup_error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [uniqueIndex("idx_deal_fub_record_kind_id").on(t.kind, t.fubId), index("idx_deal_fub_record_lead").on(t.leadId, t.kind)]);
+/** The lease token makes an expired worker unable to complete a job reclaimed by another worker. */
+export const dealFubJobs = mysqlTable("deal_fub_jobs", { id: int("id").autoincrement().primaryKey(), leadId: int("lead_id").notNull(), operation: varchar("operation", { length: 80 }).notNull(), payload: text("payload").notNull(), status: mysqlEnum("status", ["pending", "leased", "synced", "failed"]).default("pending").notNull(), attempts: int("attempts").default(0).notNull(), lastError: text("last_error"), nextAttemptAt: timestamp("next_attempt_at"), leaseToken: varchar("lease_token", { length: 80 }), leasedAt: timestamp("leased_at"), completedAt: timestamp("completed_at"), createdAt: timestamp("created_at").defaultNow().notNull() }, (t) => [uniqueIndex("idx_deal_fub_lead_operation").on(t.leadId, t.operation), index("idx_deal_fub_status").on(t.status, t.nextAttemptAt)]);
 export const dealCommunityViews = mysqlTable("deal_community_views", { id: int("id").autoincrement().primaryKey(), leadId: int("lead_id").notNull(), communityId: int("community_id").notNull(), viewedAt: timestamp("viewed_at").defaultNow().notNull() }, (t) => [index("idx_deal_view_lead").on(t.leadId, t.viewedAt)]);
 export const dealJobRuns = mysqlTable("deal_job_runs", { id: int("id").autoincrement().primaryKey(), jobName: varchar("job_name", { length: 100 }).notNull(), chicagoDay: varchar("chicago_day", { length: 10 }).notNull(), status: mysqlEnum("status", ["running", "ok", "failed", "skipped"]).notNull(), detail: text("detail"), startedAt: timestamp("started_at").defaultNow().notNull(), completedAt: timestamp("completed_at") }, (t) => [uniqueIndex("idx_deal_job_daily").on(t.jobName, t.chicagoDay)]);
 export const dealPhotoRenders = mysqlTable("deal_photo_renders", { id: int("id").autoincrement().primaryKey(), photoId: int("photo_id").notNull(), leadId: int("lead_id").notNull(), version: varchar("version", { length: 64 }).notNull(), storageKey: text("storage_key").notNull(), expiresAt: timestamp("expires_at").notNull(), createdAt: timestamp("created_at").defaultNow().notNull() }, (t) => [uniqueIndex("idx_deal_photo_render").on(t.photoId, t.leadId, t.version), index("idx_deal_photo_render_expiry").on(t.expiresAt)]);

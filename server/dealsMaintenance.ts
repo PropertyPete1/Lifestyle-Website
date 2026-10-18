@@ -1,6 +1,7 @@
 import { and, eq, lte } from "drizzle-orm";
 import {
   dealDoNotAutoImport,
+  dealFubRecords,
   dealKnownAgents,
   dealLeads,
   dealTeamAllowlist,
@@ -9,6 +10,8 @@ import { normalizeUsPhone } from "../shared/deals";
 import { notifyOwner } from "./_core/notification";
 import { getDb } from "./db";
 import { fubHeaders } from "./fub";
+import { cleanupBuilderDealsFubRecord, stripBuilderDealsTestTag } from "./dealsFub";
+import { getDealSettings } from "./dealsService";
 
 const FUB_API_URL = "https://api.followupboss.com/v1";
 const FUB_TIMEOUT_MS = 15_000;
@@ -349,9 +352,12 @@ export type DealsTestCleanupResult = {
   ok: boolean;
   eligible: number;
   markedExpired: number;
-  /** This module never calls a FUB delete endpoint. */
-  fubDeletionAttempted: false;
-  /** Count of linked FUB records a staff member must clean up through FUB. */
+  /** Count of DELETE requests made only for explicitly system-created objects. */
+  fubDeletionAttempted: number;
+  fubDeleted: number;
+  /** Existing found contacts are retained; only their TEST tag is removed. */
+  fubTagsStripped: number;
+  /** Failed or unsupported tracked artifacts remain for retry/manual review. */
   fubRecordsRequiringManualCleanup: number;
   manualFubCleanupRequired: boolean;
   reason?: "database_unavailable";
@@ -359,9 +365,9 @@ export type DealsTestCleanupResult = {
 
 /**
  * Expires local test leads only after both their 24-hour age threshold and
- * access expiration. FUB deletion is deliberately omitted: no documented safe
- * deletion helper exists in this codebase, so linked CRM records are returned
- * for manual cleanup rather than deleted speculatively.
+ * access expiration. The FUB audit table distinguishes created artifacts from
+ * found contacts: only created objects are deleted; a found contact has TEST
+ * removed. Failed cleanup is persisted for a later retry rather than lost.
  */
 export async function cleanupDealsTestRecords(now = new Date()): Promise<DealsTestCleanupResult> {
   const db = await getDb();
@@ -370,7 +376,9 @@ export async function cleanupDealsTestRecords(now = new Date()): Promise<DealsTe
       ok: false,
       eligible: 0,
       markedExpired: 0,
-      fubDeletionAttempted: false,
+      fubDeletionAttempted: 0,
+      fubDeleted: 0,
+      fubTagsStripped: 0,
       fubRecordsRequiringManualCleanup: 0,
       manualFubCleanupRequired: false,
       reason: "database_unavailable",
@@ -378,22 +386,59 @@ export async function cleanupDealsTestRecords(now = new Date()): Promise<DealsTe
   }
 
   const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60_000);
+  const settings = await getDealSettings();
   try {
     const candidates = await db
-      .select({ id: dealLeads.id, flags: dealLeads.flags, fubPersonId: dealLeads.fubPersonId })
+      .select({ id: dealLeads.id, phoneE164: dealLeads.phoneE164 })
       .from(dealLeads)
       .where(and(lte(dealLeads.createdAt, twentyFourHoursAgo), lte(dealLeads.expiresAt, now)));
-    const eligible = candidates.filter((lead) => hasDealsTestFlag(lead.flags));
+    // The configured normalized number list, not a conditional screening flag,
+    // is authoritative when full-pipeline test mode runs with that flag off.
+    const eligible = candidates.filter((lead) => settings.testNumbers.includes(lead.phoneE164));
 
     for (const lead of eligible) {
       await db.update(dealLeads).set({ status: "expired" }).where(eq(dealLeads.id, lead.id));
     }
-    const fubRecordsRequiringManualCleanup = eligible.filter((lead) => Boolean(lead.fubPersonId?.trim())).length;
+    let fubDeletionAttempted = 0;
+    let fubDeleted = 0;
+    let fubTagsStripped = 0;
+    let fubRecordsRequiringManualCleanup = 0;
+    for (const lead of eligible) {
+      const records = await db.select().from(dealFubRecords).where(eq(dealFubRecords.leadId, lead.id));
+      const owned = records.filter((record) => record.createdByUs && !record.cleanedAt);
+      const foundPeople = records.filter((record) => record.kind === "person" && !record.createdByUs && !record.cleanedAt);
+      // Delete child artifacts before an owned contact; a FUB event is retained
+      // for manual attention because FUB exposes no documented event DELETE.
+      const ordered = [...owned.filter((record) => record.kind !== "person"), ...owned.filter((record) => record.kind === "person")];
+      for (const record of ordered) {
+        fubDeletionAttempted += 1;
+        const result = await cleanupBuilderDealsFubRecord(record.kind, record.fubId);
+        if (result.ok) {
+          fubDeleted += 1;
+          await db.update(dealFubRecords).set({ cleanedAt: now, lastCleanupError: null }).where(eq(dealFubRecords.id, record.id));
+        } else {
+          fubRecordsRequiringManualCleanup += 1;
+          await db.update(dealFubRecords).set({ lastCleanupError: result.error }).where(eq(dealFubRecords.id, record.id));
+        }
+      }
+      for (const record of foundPeople) {
+        const result = await stripBuilderDealsTestTag(record.fubId);
+        if (result.ok) {
+          fubTagsStripped += 1;
+          await db.update(dealFubRecords).set({ cleanedAt: now, lastCleanupError: null }).where(eq(dealFubRecords.id, record.id));
+        } else {
+          fubRecordsRequiringManualCleanup += 1;
+          await db.update(dealFubRecords).set({ lastCleanupError: result.error }).where(eq(dealFubRecords.id, record.id));
+        }
+      }
+    }
     return {
       ok: true,
       eligible: eligible.length,
       markedExpired: eligible.length,
-      fubDeletionAttempted: false,
+      fubDeletionAttempted,
+      fubDeleted,
+      fubTagsStripped,
       fubRecordsRequiringManualCleanup,
       manualFubCleanupRequired: fubRecordsRequiringManualCleanup > 0,
     };
@@ -402,7 +447,9 @@ export async function cleanupDealsTestRecords(now = new Date()): Promise<DealsTe
       ok: false,
       eligible: 0,
       markedExpired: 0,
-      fubDeletionAttempted: false,
+      fubDeletionAttempted: 0,
+      fubDeleted: 0,
+      fubTagsStripped: 0,
       fubRecordsRequiringManualCleanup: 0,
       manualFubCleanupRequired: false,
       reason: "database_unavailable",

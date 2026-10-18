@@ -627,3 +627,13 @@ Three separate bugs stacked up:
 - [ ] Build private photo ingestion and delivery, galleries, area treatment, complete realtor/team/known-agent/blocklist workflows, admin controls, funnel events, and live runtime privacy checks.
 - [ ] Build idempotent Chicago-time alerts, health, import, refresh, cleanup, and source-change schedules without registering them before deployment approval.
 - [ ] Re-run the full real-browser funnel and runtime privacy evidence, commit review screenshots and tests, then push only `builder-deals-preview` without checkpointing or publishing.
+
+## Builder Deals Round 3 — 2026-10-18
+- [ ] A — Repair crash, security, cookie, verification, rate-limit, screening, consent, UI, and team-preview blockers.
+- [ ] B — Complete CRM, alerts, scheduled jobs, team, known-agent, TREC, cleanup, and administrative cascades.
+- [ ] C — Harden official adapters, database-driven syncing, incentive lifecycle, scrub lists, and price/sold tracking.
+- [ ] D — Complete private photo ingestion, OCR, watermark, lifecycle, and gallery requirements.
+- [ ] E — Complete Builder Deals mobile-first admin operations controls.
+- [ ] F — Replace source-grep coverage with behavioural, runtime privacy, and configurable browser tests.
+- [ ] G — Implement data-backed gated area maps and drive-time chips.
+- [ ] H — Re-capture 375px evidence and deliver the full section-by-section report.

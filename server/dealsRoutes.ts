@@ -3,6 +3,9 @@ import { completeVerification, currentDealSource, currentPending, dealsCsp, deal
 import { parse as parseCookie } from "cookie";
 import { checkTwilioVerify } from "./dealsVerification";
 
+const safe = (handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
+  (req: Request, res: Response, next: NextFunction) => { void handler(req, res, next).catch(next); };
+
 /**
  * Express-level routes are deliberately separate from tRPC. They exchange the
  * one-time link before the SPA loads, so the personal token is never available
@@ -23,7 +26,7 @@ export function registerDealsRoutes(app: Express) {
     next();
   });
 
-  app.get("/deals/v/:token", async (req, res) => {
+  app.get("/deals/v/:token", safe(async (req, res) => {
     // Validate before touching storage. Do not log this route: token-bearing
     // URLs must never be written into application logs.
     const token = String(req.params.token || "");
@@ -36,9 +39,9 @@ export function registerDealsRoutes(app: Express) {
     else if (result === "needs_gate") res.redirect(302, "/deals?gate=1");
     else if (result === "cookie_blocked") res.redirect(302, "/deals?cookieBlocked=1");
     else res.redirect(302, "/deals?expired=1");
-  });
+  }));
 
-  app.post("/deals/verify", async (req, res) => {
+  app.post("/deals/verify", safe(async (req, res) => {
     const pending = await currentPending(req);
     const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
     if (!pending || !/^\d{6}$/.test(code)) return res.redirect(302, "/deals?codeError=1");
@@ -54,24 +57,24 @@ export function registerDealsRoutes(app: Express) {
     if (!completed.isTeam && (!isTest || settings.testModeFullPipeline)) {
       const { enqueueDealsFubJob, runPendingDealsFubJobs } = await import("./dealsFubJobs");
       await enqueueDealsFubJob(completed.leadId, completed.firstUnlock ? "first_unlock" : "reverify", completed.reverifiedActive ? "re-verified on a second device" : "returned for a new link");
-      void runPendingDealsFubJobs(1);
+      void runPendingDealsFubJobs(1).catch(console.error);
     }
     // The browser redirects through an opaque, device-bound, one-time token;
     // that exchange sets the HTTP-only session and immediately removes it from
     // the displayed URL.
     res.redirect(302, `/deals/v/${completed.token}`);
-  });
+  }));
 
   // Do not leave /mine to a client-side query failure. This check runs before
   // Vite/static serving, so an unauthenticated document is redirected without
   // receiving private catalog markup. Image URLs are stricter: no redirect,
   // no bytes, and no hint about whether an image identifier exists.
-  app.get("/deals/mine", async (req, res, next) => {
+  app.get("/deals/mine", safe(async (req, res, next) => {
     const { isLiveDealSession } = await import("./dealsService");
     if (!(await isLiveDealSession(req))) return res.redirect(302, "/deals?gate=1");
     next();
-  });
-  app.get("/deals/mine/img/:photoId", async (req, res) => {
+  }));
+  app.get("/deals/mine/img/:photoId", safe(async (req, res) => {
     const { isLiveDealSession } = await import("./dealsService");
     const session = await isLiveDealSession(req);
     if (!session) return res.status(401).end();
@@ -83,10 +86,10 @@ export function registerDealsRoutes(app: Express) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.type(rendered.contentType).send(rendered.data);
-  });
+  }));
 
   app.get("/deals/auth/google", (req, res) => {
-    const clientId = process.env.GOOGLE_DEALS_CLIENT_ID;
+    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID ?? process.env.GOOGLE_DEALS_CLIENT_ID;
     if (!clientId) return res.redirect(302, "/deals?google=unavailable");
     const state = randomOpaqueToken(24);
     setDealCookie(res, "ldr_deals_google_state", state, 10 * 60);
@@ -96,9 +99,9 @@ export function registerDealsRoutes(app: Express) {
     res.redirect(302, url.toString());
   });
 
-  app.get("/deals/auth/google/callback", async (req, res) => {
-    const clientId = process.env.GOOGLE_DEALS_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_DEALS_CLIENT_SECRET;
+  app.get("/deals/auth/google/callback", safe(async (req, res) => {
+    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID ?? process.env.GOOGLE_DEALS_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? process.env.GOOGLE_DEALS_CLIENT_SECRET;
     const receivedState = String(req.query.state || "");
     const savedState = parseCookie(req.headers.cookie || "")["ldr_deals_google_state"];
     if (!clientId || !clientSecret || !savedState || receivedState !== savedState || typeof req.query.code !== "string") return res.redirect(302, "/deals?google=failed");
@@ -116,5 +119,10 @@ export function registerDealsRoutes(app: Express) {
       clearDealCookie(res, "ldr_deals_google_state");
       res.redirect(302, "/deals?google=connected");
     } catch { res.redirect(302, "/deals?google=failed"); }
+  }));
+
+  app.use("/deals", (error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    console.error("[deals] route failure", error);
+    if (!res.headersSent) res.redirect(302, "/deals?error=1");
   });
 }

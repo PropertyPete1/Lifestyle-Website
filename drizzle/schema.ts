@@ -409,6 +409,7 @@ export const dealPendingVerifications = mysqlTable(
     instagramHandle: varchar("instagram_handle", { length: 31 }),
     deviceHash: varchar("device_hash", { length: 64 }).notNull(),
     clientIp: varchar("client_ip", { length: 64 }).notNull(),
+    consentAt: timestamp("consent_at").defaultNow().notNull(),
     flags: varchar("flags", { length: 2000 }).notNull().default("[]"),
     wrongCodes: int("wrong_codes").default(0).notNull(),
     expiresAt: timestamp("expires_at").notNull(),
@@ -424,6 +425,7 @@ export const dealAccessTokens = mysqlTable(
     leadId: int("lead_id").notNull(),
     tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
     deviceHash: varchar("device_hash", { length: 64 }).notNull(),
+    kind: mysqlEnum("kind", ["exchange", "session"]).default("exchange").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
     consumedAt: timestamp("consumed_at"),
     revokedAt: timestamp("revoked_at"),
@@ -478,10 +480,11 @@ export const dealEvents = mysqlTable(
     sourceCode: varchar("source_code", { length: 40 }),
     deviceHash: varchar("device_hash", { length: 64 }),
     ipPrefix: varchar("ip_prefix", { length: 80 }),
+    phoneE164: varchar("phone_e164", { length: 20 }),
     detail: text("detail"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (t) => [index("idx_deal_events_kind_created").on(t.kind, t.createdAt)]
+  (t) => [index("idx_deal_events_kind_created").on(t.kind, t.createdAt), index("idx_deal_events_phone_kind_created").on(t.phoneE164, t.kind, t.createdAt)]
 );
 
 /** Dated observations underpin the rolling 30-day price-drop display. */

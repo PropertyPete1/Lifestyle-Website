@@ -92,6 +92,13 @@
       "when": 1792343355514,
       "tag": "0012_minor_captain_marvel",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1792350771178,
+      "tag": "0013_closed_devos",
+      "breakpoints": true
     }
   ]
 }

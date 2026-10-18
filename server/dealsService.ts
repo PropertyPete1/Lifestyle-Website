@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, asc, desc, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lte, notLike, or, sql } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { parse as parseCookie } from "cookie";
 import {
@@ -163,7 +163,7 @@ export function ensureDealsCookies(req: Request, res: Response): { deviceHash: s
   // not prove this browser will retain it for Continue or token exchange.
   const hasProbe = Boolean(cookies[DEALS_COOKIE.probe]);
   if (!hasProbe) {
-    setDealCookie(res, DEALS_COOKIE.probe, randomOpaqueToken(16), 24 * 60 * 60);
+    setDealCookie(res, DEALS_COOKIE.probe, randomOpaqueToken(16), 400 * 24 * 60 * 60);
   }
   return { deviceHash: hashSecret(device), hasProbe };
 }
@@ -201,7 +201,7 @@ export async function saveDealSettings(settings: Partial<DealSettings>) {
   return merged;
 }
 
-export async function logDealEvent(input: { leadId?: number; kind: string; sourceCode?: string | null; deviceHash?: string | null; ip?: string | null; detail?: string | null }) {
+export async function logDealEvent(input: { leadId?: number; kind: string; sourceCode?: string | null; deviceHash?: string | null; ip?: string | null; phone?: string | null; detail?: string | null }) {
   const db = await getDb();
   if (!db) return;
   await db.insert(dealEvents).values({
@@ -210,6 +210,7 @@ export async function logDealEvent(input: { leadId?: number; kind: string; sourc
     sourceCode: input.sourceCode ?? null,
     deviceHash: input.deviceHash ?? null,
     ipPrefix: input.ip ? clientIpKey(input.ip) : null,
+    phoneE164: input.phone ?? null,
     detail: input.detail ?? null,
   });
 }
@@ -223,7 +224,7 @@ export async function rateLimitCount(kind: string, since: Date, fields: { phone?
   const db = await getDb();
   if (!db) return 0;
   const detailPredicates = [
-    fields.phone ? sql`${dealEvents.detail} = ${`phone:${fields.phone}`}` : undefined,
+    fields.phone ? eq(dealEvents.phoneE164, fields.phone) : undefined,
     fields.ip ? eq(dealEvents.ipPrefix, clientIpKey(fields.ip)) : undefined,
     fields.deviceHash ? eq(dealEvents.deviceHash, fields.deviceHash) : undefined,
   ].filter(Boolean) as any[];
@@ -232,14 +233,36 @@ export async function rateLimitCount(kind: string, since: Date, fields: { phone?
   return Number(rows[0]?.n ?? 0);
 }
 
-function chicagoDayStart(now = new Date()): Date {
+/** Bound expensive FUB screening before any external lookup or blocklist write. */
+export async function reserveGateSubmit(input: { ip: string; deviceHash: string; sourceCode: string }): Promise<boolean> {
+  const settings = await getDealSettings();
+  const count = await rateLimitCount("gate_submit", new Date(Date.now() - 60 * 60_000), { ip: input.ip });
+  if (count >= settings.ipLimitPerHour) return false;
+  await logDealEvent({ kind: "gate_submit", sourceCode: input.sourceCode, deviceHash: input.deviceHash, ip: input.ip });
+  return true;
+}
+
+function chicagoDate(year: number, month: number, day: number, hour = 0, minute = 0, second = 0): Date {
+  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  const formatter = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+  // Two passes resolve the zone offset at the requested local wall-clock time,
+  // including the spring/fall Central Time transitions.
+  for (let index = 0; index < 2; index++) {
+    const parts = formatter.formatToParts(guess);
+    const read = (name: string) => Number(parts.find((part) => part.type === name)?.value ?? 0);
+    const seenAsUtc = Date.UTC(read("year"), read("month") - 1, read("day"), read("hour"), read("minute"), read("second"));
+    const intendedAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+    guess = new Date(guess.getTime() + intendedAsUtc - seenAsUtc);
+  }
+  return guess;
+}
+
+export function chicagoDayStart(now = new Date()): Date {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit",
   }).formatToParts(now);
   const get = (name: string) => Number(parts.find((part) => part.type === name)?.value ?? 0);
-  // Start only bounds an event count. A 30-hour window safely contains the
-  // current Chicago calendar day through both DST transitions.
-  return new Date(Date.UTC(get("year"), get("month") - 1, get("day")) - 6 * 60 * 60_000);
+  return chicagoDate(get("year"), get("month"), get("day"));
 }
 
 /**
@@ -267,19 +290,23 @@ export async function reserveVerificationAttempt(input: {
   const db = await getDb();
   if (!db) return { ok: false, kind: "daily_cap" };
   const dayRows = await db.select({ n: sql<number>`count(*)` }).from(dealEvents)
-    .where(and(eq(dealEvents.kind, "code_sent"), gt(dealEvents.createdAt, dayStart)));
+    .where(and(eq(dealEvents.kind, "code_sent"), gt(dealEvents.createdAt, dayStart), notLike(dealEvents.detail, "%TEST%")));
   const dailyCount = Number(dayRows[0]?.n ?? daily);
   if (perPhone >= perPhoneLimit || perIp >= settings.ipLimitPerHour) return { ok: false, kind: "rate_limited" };
   if (dailyCount >= settings.dailyVerificationCap) {
-    void notifyOwner({ title: "Builder Deals verification cap reached", content: `To: peter@lifestyledesignrealty.com, steven@lifestyledesignrealty.com\n\nThe Builder Deals daily Verify cap (${settings.dailyVerificationCap}) refused a code request. Review or raise the cap in Admin → Builder Deals: /admin/deals.` });
+    const prior = (await db.select({ id: dealEvents.id }).from(dealEvents).where(and(eq(dealEvents.kind, "cap_refused_alert"), gt(dealEvents.createdAt, dayStart))).limit(1))[0];
+    if (!prior) {
+      await logDealEvent({ kind: "cap_refused_alert", sourceCode: input.sourceCode, deviceHash: input.deviceHash, ip: input.ip });
+      void notifyOwner({ title: "Builder Deals verification cap reached", content: `The Builder Deals daily Verify cap (${settings.dailyVerificationCap}) refused a code request. Review or raise the cap in Admin → Builder Deals: /admin/deals.` }).catch(console.error);
+    }
     return { ok: false, kind: "daily_cap" };
   }
   await logDealEvent({
     kind: "code_sent", sourceCode: input.sourceCode, deviceHash: input.deviceHash, ip: input.ip,
-    detail: `phone:${input.phone};channel:${input.channel};${input.isTest ? "TEST" : "live"}`,
+    phone: input.phone, detail: `channel:${input.channel};${input.isTest ? "TEST" : "live"}`,
   });
   const nextCount = dailyCount + 1;
-  if (nextCount === Math.min(300, settings.dailyVerificationCap)) void notifyOwner({ title: "Builder Deals Verify threshold reached", content: `To: peter@lifestyledesignrealty.com, steven@lifestyledesignrealty.com\n\nBuilder Deals reached ${nextCount} verification sends today. Review safety settings or raise the cap in Admin → Builder Deals: /admin/deals.` });
+  if (nextCount === Math.min(300, settings.dailyVerificationCap)) void notifyOwner({ title: "Builder Deals Verify threshold reached", content: `Builder Deals reached ${nextCount} verification sends today. Review safety settings or raise the cap in Admin → Builder Deals: /admin/deals.` }).catch(console.error);
   return { ok: true, dailyCount: nextCount };
 }
 
@@ -305,7 +332,7 @@ export async function recordTwilioVerifyFailure(input: { sourceCode: string; dev
   const alertSent = (await db.select({ id: dealEvents.id }).from(dealEvents).where(and(eq(dealEvents.kind, "twilio_alert"), gt(dealEvents.createdAt, new Date(Date.now() - 6 * 60 * 60_000)))).limit(1))[0];
   if (!alertSent && (consecutive || (sends >= 10 && errors / sends > 0.2))) {
     await logDealEvent({ kind: "twilio_alert", sourceCode: input.sourceCode, deviceHash: input.deviceHash, ip: input.ip, detail: `sends:${sends};errors:${errors}` });
-    void notifyOwner({ title: "Builder Deals Twilio Verify alert", content: `To: peter@lifestyledesignrealty.com, steven@lifestyledesignrealty.com\n\nVerify API/account errors need attention. Last hour: ${errors} API errors across ${sends} attempts. Review Admin → Builder Deals: /admin/deals.` });
+    void notifyOwner({ title: "Builder Deals Twilio Verify alert", content: `Verify API/account errors need attention. Last hour: ${errors} API errors across ${sends} attempts. Review Admin → Builder Deals: /admin/deals.` }).catch(console.error);
   }
 }
 
@@ -451,7 +478,7 @@ export async function isLiveDealSession(req: Request): Promise<{ leadId: number;
   if (!token || !deviceHash) return null;
   const db = await getDb();
   if (!db) return null;
-  const tokenRow = (await db.select().from(dealAccessTokens).where(and(eq(dealAccessTokens.tokenHash, hashSecret(token)), eq(dealAccessTokens.deviceHash, deviceHash), isNull(dealAccessTokens.revokedAt), gt(dealAccessTokens.expiresAt, new Date()))).limit(1))[0];
+  const tokenRow = (await db.select().from(dealAccessTokens).where(and(eq(dealAccessTokens.kind, "session"), eq(dealAccessTokens.tokenHash, hashSecret(token)), eq(dealAccessTokens.deviceHash, deviceHash), isNull(dealAccessTokens.revokedAt), gt(dealAccessTokens.expiresAt, new Date()))).limit(1))[0];
   if (!tokenRow) return null;
   const lead = (await db.select().from(dealLeads).where(and(eq(dealLeads.id, tokenRow.leadId), or(eq(dealLeads.status, "verified"), eq(dealLeads.status, "team")), gt(dealLeads.expiresAt, new Date()))).limit(1))[0];
   return lead ? { leadId: lead.id, lead, deviceHash } : null;
@@ -461,7 +488,7 @@ export async function issueAccessToken(leadId: number, deviceHash: string, expir
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const token = randomOpaqueToken(32);
-  await db.insert(dealAccessTokens).values({ leadId, tokenHash: hashSecret(token), deviceHash, expiresAt });
+  await db.insert(dealAccessTokens).values({ leadId, tokenHash: hashSecret(token), deviceHash, expiresAt, kind: "exchange" });
   return token;
 }
 
@@ -471,13 +498,14 @@ export async function exchangeAccessToken(req: Request, res: Response, rawToken:
   const deviceHash = cookieState.deviceHash;
   const db = await getDb();
   if (!db) return "needs_gate";
-  const token = (await db.select().from(dealAccessTokens).where(eq(dealAccessTokens.tokenHash, hashSecret(rawToken))).limit(1))[0];
+  const token = (await db.select().from(dealAccessTokens).where(and(eq(dealAccessTokens.kind, "exchange"), eq(dealAccessTokens.tokenHash, hashSecret(rawToken)))).limit(1))[0];
   if (!token || token.revokedAt || token.expiresAt <= new Date()) return "expired";
   if (token.deviceHash !== deviceHash) return "needs_gate";
+  if (token.consumedAt) return (await isLiveDealSession(req)) ? "ok" : "expired";
   const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, token.leadId)).limit(1))[0];
   if (!lead || lead.expiresAt <= new Date() || !["verified", "team"].includes(lead.status)) return "expired";
   const session = randomOpaqueToken(32);
-  await db.insert(dealAccessTokens).values({ leadId: lead.id, tokenHash: hashSecret(session), deviceHash, expiresAt: lead.expiresAt });
+  await db.insert(dealAccessTokens).values({ leadId: lead.id, tokenHash: hashSecret(session), deviceHash, expiresAt: lead.expiresAt, kind: "session" });
   if (!token.consumedAt) await db.update(dealAccessTokens).set({ consumedAt: new Date() }).where(eq(dealAccessTokens.id, token.id));
   setDealCookie(res, DEALS_COOKIE.session, session, Math.max(60, Math.floor((lead.expiresAt.getTime() - Date.now()) / 1000)));
   return "ok";
@@ -494,13 +522,6 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   const ig = sanitizeInstagramHandle(input.ig);
   const google = getGoogleDealsIdentity(input.req);
   const isTest = settings.testNumbers.includes(normalized.e164);
-
-  if (input.choice === "has_agent") {
-    await blockDealAccess({ searchPhone: normalized.e164, deviceHash, reason: "Confirmed working with an agent", expiresAt: new Date(Date.now() + (isTest ? 10 * 60_000 : settings.hasAgentBlockDays * 86400_000)) });
-    await logDealEvent({ kind: "has_agent", sourceCode, deviceHash, ip, detail: `phone:${normalized.e164}` });
-    return { ok: false as const, kind: "has_agent" };
-  }
-
   const { classifyDealsAccess } = await import("./dealsEligibility");
   const eligibility = await classifyDealsAccess({
     phone: normalized.e164, email: google?.email, deviceHash, isTest,
@@ -508,6 +529,13 @@ export async function createPendingVerification(input: { req: Request; res: Resp
     brokerageDomains: settings.brokerageDomains, fubRealtorTags: settings.fubRealtorTags,
     fubRealtorSources: settings.fubRealtorSources,
   });
+  // Staff/test previews must not create an accidental "has agent" device
+  // block merely because they test the visible confirmation choice.
+  if (input.choice === "has_agent" && !eligibility.team) {
+    await blockDealAccess({ searchPhone: normalized.e164, deviceHash, reason: "Confirmed working with an agent", expiresAt: new Date(Date.now() + (isTest ? 10 * 60_000 : settings.hasAgentBlockDays * 86400_000)) });
+    await logDealEvent({ kind: "has_agent", sourceCode, deviceHash, ip, phone: normalized.e164 });
+    return { ok: false as const, kind: "has_agent" };
+  }
   if (!eligibility.allowed) {
     if (eligibility.blockedBy !== "blocklist") {
       // Before SMS verification, never permanently block an unverified typed
@@ -602,7 +630,7 @@ export async function completeVerification(input: { req: Request; res: Response;
   const token = await issueAccessToken(leadId, deviceHash, expiresAt);
   await db.delete(dealPendingVerifications).where(eq(dealPendingVerifications.id, pending.id));
   clearDealCookie(input.res, DEALS_COOKIE.pending);
-  await logDealEvent({ leadId, kind: "verified", sourceCode: pending.sourceCode, deviceHash, ip: pending.clientIp, detail: input.verifiedBy });
+  await logDealEvent({ leadId, kind: eligibility.team ? "team" : "verified", sourceCode: pending.sourceCode, deviceHash, ip: pending.clientIp, phone: pending.phoneE164, detail: input.verifiedBy });
   return { ok: true as const, token, leadId, expiresAt, firstUnlock: !old, reverifiedActive, isTeam: eligibility.team };
 }
 

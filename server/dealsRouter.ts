@@ -21,7 +21,10 @@ import {
   recordGateFocus,
   recordTwilioVerifyFailure,
   removePending,
+  reserveGateSubmit,
   reserveVerificationAttempt,
+  ensureDealsCookies,
+  safeBlockedMessage,
   showGoogleDealsButton,
   createPendingVerification,
 } from "./dealsService";
@@ -58,13 +61,20 @@ export const dealsRouter = router({
   }),
   start: publicProcedure.input(gateInput).mutation(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);
+    const settings = await getDealSettings();
+    const cookieState = ensureDealsCookies(ctx.req, ctx.res);
+    const sourceCode = currentDealSource(sanitizeSourceCode(input.src), settings);
+    const ip = ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0";
+    if (!cookieState.hasProbe || !(await reserveGateSubmit({ ip, deviceHash: cookieState.deviceHash, sourceCode }))) {
+      return { ok: false as const, kind: cookieState.hasProbe ? "rate_limited" : "cookie_blocked", message: cookieState.hasProbe ? "We're getting a lot of traffic, so please try again in a bit." : "Your browser is blocking cookies. Open this link in Safari or Chrome" };
+    }
     const result = await createPendingVerification({ req: ctx.req, res: ctx.res, rawPhone: input.phone, choice: input.choice, source: sanitizeSourceCode(input.src), ig: sanitizeInstagramHandle(input.ig) });
     if (!result.ok) {
       const settings = await getDealSettings();
-      if (result.kind === "has_agent" || result.kind === "blocked") return { ok: false as const, kind: "blocked", message: "This page is for buyers who aren't working with an agent yet. Thanks for checking us out!" };
-      if (result.kind === "cookie_blocked") return { ok: false as const, kind: "cookie_blocked", message: "Your browser is blocking cookies. Open this link in Safari or Chrome" };
-      if (result.kind === "outside_us") return { ok: false as const, kind: "outside_us", message: "US mobile numbers only for now. We'll help you directly by text." };
-      if (result.kind === "rate_limited") return { ok: false as const, kind: "rate_limited", message: "We're getting a lot of traffic, so please try again in a bit." };
+      if (result.kind === "has_agent" || result.kind === "blocked") return { ok: false as const, kind: "blocked", message: safeBlockedMessage(settings) };
+      if (result.kind === "cookie_blocked") return { ok: false as const, kind: "cookie_blocked", message: `Your browser is blocking cookies. Open this link in Safari or Chrome. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
+      if (result.kind === "outside_us") return { ok: false as const, kind: "outside_us", message: `Outside the US? Text ${settings.commentKeyword} to ${settings.textLine}.` };
+      if (result.kind === "rate_limited") return { ok: false as const, kind: "rate_limited", message: `We're getting a lot of traffic, so please try again in a bit. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
       return { ok: false as const, kind: "invalid_phone", message: "Enter a valid mobile number." };
     }
     const reserved = await reserveVerificationAttempt({
@@ -129,6 +139,7 @@ export const dealsRouter = router({
     dealsPublicHeaders(ctx.res);
     const session = await isLiveDealSession(ctx.req);
     if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
+    if (session.lead.status === "team") throw new TRPCError({ code: "FORBIDDEN", message: "Team preview does not create buyer tour requests." });
     const { createDealsHomeRequest } = await import("./dealsRequests");
     try {
       return await createDealsHomeRequest({ leadId: session.leadId, card: input.card, requestType: input.requestType, preferredAt: new Date(input.preferredAt), sourceCode: session.lead.sourceCode, deviceHash: session.deviceHash });

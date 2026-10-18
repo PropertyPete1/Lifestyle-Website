@@ -8,11 +8,17 @@ import { registerStorageProxy } from "./storageProxy";
 import { registerOgMeta } from "../ogMeta";
 import { appRouter } from "../routers";
 import { syncStatsHandler } from "../scheduledStatsHandler";
-import { ensureStatsSyncCron } from "../registerCron";
+import { ensureDealsCron, ensureStatsSyncCron } from "../registerCron";
 import { registerDealsRoutes } from "../dealsRoutes";
 import { scheduledDealsHandler } from "../scheduledDealsHandler";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+
+process.on("unhandledRejection", (error) => {
+  // Keep a failed optional Deals side effect from terminating the web process;
+  // request handlers themselves still return a controlled error response.
+  console.error("[unhandled-rejection]", error);
+});
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -76,9 +82,8 @@ async function startServer() {
     // Register scheduled jobs (daily stats sync). Production only so local dev
     // never touches the shared cron registry; idempotent and non-blocking.
     if (process.env.NODE_ENV === "production") {
-      void ensureStatsSyncCron();
-      // Builder Deals job definitions are intentionally not self-registered
-      // until this separately reviewed funnel is approved for launch.
+      void ensureStatsSyncCron().catch(console.error);
+      void ensureDealsCron().catch(console.error);
     }
   });
 }

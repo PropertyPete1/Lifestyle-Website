@@ -19,10 +19,6 @@ export const DEALS_STANDARD_CRON_JOB_NAME = "builder-deals-refresh-standard";
 export const DEALS_STANDARD_CRON_EXPRESSION = "0 0 0 * * *";
 export const DEALS_CRON_PATH = "/api/scheduled/refreshDeals";
 
-/**
- * Definitions only. The approved launch owner must register/enable these
- * independently; no Builder Deals schedule is created on server boot.
- */
 export const DEALS_JOB_DEFINITIONS = [
   { name: "builder-deals-health", cron: "0 0 12,13 * * *", path: DEALS_CRON_PATH, payload: { job: "health" }, description: "7:00 AM Central health-check candidates; handler enforces America/Chicago time" },
   { name: "builder-deals-incentive-revalidate", cron: "0 15 0,23 * * *", path: DEALS_CRON_PATH, payload: { job: "incentive" }, description: "6:15 PM Central incentive revalidation candidates for DST" },
@@ -71,25 +67,21 @@ export async function ensureStatsSyncCron(): Promise<void> {
   }
 }
 
-/** Register the isolated Builder Deals catalog/TREC refresh if it is absent. */
-export async function ensureDealsRefreshCron(): Promise<void> {
+/** Register all Builder Deals jobs idempotently on production startup. */
+export async function ensureDealsCron(): Promise<void> {
   try {
     const { jobs } = await listHeartbeatJobs("");
-    const jobsToEnsure = [
-      { name: DEALS_CRON_JOB_NAME, cron: DEALS_CRON_EXPRESSION },
-      { name: DEALS_STANDARD_CRON_JOB_NAME, cron: DEALS_STANDARD_CRON_EXPRESSION },
-    ];
-    for (const candidate of jobsToEnsure) {
+    for (const candidate of DEALS_JOB_DEFINITIONS) {
       if (jobs.some((j) => j.name === candidate.name)) continue;
       await createHeartbeatJob({
         name: candidate.name,
         cron: candidate.cron,
         path: DEALS_CRON_PATH,
         method: "POST",
-        description: "Builder Deals 6 PM Central / every-third-day candidate; callback enforces local cadence",
+        description: candidate.description,
       }, "");
     }
   } catch (err) {
-    console.error(`[cron] could not register "${DEALS_CRON_JOB_NAME}":`, err instanceof Error ? err.message : err);
+    console.error("[cron] could not register Builder Deals jobs:", err instanceof Error ? err.message : err);
   }
 }

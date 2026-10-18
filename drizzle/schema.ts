@@ -516,16 +516,21 @@ export const dealTrecLicenses = mysqlTable("deal_trec_licenses", {
   id: int("id").autoincrement().primaryKey(), importId: int("import_id").notNull(), fullName: varchar("full_name", { length: 190 }).notNull(),
   firstName: varchar("first_name", { length: 100 }), lastName: varchar("last_name", { length: 100 }), licenseNumber: varchar("license_number", { length: 60 }),
   licenseType: varchar("license_type", { length: 80 }), status: varchar("status", { length: 80 }), county: varchar("county", { length: 100 }), sourceUpdated: varchar("source_updated", { length: 80 }),
-}, (t) => [index("idx_deal_trec_name").on(t.importId, t.lastName), index("idx_deal_trec_county").on(t.importId, t.county)]);
+}, (t) => [
+  // The lookup path narrows on both surname and canonical first name before
+  // loading rows, so a common surname never causes a large in-process scan.
+  index("idx_deal_trec_name_first").on(t.importId, t.lastName, t.firstName),
+  index("idx_deal_trec_county").on(t.importId, t.county),
+]);
 export const dealTrecFakeRows = mysqlTable("deal_trec_fake_rows", { id: int("id").autoincrement().primaryKey(), fullName: varchar("full_name", { length: 190 }).notNull().unique(), createdAt: timestamp("created_at").defaultNow().notNull() });
 
 /** Server-only identity sources used before a verification code is sent. */
 export const dealKnownAgents = mysqlTable("deal_known_agents", {
   id: int("id").autoincrement().primaryKey(), name: varchar("name", { length: 190 }), phoneE164: varchar("phone_e164", { length: 20 }), email: varchar("email", { length: 320 }),
-  source: mysqlEnum("source", ["csv", "fub_recruit", "manual"]).notNull(), fubPersonId: varchar("fub_person_id", { length: 80 }), active: boolean("active").default(true).notNull(), createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (t) => [index("idx_deal_known_phone").on(t.phoneE164), index("idx_deal_known_email").on(t.email)]);
+  source: mysqlEnum("source", ["csv", "fub_recruit", "manual"]).notNull(), fubPersonId: varchar("fub_person_id", { length: 80 }), fubIdentityKey: varchar("fub_identity_key", { length: 420 }), active: boolean("active").default(true).notNull(), createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_deal_known_phone").on(t.phoneE164), index("idx_deal_known_email").on(t.email), uniqueIndex("idx_deal_known_fub_identity").on(t.fubIdentityKey)]);
 export const dealDoNotAutoImport = mysqlTable("deal_do_not_auto_import", { id: int("id").autoincrement().primaryKey(), value: varchar("value", { length: 320 }).notNull().unique(), kind: mysqlEnum("kind", ["phone", "email"]).notNull(), createdAt: timestamp("created_at").defaultNow().notNull() });
-export const dealTeamAllowlist = mysqlTable("deal_team_allowlist", { id: int("id").autoincrement().primaryKey(), name: varchar("name", { length: 190 }), phoneE164: varchar("phone_e164", { length: 20 }), email: varchar("email", { length: 320 }), fubUserId: varchar("fub_user_id", { length: 80 }), source: mysqlEnum("source", ["fub", "manual", "test"]).notNull(), active: boolean("active").default(true).notNull(), createdAt: timestamp("created_at").defaultNow().notNull() }, (t) => [index("idx_deal_team_phone").on(t.phoneE164), index("idx_deal_team_email").on(t.email)]);
+export const dealTeamAllowlist = mysqlTable("deal_team_allowlist", { id: int("id").autoincrement().primaryKey(), name: varchar("name", { length: 190 }), phoneE164: varchar("phone_e164", { length: 20 }), email: varchar("email", { length: 320 }), fubUserId: varchar("fub_user_id", { length: 80 }), fubIdentityKey: varchar("fub_identity_key", { length: 420 }), source: mysqlEnum("source", ["fub", "manual", "test"]).notNull(), active: boolean("active").default(true).notNull(), createdAt: timestamp("created_at").defaultNow().notNull() }, (t) => [index("idx_deal_team_phone").on(t.phoneE164), index("idx_deal_team_email").on(t.email), uniqueIndex("idx_deal_team_fub_identity").on(t.fubIdentityKey)]);
 
 /** Idempotent same-lead Chicago-day requests and durable CRM-side-effect work. */
 export const dealTourRequests = mysqlTable("deal_tour_requests", {
@@ -550,3 +555,46 @@ export const dealFubJobs = mysqlTable("deal_fub_jobs", { id: int("id").autoincre
 export const dealCommunityViews = mysqlTable("deal_community_views", { id: int("id").autoincrement().primaryKey(), leadId: int("lead_id").notNull(), communityId: int("community_id").notNull(), viewedAt: timestamp("viewed_at").defaultNow().notNull() }, (t) => [index("idx_deal_view_lead").on(t.leadId, t.viewedAt)]);
 export const dealJobRuns = mysqlTable("deal_job_runs", { id: int("id").autoincrement().primaryKey(), jobName: varchar("job_name", { length: 100 }).notNull(), chicagoDay: varchar("chicago_day", { length: 10 }).notNull(), status: mysqlEnum("status", ["running", "ok", "failed", "skipped"]).notNull(), detail: text("detail"), startedAt: timestamp("started_at").defaultNow().notNull(), completedAt: timestamp("completed_at") }, (t) => [uniqueIndex("idx_deal_job_daily").on(t.jobName, t.chicagoDay)]);
 export const dealPhotoRenders = mysqlTable("deal_photo_renders", { id: int("id").autoincrement().primaryKey(), photoId: int("photo_id").notNull(), leadId: int("lead_id").notNull(), version: varchar("version", { length: 64 }).notNull(), storageKey: text("storage_key").notNull(), expiresAt: timestamp("expires_at").notNull(), createdAt: timestamp("created_at").defaultNow().notNull() }, (t) => [uniqueIndex("idx_deal_photo_render").on(t.photoId, t.leadId, t.version), index("idx_deal_photo_render_expiry").on(t.expiresAt)]);
+
+/**
+ * Durable buyer-funnel notifications. Alert content is server/admin-only; public
+ * routes never select this table. A unique dedupe key makes first-unlock and
+ * newly-discovered profile-flag alerts safe across retries and concurrent calls.
+ */
+export const dealAlerts = mysqlTable("deal_alerts", {
+  id: int("id").autoincrement().primaryKey(),
+  dedupeKey: varchar("dedupe_key", { length: 191 }).notNull().unique(),
+  leadId: int("lead_id").notNull(),
+  kind: mysqlEnum("kind", ["first_unlock", "profile_flag"]).notNull(),
+  deliveryMode: mysqlEnum("delivery_mode", ["immediate", "hourly_digest"]).notNull(),
+  recipients: text("recipients").notNull(),
+  subject: varchar("subject", { length: 255 }).notNull(),
+  content: text("content").notNull(),
+  status: mysqlEnum("status", ["pending", "sending", "sent", "failed"]).default("pending").notNull(),
+  attempts: int("attempts").default(0).notNull(),
+  deliveryLog: varchar("delivery_log", { length: 255 }),
+  lastError: text("last_error"),
+  scheduledFor: timestamp("scheduled_for").notNull(),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+}, (t) => [index("idx_deal_alerts_delivery").on(t.status, t.scheduledFor), index("idx_deal_alerts_lead").on(t.leadId, t.createdAt)]);
+
+/**
+ * Immutable operational audit of every actual email transport attempt. The
+ * exact owner-only fallback value is retained so staff can distinguish it from
+ * a transactional email sent by Resend without exposing any secret.
+ */
+export const dealEmailLogs = mysqlTable("deal_email_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  alertId: int("alert_id"),
+  category: varchar("category", { length: 60 }).notNull(),
+  recipients: text("recipients").notNull(),
+  subject: varchar("subject", { length: 255 }).notNull(),
+  provider: mysqlEnum("provider", ["resend", "owner_notification"]).notNull(),
+  deliveryStatus: mysqlEnum("delivery_status", ["sent", "failed", "owner_only_fallback"]).notNull(),
+  deliveryLog: varchar("delivery_log", { length: 255 }).notNull(),
+  lastError: text("last_error"),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_deal_email_logs_alert").on(t.alertId, t.createdAt), index("idx_deal_email_logs_created").on(t.createdAt)]);

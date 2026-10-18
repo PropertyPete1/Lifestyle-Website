@@ -52,6 +52,21 @@ export function registerDealsRoutes(app: Express) {
       : await checkTwilioVerify(pending.phoneE164, code) ? "twilio" : "test";
     const completed = await completeVerification({ req, res, code, verifiedBy });
     if (!completed.ok) return res.redirect(302, completed.kind === "expired" ? "/deals?expired=1" : completed.kind === "blocked" ? "/deals?gate=1&blocked=1" : `/deals?codeError=${encodeURIComponent(completed.kind)}`);
+    // Alert creation precedes asynchronous delivery, so the first-unlock signal
+    // survives a process restart and never holds up the buyer's access redirect.
+    if (completed.firstUnlock && (!isTest || settings.testModeFullPipeline)) {
+      const { getDb } = await import("./db");
+      const { dealLeads } = await import("../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const db = await getDb();
+      const lead = db ? (await db.select().from(dealLeads).where(eq(dealLeads.id, completed.leadId)).limit(1))[0] : null;
+      if (lead) {
+        const { queueFirstUnlockAlert, queueProfileFlagAlert } = await import("./dealsAlerts");
+        await queueFirstUnlockAlert(lead);
+        const flags = (() => { try { const parsed: unknown = JSON.parse(lead.flags); return (Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray((parsed as { flags?: unknown }).flags) ? (parsed as { flags: unknown[] }).flags : []).filter((flag): flag is string => typeof flag === "string" && flag.startsWith("Possible Agent - ")); } catch { return []; } })();
+        await queueProfileFlagAlert(lead, flags);
+      }
+    }
     // Access is never held hostage by CRM availability. A durable job re-reads
     // the lead before every attempt, so a later block/team change suppresses it.
     if (!completed.isTeam && (!isTest || settings.testModeFullPipeline)) {

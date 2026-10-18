@@ -1,11 +1,11 @@
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { dealTrecFakeRows, dealTrecImports, dealTrecLicenses } from "../drizzle/schema";
 import { getDb } from "./db";
 
 const TREC_CSV = "https://data.texas.gov/api/views/s7ft-44qi/rows.csv?accessType=DOWNLOAD";
 type TrecInput = Record<string, string>;
-const canonical = (value: string | null | undefined) => (value ?? "").trim().replace(/\s+/g, " ").toUpperCase();
-const nameParts = (value: string) => canonical(value).replace(/\b(JR|SR|II|III|IV)\.?$/i, "").split(" ").filter(Boolean);
+export const canonicalTrecName = (value: string | null | undefined) => (value ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+export const trecNameParts = (value: string) => canonicalTrecName(value).replace(/\b(JR|SR|II|III|IV)\.?$/i, "").split(" ").filter(Boolean);
 
 function parseCsvLine(line: string): string[] {
   const cells: string[] = []; let cell = "", quoted = false;
@@ -13,6 +13,39 @@ function parseCsvLine(line: string): string[] {
   cells.push(cell); return cells;
 }
 function field(row: TrecInput, ...names: string[]) { for (const name of names) if (row[name] !== undefined) return row[name]; return ""; }
+
+/** Normalizes the lookup columns before insertion so matching can stay in SQL. */
+export function trecLicenseValues(importId: number, row: TrecInput): typeof dealTrecLicenses.$inferInsert | null {
+  const fullName = canonicalTrecName(field(row, "full_name", "name"));
+  if (!fullName) return null;
+  const parts = trecNameParts(fullName);
+  return {
+    importId,
+    fullName,
+    firstName: (canonicalTrecName(field(row, "first_name")) || parts[0] || null)?.slice(0, 100) || null,
+    lastName: (canonicalTrecName(field(row, "last_name")) || parts.at(-1) || null)?.slice(0, 100) || null,
+    licenseNumber: field(row, "license_number").trim().slice(0, 60) || null,
+    licenseType: field(row, "license_type").trim().slice(0, 80) || null,
+    status: field(row, "status").trim().slice(0, 80) || null,
+    county: canonicalTrecName(field(row, "county")).slice(0, 100) || null,
+    sourceUpdated: field(row, "updated", "last_updated").trim().slice(0, 80) || null,
+  };
+}
+
+/** Makes a complete cache current before atomically deleting every previous cache. */
+async function activateAndRetainOnlyImport(importId: number, rowCount: number) {
+  const db = await getDb(); if (!db) throw new Error("Database unavailable");
+  await db.transaction(async (tx) => {
+    const old = await tx.select({ id: dealTrecImports.id }).from(dealTrecImports).where(sql`${dealTrecImports.id} <> ${importId}`);
+    await tx.update(dealTrecImports).set({ current: false }).where(eq(dealTrecImports.current, true));
+    await tx.update(dealTrecImports).set({ current: true, rowCount, completedAt: new Date() }).where(eq(dealTrecImports.id, importId));
+    const oldIds = old.map((row) => row.id);
+    if (oldIds.length) {
+      await tx.delete(dealTrecLicenses).where(inArray(dealTrecLicenses.importId, oldIds));
+      await tx.delete(dealTrecImports).where(inArray(dealTrecImports.id, oldIds));
+    }
+  });
+}
 
 /** Streams the official public CSV into a new import record in small database batches. */
 export async function importTrecLicenses() {
@@ -31,29 +64,64 @@ export async function importTrecLicenses() {
         if (!headers) { headers = parseCsvLine(line).map((value) => value.trim().toLowerCase().replace(/[^a-z0-9]/g, "_")); continue; }
         if (!line.trim()) continue;
         const cells = parseCsvLine(line); const row = Object.fromEntries(headers.map((key, index) => [key, cells[index] ?? ""]));
-        const fullName = canonical(field(row, "full_name", "name")); if (!fullName) continue;
-        batch.push({ importId, fullName, firstName: field(row, "first_name").slice(0, 100) || null, lastName: field(row, "last_name").slice(0, 100) || null, licenseNumber: field(row, "license_number").slice(0, 60) || null, licenseType: field(row, "license_type").slice(0, 80) || null, status: field(row, "status").slice(0, 80) || null, county: field(row, "county").slice(0, 100) || null, sourceUpdated: field(row, "updated", "last_updated").slice(0, 80) || null });
+        const values = trecLicenseValues(importId, row); if (!values) continue;
+        batch.push(values);
         if (batch.length >= 500) await flush();
       }
       if (done) break;
     }
-    if (remainder.trim() && headers) { const cells = parseCsvLine(remainder); const row = Object.fromEntries(headers.map((key, index) => [key, cells[index] ?? ""])); const fullName = canonical(field(row, "full_name", "name")); if (fullName) { batch.push({ importId, fullName, firstName: field(row, "first_name").slice(0, 100) || null, lastName: field(row, "last_name").slice(0, 100) || null, licenseNumber: field(row, "license_number").slice(0, 60) || null, licenseType: field(row, "license_type").slice(0, 80) || null, status: field(row, "status").slice(0, 80) || null, county: field(row, "county").slice(0, 100) || null, sourceUpdated: field(row, "updated", "last_updated").slice(0, 80) || null }); } }
-    await flush(); await db.update(dealTrecImports).set({ current: false }).where(eq(dealTrecImports.current, true)); await db.update(dealTrecImports).set({ current: true, rowCount: count, completedAt: new Date() }).where(eq(dealTrecImports.id, importId));
+    if (remainder.trim() && headers) { const cells = parseCsvLine(remainder); const row = Object.fromEntries(headers.map((key, index) => [key, cells[index] ?? ""])); const values = trecLicenseValues(importId, row); if (values) batch.push(values); }
+    await flush(); await activateAndRetainOnlyImport(importId, count);
     return { ok: true, rows: count, importId };
-  } catch (error) { await db.delete(dealTrecLicenses).where(eq(dealTrecLicenses.importId, importId)); throw error; }
+  } catch (error) { await db.delete(dealTrecLicenses).where(eq(dealTrecLicenses.importId, importId)); await db.delete(dealTrecImports).where(eq(dealTrecImports.id, importId)); throw error; }
 }
 
-/** Matches active Texas Sales Agent/Broker rows only, tolerating middle names and suffixes. */
+/**
+ * Adds a synthetic, no-license test fixture. It is local-only and must be
+ * called through the protected administrator action with explicit consent.
+ */
+export async function addTrecFakeRow(fullName: string) {
+  const normalized = canonicalTrecName(fullName);
+  if (process.env.NODE_ENV === "production") throw new Error("TREC fake rows are unavailable in production.");
+  if (!/^TEST\s+[A-Z][A-Z' -]*\s+[A-Z][A-Z' -]*$/.test(normalized) || normalized.length > 190 || trecNameParts(normalized).length < 3) {
+    throw new Error("Use an explicit TEST first-and-last-name fixture, for example TEST JANE BUYER.");
+  }
+  const db = await getDb(); if (!db) throw new Error("Database unavailable");
+  await db.insert(dealTrecFakeRows).values({ fullName: normalized }).onDuplicateKeyUpdate({ set: { fullName: normalized } });
+  return { ok: true as const, fullName: normalized };
+}
+
+/** Matches active Texas Sales Agent/Broker rows with the first name narrowed in SQL. */
 export async function lookupTrecName(fullName: string, counties: string[] = []) {
-  const db = await getDb(); if (!db) return [] as Array<{ fullName: string; licenseType: string | null; status: string | null; county: string | null; licenseNumber: string | null; sourceUpdated: string | null }>;
-  const parts = nameParts(fullName); if (parts.length < 2) return [];
-  const first = parts[0], last = parts.at(-1)!; const current = (await db.select({ id: dealTrecImports.id }).from(dealTrecImports).where(eq(dealTrecImports.current, true)).orderBy(desc(dealTrecImports.completedAt)).limit(1))[0];
-  const validCounty = (county: string | null) => !counties.length || counties.map(canonical).includes(canonical(county));
-  const isActiveAgent = (row: { licenseType: string | null; status: string | null }) => /sales\s*agent|broker/i.test(row.licenseType ?? "") && /active/i.test(row.status ?? "") && !/inactive/i.test(row.status ?? "");
-  const output = current ? (await db.select().from(dealTrecLicenses).where(and(eq(dealTrecLicenses.importId, current.id), or(eq(dealTrecLicenses.lastName, last), eq(dealTrecLicenses.fullName, canonical(fullName))))).limit(100)).filter((row) => (canonical(row.firstName) === first || nameParts(row.fullName)[0] === first) && validCounty(row.county) && isActiveAgent(row)) : [];
-  const fakes = await db.select().from(dealTrecFakeRows).where(eq(dealTrecFakeRows.fullName, canonical(fullName))).limit(1);
-  if (fakes.length && validCounty("Bexar")) output.push({ id: -fakes[0].id, importId: 0, fullName: canonical(fullName), firstName: first, lastName: last, licenseNumber: null, licenseType: "Sales Agent", status: "Active", county: "Bexar", sourceUpdated: null });
+  const db = await getDb(); if (!db) return [] as Array<typeof dealTrecLicenses.$inferSelect & { isFake?: true }>;
+  const parts = trecNameParts(fullName); if (parts.length < 2) return [];
+  const first = parts[0], last = parts.at(-1)!, normalizedName = canonicalTrecName(fullName);
+  const current = (await db.select({ id: dealTrecImports.id }).from(dealTrecImports).where(eq(dealTrecImports.current, true)).orderBy(desc(dealTrecImports.completedAt)).limit(1))[0];
+  const normalizedCounties = Array.from(new Set(counties.map(canonicalTrecName).filter(Boolean)));
+  const output: Array<typeof dealTrecLicenses.$inferSelect & { isFake?: true }> = current ? await db.select().from(dealTrecLicenses).where(and(
+    eq(dealTrecLicenses.importId, current.id),
+    // Legacy imports can use the full-name fallback until their next refresh;
+    // new imports use the composite (import, last, first) index exclusively.
+    or(and(eq(dealTrecLicenses.lastName, last), eq(dealTrecLicenses.firstName, first)), eq(dealTrecLicenses.fullName, normalizedName)),
+    ...(normalizedCounties.length ? [inArray(dealTrecLicenses.county, normalizedCounties)] : []),
+    sql`LOWER(COALESCE(${dealTrecLicenses.licenseType}, '')) REGEXP 'sales[[:space:]]*agent|broker'`,
+    sql`LOWER(COALESCE(${dealTrecLicenses.status}, '')) REGEXP '(^|[^a-z])active([^a-z]|$)'`,
+  )).limit(100) : [];
+  const fake = process.env.NODE_ENV === "production" ? undefined : (await db.select().from(dealTrecFakeRows).where(eq(dealTrecFakeRows.fullName, normalizedName)).limit(1))[0];
+  // A test fixture is deliberately recognizable and has no official identifier.
+  if (fake) output.push({ id: -fake.id, importId: 0, fullName: normalizedName, firstName: first, lastName: last, licenseNumber: null, licenseType: "Test Sales Agent", status: "Active (test)", county: "Test", sourceUpdated: null, isFake: true });
   return output;
 }
 
-export async function trecImportSummary() { const db = await getDb(); if (!db) return null; const current = (await db.select().from(dealTrecImports).where(eq(dealTrecImports.current, true)).orderBy(desc(dealTrecImports.completedAt)).limit(1))[0]; if (!current) return null; const rows = await db.select({ licenseType: dealTrecLicenses.licenseType, status: dealTrecLicenses.status }).from(dealTrecLicenses).where(eq(dealTrecLicenses.importId, current.id)).limit(10_000); return { ...current, licenseTypes: Array.from(new Set(rows.map((row) => row.licenseType).filter(Boolean))), statuses: Array.from(new Set(rows.map((row) => row.status).filter(Boolean))) }; }
+/** Builds admin display metadata with SQL DISTINCT instead of an arbitrary row scan. */
+export async function trecImportSummary() {
+  const db = await getDb(); if (!db) return null;
+  const current = (await db.select().from(dealTrecImports).where(eq(dealTrecImports.current, true)).orderBy(desc(dealTrecImports.completedAt)).limit(1))[0];
+  const fakeRows = await db.select({ id: dealTrecFakeRows.id }).from(dealTrecFakeRows);
+  if (!current) return { import: null, licenseTypes: [] as string[], statuses: [] as string[], fakeRowCount: fakeRows.length };
+  const [typeRows, statusRows] = await Promise.all([
+    db.selectDistinct({ value: dealTrecLicenses.licenseType }).from(dealTrecLicenses).where(and(eq(dealTrecLicenses.importId, current.id), sql`${dealTrecLicenses.licenseType} IS NOT NULL AND ${dealTrecLicenses.licenseType} <> ''`)).orderBy(asc(dealTrecLicenses.licenseType)),
+    db.selectDistinct({ value: dealTrecLicenses.status }).from(dealTrecLicenses).where(and(eq(dealTrecLicenses.importId, current.id), sql`${dealTrecLicenses.status} IS NOT NULL AND ${dealTrecLicenses.status} <> ''`)).orderBy(asc(dealTrecLicenses.status)),
+  ]);
+  return { import: current, licenseTypes: typeRows.flatMap((row) => row.value ? [row.value] : []), statuses: statusRows.flatMap((row) => row.value ? [row.value] : []), fakeRowCount: fakeRows.length };
+}

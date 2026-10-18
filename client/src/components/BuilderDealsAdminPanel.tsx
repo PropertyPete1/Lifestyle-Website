@@ -108,7 +108,8 @@ type SettingsDraft = {
   fubRealtorSources: string[];
   handleKeywords: string[];
   trecCounties: string[];
-  alertMode: "instant" | "hourly_digest";
+  alertRecipients: string[];
+  alertMode: "immediate" | "hourly_digest";
 };
 
 type SettingsInput = Partial<SettingsDraft> | undefined;
@@ -166,7 +167,8 @@ const DEFAULT_SETTINGS: SettingsDraft = {
   fubRealtorSources: [],
   handleKeywords: [],
   trecCounties: [],
-  alertMode: "instant",
+  alertRecipients: ["peter@lifestyledesignrealty.com", "steven@lifestyledesignrealty.com"],
+  alertMode: "immediate",
 };
 
 const EMPTY_BLOCK: BlockForm = { phone: "", email: "", deviceHash: "", reason: "" };
@@ -335,6 +337,7 @@ function SettingsEditor({ settings }: { settings: SettingsInput }) {
       fubRealtorSources: draft.fubRealtorSources,
       handleKeywords: draft.handleKeywords,
       trecCounties: draft.trecCounties,
+      alertRecipients: draft.alertRecipients,
       alertMode: draft.alertMode,
     });
   };
@@ -374,7 +377,7 @@ function SettingsEditor({ settings }: { settings: SettingsInput }) {
           <Select value={draft.alertMode} onValueChange={(value) => setDraft({ ...draft, alertMode: value as SettingsDraft["alertMode"] })}>
             <SelectTrigger id="builder-deals-alert-mode"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="instant">Instant alerts</SelectItem>
+              <SelectItem value="immediate">Immediate alerts</SelectItem>
               <SelectItem value="hourly_digest">Hourly digest</SelectItem>
             </SelectContent>
           </Select>
@@ -417,6 +420,7 @@ function SettingsEditor({ settings }: { settings: SettingsInput }) {
         <ListField label="FUB REALTOR® sources" value={draft.fubRealtorSources} onChange={(fubRealtorSources) => setDraft({ ...draft, fubRealtorSources })} placeholder="Agent Referral" hint="Follow Up Boss sources that trigger the same protected screening." />
         <ListField label="Instagram handle keywords" value={draft.handleKeywords} onChange={(handleKeywords) => setDraft({ ...draft, handleKeywords })} placeholder="realty" hint="Keywords used in the profile-based REALTOR® screening signal." />
         <ListField label="TREC counties" value={draft.trecCounties} onChange={(trecCounties) => setDraft({ ...draft, trecCounties })} placeholder="Bexar" hint="Counties included when checking the official TREC data." />
+        <ListField label="Alert email recipients" value={draft.alertRecipients} onChange={(alertRecipients) => setDraft({ ...draft, alertRecipients })} placeholder="peter@lifestyledesignrealty.com" hint="One mailbox per line. Resend emails every saved recipient when RESEND_API_KEY is configured; otherwise the project-owner fallback is logged." />
       </div>
     </Section>
   );
@@ -444,6 +448,8 @@ function BuilderDealsAdminContent() {
   const [leadToMakeTeam, setLeadToMakeTeam] = useState<number | null>(null);
   const [leadBlockReason, setLeadBlockReason] = useState("");
   const [confirmCapIncrease, setConfirmCapIncrease] = useState(false);
+  const [trecFakeName, setTrecFakeName] = useState("");
+  const [confirmTrecFake, setConfirmTrecFake] = useState(false);
 
   const refreshOverview = () => void utils.deals.admin.overview.invalidate();
   const mutationError = (error: { message: string }) => toast.error(error.message || "Could not save Builder Deals changes");
@@ -504,6 +510,13 @@ function BuilderDealsAdminContent() {
     },
     onError: mutationError,
   });
+  const runAlertDelivery = trpc.deals.admin.runAlertDelivery.useMutation({
+    onSuccess: (result) => {
+      refreshOverview();
+      toast.success(`Alert delivery pass complete: ${result.sent} sent, ${result.failed} failed, ${result.skipped} skipped.`);
+    },
+    onError: mutationError,
+  });
   const retryFub = trpc.deals.admin.retryFub.useMutation({
     onSuccess: (result) => {
       refreshOverview();
@@ -523,6 +536,11 @@ function BuilderDealsAdminContent() {
     onSuccess: () => { refreshOverview(); toast.success("Photo state saved"); },
     onError: mutationError,
   });
+  const addTrecFakeRow = trpc.deals.admin.addTrecFakeRow.useMutation({
+    onSuccess: (result) => { refreshOverview(); setTrecFakeName(""); setConfirmTrecFake(false); toast.success(`Test-only TREC fixture saved: ${result.fullName}`); },
+    onError: mutationError,
+  });
+  const mondayReport = trpc.deals.admin.mondayReport.useQuery(undefined, { enabled: false, retry: false });
   const blockLeadAndKillLink = trpc.deals.admin.blockLeadAndKillLink.useMutation({
     onSuccess: () => { refreshOverview(); setLeadToBlock(null); setLeadBlockReason(""); toast.success("Lead blocked and access link revoked"); },
     onError: mutationError,
@@ -711,9 +729,14 @@ function BuilderDealsAdminContent() {
             </div>
             {healthQuery.isError && <p role="alert" className="mt-3 text-sm text-destructive">Health check could not be completed. Try again; no settings were changed.</p>}
             {healthQuery.data && <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="border border-border p-3"><p className="text-xs font-medium">Twilio Verify</p><dl className="mt-2 space-y-1 text-xs text-muted-foreground"><div className="flex justify-between gap-3"><dt>Account SID</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.accountSid}</dd></div><div className="flex justify-between gap-3"><dt>Auth token</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.authToken}</dd></div><div className="flex justify-between gap-3"><dt>Service SID</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.serviceSid}</dd></div><div className="flex justify-between gap-3"><dt>Availability</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.balance}</dd></div></dl></div>
-              <div className="border border-border p-3"><p className="text-xs font-medium">Follow Up Boss</p><dl className="mt-2 space-y-1 text-xs text-muted-foreground"><div className="flex justify-between gap-3"><dt>API key</dt><dd className="text-foreground">{healthQuery.data.fub.apiKey}</dd></div><div className="flex justify-between gap-3"><dt>Availability</dt><dd className="text-foreground">{healthQuery.data.fub.availability}</dd></div></dl></div>
+              <div className="border border-border p-3"><p className="text-xs font-medium">Twilio Verify</p><dl className="mt-2 space-y-1 text-xs text-muted-foreground"><div className="flex justify-between gap-3"><dt>Account SID</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.accountSid}</dd></div><div className="flex justify-between gap-3"><dt>Auth token</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.authToken}</dd></div><div className="flex justify-between gap-3"><dt>Service SID</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.serviceSid}</dd></div><div className="flex justify-between gap-3"><dt>Account</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.account}</dd></div><div className="flex justify-between gap-3"><dt>Balance threshold</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.balance}</dd></div></dl></div>
+              <div className="border border-border p-3"><p className="text-xs font-medium">Operations</p><dl className="mt-2 space-y-1 text-xs text-muted-foreground"><div className="flex justify-between gap-3"><dt>Follow Up Boss</dt><dd className="text-foreground">{healthQuery.data.fub.availability}</dd></div><div className="flex justify-between gap-3"><dt>TREC freshness</dt><dd className="text-foreground">{healthQuery.data.operational.trecImport.state} · {healthQuery.data.operational.trecImport.ageHours ?? "—"}h</dd></div><div className="flex justify-between gap-3"><dt>Source updates</dt><dd className="text-foreground">{healthQuery.data.operational.sourceUpdates.state} · {healthQuery.data.operational.sourceUpdates.staleCommunities} stale</dd></div><div className="flex justify-between gap-3"><dt>Photo queue</dt><dd className="text-foreground">{healthQuery.data.operational.photos.state} · {healthQuery.data.operational.photos.pending} pending / {healthQuery.data.operational.photos.failed} failed</dd></div><div className="flex justify-between gap-3"><dt>CRM failures</dt><dd className="text-foreground">{healthQuery.data.operational.fubFailures.jobs} jobs / {healthQuery.data.operational.fubFailures.leads} leads</dd></div><div className="flex justify-between gap-3"><dt>Holds</dt><dd className="text-foreground">{healthQuery.data.operational.holds.communities} communities / {healthQuery.data.operational.holds.incentives} incentives</dd></div></dl></div>
             </div>}
+            <div className="mt-4 border border-border p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-medium">Monday operational report</p><p className="mt-1 text-xs text-muted-foreground">Generates the current seven-check report for review only. It never sends an email or alert.</p></div><Button type="button" size="sm" variant="outline" onClick={() => void mondayReport.refetch()} disabled={mondayReport.isFetching}>{mondayReport.isFetching ? "Generating…" : "Generate no-send report"}</Button></div>
+              {mondayReport.data && <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap border border-border bg-muted/20 p-3 text-xs text-muted-foreground">{mondayReport.data.body}</pre>}
+              {mondayReport.isError && <p role="alert" className="mt-3 text-xs text-destructive">The report could not be generated. No message was sent.</p>}
+            </div>
           </div>
           <div className="border border-border p-4">
             <h3 className="font-medium">Verification capacity</h3>
@@ -732,6 +755,13 @@ function BuilderDealsAdminContent() {
             <Button type="button" size="sm" variant="outline" className="mt-4 w-full" disabled={runFubRetry.isPending} onClick={() => runFubRetry.mutate()}>
               <RotateCcw className={`mr-1 h-4 w-4 ${runFubRetry.isPending ? "animate-spin" : ""}`} /> {runFubRetry.isPending ? "Retrying…" : "Run due retries"}
             </Button>
+            <div className="mt-5 border-t border-border pt-4">
+              <h3 className="font-medium">Alert delivery</h3>
+              <p className="mt-1 text-xs text-muted-foreground">{overview.email.provider === "resend" ? `Resend routes alerts to ${overview.email.recipients.length} saved recipient${overview.email.recipients.length === 1 ? "" : "s"}.` : "Resend is unavailable; every fallback is logged for review."}</p>
+              <Button type="button" size="sm" variant="outline" className="mt-4 w-full" disabled={runAlertDelivery.isPending} onClick={() => runAlertDelivery.mutate()}>
+                <RotateCcw className={`mr-1 h-4 w-4 ${runAlertDelivery.isPending ? "animate-spin" : ""}`} /> {runAlertDelivery.isPending ? "Sending…" : "Send due alerts"}
+              </Button>
+            </div>
           </div>
         </div>
       </Section>
@@ -828,6 +858,28 @@ function BuilderDealsAdminContent() {
             <TableBody>
               {overview.fubJobs.map((job) => <TableRow key={job.id}><TableCell>#{job.leadId}</TableCell><TableCell className="text-xs">{job.operation.replaceAll("_", " ")}</TableCell><TableCell><Badge variant={job.status === "synced" ? "default" : job.status === "failed" ? "destructive" : "secondary"}>{job.status}</Badge></TableCell><TableCell>{job.attempts}</TableCell><TableCell className="whitespace-nowrap text-xs">{displayDate(job.nextAttemptAt)}</TableCell><TableCell className="max-w-64 text-xs">{job.lastError || "—"}</TableCell><TableCell className="text-right">{job.status === "failed" ? <Button size="sm" variant="outline" className="w-full sm:w-auto" disabled={retryFub.isPending} onClick={() => retryFub.mutate({ id: job.id })}><RotateCcw className="mr-1 h-3.5 w-3.5" /> {retryFub.isPending ? "Retrying…" : "Retry once"}</Button> : <span className="text-xs text-muted-foreground">—</span>}</TableCell></TableRow>)}
               {overview.fubJobs.length === 0 && <TableRow><TableCell colSpan={7} className="py-6 text-center text-sm text-muted-foreground">No CRM delivery jobs have been created.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </div>
+      </Section>
+
+      <Section title="Buyer alert delivery" icon={CircleAlert} description="First unlocks and newly discovered profile screening flags are queued durably. Immediate mode sends independently; hourly mode combines due alerts into one email per recipient set.">
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><Badge variant={overview.email.provider === "resend" ? "default" : "secondary"}>{overview.email.provider === "resend" ? "Resend configured" : "Owner-only fallback"}</Badge><span>{overview.email.recipients.length ? overview.email.recipients.join(", ") : "No alert recipients configured"}</span></div>
+        <div className="overflow-x-auto">
+          <Table className="min-w-[54rem]">
+            <TableHeader><TableRow><TableHead>Alert</TableHead><TableHead>Lead</TableHead><TableHead>Mode</TableHead><TableHead>Status</TableHead><TableHead>Scheduled</TableHead><TableHead>Delivery</TableHead><TableHead>Attempts</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {overview.alerts.map((alert) => <TableRow key={alert.id}><TableCell><p className="font-medium text-sm">{alert.kind.replaceAll("_", " ")}</p><p className="max-w-64 truncate text-xs text-muted-foreground" title={alert.subject}>{alert.subject}</p></TableCell><TableCell>#{alert.leadId}</TableCell><TableCell><Badge variant="secondary">{alert.deliveryMode === "immediate" ? "Immediate" : "Hourly digest"}</Badge></TableCell><TableCell><Badge variant={alert.status === "sent" ? "default" : alert.status === "failed" ? "destructive" : "secondary"}>{alert.status}</Badge></TableCell><TableCell className="whitespace-nowrap text-xs">{displayDate(alert.scheduledFor)}</TableCell><TableCell className="max-w-52 text-xs">{alert.deliveryLog || alert.lastError || "Pending"}</TableCell><TableCell>{alert.attempts}</TableCell></TableRow>)}
+              {overview.alerts.length === 0 && <TableRow><TableCell colSpan={7} className="py-6 text-center text-sm text-muted-foreground">No first-unlock or profile-flag alerts have been queued.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </div>
+        <div className="mt-5 overflow-x-auto">
+          <Table className="min-w-[54rem]">
+            <TableHeader><TableRow><TableHead>Sent / attempted</TableHead><TableHead>Category</TableHead><TableHead>Provider</TableHead><TableHead>Recipients</TableHead><TableHead>Outcome</TableHead><TableHead>Log</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {overview.emailLogs.map((log) => <TableRow key={log.id}><TableCell className="whitespace-nowrap text-xs">{displayDate(log.createdAt)}</TableCell><TableCell>{log.category.replaceAll("_", " ")}</TableCell><TableCell>{log.provider === "resend" ? "Resend" : "Owner notification"}</TableCell><TableCell className="max-w-56 truncate text-xs" title={log.recipients}>{log.recipients}</TableCell><TableCell><Badge variant={log.deliveryStatus === "sent" ? "default" : log.deliveryStatus === "failed" ? "destructive" : "secondary"}>{log.deliveryStatus.replaceAll("_", " ")}</Badge></TableCell><TableCell className="text-xs">{log.deliveryLog}</TableCell></TableRow>)}
+              {overview.emailLogs.length === 0 && <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">No email delivery attempts have been recorded.</TableCell></TableRow>}
             </TableBody>
           </Table>
         </div>

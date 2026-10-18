@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("./_core/notification", () => ({ notifyOwner: vi.fn() }));
-import { builderDealsLeadMarker, formatChicagoDateTime, peterUserId, unionFubContactValues } from "./dealsFub";
+import { builderDealsLeadMarker, createBuilderDealsRequestNote, formatChicagoDateTime, peterUserId, unionFubContactValues, unionFubTags } from "./dealsFub";
 import { notifyOwner } from "./_core/notification";
 
 const savedKey = process.env.FUB_API_KEY;
@@ -19,6 +19,7 @@ describe("Builder Deals FUB contact preservation", () => {
     const values = unionFubContactValues({ phones: [{ value: "+12105550123" }, { value: "210-555-9876" }], emails: [{ value: "OLD@example.com" }] }, { phone: "+12105550123", email: "new@example.com" });
     expect(values.phones).toEqual([{ value: "+12105550123" }, { value: "210-555-9876" }]);
     expect(values.emails).toEqual([{ value: "OLD@example.com" }, { value: "new@example.com" }]);
+    expect(unionFubTags({ tags: ["Past Client"] }, { timeline: "0-3", flags: [] } as any)).toEqual(expect.arrayContaining(["Past Client", "IG Builder Deals", "Intent - Hot"]));
   });
 
   it("uses a stable opaque lead marker rather than a raw database id", () => {
@@ -29,6 +30,35 @@ describe("Builder Deals FUB contact preservation", () => {
 
   it("formats owner-facing request times in America/Chicago rather than UTC ISO", () => {
     expect(formatChicagoDateTime(new Date("2026-07-01T18:30:00.000Z"))).toContain("1:30 PM CDT");
+  });
+});
+
+describe("Builder Deals daily request notes", () => {
+  const lead = { id: 11, fubPersonId: "81", phoneE164: "+12105550123", email: "buyer@example.test" };
+  const firstRequest = { id: 41, requestType: "tour" as const, preferredAt: new Date("2026-10-18T18:30:00.000Z"), chicagoDay: "2026-10-18", fubTaskId: null, fubNoteSentAt: null };
+  const secondRequest = { ...firstRequest, id: 42, requestType: "ask" as const };
+
+  it("creates a daily note once, then appends the next same-day request instead of posting another note", async () => {
+    process.env.FUB_API_KEY = "test-key";
+    const dayMarker = `${builderDealsLeadMarker(lead.id)}:request-day:${firstRequest.chicagoDay}`;
+    const firstBody = `${dayMarker}\n${builderDealsLeadMarker(lead.id)}-R${firstRequest.id}\nTour: 1 Private Street`;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const path = String(url);
+      if (path.includes("/notes?")) return new Response(JSON.stringify({ notes: fetchMock.mock.calls.filter(([value]) => String(value).includes("/notes?")).length > 1 ? [{ id: 700, body: firstBody }] : [] }), { status: 200 });
+      if (path.endsWith("/notes/700")) return new Response(JSON.stringify({ id: 700, body: firstBody }), { status: 200 });
+      if (path.endsWith("/notes") && init?.method === "POST") return new Response(JSON.stringify({ id: 700 }), { status: 200 });
+      if (path.endsWith("/notes/700") && init?.method === "PUT") return new Response("{}", { status: 200 });
+      throw new Error(`unexpected FUB request: ${path}`);
+    });
+
+    await expect(createBuilderDealsRequestNote({ lead, request: firstRequest, privateDescription: "1 Private Street" })).resolves.toMatchObject({ ok: true, records: expect.arrayContaining([expect.objectContaining({ kind: "note", fubId: "700" })]) });
+    await expect(createBuilderDealsRequestNote({ lead, request: secondRequest, privateDescription: "2 Private Street" })).resolves.toMatchObject({ ok: true, records: expect.arrayContaining([expect.objectContaining({ kind: "note", fubId: "700" })]) });
+
+    const postCalls = fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/notes") && init?.method === "POST");
+    const putCalls = fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/notes/700") && init?.method === "PUT");
+    expect(postCalls).toHaveLength(1);
+    expect(putCalls).toHaveLength(1);
+    expect(JSON.parse(String(putCalls[0]?.[1]?.body)).body).toContain(`${builderDealsLeadMarker(lead.id)}-R${secondRequest.id}`);
   });
 });
 

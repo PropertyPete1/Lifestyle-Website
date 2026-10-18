@@ -23,10 +23,10 @@ settings.skipTwilioForTestNumbers = true; settings.testModeFullPipeline = false;
 await db.query("UPDATE deal_settings SET value=? WHERE `key`='builder_deals'", [JSON.stringify(settings)]);
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 try {
-  browser = await chromium.launch({ executablePath: "/usr/bin/chromium", headless: true, args: ["--no-sandbox"] });
+  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || process.env.CHROMIUM_PATH || undefined, headless: true, args: ["--no-sandbox"] });
   const context = await browser.newContext({ viewport: { width: 375, height: 812 } }); const page = await context.newPage();
   await page.goto(new URL("/deals?src=sl1", base).toString(), { waitUntil: "networkidle" }); await page.locator("#deals-phone").waitFor(); await page.screenshot({ path: path.join(out, "builder-deals-landing-gate-375.png"), fullPage: true });
-  await page.locator("#deals-phone").fill(phone); await page.getByRole("button", { name: "No, just me" }).click(); await page.getByRole("button", { name: /continue/i }).click(); await page.locator("#deals-code").waitFor(); await page.screenshot({ path: path.join(out, "builder-deals-code-step-375.png"), fullPage: true });
+  await page.locator("#deals-phone").fill(phone); await page.getByRole("button", { name: "No, just me" }).click(); await page.getByRole("button", { name: /continue/i }).click(); await page.locator("#deals-code").waitFor(); await page.getByText(/We sent a code to/).evaluate((element) => { element.textContent = "We sent a code to (210) •••-0123. Enter it below to unlock your personal list."; }); await page.screenshot({ path: path.join(out, "builder-deals-code-step-375.png"), fullPage: true });
   await page.locator("#deals-code").fill(otp); await Promise.all([page.waitForURL(/\/deals\/mine/), page.getByRole("button", { name: /unlock my list/i }).click()]); await page.waitForTimeout(750); await page.screenshot({ path: path.join(out, "builder-deals-name-prompt-375.png"), fullPage: true });
   const dismiss = page.getByRole("button", { name: "Dismiss name prompt" }); if (await dismiss.count()) await dismiss.click(); await page.waitForTimeout(300); await page.screenshot({ path: path.join(out, "builder-deals-gated-catalog-375.png"), fullPage: true });
   const gallery = page.locator("img[src^='/deals/mine/img/']").first();

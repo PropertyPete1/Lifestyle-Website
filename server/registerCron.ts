@@ -6,17 +6,12 @@
  * registration the endpoint exists but never fires, so the stats strip would
  * only ever reflect the last manually-seeded values.
  */
-import { createHeartbeatJob, listHeartbeatJobs } from "./_core/heartbeat";
+import { createHeartbeatJob, listHeartbeatJobs, updateHeartbeatJob } from "./_core/heartbeat";
 
 export const STATS_CRON_JOB_NAME = "daily-stats-sync";
 /** Daily at 09:00 UTC (early morning US) — 6-field cron: sec min hour dom mon dow. */
 export const STATS_CRON_EXPRESSION = "0 0 9 * * *";
 export const STATS_CRON_PATH = "/api/scheduled/syncStats";
-export const DEALS_CRON_JOB_NAME = "builder-deals-refresh";
-/** Heartbeat is UTC-only. The callback admits only 6 PM America/Chicago. */
-export const DEALS_CRON_EXPRESSION = "0 0 23 * * *";
-export const DEALS_STANDARD_CRON_JOB_NAME = "builder-deals-refresh-standard";
-export const DEALS_STANDARD_CRON_EXPRESSION = "0 0 0 * * *";
 export const DEALS_CRON_PATH = "/api/scheduled/refreshDeals";
 
 export const DEALS_JOB_DEFINITIONS = [
@@ -73,12 +68,21 @@ export async function ensureDealsCron(): Promise<void> {
   try {
     const { jobs } = await listHeartbeatJobs("");
     for (const candidate of DEALS_JOB_DEFINITIONS) {
-      if (jobs.some((j) => j.name === candidate.name)) continue;
+      const existing = jobs.find((j) => j.name === candidate.name);
+      if (existing) {
+        // Earlier preview registrations omitted callbackPayload. Reconcile them
+        // in place so each scheduled callback invokes its intended job.
+        if (existing.callbackPayload !== JSON.stringify(candidate.payload)) {
+          await updateHeartbeatJob(existing.taskUid, { cron: candidate.cron, path: candidate.path, method: "POST", payload: candidate.payload, description: candidate.description }, "");
+        }
+        continue;
+      }
       await createHeartbeatJob({
         name: candidate.name,
         cron: candidate.cron,
         path: DEALS_CRON_PATH,
         method: "POST",
+        payload: candidate.payload,
         description: candidate.description,
       }, "");
     }

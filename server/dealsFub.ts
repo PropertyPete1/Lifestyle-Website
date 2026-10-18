@@ -283,7 +283,7 @@ export function formatChicagoDateTime(value: Date) {
 }
 
 type RequestLead = { id: number; fubPersonId: string | null; phoneE164: string; email: string | null; name?: string | null; instagramHandle?: string | null; sourceCode?: string; consentText?: string; consentAt?: Date; consentIp?: string | null };
-type TourRequest = { id: number; requestType: "tour" | "ask"; preferredAt: Date; fubTaskId: string | null; fubNoteSentAt: Date | null };
+type TourRequest = { id: number; requestType: "tour" | "ask"; preferredAt: Date; chicagoDay: string; fubTaskId: string | null; fubNoteSentAt: Date | null };
 
 async function taskPersonId(lead: RequestLead) {
   if (lead.fubPersonId) return lead.fubPersonId;
@@ -291,6 +291,7 @@ async function taskPersonId(lead: RequestLead) {
   return person?.id ? String(person.id) : null;
 }
 function requestMarker(leadId: number, requestId: number) { return `${builderDealsLeadMarker(leadId)}-R${requestId}`; }
+function requestDayMarker(leadId: number, chicagoDay: string) { return `${builderDealsLeadMarker(leadId)}:request-day:${chicagoDay}`; }
 function requestLine(request: TourRequest, privateDescription: string) {
   return `${request.requestType === "tour" ? "Tour" : "Question"}: ${privateDescription}\nPreferred: ${formatChicagoDateTime(request.preferredAt)}`;
 }
@@ -325,18 +326,58 @@ export async function appendBuilderDealsTourTask(input: { lead: RequestLead; req
   } catch { return { ok: false, error: "FUB task append failed" }; }
 }
 
-/** One marker-protected note per request; retries never append duplicate notes. */
-export async function appendBuilderDealsRequestNote(input: { lead: RequestLead; request: TourRequest; privateDescription: string }): Promise<FubDeliveryResult> {
+function fubNoteId(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const note = record.note && typeof record.note === "object" ? record.note as Record<string, unknown> : record;
+  return stringValue(note.id ?? record.id) ?? undefined;
+}
+function fubNoteBody(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  const note = record.note && typeof record.note === "object" ? record.note as Record<string, unknown> : record;
+  return stringValue(note.body ?? record.body) ?? "";
+}
+async function findBuilderDealsRequestNote(personId: string, dayMarker: string) {
+  const response = await fub(`/notes?${new URLSearchParams({ personId, limit: String(FUB_PAGE_SIZE) })}`);
+  const body = await response.json().catch(() => ({})) as { notes?: unknown[] };
+  const notes = Array.isArray(body.notes) ? body.notes : [];
+  const matching = notes.find((note) => textInFubObject(note).some((text) => text.includes(dayMarker)));
+  return matching === undefined ? null : { id: fubNoteId(matching) };
+}
+
+/** Create the one marker-protected FUB note for a lead's Chicago request day. */
+export async function createBuilderDealsRequestNote(input: { lead: RequestLead; request: TourRequest; privateDescription: string }): Promise<FubDeliveryResult> {
   try {
     const personId = await taskPersonId(input.lead);
     if (!personId) return { ok: false, error: "FUB contact unavailable" };
+    const dayMarker = requestDayMarker(input.lead.id, input.request.chicagoDay);
+    const existing = await findBuilderDealsRequestNote(personId, dayMarker);
+    if (existing?.id) return appendBuilderDealsRequestNote({ ...input, noteId: existing.id });
+    if (existing) return { ok: false, error: "FUB per-day note id unavailable" };
     const marker = requestMarker(input.lead.id, input.request.id);
-    if (await personHasLeadMarker(personId, marker)) return { ok: true, personId, records: [{ kind: "person", fubId: personId, createdByUs: false }] };
-    const note = await postFubNote(personId, "Builder Deals request", `${marker}\n${requestLine(input.request, input.privateDescription)}`);
+    const note = await postFubNote(personId, "Builder Deals request", `${dayMarker}\n${marker}\n${requestLine(input.request, input.privateDescription)}`);
+    if (note.ok && !note.id) return { ok: false, error: "FUB note did not return an id" };
     return note.ok
       ? { ok: true, personId, records: [{ kind: "person", fubId: personId, createdByUs: false }, ...(note.id ? [{ kind: "note" as const, fubId: note.id, createdByUs: true }] : [])] }
       : { ok: false, error: note.error };
   } catch { return { ok: false, error: "FUB request note failed" }; }
+}
+
+/** Append a request to the existing daily FUB note; its request marker makes retries safe. */
+export async function appendBuilderDealsRequestNote(input: { lead: RequestLead; request: TourRequest; noteId: string; privateDescription: string }): Promise<FubDeliveryResult> {
+  try {
+    const personId = await taskPersonId(input.lead);
+    if (!personId) return { ok: false, error: "FUB contact unavailable" };
+    const response = await fub(`/notes/${encodeURIComponent(input.noteId)}`);
+    const current = fubNoteBody(await response.json().catch(() => ({})));
+    const marker = requestMarker(input.lead.id, input.request.id);
+    if (!current.includes(marker)) {
+      const addition = `${marker}\n${requestLine(input.request, input.privateDescription)}`;
+      await fub(`/notes/${encodeURIComponent(input.noteId)}`, { method: "PUT", body: JSON.stringify({ body: [current, addition].filter(Boolean).join("\n\n") }) });
+    }
+    return { ok: true, personId, records: [{ kind: "person", fubId: personId, createdByUs: false }, { kind: "note", fubId: input.noteId, createdByUs: true }] };
+  } catch { return { ok: false, error: "FUB request note append failed" }; }
 }
 
 export async function appendBuilderDealsActivity(lead: { id: number; fubPersonId: string | null; phoneE164: string; email: string | null }, detail: string) {

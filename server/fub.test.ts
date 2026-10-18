@@ -66,12 +66,13 @@ describe("fubHeaders", () => {
 });
 
 describe("FUB API key validation", () => {
-  it(
+  const liveIt = process.env.FUB_API_KEY?.trim() ? it : it.skip;
+  liveIt(
     "authenticates against the FUB identity endpoint",
     { timeout: 30000 },
     async () => {
       const apiKey = process.env.FUB_API_KEY;
-      expect(apiKey, "FUB_API_KEY must be set").toBeTruthy();
+      expect(apiKey, "FUB_API_KEY must be set when the live smoke test is enabled").toBeTruthy();
       const res = await fetch("https://api.followupboss.com/v1/identity", {
         headers: fubHeaders(apiKey as string),
         signal: AbortSignal.timeout(25000),

@@ -9,7 +9,11 @@ import { builderDealsHealthCheck, builderDealsMondayReport, cleanupDealsTestReco
 import { runPendingDealsFubJobs } from "./dealsFubJobs";
 
 import { chicagoClock, chicagoDay } from "./dealsService";
-function dueAt(hour: number, minute: number, weekday?: string) { const now = chicagoClock(); return now.hour === hour && now.minute >= minute && (!weekday || now.weekday === weekday); }
+/** Pure Chicago wall-clock predicate used by the DST candidate cron callbacks. */
+export function isDueAtChicago(now: { hour: number; minute: number; weekday: string }, hour: number, minute: number, weekday?: string) {
+  return now.hour === hour && now.minute >= minute && (!weekday || now.weekday === weekday);
+}
+function dueAt(hour: number, minute: number, weekday?: string) { return isDueAtChicago(chicagoClock(), hour, minute, weekday); }
 function isSuccessfulResult(result: unknown) {
   if (Array.isArray(result)) return result.some((item) => item && typeof item === "object" && (item as { ok?: unknown }).ok === true);
   return !result || typeof result !== "object" || !("ok" in result) || (result as { ok?: boolean }).ok !== false;

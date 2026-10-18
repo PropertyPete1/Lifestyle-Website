@@ -5,6 +5,7 @@ import { getDb } from "./db";
 import {
   appendBuilderDealsRequestNote,
   appendBuilderDealsTourTask,
+  createBuilderDealsRequestNote,
   createBuilderDealsTourTask,
   formatChicagoDateTime,
   sendBuilderDealsLeadToFub,
@@ -17,12 +18,12 @@ import { getDealSettings } from "./dealsService";
 export type FubOperation =
   | "first_unlock"
   | "reverify"
-  | `request_task:${number}`
-  | `request_note:${number}`
+  | `request_task:${string}`
+  | `request_note:${string}`
   | `request_email:${number}`;
 
 type LeadJobMetadata = { reason?: "re-verified on a second device" | "returned for a new link"; occurrenceId?: string };
-type RequestJobMetadata = { requestId: number };
+type RequestJobMetadata = { requestId: number; chicagoDay?: string };
 type JobMetadata = LeadJobMetadata | RequestJobMetadata;
 
 const LEASE_MS = 5 * 60_000;
@@ -75,11 +76,13 @@ export async function enqueueDealsFubJob(
     } });
 }
 
-export async function enqueueDealsRequestJobs(leadId: number, requestId: number) {
-  const metadata: RequestJobMetadata = { requestId };
+export async function enqueueDealsRequestJobs(leadId: number, requestId: number, chicagoDay: string) {
+  const metadata: RequestJobMetadata = { requestId, chicagoDay };
   await Promise.all([
-    enqueueDealsFubJob(leadId, `request_task:${requestId}`, metadata),
-    enqueueDealsFubJob(leadId, `request_note:${requestId}`, metadata),
+    // One durable lead/day row and lease serializes concurrent visitors before
+    // either the FUB task or the FUB note can be created.
+    enqueueDealsFubJob(leadId, `request_task:${chicagoDay}`, metadata),
+    enqueueDealsFubJob(leadId, `request_note:${chicagoDay}`, metadata),
     enqueueDealsFubJob(leadId, `request_email:${requestId}`, metadata),
   ]);
 }
@@ -132,36 +135,89 @@ async function loadRequestJob(job: typeof dealFubJobs.$inferSelect) {
   return { request, lead, home, privateDescription: `${home.privateAddress ?? "Requested home"}${home.privatePlanName ? ` (${home.privatePlanName})` : ""}` };
 }
 
+type LoadedRequestJob = NonNullable<Awaited<ReturnType<typeof loadRequestJob>>>;
+async function loadDayRequestJobs(loaded: LoadedRequestJob) {
+  const db = await getDb();
+  if (!db) return null;
+  const requests = await db.select().from(dealTourRequests)
+    .where(and(eq(dealTourRequests.leadId, loaded.lead.id), eq(dealTourRequests.chicagoDay, loaded.request.chicagoDay)))
+    .orderBy(asc(dealTourRequests.createdAt), asc(dealTourRequests.id));
+  const homes = await Promise.all(requests.map(async (request) =>
+    (await db.select().from(dealHomes).where(eq(dealHomes.id, request.homeId)).limit(1))[0],
+  ));
+  if (homes.some((home) => !home)) return null;
+  return requests.map((request, index) => {
+    const home = homes[index]!;
+    return { request, privateDescription: `${home.privateAddress ?? "Requested home"}${home.privatePlanName ? ` (${home.privatePlanName})` : ""}` };
+  });
+}
+function combinedDelivery(results: Array<Extract<FubDeliveryResult, { ok: true }>>, taskId?: string): Extract<FubDeliveryResult, { ok: true }> {
+  const records = Array.from(new Map(results.flatMap((result) => result.records).map((record) => [`${record.kind}:${record.fubId}`, record])).values());
+  const latest = results.at(-1);
+  return { ok: true, personId: latest?.personId, taskId, records, warning: results.find((result) => result.warning)?.warning };
+}
+
 async function executeRequestTask(job: typeof dealFubJobs.$inferSelect): Promise<FubDeliveryResult> {
   const db = await getDb();
   const loaded = await loadRequestJob(job);
   if (!db) return { ok: false, error: "Database unavailable" };
   if (!loaded) return { ok: true, records: [] };
-  const dayRequests = await db.select().from(dealTourRequests)
-    .where(and(eq(dealTourRequests.leadId, loaded.lead.id), eq(dealTourRequests.chicagoDay, loaded.request.chicagoDay)))
-    .orderBy(asc(dealTourRequests.createdAt));
-  const dayTaskId = dayRequests.find((request) => request.fubTaskId)?.fubTaskId;
-  const result = dayTaskId
-    ? await appendBuilderDealsTourTask({ lead: loaded.lead, request: loaded.request, taskId: dayTaskId, privateDescription: loaded.privateDescription })
-    : await createBuilderDealsTourTask({ lead: loaded.lead, request: loaded.request, privateDescription: loaded.privateDescription });
-  if (result.ok && result.taskId) {
-    // All requests on the same Chicago request day show the same task in admin.
-    await db.update(dealTourRequests).set({ fubTaskId: result.taskId }).where(and(eq(dealTourRequests.leadId, loaded.lead.id), eq(dealTourRequests.chicagoDay, loaded.request.chicagoDay)));
+  const dayRequests = await loadDayRequestJobs(loaded);
+  if (!dayRequests?.length) return { ok: false, error: "Builder Deals request home unavailable" };
+  const results: Array<Extract<FubDeliveryResult, { ok: true }>> = [];
+  let taskId = dayRequests.find(({ request }) => request.fubTaskId)?.request.fubTaskId;
+  let createdRequestId: number | null = null;
+  if (!taskId) {
+    const first = dayRequests[0]!;
+    const created = await createBuilderDealsTourTask({ lead: loaded.lead, request: first.request, privateDescription: first.privateDescription });
+    if (!created.ok) return created;
+    if (!created.taskId) return { ok: false, error: "FUB task did not return an id" };
+    taskId = created.taskId;
+    createdRequestId = first.request.id;
+    results.push(created);
+    await db.update(dealTourRequests).set({ fubTaskId: taskId }).where(and(eq(dealTourRequests.leadId, loaded.lead.id), eq(dealTourRequests.chicagoDay, loaded.request.chicagoDay)));
   }
-  return result;
+  for (const entry of dayRequests) {
+    if (entry.request.id === createdRequestId) continue;
+    const appended = await appendBuilderDealsTourTask({ lead: loaded.lead, request: entry.request, taskId, privateDescription: entry.privateDescription });
+    if (!appended.ok) return appended;
+    results.push(appended);
+  }
+  await db.update(dealTourRequests).set({ fubTaskId: taskId }).where(and(eq(dealTourRequests.leadId, loaded.lead.id), eq(dealTourRequests.chicagoDay, loaded.request.chicagoDay)));
+  return combinedDelivery(results, taskId);
 }
 
 async function executeRequestNote(job: typeof dealFubJobs.$inferSelect): Promise<FubDeliveryResult> {
   const db = await getDb();
   const loaded = await loadRequestJob(job);
   if (!db) return { ok: false, error: "Database unavailable" };
-  if (!loaded || loaded.request.fubNoteSentAt) return { ok: true, records: [] };
-  const result = await appendBuilderDealsRequestNote({ lead: loaded.lead, request: loaded.request, privateDescription: loaded.privateDescription });
-  if (result.ok) {
-    const noteId = result.records.find((record) => record.kind === "note")?.fubId;
-    await db.update(dealTourRequests).set({ fubNoteSentAt: new Date(), fubNoteId: noteId ?? undefined }).where(eq(dealTourRequests.id, loaded.request.id));
+  if (!loaded) return { ok: true, records: [] };
+  const dayRequests = await loadDayRequestJobs(loaded);
+  if (!dayRequests?.length) return { ok: false, error: "Builder Deals request home unavailable" };
+  const pending = dayRequests.filter(({ request }) => !request.fubNoteSentAt);
+  if (!pending.length) return { ok: true, records: [] };
+  const results: Array<Extract<FubDeliveryResult, { ok: true }>> = [];
+  let noteId = dayRequests.find(({ request }) => request.fubNoteId)?.request.fubNoteId;
+  let createdRequestId: number | null = null;
+  if (!noteId) {
+    const first = pending[0]!;
+    const created = await createBuilderDealsRequestNote({ lead: loaded.lead, request: first.request, privateDescription: first.privateDescription });
+    if (!created.ok) return created;
+    noteId = created.records.find((record) => record.kind === "note")?.fubId;
+    if (!noteId) return { ok: false, error: "FUB note did not return an id" };
+    createdRequestId = first.request.id;
+    results.push(created);
+    await db.update(dealTourRequests).set({ fubNoteId: noteId }).where(and(eq(dealTourRequests.leadId, loaded.lead.id), eq(dealTourRequests.chicagoDay, loaded.request.chicagoDay)));
+    await db.update(dealTourRequests).set({ fubNoteSentAt: new Date(), fubNoteId: noteId }).where(eq(dealTourRequests.id, createdRequestId));
   }
-  return result;
+  for (const entry of pending) {
+    if (entry.request.id === createdRequestId) continue;
+    const appended = await appendBuilderDealsRequestNote({ lead: loaded.lead, request: entry.request, noteId, privateDescription: entry.privateDescription });
+    if (!appended.ok) return appended;
+    results.push(appended);
+    await db.update(dealTourRequests).set({ fubNoteSentAt: new Date(), fubNoteId: noteId }).where(eq(dealTourRequests.id, entry.request.id));
+  }
+  return combinedDelivery(results);
 }
 
 async function executeRequestEmail(job: typeof dealFubJobs.$inferSelect): Promise<FubDeliveryResult> {

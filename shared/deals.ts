@@ -99,31 +99,64 @@ export function normalizedDealSourceKey(input: string): string {
   }
 }
 
+/** Categories contain private values supplied by the server, never builder constants. */
+export const DEAL_SCRUB_CATEGORIES = ["builder", "lender", "community", "plan", "street", "other"] as const;
+export type DealScrubCategory = (typeof DEAL_SCRUB_CATEGORIES)[number];
+export type DealScrubConfig = Record<DealScrubCategory, string[]>;
+export function emptyDealScrubConfig(): DealScrubConfig {
+  return { builder: [], lender: [], community: [], plan: [], street: [], other: [] };
+}
+export function parseDealScrubConfig(value: unknown): DealScrubConfig {
+  const result = emptyDealScrubConfig();
+  if (Array.isArray(value)) value = { other: value }; // Legacy flat arrays remain supported.
+  if (!value || typeof value !== "object") return result;
+  for (const category of DEAL_SCRUB_CATEGORIES) {
+    const terms = (value as Record<string, unknown>)[category];
+    if (Array.isArray(terms)) result[category] = Array.from(new Set(terms.filter((term): term is string => typeof term === "string").map((term) => term.trim()).filter(Boolean)));
+  }
+  return result;
+}
+export function dealScrubTerms(value: DealScrubConfig | readonly string[]): string[] {
+  const config = parseDealScrubConfig(value);
+  return Array.from(new Set(DEAL_SCRUB_CATEGORIES.flatMap((category) => config[category])));
+}
 /** Public storage/output scrubber. It purposely performs no guessing. */
 export function scrubPrivateNames(
   input: string,
-  names: string[],
+  names: readonly string[] | DealScrubConfig,
   options: { planField?: boolean } = {}
 ): string {
   let out = input;
-  for (const raw of names) {
-    const name = raw.trim();
-    if (name.length < 4) continue;
+  const config = parseDealScrubConfig(names);
+  const replacements: Record<DealScrubCategory, string> = { builder: "the builder", lender: "the builder's lender", community: "this community", plan: "this plan", street: "this street", other: "this community" };
+  const entries = DEAL_SCRUB_CATEGORIES.flatMap((category) => config[category].map((name) => ({ category, name })));
+  // Longest first prevents a shorter brand alias from leaving private residue.
+  for (const { category, name } of entries.sort((a, b) => b.name.length - a.name.length)) {
+    if (name.length < 4 && category !== "builder" && category !== "lender") continue;
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const planPattern = options.planField
-      ? new RegExp(`\\b${escaped}\\b`, "gi")
-      : new RegExp(`\\b(?:the\\s+)?${escaped}(?:\\s+plan)?\\b`, "gi");
-    out = out.replace(planPattern, options.planField ? "this plan" : "this community");
+    const boundary = `(?<![a-z0-9])${escaped}(?![a-z0-9])`;
+    const pattern = category === "plan" && !options.planField
+      ? new RegExp(`(?<![a-z0-9])(?:the\\s+${escaped}(?![a-z0-9])|${escaped}\\s+plan(?![a-z0-9]))`, "gi")
+      : new RegExp(boundary, "gi");
+    out = out.replace(pattern, options.planField ? "this plan" : replacements[category]);
   }
   return out;
 }
 
-export function hasPrivateTerm(input: string, names: string[]): boolean {
+export function hasPrivateTerm(input: string, names: readonly string[] | DealScrubConfig): boolean {
   const normalized = normalizedText(input);
-  return names.some((raw) => {
+  return dealScrubTerms(names).some((raw) => {
     const value = normalizedText(raw);
-    return value.length >= 4 && normalized.includes(value);
+    const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return value.length > 0 && new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, "i").test(normalized);
   });
+}
+
+/** One community: available QMIs win; plans are the zero-QMI fallback only. */
+export function selectDealCatalogHomes<T extends { kind: string; status?: string }>(homes: readonly T[]): T[] {
+  const available = homes.filter((home) => !home.status || home.status === "available");
+  const qmis = available.filter((home) => home.kind === "quick_move_in");
+  return qmis.length ? qmis : available.filter((home) => home.kind === "to_be_built");
 }
 
 export function clientIpKey(ip: string): string {

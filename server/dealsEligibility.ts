@@ -7,7 +7,7 @@ import { fubHeaders } from "./fub";
 export type DealEligibility = {
   allowed: boolean;
   team: boolean;
-  blockedBy?: "blocklist" | "known_agent" | "brokerage_domain" | "fub_realtor";
+  blockedBy?: "has_agent" | "blocklist" | "known_agent" | "brokerage_domain" | "fub_realtor";
   matchOn?: "phone" | "email" | "device";
   flags: string[];
 };
@@ -16,7 +16,10 @@ const normalizeEmail = (email?: string | null) => email?.trim().toLowerCase() ||
 const emailDomain = (email?: string | null) => normalizeEmail(email)?.split("@").at(-1) || null;
 
 export type DealIdentity = { phoneE164?: string | null; email?: string | null; deviceHash?: string | null };
-type DealsDb = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+// Both the project database and its Drizzle transaction implement this query
+// surface. Keeping it structural permits post-verification cascades to remain
+// atomic without leaking transaction internals through every caller.
+type DealsDb = any;
 
 function identityPredicates(identity: DealIdentity) {
   return [
@@ -47,7 +50,7 @@ export async function revokeNonTeamMatchingDealLinks(db: DealsDb, identity: Deal
   const matches = await db.select({ id: dealLeads.id, status: dealLeads.status })
     .from(dealLeads)
     .where(or(...predicates));
-  const ids = matches.filter((lead) => lead.status === "verified").map((lead) => lead.id);
+  const ids = matches.filter((lead: { id: number; status: string }) => lead.status === "verified").map((lead: { id: number; status: string }) => lead.id);
   if (!ids.length) return 0;
   const now = new Date();
   await db.update(dealLeads).set({ status: "blocked", revokedAt: now }).where(inArray(dealLeads.id, ids));
@@ -60,7 +63,7 @@ export async function revokeAllMatchingDealLinks(db: DealsDb, identity: DealIden
   const predicates = identityPredicates(identity);
   if (!predicates.length) return 0;
   const matches = await db.select({ id: dealLeads.id }).from(dealLeads).where(or(...predicates));
-  const ids = matches.map((lead) => lead.id);
+  const ids = matches.map((lead: { id: number }) => lead.id);
   if (!ids.length) return 0;
   const now = new Date();
   await db.update(dealLeads).set({ status: "blocked", revokedAt: now }).where(inArray(dealLeads.id, ids));
@@ -74,7 +77,7 @@ export async function makeMatchingLeadsTeam(db: DealsDb, identity: DealIdentity)
   if (!predicates.length) return 0;
   const matches = await db.select({ id: dealLeads.id }).from(dealLeads).where(or(...predicates));
   if (!matches.length) return 0;
-  await db.update(dealLeads).set({ status: "team" }).where(inArray(dealLeads.id, matches.map((lead) => lead.id)));
+  await db.update(dealLeads).set({ status: "team" }).where(inArray(dealLeads.id, matches.map((lead: { id: number }) => lead.id)));
   return matches.length;
 }
 
@@ -90,8 +93,8 @@ export async function revokeOrphanedTeamPreviewLinks(db: DealsDb): Promise<numbe
     db.select({ phoneE164: dealTeamAllowlist.phoneE164, email: dealTeamAllowlist.email }).from(dealTeamAllowlist).where(eq(dealTeamAllowlist.active, true)),
   ]);
   const ids = teamLeads
-    .filter((lead) => !teamIdentityMatch(lead, members, settings.testTeamNumbers))
-    .map((lead) => lead.id);
+    .filter((lead: { id: number; phoneE164: string; email: string | null }) => !teamIdentityMatch(lead, members, settings.testTeamNumbers))
+    .map((lead: { id: number }) => lead.id);
   if (!ids.length) return 0;
   const now = new Date();
   await db.update(dealLeads).set({ status: "expired", revokedAt: now }).where(inArray(dealLeads.id, ids));
@@ -107,9 +110,11 @@ export async function classifyDealsAccess(input: {
   isTest: boolean;
   testSkipChecks: boolean;
   testTeamNumbers?: string[];
+  choice?: "buyer" | "has_agent";
   brokerageDomains: string[];
   fubRealtorTags: string[];
   fubRealtorSources: string[];
+  fubTimeoutMs?: number;
 }): Promise<DealEligibility> {
   const db = await getDb();
   if (!db) return { allowed: false, team: false, blockedBy: "blocklist", flags: ["database_unavailable"] };
@@ -126,41 +131,61 @@ export async function classifyDealsAccess(input: {
   )).limit(1);
   if (team) return { allowed: true, team: true, flags: ["team"] };
 
-  const [phoneSuppressed, emailSuppressed] = await Promise.all([isDoNotAutoImport(input.phone), email ? isDoNotAutoImport(email) : Promise.resolve(false)]);
-  const skipAutoImport = phoneSuppressed || emailSuppressed;
-  const [block, known] = await Promise.all([
-    getActiveBlock({ phone: input.phone, email: email ?? undefined, deviceHash: input.deviceHash }),
-    skipAutoImport ? Promise.resolve([]) : db.select().from(dealKnownAgents).where(and(eq(dealKnownAgents.active, true), or(
-      eq(dealKnownAgents.phoneE164, input.phone), ...(email ? [eq(dealKnownAgents.email, email)] : []),
-    ))).limit(1),
-  ]);
+  if (input.choice === "has_agent") return { allowed: false, team: false, blockedBy: "has_agent", flags: ["has_agent"] };
+  const block = await getActiveBlock({ phone: input.phone, email: email ?? undefined, deviceHash: input.deviceHash });
   if (block) return { allowed: false, team: false, blockedBy: "blocklist", matchOn: block.phoneE164 ? "phone" : block.email ? "email" : "device", flags: ["blocked"] };
+  const [phoneSuppressed, emailSuppressed] = await Promise.all([isDoNotAutoImport(input.phone), email ? isDoNotAutoImport(email) : Promise.resolve(false)]);
+  const eligiblePhone = phoneSuppressed ? null : input.phone;
+  const eligibleEmail = emailSuppressed ? null : email;
+  const predicates = [...(eligiblePhone ? [eq(dealKnownAgents.phoneE164, eligiblePhone)] : []), ...(eligibleEmail ? [eq(dealKnownAgents.email, eligibleEmail)] : [])];
+  const known = predicates.length ? await db.select().from(dealKnownAgents).where(and(eq(dealKnownAgents.active, true), or(...predicates))).limit(1) : [];
   if (known[0]) return { allowed: false, team: false, blockedBy: "known_agent", matchOn: known[0].phoneE164 === input.phone ? "phone" : "email", flags: ["known_agent"] };
   // FUB is authoritative only when reachable. A timeout never blocks a buyer:
   // post-verification reconciliation can revoke access if a match is discovered.
-  const fubFlags = skipAutoImport ? { match: false, matchOn: "phone" as const, unavailable: false } : await fubRealtorMatch(input.phone, email, input.fubRealtorTags, input.fubRealtorSources);
-  if (fubFlags.match) return { allowed: false, team: false, blockedBy: "fub_realtor", matchOn: fubFlags.matchOn, flags: ["fub_realtor"] };
+  const fubFlags = await fubRealtorMatch(eligiblePhone, eligibleEmail, input.fubRealtorTags, input.fubRealtorSources, input.fubTimeoutMs);
+  if (fubFlags.match) {
+    queueScreeningContact({ phone: eligiblePhone, email: eligibleEmail, personId: fubFlags.personId, tag: "Agent - FUB Match", matchOn: fubFlags.matchOn });
+    return { allowed: false, team: false, blockedBy: "fub_realtor", matchOn: fubFlags.matchOn, flags: ["fub_realtor"] };
+  }
   const domain = emailDomain(email);
   if (domain && input.brokerageDomains.map((value) => value.toLowerCase()).includes(domain)) {
+    queueScreeningContact({ phone: eligiblePhone, email, tag: "Possible Agent - Email Domain", matchOn: "email" });
     return { allowed: false, team: false, blockedBy: "brokerage_domain", matchOn: "email", flags: ["brokerage_domain"] };
   }
   return { allowed: true, team: false, flags: fubFlags.unavailable ? ["fub_check_deferred"] : [] };
 }
 
-async function fubRealtorMatch(phone: string, email: string | null, tags: string[], sources: string[]) {
+function queueScreeningContact(input: { phone: string | null; email: string | null; personId?: string; tag: "Agent - FUB Match" | "Possible Agent - Email Domain"; matchOn?: "phone" | "email" }) {
+  void import("./dealsFub").then(({ tagBuilderDealsScreeningContact }) => tagBuilderDealsScreeningContact(input))
+    .then((result) => { if (!result.ok) console.error("[deals] screening contact update failed"); })
+    .catch(() => console.error("[deals] screening contact update failed"));
+}
+
+async function fubRealtorMatch(phone: string | null, email: string | null, tags: string[], sources: string[], timeoutMs = 3_000): Promise<{ match: boolean; unavailable: boolean; matchOn?: "phone" | "email"; personId?: string }> {
   const apiKey = process.env.FUB_API_KEY;
-  if (!apiKey || (!tags.length && !sources.length)) return { match: false, unavailable: false };
+  if ((!phone && !email) || (!tags.length && !sources.length)) return { match: false, unavailable: false };
+  if (!apiKey) return { match: false, unavailable: true };
   try {
+    type Person = { id?: string | number; tags?: Array<string | { name?: string; value?: string }>; source?: string };
+    const signal = AbortSignal.timeout(timeoutMs);
     const lookup = async (kind: "phone" | "email", value: string) => {
       const query = new URL("https://api.followupboss.com/v1/people"); query.searchParams.set(kind, value);
-      const response = await fetch(query, { headers: fubHeaders(apiKey), signal: AbortSignal.timeout(3_000) });
-      if (!response.ok) throw new Error("FUB unavailable"); return (await response.json().catch(() => ({})) as { people?: Array<{ tags?: string[]; source?: string }> }).people ?? [];
+      const response = await fetch(query, { headers: fubHeaders(apiKey), signal });
+      if (!response.ok) throw new Error("FUB unavailable");
+      const body = await response.json() as { people?: Person[] };
+      if (!Array.isArray(body.people)) throw new Error("Invalid FUB response");
+      return body.people;
     };
     const normalizedTags = tags.map((value) => value.toLowerCase());
     const normalizedSources = sources.map((value) => value.toLowerCase());
-    const match = (values: Array<{ tags?: string[]; source?: string }>) => values.some((person) => (person.tags ?? []).some((tag) => normalizedTags.includes(tag.toLowerCase()) || tag.toLowerCase().startsWith("recruit")) || (person.source && normalizedSources.includes(person.source.toLowerCase())));
-    if (match(await lookup("phone", phone))) return { match: true, matchOn: "phone" as const, unavailable: false };
-    if (email && match(await lookup("email", email))) return { match: true, matchOn: "email" as const, unavailable: false };
+    const match = (values: Person[]) => values.find((person) => (person.tags ?? []).some((tag) => {
+      const name = typeof tag === "string" ? tag : tag.name ?? tag.value ?? "";
+      return normalizedTags.includes(name.toLowerCase()) || name.toLowerCase().startsWith("recruit");
+    }) || (person.source && normalizedSources.includes(person.source.toLowerCase())));
+    const byPhone = phone ? match(await lookup("phone", phone)) : null;
+    if (byPhone) return { match: true, matchOn: "phone", personId: byPhone.id === undefined ? undefined : String(byPhone.id), unavailable: false };
+    const byEmail = email ? match(await lookup("email", email)) : null;
+    if (byEmail) return { match: true, matchOn: "email", personId: byEmail.id === undefined ? undefined : String(byEmail.id), unavailable: false };
     return { match: false, unavailable: false };
   } catch { return { match: false, unavailable: true }; }
 }

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, asc, desc, eq, gt, isNull, lte, notLike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lte, notLike, or, sql } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { parse as parseCookie } from "cookie";
 import {
@@ -32,6 +32,7 @@ import {
 } from "../shared/deals";
 import { getDb } from "./db";
 import { notifyOwner } from "./_core/notification";
+import { checkTwilioVerify } from "./dealsVerification";
 
 export type DealSettings = {
   allowCanada: boolean;
@@ -78,7 +79,7 @@ const DEFAULT_SETTINGS: DealSettings = {
   testTeamNumbers: [],
   activeReelCodes: ["sl1", "vg1"],
   brokerageDomains: ["exprealty.com", "kw.com", "kwrealty.com", "compass.com", "redfin.com", "remax.net", "coldwellbanker.com", "c21.com", "century21.com", "bhhs.com", "jpar.com", "realbrokerage.com", "therealbrokerage.com", "lptrealty.com", "fathomrealty.com", "homesmart.com", "sothebysrealty.com", "douglaselliman.com", "elliman.com", "realtyaustin.com", "kuperrealty.com", "phyllisbrowning.com"],
-  fubRealtorTags: ["Recruit - Website", "Agent - Blocked", "Agent - FUB Match", "Recruit"],
+  fubRealtorTags: ["Recruit - Website", "Agent - Blocked", "Agent - FUB Match", "Possible Agent - Email Domain", "Recruit"],
   fubRealtorSources: ["New Agent Inquiry", "Agent Scouting"],
   handleKeywords: ["realtor", "realty", "homes", "sells", "estate", "broker", "exprealty", "kw", "compass"],
   trecCounties: ["Bexar", "Comal", "Guadalupe", "Wilson", "Medina", "Kendall", "Atascosa", "Bandera", "Travis", "Williamson", "Hays", "Bastrop", "Caldwell"],
@@ -361,17 +362,24 @@ export async function recordGateFocus(input: { sourceCode: string; deviceHash: s
   if (!recent) await logDealEvent({ kind: "started_gate", ...input });
 }
 
-/** Account/API failures only: caller omits normal landline and STOP outcomes. */
-export async function recordTwilioVerifyFailure(input: { sourceCode: string; deviceHash: string; ip: string }) {
+/** Every real Verify send has a terminal outcome. Normal STOP/landline refusals
+ * break an API-error streak but do not themselves count as account failures. */
+export async function recordTwilioVerifyOutcome(input: { sourceCode: string; deviceHash: string; ip: string; phone?: string; outcome: "success" | "rejected" | "error" }) {
+  const { outcome, ...event } = input;
+  if (outcome === "error") return recordTwilioVerifyFailure(event);
+  await logDealEvent({ kind: outcome === "success" ? "twilio_verify_success" : "twilio_verify_rejected", ...event });
+}
+
+/** Account/API failures only; alert on three consecutive terminal API errors. */
+export async function recordTwilioVerifyFailure(input: { sourceCode: string; deviceHash: string; ip: string; phone?: string }) {
   const db = await getDb(); if (!db) return;
   await logDealEvent({ kind: "twilio_api_error", ...input });
-  const recent = await db.select({ kind: dealEvents.kind }).from(dealEvents).where(gt(dealEvents.createdAt, new Date(Date.now() - 60 * 60_000))).orderBy(desc(dealEvents.createdAt)).limit(400);
-  const sends = recent.filter((row) => row.kind === "code_sent").length;
-  const errors = recent.filter((row) => row.kind === "twilio_api_error").length;
-  // Only terminal outcome events participate. A code_sent event sits between
-  // every send and its failure, so looking at raw adjacent events can never
-  // observe three failed verification attempts.
-  const outcomes = recent.filter((row) => row.kind === "twilio_api_error" || row.kind === "twilio_verify_success");
+  const outcomes = await db.select({ kind: dealEvents.kind }).from(dealEvents).where(and(
+    gt(dealEvents.createdAt, new Date(Date.now() - 60 * 60_000)),
+    inArray(dealEvents.kind, ["twilio_api_error", "twilio_verify_success", "twilio_verify_rejected"]),
+  )).orderBy(desc(dealEvents.createdAt), desc(dealEvents.id));
+  const sends = outcomes.length;
+  const errors = outcomes.filter((row) => row.kind === "twilio_api_error").length;
   const consecutive = outcomes.slice(0, 3).length === 3 && outcomes.slice(0, 3).every((row) => row.kind === "twilio_api_error");
   const alertSent = (await db.select({ id: dealEvents.id }).from(dealEvents).where(and(eq(dealEvents.kind, "twilio_alert"), gt(dealEvents.createdAt, new Date(Date.now() - 6 * 60 * 60_000)))).limit(1))[0];
   if (!alertSent && (consecutive || (sends >= 10 && errors / sends > 0.2))) {
@@ -571,7 +579,7 @@ export async function createPendingVerification(input: { req: Request; res: Resp
     phone: normalized.e164, email: google?.email, deviceHash, isTest,
     testSkipChecks: settings.testNumbersSkipChecks, testTeamNumbers: settings.testTeamNumbers,
     brokerageDomains: settings.brokerageDomains, fubRealtorTags: settings.fubRealtorTags,
-    fubRealtorSources: settings.fubRealtorSources,
+    fubRealtorSources: settings.fubRealtorSources, choice: input.choice,
   });
   // Staff/test previews must not create an accidental "has agent" device
   // block merely because they test the visible confirmation choice.
@@ -611,13 +619,20 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   return { ok: true as const, pendingId: opaque, phone: normalized.e164, displayPhone: normalized.display, isTest, settings, sourceCode, deviceHash, ip };
 }
 
-export async function currentPending(req: Request) {
+async function lookupPending(req: Request) {
   const opaque = parseCookie(req.headers.cookie || "")[DEALS_COOKIE.pending];
   const deviceHash = dealDeviceHash(req);
   if (!opaque || !deviceHash) return null;
   const db = await getDb();
   if (!db) return null;
   return (await db.select().from(dealPendingVerifications).where(and(eq(dealPendingVerifications.opaqueIdHash, hashSecret(opaque)), eq(dealPendingVerifications.deviceHash, deviceHash), gt(dealPendingVerifications.expiresAt, new Date()))).limit(1))[0] ?? null;
+}
+
+export async function currentPending(req: Request) {
+  const pending = await lookupPending(req);
+  if (!pending) return null;
+  try { if (JSON.parse(pending.flags || "{}").completed) return null; } catch { /* legacy flags */ }
+  return pending;
 }
 
 export async function removePending(req: Request, res: Response) {
@@ -627,25 +642,69 @@ export async function removePending(req: Request, res: Response) {
   clearDealCookie(res, DEALS_COOKIE.pending);
 }
 
-export async function completeVerification(input: { req: Request; res: Response; code: string; verifiedBy: "test" | "twilio" }) {
-  const pending = await currentPending(input.req);
+type VerificationInput = { req: Request; res: Response; code: string; verifiedBy?: "test" | "twilio" };
+type VerificationReceipt = { codeHash: string; leadId: number; expiresAt: string; isTeam: boolean; isTest: boolean; fubCheckDeferred: boolean };
+type DealWriteDb = any;
+
+/** A post-OTP match owns a verified phone, unlike the unverified typed gate. */
+export async function blockVerifiedDealsIdentity(input: { phone: string; email?: string | null; deviceHash: string; reason: string }, connection?: DealWriteDb) {
+  const db = connection ?? await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.insert(dealBlocklist).values({ phoneE164: input.phone, email: input.email?.toLowerCase() ?? null, reason: input.reason });
+  await db.insert(dealBlocklist).values({ deviceHash: input.deviceHash, reason: `${input.reason} device cooldown`, expiresAt: new Date(Date.now() + 24 * 60 * 60_000) });
+  const { revokeNonTeamMatchingDealLinks } = await import("./dealsEligibility");
+  await revokeNonTeamMatchingDealLinks(db as never, { phoneE164: input.phone, email: input.email, deviceHash: input.deviceHash });
+}
+
+/** Lock the pending row, not the phone: a double tap shares one approval and one
+ * exchange token across workers. The retained receipt expires with the pending
+ * record and is excluded from state/resend; no raw token or code is stored. */
+export async function completeVerification(input: VerificationInput) {
+  const opaque = parseCookie(input.req.headers.cookie || "")[DEALS_COOKIE.pending];
+  const deviceHash = dealDeviceHash(input.req);
+  const db = await getDb();
+  if (!opaque || !deviceHash || !db) return { ok: false as const, kind: "expired" };
+  return db.transaction(async (tx) => {
+    const pending = (await tx.select().from(dealPendingVerifications).where(and(
+      eq(dealPendingVerifications.opaqueIdHash, hashSecret(opaque)), eq(dealPendingVerifications.deviceHash, deviceHash),
+      gt(dealPendingVerifications.expiresAt, new Date()),
+    )).limit(1).for("update"))[0];
+    return finishVerification(input, pending ?? null, tx);
+  });
+}
+
+async function finishVerification(input: VerificationInput, pending: typeof dealPendingVerifications.$inferSelect | null, db: DealWriteDb) {
   const deviceHash = dealDeviceHash(input.req);
   if (!pending || !deviceHash) return { ok: false as const, kind: "expired" };
   const settings = await getDealSettings();
   const isTest = settings.testNumbers.includes(pending.phoneE164);
+  const identity = JSON.parse(pending.flags || "{}") as { google?: GoogleDealsIdentity; flags?: string[]; team?: boolean; completed?: VerificationReceipt };
+  const cookies = parseCookie(input.req.headers.cookie || "");
+  // Both cookie values are high-entropy, HTTP-only, device-bound secrets. This
+  // stable value lets a concurrent response redirect to the very same link.
+  const token = hashSecret(`deals-verified:${cookies[DEALS_COOKIE.pending]}:${cookies[DEALS_COOKIE.device]}`);
+  if (identity.completed) {
+    const receipt = identity.completed;
+    const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, receipt.leadId)).limit(1))[0];
+    if (receipt.codeHash !== hashSecret(input.code)) return { ok: false as const, kind: "invalid_code" };
+    if (!lead || lead.revokedAt || !["verified", "team"].includes(lead.status) || lead.expiresAt <= new Date()) return { ok: false as const, kind: "expired" };
+    clearDealCookie(input.res, DEALS_COOKIE.pending);
+    return { ok: true as const, token, leadId: lead.id, expiresAt: lead.expiresAt, firstUnlock: false, reverifiedActive: true, isTeam: lead.status === "team", isTest: receipt.isTest, fubCheckDeferred: receipt.fubCheckDeferred, duplicate: true };
+  }
   const expectedTestCode = process.env.DEALS_TEST_OTP?.trim();
   if (isTest && input.code === expectedTestCode) {
     input.verifiedBy = "test";
-  } else if (input.verifiedBy !== "twilio") {
-    const db = await getDb();
-    if (db) await db.update(dealPendingVerifications).set({ wrongCodes: pending.wrongCodes + 1 }).where(eq(dealPendingVerifications.id, pending.id));
-    if (pending.wrongCodes + 1 >= 5) await removePending(input.req, input.res);
+  } else if (input.verifiedBy !== "twilio" && !await checkTwilioVerify(pending.phoneE164, input.code)) {
+    await db.update(dealPendingVerifications).set({ wrongCodes: pending.wrongCodes + 1 }).where(eq(dealPendingVerifications.id, pending.id));
+    if (pending.wrongCodes + 1 >= 5) {
+      await db.delete(dealPendingVerifications).where(eq(dealPendingVerifications.id, pending.id));
+      clearDealCookie(input.res, DEALS_COOKIE.pending);
+    }
     return { ok: false as const, kind: "invalid_code" };
+  } else {
+    input.verifiedBy = "twilio";
   }
 
-  const db = await getDb();
-  if (!db) return { ok: false as const, kind: "unavailable" };
-  const identity = JSON.parse(pending.flags || "{}") as { google?: GoogleDealsIdentity; flags?: string[]; team?: boolean };
   // Re-evaluate the mutable checks after the code is approved and before any
   // token is created. A discovered match cannot inherit an issued link.
   const eligibility = await (await import("./dealsEligibility")).classifyDealsAccess({
@@ -655,15 +714,16 @@ export async function completeVerification(input: { req: Request; res: Response;
     fubRealtorSources: settings.fubRealtorSources,
   });
   if (!eligibility.allowed) {
+    await blockVerifiedDealsIdentity({ phone: pending.phoneE164, email: identity.google?.email, deviceHash, reason: eligibility.blockedBy ?? "post_verification" }, db);
     await db.delete(dealPendingVerifications).where(eq(dealPendingVerifications.id, pending.id));
     clearDealCookie(input.res, DEALS_COOKIE.pending);
-    await logDealEvent({ kind: "blocked", sourceCode: pending.sourceCode, deviceHash, ip: pending.clientIp, detail: eligibility.blockedBy ?? "post_verification" });
+    await db.insert(dealEvents).values({ kind: "blocked", sourceCode: pending.sourceCode, deviceHash, ipPrefix: clientIpKey(pending.clientIp), phoneE164: pending.phoneE164, detail: eligibility.blockedBy ?? "post_verification" });
     return { ok: false as const, kind: "blocked" };
   }
   let old = (await db.select().from(dealLeads).where(eq(dealLeads.phoneE164, pending.phoneE164)).limit(1))[0];
   let reverifiedActive = Boolean(old && old.expiresAt > new Date());
   let expiresAt = old && old.expiresAt > new Date() ? old.expiresAt : new Date(Date.now() + settings.expiryHours * 60 * 60_000);
-  const flags = Array.from(new Set([...(identity.flags ?? []), ...eligibility.flags]));
+  const flags = Array.from(new Set([...(identity.flags ?? []).filter((flag) => flag !== "fub_check_deferred"), ...eligibility.flags]));
   let leadId: number;
   if (old) {
     await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? pending.instagramHandle, email: old.email ?? identity.google?.email ?? null, name: old.name ?? identity.google?.name ?? null, flags: JSON.stringify(flags) }).where(eq(dealLeads.id, old.id));
@@ -680,7 +740,9 @@ export async function completeVerification(input: { req: Request; res: Response;
       // Two verify submissions can legitimately race. The unique normalized
       // phone key makes this safe: retrieve the winner and continue exactly as
       // a re-verification instead of leaking an ER_DUP_ENTRY out of Express.
-      const raced = (await db.select().from(dealLeads).where(eq(dealLeads.phoneE164, pending.phoneE164)).limit(1))[0];
+      const cause = error && typeof error === "object" ? (error as { code?: string; errno?: number; cause?: { code?: string; errno?: number } }) : null;
+      if (cause?.code !== "ER_DUP_ENTRY" && cause?.errno !== 1062 && cause?.cause?.code !== "ER_DUP_ENTRY" && cause?.cause?.errno !== 1062) throw error;
+      const raced = (await db.select().from(dealLeads).where(eq(dealLeads.phoneE164, pending.phoneE164)).limit(1).for("update"))[0];
       if (!raced) throw error;
       old = raced;
       reverifiedActive = raced.expiresAt > new Date();
@@ -689,11 +751,12 @@ export async function completeVerification(input: { req: Request; res: Response;
       leadId = raced.id;
     }
   }
-  const token = await issueAccessToken(leadId, deviceHash, expiresAt);
-  await db.delete(dealPendingVerifications).where(eq(dealPendingVerifications.id, pending.id));
+  await db.insert(dealAccessTokens).values({ leadId, tokenHash: hashSecret(token), deviceHash, expiresAt, kind: "exchange" });
+  const fubCheckDeferred = flags.includes("fub_check_deferred");
+  await db.update(dealPendingVerifications).set({ flags: JSON.stringify({ ...identity, completed: { codeHash: hashSecret(input.code), leadId, expiresAt: expiresAt.toISOString(), isTeam: eligibility.team, isTest, fubCheckDeferred } satisfies VerificationReceipt }) }).where(eq(dealPendingVerifications.id, pending.id));
   clearDealCookie(input.res, DEALS_COOKIE.pending);
-  await logDealEvent({ leadId, kind: eligibility.team ? "team" : "verified", sourceCode: pending.sourceCode, deviceHash, ip: pending.clientIp, phone: pending.phoneE164, detail: input.verifiedBy });
-  return { ok: true as const, token, leadId, expiresAt, firstUnlock: !old, reverifiedActive, isTeam: eligibility.team };
+  await db.insert(dealEvents).values({ leadId, kind: eligibility.team ? "team" : "verified", sourceCode: pending.sourceCode, deviceHash, ipPrefix: clientIpKey(pending.clientIp), phoneE164: pending.phoneE164, detail: input.verifiedBy });
+  return { ok: true as const, token, leadId, expiresAt, firstUnlock: !old, reverifiedActive, isTeam: eligibility.team, isTest, fubCheckDeferred, duplicate: false };
 }
 
 export function dealsPublicHeaders(res: Response) {

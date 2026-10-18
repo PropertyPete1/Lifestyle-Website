@@ -1,7 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { completeVerification, currentDealSource, currentPending, dealsCsp, dealsPublicHeaders, ensureDealsCookies, exchangeAccessToken, getDealSettings, isDealsCrawler, logDealEvent, randomOpaqueToken, recordDealsLanding, setDealCookie, setGoogleDealsIdentity } from "./dealsService";
 import { parse as parseCookie } from "cookie";
-import { checkTwilioVerify } from "./dealsVerification";
 
 const safe = (handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
   (req: Request, res: Response, next: NextFunction) => { void handler(req, res, next).catch(next); };
@@ -20,7 +19,7 @@ export function registerDealsRoutes(app: Express) {
     if (req.method === "GET") {
       const cookies = ensureDealsCookies(req, res);
       if (req.path === "/" && !isDealsCrawler(req)) {
-        void getDealSettings().then((settings) => recordDealsLanding({ sourceCode: currentDealSource(String(req.query.src ?? ""), settings), deviceHash: cookies.deviceHash, ip: req.ip || req.socket.remoteAddress || "0.0.0.0" }));
+        void getDealSettings().then((settings) => recordDealsLanding({ sourceCode: currentDealSource(String(req.query.src ?? ""), settings), deviceHash: cookies.deviceHash, ip: req.ip || req.socket.remoteAddress || "0.0.0.0" })).catch(() => console.error("[deals] landing event failed"));
       }
     }
     next();
@@ -42,18 +41,15 @@ export function registerDealsRoutes(app: Express) {
   }));
 
   app.post("/deals/verify", safe(async (req, res) => {
-    const pending = await currentPending(req);
     const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
-    if (!pending || !/^\d{6}$/.test(code)) return res.redirect(302, "/deals?codeError=1");
-    const settings = await getDealSettings();
-    const isTest = settings.testNumbers.includes(pending.phoneE164);
-    const verifiedBy = isTest && code === process.env.DEALS_TEST_OTP
-      ? "test"
-      : await checkTwilioVerify(pending.phoneE164, code) ? "twilio" : "test";
-    const completed = await completeVerification({ req, res, code, verifiedBy });
+    if (!/^\d{6}$/.test(code)) return res.redirect(302, "/deals?codeError=1");
+    const completed = await completeVerification({ req, res, code });
     if (!completed.ok) return res.redirect(302, completed.kind === "expired" ? "/deals?expired=1" : completed.kind === "blocked" ? "/deals?gate=1&blocked=1" : `/deals?codeError=${encodeURIComponent(completed.kind)}`);
+    const settings = await getDealSettings();
+    const isTest = completed.isTest;
     // Alert creation precedes asynchronous delivery, so the first-unlock signal
     // survives a process restart and never holds up the buyer's access redirect.
+    try {
     if (completed.firstUnlock && (!isTest || settings.testModeFullPipeline)) {
       const { getDb } = await import("./db");
       const { dealLeads } = await import("../drizzle/schema");
@@ -74,6 +70,7 @@ export function registerDealsRoutes(app: Express) {
       await enqueueDealsFubJob(completed.leadId, completed.firstUnlock ? "first_unlock" : "reverify", completed.reverifiedActive ? "re-verified on a second device" : "returned for a new link");
       void runPendingDealsFubJobs(1).catch(console.error);
     }
+    } catch { console.error("[deals] verification side-effect enqueue failed"); }
     // The browser redirects through an opaque, device-bound, one-time token;
     // that exchange sets the HTTP-only session and immediately removes it from
     // the displayed URL.
@@ -137,7 +134,10 @@ export function registerDealsRoutes(app: Express) {
   }));
 
   app.use("/deals", (error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    console.error("[deals] route failure", error);
+    // Error messages/stacks can contain the personal URL or upstream request
+    // credentials. Only a generic marker belongs in the web-process log.
+    console.error("[deals] route failure");
+    if (res.headersSent) return _next(error);
     if (!res.headersSent) res.redirect(302, "/deals?error=1");
   });
 }

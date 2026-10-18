@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTags, escapeHtml } from "./ogMeta";
+import { buildTags, DEALS_OG_DESCRIPTION, DEALS_OG_IMAGE, DEALS_OG_TITLE, escapeHtml } from "./ogMeta";
 import { selectCityImage } from "../shared/cityImagery";
 
 describe("ogMeta", () => {
@@ -61,5 +61,12 @@ describe("ogMeta", () => {
     });
     expect(tags).not.toContain("<script>");
     expect(tags).toContain("&lt;script&gt;");
+  });
+
+  it("has a generic branded Builder Deals card without private inventory metadata", () => {
+    const tags = buildTags({ title: DEALS_OG_TITLE, description: DEALS_OG_DESCRIPTION, image: DEALS_OG_IMAGE, url: "https://example.com/deals" });
+    expect(tags).toContain("This week's best new-build deals in San Antonio");
+    expect(tags).toContain("builder-deals-og-card");
+    expect(tags).not.toMatch(/Sienna|Vista|Chesmar|M\/I|Rio Grande|Hanging Basket/i);
   });
 });

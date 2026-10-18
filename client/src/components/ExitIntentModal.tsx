@@ -33,7 +33,7 @@ const SEEN_KEY = "ldr_exit_intent_seen";
  * Routes where the nudge must never appear. Matched against the pathname with
  * an exact / prefix test so `/links` and `/links/anything` are both covered.
  */
-export const EXIT_INTENT_EXCLUDED_PATHS = ["/links"] as const;
+export const EXIT_INTENT_EXCLUDED_PATHS = ["/links", "/deals"] as const;
 
 export function isExitIntentExcluded(pathname: string): boolean {
   const path = (pathname || "/").replace(/\/+$/, "") || "/";

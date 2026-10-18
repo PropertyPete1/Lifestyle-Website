@@ -610,3 +610,14 @@ Three separate bugs stacked up:
 - [x] Create a public `/terms` page with the required Texas website and SMS terms, contact details, and Privacy Policy link.
 - [x] Add Terms links beside Privacy links in the site footer and all lead-form TCPA consent copy.
 - [x] Add regression coverage, validate types/tests, publish, and verify both public live routes.
+
+## Builder Deals preview — 2026-10-18
+- [x] Back up the production database and add only new Deals tables, with no changes to existing tables.
+- [ ] Build private Deals data, builder-adapter, scrubber, pricing/incentive, image-processing, and admin controls for the two launch communities.
+- [x] Build the public landing, phone-first gate, server-side verification/session/token flow, gated catalog, and privacy-safe public/data/image boundaries.
+- [ ] Add FUB-first persistence with retry visibility, test-mode safeguards, realtor/team checks, consent/audit records, and admin leads/blocklist/settings tools.
+- [ ] Add Chicago-time health, update, alert, and cleanup schedules with idempotent handlers.
+- [x] Add and run security, privacy, gate, normalization, sanitization, and regression coverage; verify the preview deployment at iPhone dimensions.
+- [x] Deliver the code review branch, mobile screenshots, public API/privacy evidence, and preview admin URL. Do not checkpoint or publish Builder Deals until explicit user approval.
+- [ ] Before launch approval, complete live Twilio Verify delivery/Attempts confirmation once runtime secrets are accessible and obtain an authenticated admin-tab screenshot.
+- [ ] Complete the remaining original image-ingestion, FUB/team/realtor detection, cleanup, health-alert, and scheduled-maintenance requirements before live custom-domain publication.

@@ -23,6 +23,7 @@ import {
 import { generateCityNarrative, fallbackNarrative, CITY_DATA } from "./cityNarrative";
 import { isAdminEmail } from "@shared/site";
 import { ENV } from "./_core/env";
+import { dealsRouter } from "./dealsRouter";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   // Defense in depth: DB role must be admin AND the account must be on the
@@ -86,6 +87,8 @@ const leadInput = z.object({
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
+  /** Private Builder Deals gate. Public and gated responses are explicitly fenced in dealsRouter. */
+  deals: dealsRouter,
 
   /** Convince Your Partner — AI dream-scene pitches, cached per shareable slug. */
   partnerPitch: router({

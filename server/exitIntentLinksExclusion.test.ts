@@ -66,7 +66,8 @@ describe("exit-intent /links exclusion", () => {
     expect(code).toMatch(/!open\s*\|\|\s*excluded/);
   });
 
-  it("keeps the exclusion narrow — only the link-in-bio route", () => {
-    expect(EXIT_INTENT_EXCLUDED_PATHS).toHaveLength(1);
+  it("keeps the exclusion scope explicit for private conversion funnels", () => {
+    expect(EXIT_INTENT_EXCLUDED_PATHS).toEqual(["/links", "/deals"]);
+    expect(isExitIntentExcluded("/deals/mine")).toBe(true);
   });
 });

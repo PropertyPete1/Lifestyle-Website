@@ -63,7 +63,10 @@ export function usePageTracking() {
 
   useEffect(() => {
     const path = location.split(/[?#]/)[0] || "/";
-    if (path.startsWith("/admin")) return; // never track the admin area
+    // Deals has its own privacy-scoped funnel. Its personal routes must never
+    // be copied into the generic analytics table or a third-party telemetry
+    // surface, especially when a one-time link exchange is involved.
+    if (path.startsWith("/admin") || path.startsWith("/deals")) return;
     if (lastPath.current === path) return; // dedupe re-renders of same route
     lastPath.current = path;
     const src = getTrafficSource();

@@ -246,3 +246,226 @@ export const cityMatches = mysqlTable("city_matches", {
 });
 export type CityMatch = typeof cityMatches.$inferSelect;
 export type InsertCityMatch = typeof cityMatches.$inferInsert;
+
+/**
+ * Builder Deals is intentionally isolated from the public placeholder listings
+ * and normal lead pipeline. Private builder identities, source URLs, addresses
+ * and plan names never cross its public DTO boundary.
+ */
+export const dealCommunities = mysqlTable(
+  "deal_communities",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    /** Private admin-only identity and source mapping. */
+    builder: varchar("builder", { length: 80 }).notNull(),
+    privateName: varchar("private_name", { length: 190 }).notNull(),
+    sourceUrl: text("source_url").notNull(),
+    privateAddress: varchar("private_address", { length: 255 }).notNull(),
+    salesPhone: varchar("sales_phone", { length: 40 }),
+    /** Public-safe presentation values only. */
+    publicLabel: varchar("public_label", { length: 190 }).notNull(),
+    areaLabel: varchar("area_label", { length: 120 }).notNull(),
+    schoolDistrict: varchar("school_district", { length: 120 }),
+    lotSizes: varchar("lot_sizes", { length: 160 }),
+    amenities: text("amenities"), // JSON string array after name scrubbing
+    fromPrice: int("from_price"),
+    reelUrl: text("reel_url"),
+    reelCode: varchar("reel_code", { length: 40 }).notNull().unique(),
+    /** Private words/phrases scrubbed before any public persistence. */
+    scrubList: text("scrub_list").notNull(), // JSON string array
+    active: boolean("active").default(true).notNull(),
+    paused: boolean("paused").default(false).notNull(),
+    manualMode: boolean("manual_mode").default(false).notNull(),
+    lastSuccessfulSyncAt: timestamp("last_successful_sync_at"),
+    lastAttemptAt: timestamp("last_attempt_at"),
+    holdReason: text("hold_reason"),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("idx_deal_communities_active").on(t.active, t.paused)]
+);
+
+export const dealIncentives = mysqlTable(
+  "deal_incentives",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    communityId: int("community_id").notNull(),
+    /** Exact official wording after private-name scrubbing. */
+    normalizedText: text("normalized_text").notNull(),
+    publicText: text("public_text").notNull(),
+    headlineRate: varchar("headline_rate", { length: 80 }),
+    followOnRate: varchar("follow_on_rate", { length: 80 }),
+    followOnPeriod: varchar("follow_on_period", { length: 100 }),
+    apr: varchar("apr", { length: 80 }),
+    loanType: varchar("loan_type", { length: 80 }),
+    downPayment: varchar("down_payment", { length: 80 }),
+    repaymentTerms: varchar("repayment_terms", { length: 120 }),
+    contractBy: timestamp("contract_by"),
+    closeBy: timestamp("close_by"),
+    confirmedAt: timestamp("confirmed_at").defaultNow().notNull(),
+    expiresAt: timestamp("expires_at"),
+    active: boolean("active").default(true).notNull(),
+    held: boolean("held").default(false).notNull(),
+    holdReason: text("hold_reason"),
+    manual: boolean("manual").default(false).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [index("idx_deal_incentives_community_active").on(t.communityId, t.active)]
+);
+
+export const dealHomes = mysqlTable(
+  "deal_homes",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    communityId: int("community_id").notNull(),
+    /** Private identifiers and source data are never serialized to visitors. */
+    sourceKey: varchar("source_key", { length: 255 }).notNull().unique(),
+    sourceUrl: text("source_url").notNull(),
+    privateAddress: varchar("private_address", { length: 255 }),
+    privatePlanName: varchar("private_plan_name", { length: 190 }),
+    kind: mysqlEnum("kind", ["quick_move_in", "to_be_built"]).default("quick_move_in").notNull(),
+    status: mysqlEnum("status", ["available", "sold", "hidden"]).default("available").notNull(),
+    beds: varchar("beds", { length: 30 }),
+    baths: varchar("baths", { length: 30 }),
+    sqft: int("sqft"),
+    price: int("price"),
+    previousPrice: int("previous_price"),
+    moveInDate: varchar("move_in_date", { length: 100 }),
+    lotSize: varchar("lot_size", { length: 100 }),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("idx_deal_homes_community_status").on(t.communityId, t.status)]
+);
+
+export const dealPhotos = mysqlTable(
+  "deal_photos",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    homeId: int("home_id").notNull(),
+    sourceUrl: text("source_url").notNull(),
+    originalStorageKey: text("original_storage_key"),
+    processedStorageKey: text("processed_storage_key"),
+    sourceHash: varchar("source_hash", { length: 64 }).notNull(),
+    automaticHidden: boolean("automatic_hidden").default(false).notNull(),
+    adminHidden: boolean("admin_hidden").default(false).notNull(),
+    processingState: mysqlEnum("processing_state", ["pending", "processed", "failed"]).default("pending").notNull(),
+    sortOrder: int("sort_order").default(0).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [index("idx_deal_photos_home").on(t.homeId, t.processingState)]
+);
+
+export const dealLeads = mysqlTable(
+  "deal_leads",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    phoneE164: varchar("phone_e164", { length: 20 }).notNull().unique(),
+    email: varchar("email", { length: 320 }),
+    name: varchar("name", { length: 190 }),
+    instagramHandle: varchar("instagram_handle", { length: 31 }),
+    sourceCode: varchar("source_code", { length: 40 }).notNull().default("other"),
+    timeline: varchar("timeline", { length: 40 }),
+    status: mysqlEnum("status", ["verified", "blocked", "expired", "team"]).default("verified").notNull(),
+    flags: varchar("flags", { length: 2000 }).notNull().default("[]"),
+    consentText: text("consent_text").notNull(),
+    consentAt: timestamp("consent_at").defaultNow().notNull(),
+    consentIp: varchar("consent_ip", { length: 64 }).notNull(),
+    deviceHash: varchar("device_hash", { length: 64 }).notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    revokedAt: timestamp("revoked_at"),
+    fubPersonId: varchar("fub_person_id", { length: 80 }),
+    fubStatus: mysqlEnum("fub_status", ["pending", "synced", "failed"]).default("pending").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [index("idx_deal_leads_expiry").on(t.expiresAt), index("idx_deal_leads_fub").on(t.fubStatus)]
+);
+
+export const dealPendingVerifications = mysqlTable(
+  "deal_pending_verifications",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    opaqueIdHash: varchar("opaque_id_hash", { length: 64 }).notNull().unique(),
+    phoneE164: varchar("phone_e164", { length: 20 }).notNull(),
+    choice: mysqlEnum("choice", ["buyer", "has_agent"]).notNull(),
+    sourceCode: varchar("source_code", { length: 40 }).notNull().default("other"),
+    instagramHandle: varchar("instagram_handle", { length: 31 }),
+    deviceHash: varchar("device_hash", { length: 64 }).notNull(),
+    clientIp: varchar("client_ip", { length: 64 }).notNull(),
+    flags: varchar("flags", { length: 2000 }).notNull().default("[]"),
+    wrongCodes: int("wrong_codes").default(0).notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("idx_deal_pending_phone").on(t.phoneE164, t.createdAt)]
+);
+
+export const dealAccessTokens = mysqlTable(
+  "deal_access_tokens",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    leadId: int("lead_id").notNull(),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+    deviceHash: varchar("device_hash", { length: 64 }).notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    consumedAt: timestamp("consumed_at"),
+    revokedAt: timestamp("revoked_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("idx_deal_access_lead").on(t.leadId, t.expiresAt)]
+);
+
+export const dealBlocklist = mysqlTable(
+  "deal_blocklist",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    phoneE164: varchar("phone_e164", { length: 20 }),
+    email: varchar("email", { length: 320 }),
+    deviceHash: varchar("device_hash", { length: 64 }),
+    searchPhone: varchar("search_phone", { length: 20 }),
+    reason: varchar("reason", { length: 255 }).notNull(),
+    expiresAt: timestamp("expires_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("idx_deal_block_phone").on(t.phoneE164), index("idx_deal_block_device").on(t.deviceHash)]
+);
+
+export const dealSettings = mysqlTable("deal_settings", {
+  key: varchar("key", { length: 100 }).primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+/** Admin-only confirmation records from the official TREC public dataset. */
+export const dealTrecVerifications = mysqlTable(
+  "deal_trec_verifications",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    teamMemberId: int("team_member_id").notNull(),
+    fullName: varchar("full_name", { length: 190 }).notNull(),
+    licenseNumber: varchar("license_number", { length: 60 }),
+    licenseType: varchar("license_type", { length: 80 }),
+    status: varchar("status", { length: 80 }).notNull(),
+    verifiedAt: timestamp("verified_at").defaultNow().notNull(),
+    sourceUpdatedAt: timestamp("source_updated_at"),
+  },
+  (t) => [index("idx_deal_trec_member").on(t.teamMemberId, t.verifiedAt)]
+);
+
+export const dealEvents = mysqlTable(
+  "deal_events",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    leadId: int("lead_id"),
+    kind: varchar("kind", { length: 60 }).notNull(),
+    sourceCode: varchar("source_code", { length: 40 }),
+    deviceHash: varchar("device_hash", { length: 64 }),
+    ipPrefix: varchar("ip_prefix", { length: 80 }),
+    detail: text("detail"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("idx_deal_events_kind_created").on(t.kind, t.createdAt)]
+);

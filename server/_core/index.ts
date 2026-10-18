@@ -8,7 +8,9 @@ import { registerStorageProxy } from "./storageProxy";
 import { registerOgMeta } from "../ogMeta";
 import { appRouter } from "../routers";
 import { syncStatsHandler } from "../scheduledStatsHandler";
-import { ensureStatsSyncCron } from "../registerCron";
+import { ensureDealsRefreshCron, ensureStatsSyncCron } from "../registerCron";
+import { registerDealsRoutes } from "../dealsRoutes";
+import { scheduledDealsHandler } from "../scheduledDealsHandler";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -33,6 +35,9 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 
 async function startServer() {
   const app = express();
+  // The managed runtime adds exactly one trusted proxy hop. Express derives
+  // req.ip from that hop only, protecting Deals consent and rate-limit keys.
+  app.set("trust proxy", 1);
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
@@ -40,8 +45,10 @@ async function startServer() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   registerOgMeta(app);
+  registerDealsRoutes(app);
   // Heartbeat cron callbacks — must be mounted before the Vite/static fallthrough
   app.post("/api/scheduled/syncStats", syncStatsHandler);
+  app.post("/api/scheduled/refreshDeals", scheduledDealsHandler);
   // tRPC API
   app.use(
     "/api/trpc",
@@ -70,6 +77,7 @@ async function startServer() {
     // never touches the shared cron registry; idempotent and non-blocking.
     if (process.env.NODE_ENV === "production") {
       void ensureStatsSyncCron();
+      void ensureDealsRefreshCron();
     }
   });
 }

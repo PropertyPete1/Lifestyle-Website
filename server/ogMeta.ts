@@ -17,6 +17,12 @@ export const JOIN_OG_TITLE = "Now Hiring: Licensed Agents — Lifestyle Design R
 export const JOIN_OG_DESCRIPTION =
   "Real leads. Real support. Lease commissions up to $6,000 per deal. Veteran-owned brokerage hiring in Austin, San Antonio, Dallas & Houston.";
 
+/** Public landing-only card. Never attach metadata to personal Deals URLs. */
+export const DEALS_OG_IMAGE = "/manus-storage/builder-deals-og-card_1b97dbbc.png";
+export const DEALS_OG_TITLE = "This week's best new-build deals in San Antonio";
+export const DEALS_OG_DESCRIPTION =
+  "A private, phone-verified list for buyers who have not chosen an agent yet.";
+
 export function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -76,7 +82,11 @@ export function registerOgMeta(app: Express) {
     const isConvince = req.path.startsWith("/convince");
     const isCityFinder = req.path.startsWith("/city-finder");
     const isJoin = req.path === "/join" || req.path === "/join/";
-    if (!isConvince && !isCityFinder && !isJoin) return next();
+    const isDealsLanding = req.path === "/deals" || req.path === "/deals/";
+    const isDealsPrivateDocument = req.path.startsWith("/deals/") && !req.path.startsWith("/deals/v/") && !req.path.startsWith("/deals/auth/");
+    // Personal Deals routes deliberately have no OG preview. A pasted private
+    // token or /mine URL must reveal nothing useful to a crawler.
+    if (!isConvince && !isCityFinder && !isJoin && !isDealsLanding && !isDealsPrivateDocument) return next();
     // Only intercept HTML document requests, not assets/api
     const accepts = req.headers.accept || "";
     if (!accepts.includes("text/html") && accepts !== "*/*" && accepts !== "") return next();
@@ -96,6 +106,12 @@ export function registerOgMeta(app: Express) {
       title = JOIN_OG_TITLE;
       description = JOIN_OG_DESCRIPTION;
       image = JOIN_OG_IMAGE;
+    }
+
+    if (isDealsLanding) {
+      title = DEALS_OG_TITLE;
+      description = DEALS_OG_DESCRIPTION;
+      image = DEALS_OG_IMAGE;
     }
 
     const cityFinderSlug = req.path.match(/^\/city-finder\/([A-Za-z0-9_-]+)$/);
@@ -148,9 +164,12 @@ export function registerOgMeta(app: Express) {
 
     const canonicalUrl = isJoin
       ? `${proto}://${host}/join`
+      : isDealsLanding
+        ? `${proto}://${host}/deals`
       : fullUrl;
 
-    const tags = buildTags({ title, description, url: canonicalUrl, image });
+    const robots = (isDealsLanding || isDealsPrivateDocument) ? `<meta name="robots" content="noindex, nofollow" />` : "";
+    const tags = `${robots}${isDealsLanding || !isDealsPrivateDocument ? `${robots ? "\n    " : ""}${buildTags({ title, description, url: canonicalUrl, image })}` : ""}`;
 
     // Monkey-patch send to inject tags into the outgoing HTML
     const originalSend = res.send.bind(res);

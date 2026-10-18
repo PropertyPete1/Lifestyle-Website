@@ -39,6 +39,10 @@ export default function Privacy() {
           <p>
             Lifestyle Design Realty sends text messages only to people who opt in by checking the consent box on our website forms. Messages may include replies to your real estate inquiry, property listings, showing and appointment reminders, and career opportunity information for licensed real estate agents. Message frequency varies. Message and data rates may apply. Reply STOP to opt out at any time or HELP for help. Text messaging originator opt-in data and consent will not be shared with any third parties.
           </p>
+          <p>
+            For Builder Deals access, we may send one verification text message or place one
+            verification call to the phone number you enter before showing the private list.
+          </p>
           <h2 className="font-serif text-2xl text-foreground">Data Storage and Your Rights</h2>
           <p>
             Your information is stored securely in our customer relationship management system and kept only as long as needed to provide our services. You may request access to or deletion of your information by emailing team@lifestyledesignrealty.com.

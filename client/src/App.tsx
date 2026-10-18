@@ -25,6 +25,7 @@ import Links from "./pages/Links";
 import Convince, { ConvinceShared } from "./pages/Convince";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
+import Deals from "./pages/Deals";
 import Admin from "./pages/Admin";
 import { usePageTracking } from "./hooks/usePageTracking";
 import { FEATURES } from "@shared/site";
@@ -85,6 +86,9 @@ function Router() {
       <Route path={"/convince/:slug"} component={ConvinceShared} />
       <Route path={"/privacy"} component={Privacy} />
       <Route path={"/terms"} component={Terms} />
+      {/* Builder Deals owns its own logo-only shell and suppresses global promos. */}
+      <Route path={"/deals"} component={Deals} />
+      <Route path={"/deals/mine"} component={Deals} />
       <Route path={"/admin"} component={Admin} />
       <Route path={"/admin/:tab"} component={Admin} />
       <Route path={"/404"} component={NotFound} />

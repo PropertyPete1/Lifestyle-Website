@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -35,16 +36,21 @@ import {
   Ban,
   Building2,
   CheckCircle2,
+  CircleAlert,
   Eye,
   FilePenLine,
+  HeartPulse,
   Home,
   Image,
   Loader2,
   LockKeyhole,
   Plus,
   RefreshCw,
+  RotateCcw,
   Save,
   ShieldAlert,
+  Upload,
+  UserRoundCheck,
   Users,
 } from "lucide-react";
 
@@ -95,6 +101,7 @@ type SettingsDraft = {
   testNumbersSkipChecks: boolean;
   testModeFullPipeline: boolean;
   testNumbers: string[];
+  testTeamNumbers: string[];
   activeReelCodes: string[];
   brokerageDomains: string[];
   fubRealtorTags: string[];
@@ -117,14 +124,12 @@ type KnownAgentForm = {
   name: string;
   phoneE164: string;
   email: string;
-  source: "csv" | "fub_recruit" | "manual";
 };
 
 type TeamForm = {
   name: string;
   phoneE164: string;
   email: string;
-  source: "fub" | "manual" | "test";
 };
 
 type ManualHomeForm = {
@@ -154,6 +159,7 @@ const DEFAULT_SETTINGS: SettingsDraft = {
   testNumbersSkipChecks: true,
   testModeFullPipeline: false,
   testNumbers: [],
+  testTeamNumbers: [],
   activeReelCodes: [],
   brokerageDomains: [],
   fubRealtorTags: [],
@@ -164,8 +170,8 @@ const DEFAULT_SETTINGS: SettingsDraft = {
 };
 
 const EMPTY_BLOCK: BlockForm = { phone: "", email: "", deviceHash: "", reason: "" };
-const EMPTY_KNOWN_AGENT: KnownAgentForm = { name: "", phoneE164: "", email: "", source: "manual" };
-const EMPTY_TEAM: TeamForm = { name: "", phoneE164: "", email: "", source: "manual" };
+const EMPTY_KNOWN_AGENT: KnownAgentForm = { name: "", phoneE164: "", email: "" };
+const EMPTY_TEAM: TeamForm = { name: "", phoneE164: "", email: "" };
 const EMPTY_MANUAL_HOME: ManualHomeForm = {
   communityId: "",
   sourceUrl: "",
@@ -269,10 +275,12 @@ function ListField({ label, hint, value, onChange, placeholder }: {
   onChange: (value: string[]) => void;
   placeholder?: string;
 }) {
+  const id = useId();
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
+      <Label htmlFor={id}>{label}</Label>
       <Textarea
+        id={id}
         value={listValue(value)}
         onChange={(event) => onChange(toList(event.target.value))}
         placeholder={placeholder ?? "One item per line"}
@@ -320,6 +328,7 @@ function SettingsEditor({ settings }: { settings: SettingsInput }) {
       testNumbersSkipChecks: draft.testNumbersSkipChecks,
       testModeFullPipeline: draft.testModeFullPipeline,
       testNumbers: draft.testNumbers,
+      testTeamNumbers: draft.testTeamNumbers,
       activeReelCodes: draft.activeReelCodes,
       brokerageDomains: draft.brokerageDomains,
       fubRealtorTags: draft.fubRealtorTags,
@@ -332,8 +341,9 @@ function SettingsEditor({ settings }: { settings: SettingsInput }) {
 
   const numberField = (label: string, key: "expiryHours" | "hasAgentBlockDays" | "incentiveLapseDays" | "dailyVerificationCap" | "phoneLimitPerHour" | "ipLimitPerHour" | "testPhoneLimitPerHour", min: number, max: number) => (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
+      <Label htmlFor={`builder-deals-${key}`}>{label}</Label>
       <Input
+        id={`builder-deals-${key}`}
         type="number"
         min={min}
         max={max}
@@ -348,7 +358,7 @@ function SettingsEditor({ settings }: { settings: SettingsInput }) {
       title="Gate, attribution & screening settings"
       icon={FilePenLine}
       description="These controls are applied by the protected Builder Deals funnel. Keep private screening signals and testing controls here; they are not returned by public catalog routes."
-      action={<Button onClick={submit} disabled={saveSettings.isPending} className="bg-gold text-primary-foreground hover:bg-gold/90"><Save className="mr-1 h-4 w-4" />{saveSettings.isPending ? "Saving…" : "Save settings"}</Button>}
+      action={<Button onClick={submit} disabled={saveSettings.isPending} className="w-full bg-gold text-primary-foreground hover:bg-gold/90 sm:w-auto"><Save className="mr-1 h-4 w-4" />{saveSettings.isPending ? "Saving…" : "Save settings"}</Button>}
     >
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-1.5">
@@ -360,9 +370,9 @@ function SettingsEditor({ settings }: { settings: SettingsInput }) {
           <Input id="builder-deals-text-line" maxLength={40} value={draft.textLine} onChange={(event) => setDraft({ ...draft, textLine: event.target.value })} />
         </div>
         <div className="space-y-1.5">
-          <Label>Alert delivery</Label>
+          <Label htmlFor="builder-deals-alert-mode">Alert delivery</Label>
           <Select value={draft.alertMode} onValueChange={(value) => setDraft({ ...draft, alertMode: value as SettingsDraft["alertMode"] })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger id="builder-deals-alert-mode"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="instant">Instant alerts</SelectItem>
               <SelectItem value="hourly_digest">Hourly digest</SelectItem>
@@ -370,8 +380,8 @@ function SettingsEditor({ settings }: { settings: SettingsInput }) {
           </Select>
         </div>
         <div className="flex items-center justify-between gap-4 border border-border px-3 py-2.5">
-          <div><Label>Allow Canadian phone numbers</Label><p className="text-[11px] text-muted-foreground">US-only remains the default funnel behavior.</p></div>
-          <Switch checked={draft.allowCanada} onCheckedChange={(allowCanada) => setDraft({ ...draft, allowCanada })} />
+          <div><Label htmlFor="builder-deals-allow-canada">Allow Canadian phone numbers</Label><p className="text-[11px] text-muted-foreground">US-only remains the default funnel behavior.</p></div>
+          <Switch id="builder-deals-allow-canada" checked={draft.allowCanada} onCheckedChange={(allowCanada) => setDraft({ ...draft, allowCanada })} />
         </div>
       </div>
 
@@ -391,15 +401,16 @@ function SettingsEditor({ settings }: { settings: SettingsInput }) {
           { key: "testNumbersSkipChecks" as const, title: "Test numbers skip blocking checks", note: "Does not change the treatment of real visitors." },
           { key: "testModeFullPipeline" as const, title: "Run test records through the full pipeline", note: "Test records are marked for cleanup in downstream operations." },
         ].map((item) => (
-          <label key={item.key} className="flex items-start justify-between gap-3 border border-border p-3">
+          <div key={item.key} className="flex items-start justify-between gap-3 border border-border p-3">
             <span><strong className="text-sm">{item.title}</strong><span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground">{item.note}</span></span>
-            <Switch checked={draft[item.key]} onCheckedChange={(checked) => setDraft({ ...draft, [item.key]: checked })} />
-          </label>
+            <Switch aria-label={item.title} checked={draft[item.key]} onCheckedChange={(checked) => setDraft({ ...draft, [item.key]: checked })} />
+          </div>
         ))}
       </div>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
         <ListField label="Test numbers" value={draft.testNumbers} onChange={(testNumbers) => setDraft({ ...draft, testNumbers })} placeholder="+15125550123" hint="One E.164 number per line. The server normalizes and validates every value." />
+        <ListField label="Test team numbers" value={draft.testTeamNumbers} onChange={(testTeamNumbers) => setDraft({ ...draft, testTeamNumbers })} placeholder="+15125550123" hint="One E.164 test team number per line. These are recognized by the protected team-preview flow." />
         <ListField label="Active reel codes" value={draft.activeReelCodes} onChange={(activeReelCodes) => setDraft({ ...draft, activeReelCodes })} placeholder="sl1" hint="Only these sanitized attribution codes are accepted by the buyer funnel." />
         <ListField label="Brokerage domains" value={draft.brokerageDomains} onChange={(brokerageDomains) => setDraft({ ...draft, brokerageDomains })} placeholder="examplebrokerage.com" hint="Domains used to identify broker/agent identities before link issuance." />
         <ListField label="FUB REALTOR® tags" value={draft.fubRealtorTags} onChange={(fubRealtorTags) => setDraft({ ...draft, fubRealtorTags })} placeholder="Recruit" hint="Follow Up Boss tags that should be screened as real-estate professionals." />
@@ -413,16 +424,26 @@ function SettingsEditor({ settings }: { settings: SettingsInput }) {
 
 function BuilderDealsAdminContent() {
   const utils = trpc.useUtils();
-  const { data: overview, isLoading, isFetching, refetch } = trpc.deals.admin.overview.useQuery();
-  const { data: settings } = trpc.deals.admin.settings.useQuery();
+  const overviewQuery = trpc.deals.admin.overview.useQuery(undefined, { retry: false, refetchOnWindowFocus: false });
+  const settingsQuery = trpc.deals.admin.settings.useQuery(undefined, { retry: false, refetchOnWindowFocus: false });
+  // Health performs credential availability checks, so run it only when an
+  // administrator explicitly asks instead of on every admin-page visit.
+  const healthQuery = trpc.deals.admin.health.useQuery(undefined, { enabled: false, retry: false });
+  const overview = overviewQuery.data;
+  const settings = settingsQuery.data;
   const [blockForm, setBlockForm] = useState<BlockForm>(EMPTY_BLOCK);
   const [knownAgentForm, setKnownAgentForm] = useState<KnownAgentForm>(EMPTY_KNOWN_AGENT);
   const [teamForm, setTeamForm] = useState<TeamForm>(EMPTY_TEAM);
+  const [doNotAutoImport, setDoNotAutoImport] = useState({ value: "", kind: "phone" as "phone" | "email" });
+  const [knownAgentsCsv, setKnownAgentsCsv] = useState("");
+  const [knownAgentsCsvName, setKnownAgentsCsvName] = useState("");
   const [manualHomeForm, setManualHomeForm] = useState<ManualHomeForm>(EMPTY_MANUAL_HOME);
   const [reelDrafts, setReelDrafts] = useState<Record<number, string>>({});
   const [photoCrops, setPhotoCrops] = useState<Record<number, string>>({});
   const [leadToBlock, setLeadToBlock] = useState<number | null>(null);
+  const [leadToMakeTeam, setLeadToMakeTeam] = useState<number | null>(null);
   const [leadBlockReason, setLeadBlockReason] = useState("");
+  const [confirmCapIncrease, setConfirmCapIncrease] = useState(false);
 
   const refreshOverview = () => void utils.deals.admin.overview.invalidate();
   const mutationError = (error: { message: string }) => toast.error(error.message || "Could not save Builder Deals changes");
@@ -443,8 +464,55 @@ function BuilderDealsAdminContent() {
     onSuccess: () => { refreshOverview(); setKnownAgentForm(EMPTY_KNOWN_AGENT); toast.success("Known agent added"); },
     onError: mutationError,
   });
+  const importKnownAgentsCsv = trpc.deals.admin.importKnownAgentsCsv.useMutation({
+    onSuccess: (result) => {
+      refreshOverview();
+      setKnownAgentsCsv("");
+      setKnownAgentsCsvName("");
+      toast.success(`CSV import complete: ${result.imported} imported, ${result.skipped} skipped, ${result.linksKilled} access link${result.linksKilled === 1 ? "" : "s"} revoked.`);
+    },
+    onError: mutationError,
+  });
+  const addDoNotAutoImport = trpc.deals.admin.addDoNotAutoImport.useMutation({
+    onSuccess: () => {
+      refreshOverview();
+      setDoNotAutoImport({ value: "", kind: "phone" });
+      toast.success("Auto-import exclusion saved");
+    },
+    onError: mutationError,
+  });
   const addTeam = trpc.deals.admin.addTeam.useMutation({
     onSuccess: () => { refreshOverview(); setTeamForm(EMPTY_TEAM); toast.success("Team allowlist entry added"); },
+    onError: mutationError,
+  });
+  const makeLeadTeam = trpc.deals.admin.makeLeadTeam.useMutation({
+    onSuccess: () => { refreshOverview(); setLeadToMakeTeam(null); toast.success("Lead added to team preview"); },
+    onError: mutationError,
+  });
+  const raiseDailyVerificationCap = trpc.deals.admin.raiseDailyVerificationCap.useMutation({
+    onSuccess: (nextSettings) => {
+      void utils.deals.admin.settings.invalidate();
+      setConfirmCapIncrease(false);
+      toast.success(`Daily verification cap raised to ${nextSettings.dailyVerificationCap.toLocaleString()}`);
+    },
+    onError: mutationError,
+  });
+  const runFubRetry = trpc.deals.admin.runFubRetry.useMutation({
+    onSuccess: (result) => {
+      refreshOverview();
+      toast.success(`CRM retry pass complete: ${result.sent} sent, ${result.failed} failed, ${result.skipped} skipped.`);
+    },
+    onError: mutationError,
+  });
+  const retryFub = trpc.deals.admin.retryFub.useMutation({
+    onSuccess: (result) => {
+      refreshOverview();
+      toast.success(`CRM retry complete: ${result.sent} sent, ${result.failed} failed, ${result.skipped} skipped.`);
+    },
+    onError: mutationError,
+  });
+  const refreshOfficialSources = trpc.deals.admin.refreshCommunity.useMutation({
+    onSuccess: () => { refreshOverview(); toast.success("Official source refresh completed"); },
     onError: mutationError,
   });
   const addManualHome = trpc.deals.admin.addManualHome.useMutation({
@@ -460,11 +528,26 @@ function BuilderDealsAdminContent() {
     onError: mutationError,
   });
 
-  if (isLoading || !overview) {
+  if (overviewQuery.isLoading) {
     return (
       <div className="flex min-h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin text-gold" /> Loading Builder Deals operations…
       </div>
+    );
+  }
+
+  if (overviewQuery.isError || !overview) {
+    return (
+      <section role="alert" className="border border-destructive/40 bg-destructive/5 p-5">
+        <div className="flex items-start gap-3">
+          <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+          <div>
+            <h1 className="font-serif text-2xl">Builder Deals operations unavailable</h1>
+            <p className="mt-2 text-sm text-muted-foreground">{overviewQuery.error?.message || "The private operations data could not be loaded. No controls have been shown or changed."}</p>
+            <Button className="mt-4 w-full sm:w-auto" variant="outline" onClick={() => void overviewQuery.refetch()}><RefreshCw className="mr-1 h-4 w-4" /> Try again</Button>
+          </div>
+        </div>
+      </section>
     );
   }
 
@@ -476,6 +559,7 @@ function BuilderDealsAdminContent() {
   const availableHomes = overview.homes.filter((home) => home.status === "available").length;
   const visiblePhotos = overview.photos.filter((photo) => photo.processingState === "processed" && !photo.automaticHidden && !photo.adminHidden).length;
   const selectedLead = overview.leads.find((lead) => lead.id === leadToBlock);
+  const selectedTeamLead = overview.leads.find((lead) => lead.id === leadToMakeTeam);
 
   const saveReel = (communityId: number, value: string) => {
     const reelUrl = value.trim();
@@ -516,8 +600,36 @@ function BuilderDealsAdminContent() {
       name: knownAgentForm.name.trim() || undefined,
       phoneE164: knownAgentForm.phoneE164.trim() || undefined,
       email: knownAgentForm.email.trim().toLowerCase() || undefined,
-      source: knownAgentForm.source,
+      source: "manual",
     });
+  };
+
+  const submitKnownAgentsCsv = () => {
+    if (knownAgentsCsv.trim().length < 2) {
+      toast.error("Choose or paste a CSV with at least a header row.");
+      return;
+    }
+    importKnownAgentsCsv.mutate({ csv: knownAgentsCsv });
+  };
+
+  const readKnownAgentsCsv = (file: File | undefined) => {
+    if (!file) return;
+    if (file.size > 2_000_000) {
+      toast.error("CSV files must be 2 MB or smaller.");
+      return;
+    }
+    void file.text().then((csv) => {
+      setKnownAgentsCsv(csv);
+      setKnownAgentsCsvName(file.name);
+    }).catch(() => toast.error("That CSV could not be read on this device."));
+  };
+
+  const submitDoNotAutoImport = () => {
+    if (doNotAutoImport.value.trim().length < 3) {
+      toast.error("Enter a phone number or email address with at least three characters.");
+      return;
+    }
+    addDoNotAutoImport.mutate({ value: doNotAutoImport.value.trim(), kind: doNotAutoImport.kind });
   };
 
   const submitTeam = () => {
@@ -529,7 +641,7 @@ function BuilderDealsAdminContent() {
       name: teamForm.name.trim() || undefined,
       phoneE164: teamForm.phoneE164.trim() || undefined,
       email: teamForm.email.trim().toLowerCase() || undefined,
-      source: teamForm.source,
+      source: "manual",
     });
   };
 
@@ -574,7 +686,7 @@ function BuilderDealsAdminContent() {
             Private buyer-funnel administration. Contact data, source mappings, address data, screening controls, and operational records remain inside the protected admin surface.
           </p>
         </div>
-        <Button variant="outline" onClick={() => void refetch()} disabled={isFetching}><RefreshCw className={`mr-1 h-4 w-4 ${isFetching ? "animate-spin" : ""}`} /> Refresh</Button>
+        <Button variant="outline" className="w-full sm:w-auto" onClick={() => void overviewQuery.refetch()} disabled={overviewQuery.isFetching}><RefreshCw className={`mr-1 h-4 w-4 ${overviewQuery.isFetching ? "animate-spin" : ""}`} /> Refresh</Button>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -585,7 +697,51 @@ function BuilderDealsAdminContent() {
         <Metric label="Active blocks" value={overview.blocks.length} detail={`${blockedLeads} blocked lead records`} tone={overview.blocks.length ? "warning" : "default"} />
       </div>
 
-      <Section title="Community launch controls" icon={Building2} description="Pause a community to remove it from the buyer catalog. Manual mode prevents scheduled source changes. The private builder mapping below is intentionally rendered only in this role-gated panel.">
+      <Section title="Service health & recovery" icon={HeartPulse} description="Checks expose credential and service availability only; no credentials or balance amounts are returned. CRM retries run the already queued work only.">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+          <div className="border border-border p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-medium">Credential and service check</h3>
+                <p className="mt-1 text-xs text-muted-foreground">Run on demand. It checks Twilio Verify configuration and service reachability, plus FUB configuration and reachability.</p>
+              </div>
+              <Button type="button" size="sm" variant="outline" className="w-full sm:w-auto" onClick={() => void healthQuery.refetch()} disabled={healthQuery.isFetching}>
+                <HeartPulse className={`mr-1 h-4 w-4 ${healthQuery.isFetching ? "animate-spin" : ""}`} /> {healthQuery.isFetching ? "Checking…" : "Check health"}
+              </Button>
+            </div>
+            {healthQuery.isError && <p role="alert" className="mt-3 text-sm text-destructive">Health check could not be completed. Try again; no settings were changed.</p>}
+            {healthQuery.data && <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="border border-border p-3"><p className="text-xs font-medium">Twilio Verify</p><dl className="mt-2 space-y-1 text-xs text-muted-foreground"><div className="flex justify-between gap-3"><dt>Account SID</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.accountSid}</dd></div><div className="flex justify-between gap-3"><dt>Auth token</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.authToken}</dd></div><div className="flex justify-between gap-3"><dt>Service SID</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.serviceSid}</dd></div><div className="flex justify-between gap-3"><dt>Availability</dt><dd className="text-foreground">{healthQuery.data.twilioVerify.balance}</dd></div></dl></div>
+              <div className="border border-border p-3"><p className="text-xs font-medium">Follow Up Boss</p><dl className="mt-2 space-y-1 text-xs text-muted-foreground"><div className="flex justify-between gap-3"><dt>API key</dt><dd className="text-foreground">{healthQuery.data.fub.apiKey}</dd></div><div className="flex justify-between gap-3"><dt>Availability</dt><dd className="text-foreground">{healthQuery.data.fub.availability}</dd></div></dl></div>
+            </div>}
+          </div>
+          <div className="border border-border p-4">
+            <h3 className="font-medium">Verification capacity</h3>
+            <p className="mt-1 text-xs text-muted-foreground">Current daily cap: <strong className="text-foreground">{settings?.dailyVerificationCap?.toLocaleString() ?? "Loading…"}</strong>. The emergency action raises the saved cap by exactly 1,000.</p>
+            <label className="mt-4 flex items-start gap-2 text-sm">
+              <input type="checkbox" checked={confirmCapIncrease} onChange={(event) => setConfirmCapIncrease(event.target.checked)} disabled={!settings || raiseDailyVerificationCap.isPending} className="mt-0.5 h-4 w-4 accent-[oklch(0.75_0.09_85)]" />
+              <span>I understand this immediately increases the daily verification cap by 1,000.</span>
+            </label>
+            <Button type="button" size="sm" variant="outline" className="mt-4 w-full sm:w-auto" disabled={!settings || !confirmCapIncrease || raiseDailyVerificationCap.isPending} onClick={() => raiseDailyVerificationCap.mutate({ confirm: true })}>
+              <Plus className="mr-1 h-4 w-4" /> {raiseDailyVerificationCap.isPending ? "Raising…" : "Raise cap by 1,000"}
+            </Button>
+          </div>
+          <div className="border border-border p-4 lg:max-w-64">
+            <h3 className="font-medium">CRM retry pass</h3>
+            <p className="mt-1 text-xs text-muted-foreground">Attempts queued FUB work that is due now. It does not create new leads.</p>
+            <Button type="button" size="sm" variant="outline" className="mt-4 w-full" disabled={runFubRetry.isPending} onClick={() => runFubRetry.mutate()}>
+              <RotateCcw className={`mr-1 h-4 w-4 ${runFubRetry.isPending ? "animate-spin" : ""}`} /> {runFubRetry.isPending ? "Retrying…" : "Run due retries"}
+            </Button>
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Community launch controls"
+        icon={Building2}
+        description="Pause a community to remove it from the buyer catalog. Manual mode prevents scheduled source changes. The private builder mapping below is intentionally rendered only in this role-gated panel. Official source refresh runs every configured official source, not only the selected row."
+        action={overview.communities.length > 0 ? <Button type="button" variant="outline" className="w-full sm:w-auto" disabled={refreshOfficialSources.isPending} onClick={() => refreshOfficialSources.mutate({ id: overview.communities[0].id })}><RefreshCw className={`mr-1 h-4 w-4 ${refreshOfficialSources.isPending ? "animate-spin" : ""}`} /> {refreshOfficialSources.isPending ? "Refreshing…" : "Refresh official sources"}</Button> : undefined}
+      >
         <div className="space-y-4">
           {overview.communities.map((community) => (
             <div key={community.id} className="border border-border p-4">
@@ -612,19 +768,21 @@ function BuilderDealsAdminContent() {
         </div>
       </Section>
 
-      <SettingsEditor settings={settings} />
+      {settingsQuery.isLoading && <section className="border border-border bg-card p-5 text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin text-gold" /> Loading Builder Deals settings…</section>}
+      {settingsQuery.isError && <section role="alert" className="border border-destructive/40 bg-destructive/5 p-5"><p className="font-medium text-destructive">Settings are unavailable</p><p className="mt-1 text-sm text-muted-foreground">Settings were not loaded, so no default values are available to save.</p><Button variant="outline" className="mt-4 w-full sm:w-auto" onClick={() => void settingsQuery.refetch()}>Try loading settings again</Button></section>}
+      {settings && <SettingsEditor settings={settings} />}
 
       <Section title="Manual home entry" icon={Home} description="Add or update a manually curated home record. This form writes the private source and address data to the protected Builder Deals catalog only.">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="space-y-1.5"><Label>Community</Label><Select value={manualHomeForm.communityId} onValueChange={(communityId) => setManualHomeForm({ ...manualHomeForm, communityId })}><SelectTrigger><SelectValue placeholder="Choose community" /></SelectTrigger><SelectContent>{overview.communities.map((community) => <SelectItem key={community.id} value={String(community.id)}>{community.publicLabel}</SelectItem>)}</SelectContent></Select></div>
-          <div className="space-y-1.5 xl:col-span-2"><Label>Private source URL</Label><Input value={manualHomeForm.sourceUrl} onChange={(event) => setManualHomeForm({ ...manualHomeForm, sourceUrl: event.target.value })} placeholder="https://builder.example/home" /></div>
-          <div className="space-y-1.5"><Label>Home kind</Label><Select value={manualHomeForm.kind} onValueChange={(kind) => setManualHomeForm({ ...manualHomeForm, kind: kind as ManualHomeForm["kind"] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="quick_move_in">Quick move-in</SelectItem><SelectItem value="to_be_built">To be built</SelectItem></SelectContent></Select></div>
-          <div className="space-y-1.5"><Label>Private address</Label><Input value={manualHomeForm.privateAddress} onChange={(event) => setManualHomeForm({ ...manualHomeForm, privateAddress: event.target.value })} /></div>
-          <div className="space-y-1.5"><Label>Private plan name</Label><Input value={manualHomeForm.privatePlanName} onChange={(event) => setManualHomeForm({ ...manualHomeForm, privatePlanName: event.target.value })} /></div>
-          <div className="space-y-1.5"><Label>Beds</Label><Input value={manualHomeForm.beds} onChange={(event) => setManualHomeForm({ ...manualHomeForm, beds: event.target.value })} placeholder="4" /></div>
-          <div className="space-y-1.5"><Label>Baths</Label><Input value={manualHomeForm.baths} onChange={(event) => setManualHomeForm({ ...manualHomeForm, baths: event.target.value })} placeholder="3.5" /></div>
-          <div className="space-y-1.5"><Label>Square feet</Label><Input type="number" min="0" value={manualHomeForm.sqft} onChange={(event) => setManualHomeForm({ ...manualHomeForm, sqft: event.target.value })} /></div>
-          <div className="space-y-1.5"><Label>Price</Label><Input type="number" min="0" value={manualHomeForm.price} onChange={(event) => setManualHomeForm({ ...manualHomeForm, price: event.target.value })} /></div>
+          <div className="space-y-1.5"><Label htmlFor="manual-home-community">Community</Label><Select value={manualHomeForm.communityId} onValueChange={(communityId) => setManualHomeForm({ ...manualHomeForm, communityId })}><SelectTrigger id="manual-home-community"><SelectValue placeholder="Choose community" /></SelectTrigger><SelectContent>{overview.communities.map((community) => <SelectItem key={community.id} value={String(community.id)}>{community.publicLabel}</SelectItem>)}</SelectContent></Select></div>
+          <div className="space-y-1.5 xl:col-span-2"><Label htmlFor="manual-home-source-url">Private source URL</Label><Input id="manual-home-source-url" type="url" value={manualHomeForm.sourceUrl} onChange={(event) => setManualHomeForm({ ...manualHomeForm, sourceUrl: event.target.value })} placeholder="https://builder.example/home" /></div>
+          <div className="space-y-1.5"><Label htmlFor="manual-home-kind">Home kind</Label><Select value={manualHomeForm.kind} onValueChange={(kind) => setManualHomeForm({ ...manualHomeForm, kind: kind as ManualHomeForm["kind"] })}><SelectTrigger id="manual-home-kind"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="quick_move_in">Quick move-in</SelectItem><SelectItem value="to_be_built">To be built</SelectItem></SelectContent></Select></div>
+          <div className="space-y-1.5"><Label htmlFor="manual-home-address">Private address</Label><Input id="manual-home-address" value={manualHomeForm.privateAddress} onChange={(event) => setManualHomeForm({ ...manualHomeForm, privateAddress: event.target.value })} /></div>
+          <div className="space-y-1.5"><Label htmlFor="manual-home-plan">Private plan name</Label><Input id="manual-home-plan" value={manualHomeForm.privatePlanName} onChange={(event) => setManualHomeForm({ ...manualHomeForm, privatePlanName: event.target.value })} /></div>
+          <div className="space-y-1.5"><Label htmlFor="manual-home-beds">Beds</Label><Input id="manual-home-beds" inputMode="decimal" value={manualHomeForm.beds} onChange={(event) => setManualHomeForm({ ...manualHomeForm, beds: event.target.value })} placeholder="4" /></div>
+          <div className="space-y-1.5"><Label htmlFor="manual-home-baths">Baths</Label><Input id="manual-home-baths" inputMode="decimal" value={manualHomeForm.baths} onChange={(event) => setManualHomeForm({ ...manualHomeForm, baths: event.target.value })} placeholder="3.5" /></div>
+          <div className="space-y-1.5"><Label htmlFor="manual-home-sqft">Square feet</Label><Input id="manual-home-sqft" type="number" inputMode="numeric" min="0" value={manualHomeForm.sqft} onChange={(event) => setManualHomeForm({ ...manualHomeForm, sqft: event.target.value })} /></div>
+          <div className="space-y-1.5"><Label htmlFor="manual-home-price">Price</Label><Input id="manual-home-price" type="number" inputMode="numeric" min="0" value={manualHomeForm.price} onChange={(event) => setManualHomeForm({ ...manualHomeForm, price: event.target.value })} /></div>
           <div className="flex items-end"><Button onClick={submitManualHome} disabled={addManualHome.isPending} className="w-full bg-gold text-primary-foreground hover:bg-gold/90"><Plus className="mr-1 h-4 w-4" />{addManualHome.isPending ? "Saving…" : "Save manual home"}</Button></div>
         </div>
         <div className="mt-6 overflow-x-auto">
@@ -651,13 +809,25 @@ function BuilderDealsAdminContent() {
         </div>
       </Section>
 
-      <Section title="Buyer leads & active access" icon={Users} description="Flags, contact details, and FUB delivery state are private operational records. Blocking a lead also revokes every current access link for that lead.">
+      <Section title="Buyer leads & active access" icon={Users} description="Flags, contact details, and FUB delivery state are private operational records. Blocking a lead revokes every current access link; adding a lead to team preview changes the lead status and allowlists that identity.">
         <div className="overflow-x-auto">
-          <Table>
+          <Table className="min-w-[56rem]">
             <TableHeader><TableRow><TableHead>Lead</TableHead><TableHead>Contact</TableHead><TableHead>Attribution</TableHead><TableHead>Flags</TableHead><TableHead>Access</TableHead><TableHead>FUB</TableHead><TableHead>Created</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
             <TableBody>
-              {overview.leads.map((lead) => <TableRow key={lead.id}><TableCell><p className="font-medium">{lead.name || "Unnamed buyer"}</p><p className="text-xs text-muted-foreground">{lead.instagramHandle ? `@${lead.instagramHandle}` : "No Instagram handle"}</p></TableCell><TableCell className="text-xs">{lead.phoneE164}<br />{lead.email || "—"}</TableCell><TableCell><p className="text-xs">{lead.sourceCode}</p><p className="text-xs text-muted-foreground">{lead.timeline || "No timeline"}</p></TableCell><TableCell className="max-w-56"><div className="flex flex-wrap gap-1">{flagValues(lead.flags).length ? flagValues(lead.flags).map((flag, index) => <Badge key={`${flag}-${index}`} variant="secondary" className="max-w-40 truncate text-[10px]">{flag}</Badge>) : <span className="text-xs text-muted-foreground">None</span>}</div></TableCell><TableCell><Badge variant={lead.status === "verified" ? "default" : lead.status === "blocked" ? "destructive" : "secondary"}>{lead.status}</Badge><p className="mt-1 text-[10px] text-muted-foreground">Expires {displayDate(lead.expiresAt)}</p></TableCell><TableCell><Badge variant={lead.fubStatus === "synced" ? "default" : lead.fubStatus === "failed" ? "destructive" : "secondary"}>{lead.fubStatus}</Badge></TableCell><TableCell className="whitespace-nowrap text-xs">{displayDate(lead.createdAt)}</TableCell><TableCell className="text-right">{lead.status !== "blocked" ? <Button size="sm" variant="destructive" onClick={() => { setLeadToBlock(lead.id); setLeadBlockReason(""); }}><Ban className="mr-1 h-3.5 w-3.5" /> Block & revoke</Button> : <span className="text-xs text-muted-foreground">Blocked</span>}</TableCell></TableRow>)}
+              {overview.leads.map((lead) => <TableRow key={lead.id}><TableCell><p className="font-medium">{lead.name || "Unnamed buyer"}</p><p className="text-xs text-muted-foreground">{lead.instagramHandle ? `@${lead.instagramHandle}` : "No Instagram handle"}</p></TableCell><TableCell className="text-xs">{lead.phoneE164}<br />{lead.email || "—"}</TableCell><TableCell><p className="text-xs">{lead.sourceCode}</p><p className="text-xs text-muted-foreground">{lead.timeline || "No timeline"}</p></TableCell><TableCell className="max-w-56"><div className="flex flex-wrap gap-1">{flagValues(lead.flags).length ? flagValues(lead.flags).map((flag, index) => <Badge key={`${flag}-${index}`} variant="secondary" className="max-w-40 truncate text-[10px]">{flag}</Badge>) : <span className="text-xs text-muted-foreground">None</span>}</div></TableCell><TableCell><Badge variant={lead.status === "verified" ? "default" : lead.status === "blocked" ? "destructive" : "secondary"}>{lead.status}</Badge><p className="mt-1 text-[10px] text-muted-foreground">Expires {displayDate(lead.expiresAt)}</p></TableCell><TableCell><Badge variant={lead.fubStatus === "synced" ? "default" : lead.fubStatus === "failed" ? "destructive" : "secondary"}>{lead.fubStatus}</Badge></TableCell><TableCell className="whitespace-nowrap text-xs">{displayDate(lead.createdAt)}</TableCell><TableCell><div className="flex min-w-40 flex-col gap-2 sm:items-end">{lead.status === "verified" && <Button size="sm" variant="outline" className="w-full sm:w-auto" onClick={() => setLeadToMakeTeam(lead.id)}><UserRoundCheck className="mr-1 h-3.5 w-3.5" /> Team preview</Button>}{lead.status !== "blocked" ? <Button size="sm" variant="destructive" className="w-full sm:w-auto" onClick={() => { setLeadToBlock(lead.id); setLeadBlockReason(""); }}><Ban className="mr-1 h-3.5 w-3.5" /> Block & revoke</Button> : <span className="text-xs text-muted-foreground">Blocked</span>}</div></TableCell></TableRow>)}
               {overview.leads.length === 0 && <TableRow><TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">No Builder Deals leads have been recorded.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </div>
+      </Section>
+
+      <Section title="CRM delivery queue" icon={RotateCcw} description="Shows durable Follow Up Boss delivery jobs. A manual retry is available only for failed jobs; it requeues and runs that existing job once.">
+        <div className="overflow-x-auto">
+          <Table className="min-w-[48rem]">
+            <TableHeader><TableRow><TableHead>Lead</TableHead><TableHead>Operation</TableHead><TableHead>Status</TableHead><TableHead>Attempts</TableHead><TableHead>Next attempt</TableHead><TableHead>Last error</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {overview.fubJobs.map((job) => <TableRow key={job.id}><TableCell>#{job.leadId}</TableCell><TableCell className="text-xs">{job.operation.replaceAll("_", " ")}</TableCell><TableCell><Badge variant={job.status === "synced" ? "default" : job.status === "failed" ? "destructive" : "secondary"}>{job.status}</Badge></TableCell><TableCell>{job.attempts}</TableCell><TableCell className="whitespace-nowrap text-xs">{displayDate(job.nextAttemptAt)}</TableCell><TableCell className="max-w-64 text-xs">{job.lastError || "—"}</TableCell><TableCell className="text-right">{job.status === "failed" ? <Button size="sm" variant="outline" className="w-full sm:w-auto" disabled={retryFub.isPending} onClick={() => retryFub.mutate({ id: job.id })}><RotateCcw className="mr-1 h-3.5 w-3.5" /> {retryFub.isPending ? "Retrying…" : "Retry once"}</Button> : <span className="text-xs text-muted-foreground">—</span>}</TableCell></TableRow>)}
+              {overview.fubJobs.length === 0 && <TableRow><TableCell colSpan={7} className="py-6 text-center text-sm text-muted-foreground">No CRM delivery jobs have been created.</TableCell></TableRow>}
             </TableBody>
           </Table>
         </div>
@@ -669,15 +839,18 @@ function BuilderDealsAdminContent() {
           <div className="mt-6 max-h-96 overflow-auto border border-border"><Table><TableHeader><TableRow><TableHead>Identifier</TableHead><TableHead>Reason</TableHead><TableHead>Added</TableHead><TableHead /></TableRow></TableHeader><TableBody>{overview.blocks.map((block) => <TableRow key={block.id}><TableCell className="text-xs">{block.phoneE164 || block.email || masked(block.deviceHash)}</TableCell><TableCell className="max-w-44 text-xs">{block.reason}</TableCell><TableCell className="whitespace-nowrap text-xs">{displayDate(block.createdAt)}</TableCell><TableCell className="text-right"><Button size="sm" variant="ghost" className="text-destructive" disabled={unblock.isPending} onClick={() => { if (window.confirm("Remove this Builder Deals block?")) unblock.mutate({ id: block.id }); }}>Unblock</Button></TableCell></TableRow>)}{overview.blocks.length === 0 && <TableRow><TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">No active blocks.</TableCell></TableRow>}</TableBody></Table></div>
         </Section>
 
-        <Section title="Eligibility allowlists" icon={ShieldAlert} description="Team members may be recognized separately from buyer screening. Known agents are retained as a protected block/screening source.">
+        <Section title="Screening & team controls" icon={ShieldAlert} description="Manual entries are stored with their actual source. Use CSV import for CSV source records. Exclusions keep a phone or email out of automatic known-agent imports.">
           <div className="grid gap-5 lg:grid-cols-2">
-            <div className="border border-border p-4"><h3 className="font-medium">Add known agent</h3><p className="mt-1 text-[11px] text-muted-foreground">CSV, recruiting, or manual identity source.</p><div className="mt-4 space-y-3"><Input value={knownAgentForm.name} onChange={(event) => setKnownAgentForm({ ...knownAgentForm, name: event.target.value })} placeholder="Name" /><Input value={knownAgentForm.phoneE164} onChange={(event) => setKnownAgentForm({ ...knownAgentForm, phoneE164: event.target.value })} placeholder="Phone (E.164)" /><Input type="email" value={knownAgentForm.email} onChange={(event) => setKnownAgentForm({ ...knownAgentForm, email: event.target.value })} placeholder="Email" /><Select value={knownAgentForm.source} onValueChange={(source) => setKnownAgentForm({ ...knownAgentForm, source: source as KnownAgentForm["source"] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manual">Manual</SelectItem><SelectItem value="csv">CSV</SelectItem><SelectItem value="fub_recruit">FUB Recruit</SelectItem></SelectContent></Select><Button className="w-full" variant="outline" disabled={addKnownAgent.isPending} onClick={submitKnownAgent}>Add known agent</Button></div></div>
-            <div className="border border-border p-4"><h3 className="font-medium">Add team allowlist</h3><p className="mt-1 text-[11px] text-muted-foreground">Recognized team identities may access the team flow.</p><div className="mt-4 space-y-3"><Input value={teamForm.name} onChange={(event) => setTeamForm({ ...teamForm, name: event.target.value })} placeholder="Name" /><Input value={teamForm.phoneE164} onChange={(event) => setTeamForm({ ...teamForm, phoneE164: event.target.value })} placeholder="Phone (E.164)" /><Input type="email" value={teamForm.email} onChange={(event) => setTeamForm({ ...teamForm, email: event.target.value })} placeholder="Email" /><Select value={teamForm.source} onValueChange={(source) => setTeamForm({ ...teamForm, source: source as TeamForm["source"] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manual">Manual</SelectItem><SelectItem value="fub">FUB</SelectItem><SelectItem value="test">Test</SelectItem></SelectContent></Select><Button className="w-full" variant="outline" disabled={addTeam.isPending} onClick={submitTeam}>Add team allowlist</Button></div></div>
+            <div className="space-y-5 border border-border p-4"><div><h3 className="font-medium">Add known agent manually</h3><p className="mt-1 text-[11px] text-muted-foreground">Add at least one identifier. This creates a manual record and can revoke matching active buyer links.</p></div><div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label htmlFor="known-agent-name">Name</Label><Input id="known-agent-name" value={knownAgentForm.name} onChange={(event) => setKnownAgentForm({ ...knownAgentForm, name: event.target.value })} /></div><div className="space-y-1.5"><Label htmlFor="known-agent-phone">Phone (E.164)</Label><Input id="known-agent-phone" inputMode="tel" value={knownAgentForm.phoneE164} onChange={(event) => setKnownAgentForm({ ...knownAgentForm, phoneE164: event.target.value })} placeholder="+15125550123" /></div><div className="space-y-1.5 sm:col-span-2"><Label htmlFor="known-agent-email">Email</Label><Input id="known-agent-email" type="email" autoComplete="email" value={knownAgentForm.email} onChange={(event) => setKnownAgentForm({ ...knownAgentForm, email: event.target.value })} placeholder="name@example.com" /></div></div><Button className="w-full" variant="outline" disabled={addKnownAgent.isPending} onClick={submitKnownAgent}>{addKnownAgent.isPending ? "Adding…" : "Add known agent"}</Button></div>
+            <div className="space-y-5 border border-border p-4"><div><h3 className="font-medium">Import known-agent CSV</h3><p className="mt-1 text-[11px] text-muted-foreground">Accepted headers: name or full name, phone, and email. Up to 2 MB. Records are normalized and invalid rows are skipped server-side.</p></div><div className="space-y-1.5"><Label htmlFor="known-agent-csv">CSV file</Label><Input id="known-agent-csv" type="file" accept=".csv,text/csv" onChange={(event) => readKnownAgentsCsv(event.target.files?.[0])} /></div><div className="space-y-1.5"><Label htmlFor="known-agent-csv-paste">Or paste CSV</Label><Textarea id="known-agent-csv-paste" rows={4} value={knownAgentsCsv} onChange={(event) => { setKnownAgentsCsv(event.target.value); setKnownAgentsCsvName(""); }} placeholder={'name,phone,email\nJane Doe,+15125550123,jane@example.com'} /></div>{knownAgentsCsvName && <p className="text-xs text-muted-foreground">Ready to import: {knownAgentsCsvName}</p>}<Button className="w-full" variant="outline" disabled={importKnownAgentsCsv.isPending || knownAgentsCsv.trim().length < 2} onClick={submitKnownAgentsCsv}><Upload className="mr-1 h-4 w-4" /> {importKnownAgentsCsv.isPending ? "Importing…" : "Import CSV"}</Button></div>
+            <div className="space-y-5 border border-border p-4"><div><h3 className="font-medium">Add team allowlist manually</h3><p className="mt-1 text-[11px] text-muted-foreground">Recognized team identities may use the team-preview flow. Add at least one identifier.</p></div><div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label htmlFor="team-name">Name</Label><Input id="team-name" value={teamForm.name} onChange={(event) => setTeamForm({ ...teamForm, name: event.target.value })} /></div><div className="space-y-1.5"><Label htmlFor="team-phone">Phone (E.164)</Label><Input id="team-phone" inputMode="tel" value={teamForm.phoneE164} onChange={(event) => setTeamForm({ ...teamForm, phoneE164: event.target.value })} placeholder="+15125550123" /></div><div className="space-y-1.5 sm:col-span-2"><Label htmlFor="team-email">Email</Label><Input id="team-email" type="email" autoComplete="email" value={teamForm.email} onChange={(event) => setTeamForm({ ...teamForm, email: event.target.value })} placeholder="name@example.com" /></div></div><Button className="w-full" variant="outline" disabled={addTeam.isPending} onClick={submitTeam}>{addTeam.isPending ? "Adding…" : "Add team allowlist"}</Button></div>
+            <div className="space-y-5 border border-border p-4"><div><h3 className="font-medium">Prevent automatic known-agent import</h3><p className="mt-1 text-[11px] text-muted-foreground">This exclusion applies to automatic known-agent imports. It does not remove an existing record or block visitor access.</p></div><div className="space-y-1.5"><Label htmlFor="do-not-auto-import-kind">Identifier type</Label><Select value={doNotAutoImport.kind} onValueChange={(kind) => setDoNotAutoImport({ ...doNotAutoImport, kind: kind as "phone" | "email" })}><SelectTrigger id="do-not-auto-import-kind"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="phone">Phone</SelectItem><SelectItem value="email">Email</SelectItem></SelectContent></Select></div><div className="space-y-1.5"><Label htmlFor="do-not-auto-import-value">{doNotAutoImport.kind === "phone" ? "Phone number" : "Email address"}</Label><Input id="do-not-auto-import-value" type={doNotAutoImport.kind === "email" ? "email" : "tel"} inputMode={doNotAutoImport.kind === "email" ? "email" : "tel"} autoComplete="off" value={doNotAutoImport.value} onChange={(event) => setDoNotAutoImport({ ...doNotAutoImport, value: event.target.value })} placeholder={doNotAutoImport.kind === "email" ? "name@example.com" : "+15125550123"} /></div><Button className="w-full" variant="outline" disabled={addDoNotAutoImport.isPending} onClick={submitDoNotAutoImport}>{addDoNotAutoImport.isPending ? "Saving…" : "Save exclusion"}</Button></div>
           </div>
           <div className="mt-5 grid gap-5 lg:grid-cols-2">
             <div className="max-h-64 overflow-auto border border-border"><Table><TableHeader><TableRow><TableHead>Known agent</TableHead><TableHead>Source</TableHead><TableHead>Added</TableHead></TableRow></TableHeader><TableBody>{overview.agents.map((agent) => <TableRow key={agent.id}><TableCell><p className="font-medium text-sm">{agent.name || "Unnamed"}</p><p className="text-xs text-muted-foreground">{agent.phoneE164 || agent.email || "No contact identifier"}</p></TableCell><TableCell><Badge variant="secondary">{agent.source}</Badge></TableCell><TableCell className="whitespace-nowrap text-xs">{displayDate(agent.createdAt)}</TableCell></TableRow>)}{overview.agents.length === 0 && <TableRow><TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">No known agents recorded.</TableCell></TableRow>}</TableBody></Table></div>
             <div className="max-h-64 overflow-auto border border-border"><Table><TableHeader><TableRow><TableHead>Team member</TableHead><TableHead>Source</TableHead><TableHead>Added</TableHead></TableRow></TableHeader><TableBody>{overview.team.map((member) => <TableRow key={member.id}><TableCell><p className="font-medium text-sm">{member.name || "Unnamed"}</p><p className="text-xs text-muted-foreground">{member.phoneE164 || member.email || "No contact identifier"}</p></TableCell><TableCell><Badge variant="secondary">{member.source}</Badge></TableCell><TableCell className="whitespace-nowrap text-xs">{displayDate(member.createdAt)}</TableCell></TableRow>)}{overview.team.length === 0 && <TableRow><TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">No team allowlist entries.</TableCell></TableRow>}</TableBody></Table></div>
           </div>
+          <div className="mt-5 max-h-64 overflow-auto border border-border"><Table><TableHeader><TableRow><TableHead>Auto-import exclusion</TableHead><TableHead>Type</TableHead><TableHead>Added</TableHead></TableRow></TableHeader><TableBody>{overview.doNotAutoImport.map((entry) => <TableRow key={entry.id}><TableCell className="font-mono text-xs">{entry.value}</TableCell><TableCell><Badge variant="secondary">{entry.kind}</Badge></TableCell><TableCell className="whitespace-nowrap text-xs">{displayDate(entry.createdAt)}</TableCell></TableRow>)}{overview.doNotAutoImport.length === 0 && <TableRow><TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">No automatic-import exclusions.</TableCell></TableRow>}</TableBody></Table></div>
         </Section>
       </div>
 
@@ -695,12 +868,23 @@ function BuilderDealsAdminContent() {
 
       <Dialog open={leadToBlock !== null} onOpenChange={(open) => { if (!open && !blockLeadAndKillLink.isPending) { setLeadToBlock(null); setLeadBlockReason(""); } }}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Block lead and revoke access</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Block lead and revoke access</DialogTitle><DialogDescription>This operation immediately blocks the selected buyer identity and revokes all of that lead’s active Builder Deals access links.</DialogDescription></DialogHeader>
           <div className="space-y-4">
             <div className="border border-destructive/30 bg-destructive/5 p-3 text-sm"><p className="flex items-center gap-2 font-medium text-destructive"><AlertTriangle className="h-4 w-4" /> This immediately revokes the lead’s access links.</p><p className="mt-1 text-muted-foreground">{selectedLead ? `${selectedLead.name || "Unnamed buyer"} · ${selectedLead.phoneE164}` : "Selected buyer"} will be added to the blocklist using their private lead identifiers.</p></div>
             <div className="space-y-1.5"><Label htmlFor="lead-block-reason">Internal reason</Label><Textarea id="lead-block-reason" rows={3} value={leadBlockReason} onChange={(event) => setLeadBlockReason(event.target.value)} placeholder="Required internal reason" /></div>
           </div>
           <DialogFooter><Button variant="outline" disabled={blockLeadAndKillLink.isPending} onClick={() => { setLeadToBlock(null); setLeadBlockReason(""); }}>Cancel</Button><Button variant="destructive" disabled={blockLeadAndKillLink.isPending || leadBlockReason.trim().length < 3} onClick={() => { if (leadToBlock !== null) blockLeadAndKillLink.mutate({ leadId: leadToBlock, reason: leadBlockReason.trim() }); }}><Ban className="mr-1 h-4 w-4" />{blockLeadAndKillLink.isPending ? "Blocking…" : "Block & revoke"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={leadToMakeTeam !== null} onOpenChange={(open) => { if (!open && !makeLeadTeam.isPending) setLeadToMakeTeam(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Enable team preview</DialogTitle><DialogDescription>This changes the selected verified lead to team status and adds their identifiers to the team allowlist.</DialogDescription></DialogHeader>
+          <div className="border border-gold/30 bg-gold/5 p-3 text-sm">
+            <p className="flex items-center gap-2 font-medium"><UserRoundCheck className="h-4 w-4 text-gold" /> Team preview does not create buyer tour requests.</p>
+            <p className="mt-1 text-muted-foreground">{selectedTeamLead ? `${selectedTeamLead.name || "Unnamed buyer"} · ${selectedTeamLead.phoneE164}` : "Selected lead"} will be able to use the protected team-preview flow.</p>
+          </div>
+          <DialogFooter><Button variant="outline" disabled={makeLeadTeam.isPending} onClick={() => setLeadToMakeTeam(null)}>Cancel</Button><Button disabled={makeLeadTeam.isPending} className="bg-gold text-primary-foreground hover:bg-gold/90" onClick={() => { if (leadToMakeTeam !== null) makeLeadTeam.mutate({ leadId: leadToMakeTeam }); }}><UserRoundCheck className="mr-1 h-4 w-4" />{makeLeadTeam.isPending ? "Enabling…" : "Enable team preview"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

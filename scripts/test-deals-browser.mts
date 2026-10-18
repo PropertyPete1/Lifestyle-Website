@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { assertMobileGeometry, browserExecutable, configuredBaseUrl, demoOtp, demoPhone, installDemoFixtures } from "./deals-browser-fixtures.mts";
 
+if (!process.env.DEALS_E2E_BASE_URL?.trim()) {
+  console.error("SKIP: DEALS_E2E_BASE_URL is not configured for the browser fixture run.");
+  process.exit(2);
+}
+
 const base = configuredBaseUrl();
 const browser = await chromium.launch({ executablePath: browserExecutable(), headless: true, args: ["--no-sandbox"] });
 try {

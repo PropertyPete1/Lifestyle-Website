@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealPhotos } from "../drizzle/schema";
 import { getDb } from "./db";
-import { hashSecret } from "./dealsService";
+import { chicagoEndOfDay, hashSecret } from "./dealsService";
 import { loadOfficialDeals } from "./dealsAdapters";
 import { scrubPrivateNames } from "../shared/deals";
 import { processDealPhoto } from "./dealsPhotos";
@@ -129,8 +129,8 @@ export async function seedLaunchDeals(): Promise<{ communities: number; homes: n
     loanType: "FHA",
     downPayment: "3.5% minimum down payment",
     repaymentTerms: "360 monthly payments · 30-year fixed",
-    contractBy: new Date("2026-10-18T23:59:59-05:00"),
-    closeBy: new Date("2026-12-31T23:59:59-06:00"),
+    contractBy: chicagoEndOfDay(2026, 10, 18),
+    closeBy: chicagoEndOfDay(2026, 12, 31),
     held: false,
     holdReason: null,
     manual: false,
@@ -148,8 +148,8 @@ export async function seedLaunchDeals(): Promise<{ communities: number; homes: n
     loanType: "FHA",
     downPayment: "3.5% down payment · minimum 640 credit score",
     repaymentTerms: "30-year fixed FHA · 1/0 buydown · selected Quick Move-In homes",
-    contractBy: new Date("2026-11-08T23:59:59-06:00"),
-    closeBy: new Date("2026-11-30T23:59:59-06:00"),
+    contractBy: chicagoEndOfDay(2026, 11, 8),
+    closeBy: chicagoEndOfDay(2026, 11, 30),
     held: false,
     holdReason: null,
   });
@@ -243,7 +243,7 @@ export async function refreshOfficialDeals() {
     }
     if (snapshot.private.incentive?.facts.publishable) {
       const fact = snapshot.private.incentive.facts;
-      await replaceIncentive({ communityId: community.id, normalizedText: fact.normalizedText, publicText: scrubPrivateNames(snapshot.private.incentive.text, JSON.parse(community.scrubList)), headlineRate: `${fact.promotionalRatePercent}%`, followOnRate: fact.followOnRatePercent ? `${fact.followOnRatePercent}%` : undefined, followOnPeriod: fact.followOnPeriod ?? undefined, apr: `${fact.aprPercent}% APR`, loanType: fact.loanType ?? undefined, downPayment: fact.downPaymentPercent ? `${fact.downPaymentPercent}% down payment` : undefined, repaymentTerms: fact.repaymentTermYears ? `${fact.repaymentTermYears}-year fixed` : undefined, contractBy: fact.contractDeadline?.isoDate ? new Date(`${fact.contractDeadline.isoDate}T23:59:59-06:00`) : null, closeBy: fact.closingDeadline?.isoDate ? new Date(`${fact.closingDeadline.isoDate}T23:59:59-06:00`) : null, held: false, holdReason: null });
+      await replaceIncentive({ communityId: community.id, normalizedText: fact.normalizedText, publicText: snapshot.public.incentive?.text ?? scrubPrivateNames(snapshot.private.incentive.text, JSON.parse(community.scrubList)), headlineRate: `${fact.promotionalRatePercent}%`, followOnRate: fact.followOnRatePercent ? `${fact.followOnRatePercent}%` : undefined, followOnPeriod: fact.followOnPeriod ?? undefined, apr: `${fact.aprPercent}% APR`, loanType: fact.loanType ?? undefined, downPayment: fact.downPaymentPercent ? `${fact.downPaymentPercent}% down payment` : undefined, repaymentTerms: fact.repaymentTermYears ? `${fact.repaymentTermYears}-year fixed` : undefined, contractBy: fact.contractDeadline?.isoDate ? chicagoEndOfDay(...fact.contractDeadline.isoDate.split("-").map(Number) as [number, number, number]) : null, closeBy: fact.closingDeadline?.isoDate ? chicagoEndOfDay(...fact.closingDeadline.isoDate.split("-").map(Number) as [number, number, number]) : null, held: false, holdReason: null });
     }
     await db.update(dealCommunities).set({ lastSuccessfulSyncAt: new Date(), catalogUpdatedAt: new Date(), holdReason: snapshot.incentiveHoldReasons.length ? snapshot.incentiveHoldReasons.join(", ") : null }).where(eq(dealCommunities.id, community.id));
     results.push({ reelCode: config.reelCode, ok: true });

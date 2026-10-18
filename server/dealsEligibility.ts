@@ -91,7 +91,7 @@ export async function profileRealtorFlags(input: { name?: string | null; instagr
     const { lookupTrecName } = await import("./dealsTrec");
     if ((await lookupTrecName(input.name, input.trecCounties)).length) flags.push("Possible Agent - TREC Name Match");
   }
-  const handle = input.instagramHandle?.toLowerCase() ?? "";
-  if (handle && input.handleKeywords.some((keyword) => keyword.trim() && handle.includes(keyword.trim().toLowerCase()))) flags.push("Possible Agent - Handle");
+  const tokens = new Set((input.instagramHandle ?? "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  if (tokens.size && input.handleKeywords.some((keyword) => tokens.has(keyword.trim().toLowerCase()))) flags.push("Possible Agent - Handle");
   return flags;
 }

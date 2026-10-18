@@ -100,9 +100,15 @@ export function hasPrivateTerm(input: string, names: string[]): boolean {
 }
 
 export function clientIpKey(ip: string): string {
-  const value = ip.trim().toLowerCase();
-  // First four segments are the /64 key for a normalized IPv6 literal.
-  if (value.includes(":")) return value.split(":").slice(0, 4).join(":") + "::/64";
+  const value = ip.trim().toLowerCase().replace(/^\[|\]$/g, "").replace(/^::ffff:/, "");
+  if (value.includes(":")) {
+    const [left, right = ""] = value.split("::", 2);
+    const leftParts = left ? left.split(":").filter(Boolean) : [];
+    const rightParts = right ? right.split(":").filter(Boolean) : [];
+    const expanded = [...leftParts, ...Array(Math.max(0, 8 - leftParts.length - rightParts.length)).fill("0"), ...rightParts]
+      .map((part) => part.padStart(4, "0"));
+    return expanded.slice(0, 4).join(":") + "::/64";
+  }
   return value;
 }
 

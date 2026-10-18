@@ -265,6 +265,10 @@ export function chicagoDayStart(now = new Date()): Date {
   return chicagoDate(get("year"), get("month"), get("day"));
 }
 
+export function chicagoEndOfDay(year: number, month: number, day: number): Date {
+  return chicagoDate(year, month, day, 23, 59, 59);
+}
+
 /**
  * Reserve exactly one verification attempt before it is sent. This makes test
  * OTP, SMS and voice requests share the same auditable safety limits.
@@ -560,8 +564,9 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   const opaque = randomOpaqueToken(24);
   await db.insert(dealPendingVerifications).values({
     opaqueIdHash: hashSecret(opaque), phoneE164: normalized.e164, choice: "buyer", sourceCode, instagramHandle: ig,
-    deviceHash, clientIp: ip, flags: JSON.stringify({ google, flags: [...eligibility.flags, ...profileFlags], team: eligibility.team }), expiresAt: new Date(Date.now() + PENDING_MINUTES * 60_000),
+    deviceHash, clientIp: ip, consentAt: new Date(), flags: JSON.stringify({ google, flags: [...eligibility.flags, ...profileFlags], team: eligibility.team }), expiresAt: new Date(Date.now() + PENDING_MINUTES * 60_000),
   });
+  await logDealEvent({ kind: "consent", sourceCode, deviceHash, ip, phone: normalized.e164, detail: DEALS_CONSENT_TEXT });
   setDealCookie(input.res, DEALS_COOKIE.pending, opaque, PENDING_MINUTES * 60);
   return { ok: true as const, pendingId: opaque, phone: normalized.e164, displayPhone: normalized.display, isTest, settings, sourceCode, deviceHash, ip };
 }
@@ -624,7 +629,7 @@ export async function completeVerification(input: { req: Request; res: Response;
     await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? pending.instagramHandle, email: old.email ?? identity.google?.email ?? null, name: old.name ?? identity.google?.name ?? null, flags: JSON.stringify(flags) }).where(eq(dealLeads.id, old.id));
     leadId = old.id;
   } else {
-    const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle: pending.instagramHandle, email: identity.google?.email ?? null, name: identity.google?.name ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentIp: pending.clientIp, deviceHash, expiresAt, status: eligibility.team ? "team" : "verified", flags: JSON.stringify(flags) });
+    const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle: pending.instagramHandle, email: identity.google?.email ?? null, name: identity.google?.name ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentAt: pending.consentAt, consentIp: pending.clientIp, deviceHash, expiresAt, status: eligibility.team ? "team" : "verified", flags: JSON.stringify(flags) });
     leadId = Number((result as unknown as [{ insertId: number }])[0].insertId);
   }
   const token = await issueAccessToken(leadId, deviceHash, expiresAt);
@@ -644,11 +649,11 @@ export function dealsCsp(res: Response) {
   // Vite and the production HTML both use an inline bootstrap. Allow only that
   // bootstrap and same-origin app code; external telemetry hosts remain blocked
   // by script-src and connect-src on every Deals response.
-  res.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' https://www.instagram.com https://*.cdninstagram.com data:; frame-src https://www.instagram.com; frame-ancestors 'none'; script-src 'self' 'unsafe-inline' https://www.instagram.com; style-src 'self' 'unsafe-inline'; connect-src 'self'");
+  res.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' https://www.instagram.com https://*.cdninstagram.com data:; frame-src https://www.instagram.com https://*.cdninstagram.com; frame-ancestors 'none'; script-src 'self' 'unsafe-inline' https://www.instagram.com https://*.cdninstagram.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'");
 }
 
 export function isDealsCrawler(req: Request) { return req.method === "HEAD" || isCrawler(req.headers["user-agent"]); }
-export function showGoogleDealsButton(req: Request) { return !isInAppBrowser(req.headers["user-agent"]) && Boolean(process.env.GOOGLE_DEALS_CLIENT_ID && process.env.GOOGLE_DEALS_CLIENT_SECRET); }
+export function showGoogleDealsButton(req: Request) { return !isInAppBrowser(req.headers["user-agent"]) && Boolean((process.env.GOOGLE_OAUTH_CLIENT_ID ?? process.env.GOOGLE_DEALS_CLIENT_ID) && (process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? process.env.GOOGLE_DEALS_CLIENT_SECRET)); }
 
 export function publicNoPrivateNames(payload: unknown, privateTerms: string[]): boolean {
   return !hasPrivateTerm(JSON.stringify(payload), privateTerms);

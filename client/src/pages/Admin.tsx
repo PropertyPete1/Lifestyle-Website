@@ -112,7 +112,7 @@ export default function Admin() {
       </aside>
 
       {/* Content */}
-      <main className="flex-1 p-5 lg:p-10 overflow-x-auto">
+      <main className="min-w-0 flex-1 p-5 lg:p-10">
         {tab === "analytics" && <AnalyticsViewer />}
         {tab === "listings" && <ListingsManager />}
         {tab === "testimonials" && <TestimonialsManager />}
@@ -932,68 +932,4 @@ function LeadsViewer() {
       </Table>
     </div>
   );
-}
-
-
-/* ================= Builder Deals (isolated, admin-only) ================= */
-function DealsManager() {
-  const { data, isLoading, refetch } = trpc.deals.admin.overview.useQuery();
-  const { data: settings } = trpc.deals.admin.settings.useQuery();
-  const save = trpc.deals.admin.saveCommunityState.useMutation({
-    onSuccess: () => { void refetch(); toast.success("Builder Deals state saved"); },
-    onError: () => toast.error("Could not save Builder Deals state"),
-  });
-  if (isLoading || !data) return <div className="text-muted-foreground">Loading Builder Deals…</div>;
-  const failed = data.leads.filter((lead) => lead.fubStatus === "failed").length;
-  return (
-    <div>
-      <SectionHeader title="Builder Deals" action={<Link href="/deals" className="text-xs uppercase tracking-widest text-gold underline underline-offset-4">Open public page</Link>} />
-      <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">A separate, private buyer funnel. Builder sources, addresses, plan names, and operational mappings remain visible only here and are excluded from public Deals responses.</p>
-      <div className="mt-6 grid gap-3 sm:grid-cols-3">
-        <DealsMetric label="Verified buyer leads" value={data.leads.filter((lead) => lead.status === "verified").length} />
-        <DealsMetric label="CRM delivery retries" value={failed} />
-        <DealsMetric label="Active blocks" value={data.blocks.length} />
-      </div>
-      <section className="mt-8 border border-border bg-card p-5">
-        <h2 className="font-serif text-2xl">Launch mappings</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Public labels are separated from the private builder source record. Pause stops a community from rendering; manual mode prevents scheduled source changes.</p>
-        <div className="mt-5 space-y-4">
-          {data.communities.map((community) => (
-            <div key={community.id} className="border border-border/70 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium">{community.publicLabel}</p><p className="mt-1 text-xs text-muted-foreground">Private source: {community.builder} · {community.privateName}</p><p className="text-xs text-muted-foreground">Last successful sync: {community.lastSuccessfulSyncAt ? new Date(community.lastSuccessfulSyncAt).toLocaleString() : "not yet"}</p>{community.holdReason && <p className="mt-2 text-xs text-destructive">Hold: {community.holdReason}</p>}</div><div className="flex flex-wrap gap-2"><Button size="sm" variant={community.paused ? "default" : "outline"} className={community.paused ? "bg-gold text-primary-foreground" : ""} onClick={() => save.mutate({ id: community.id, paused: !community.paused })}>{community.paused ? "Resume" : "Pause"}</Button><Button size="sm" variant={community.manualMode ? "default" : "outline"} className={community.manualMode ? "bg-gold text-primary-foreground" : ""} onClick={() => save.mutate({ id: community.id, manualMode: !community.manualMode })}>{community.manualMode ? "Manual on" : "Manual off"}</Button></div></div>
-              <div className="mt-3 flex items-center gap-3"><Label className="text-xs">Reel URL</Label><Input defaultValue={community.reelUrl ?? ""} placeholder="Paste Instagram reel URL" className="max-w-xl" onBlur={(e) => { const value = e.target.value.trim(); if (value !== (community.reelUrl ?? "")) save.mutate({ id: community.id, reelUrl: value || null }); }} /></div>
-            </div>
-          ))}
-        </div>
-      </section>
-      <DealsSettingsForm settings={settings} />
-      <section className="mt-8 border border-border bg-card p-5"><h2 className="font-serif text-2xl">TREC team checks</h2><p className="mt-1 text-xs text-muted-foreground">Official TREC public dataset results. The scheduled Builder Deals refresh retries if its public host is temporarily unavailable.</p><div className="mt-4 overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Team member</TableHead><TableHead>License</TableHead><TableHead>Status</TableHead><TableHead>Checked</TableHead></TableRow></TableHeader><TableBody>{data.checks.slice(0, 12).map((check) => <TableRow key={check.id}><TableCell>{check.fullName}</TableCell><TableCell>{check.licenseNumber ?? "—"}</TableCell><TableCell>{check.status}</TableCell><TableCell>{new Date(check.verifiedAt).toLocaleString()}</TableCell></TableRow>)}{data.checks.length === 0 && <TableRow><TableCell colSpan={4} className="py-8 text-center text-muted-foreground">No completed TREC checks yet.</TableCell></TableRow>}</TableBody></Table></div></section>
-    </div>
-  );
-}
-
-function DealsSettingsForm({ settings }: { settings: any }) {
-  const utils = trpc.useUtils();
-  const [draft, setDraft] = useState<any>(settings ?? {});
-  useEffect(() => { if (settings) setDraft(settings); }, [settings]);
-  const save = trpc.deals.admin.saveSettings.useMutation({
-    onSuccess: () => { utils.deals.admin.settings.invalidate(); toast.success("Builder Deals settings saved"); },
-    onError: () => toast.error("Could not save Builder Deals settings"),
-  });
-  const normalizedNumbers = String(draft.testNumbersText ?? (settings?.testNumbers ?? []).join("\n"))
-    .split(/[\n,]/).map((value: string) => value.trim()).filter(Boolean);
-  const submit = () => save.mutate({
-    commentKeyword: String(draft.commentKeyword ?? settings?.commentKeyword ?? "HOME").trim(),
-    textLine: String(draft.textLine ?? settings?.textLine ?? "").trim(),
-    skipTwilioForTestNumbers: Boolean(draft.skipTwilioForTestNumbers ?? settings?.skipTwilioForTestNumbers),
-    testNumbersSkipChecks: Boolean(draft.testNumbersSkipChecks ?? settings?.testNumbersSkipChecks),
-    testModeFullPipeline: Boolean(draft.testModeFullPipeline ?? settings?.testModeFullPipeline),
-    testNumbers: normalizedNumbers,
-  });
-  if (!settings) return null;
-  return <section className="mt-8 border border-border bg-card p-5"><h2 className="font-serif text-2xl">Gate & test configuration</h2><p className="mt-1 text-xs text-muted-foreground">Phone verification remains required after optional Google sign-in. These controls update the live Builder Deals configuration without a redeploy.</p><div className="mt-5 grid gap-4 sm:grid-cols-2"><div><Label htmlFor="deals-keyword">Buyer text keyword</Label><Input id="deals-keyword" value={draft.commentKeyword ?? settings.commentKeyword} onChange={e => setDraft({ ...draft, commentKeyword: e.target.value })} /></div><div><Label htmlFor="deals-text-line">Text line shown to buyers</Label><Input id="deals-text-line" value={draft.textLine ?? settings.textLine} onChange={e => setDraft({ ...draft, textLine: e.target.value })} /></div></div><div className="mt-4"><Label htmlFor="deals-test-numbers">Test numbers</Label><Textarea id="deals-test-numbers" value={draft.testNumbersText ?? settings.testNumbers.join("\n")} onChange={e => setDraft({ ...draft, testNumbersText: e.target.value })} placeholder="One E.164 number per line" /><p className="mt-1 text-[11px] text-muted-foreground">Test numbers are kept in Builder Deals settings, not in secrets.</p></div><div className="mt-5 grid gap-3"><label className="flex items-center justify-between gap-4 border border-border p-3 text-sm"><span><strong>Skip Twilio for test numbers</strong><br /><span className="text-xs text-muted-foreground">Use the protected test OTP instead of a real Verify message.</span></span><Switch checked={Boolean(draft.skipTwilioForTestNumbers ?? settings.skipTwilioForTestNumbers)} onCheckedChange={(checked) => setDraft({ ...draft, skipTwilioForTestNumbers: checked })} /></label><label className="flex items-center justify-between gap-4 border border-border p-3 text-sm"><span><strong>Test numbers skip blocking checks</strong><br /><span className="text-xs text-muted-foreground">Does not affect real visitors.</span></span><Switch checked={Boolean(draft.testNumbersSkipChecks ?? settings.testNumbersSkipChecks)} onCheckedChange={(checked) => setDraft({ ...draft, testNumbersSkipChecks: checked })} /></label><label className="flex items-center justify-between gap-4 border border-border p-3 text-sm"><span><strong>Send test records through the full pipeline</strong><br /><span className="text-xs text-muted-foreground">Every generated FUB/local record is marked TEST for cleanup.</span></span><Switch checked={Boolean(draft.testModeFullPipeline ?? settings.testModeFullPipeline)} onCheckedChange={(checked) => setDraft({ ...draft, testModeFullPipeline: checked })} /></label></div><Button className="mt-5 bg-gold text-primary-foreground" onClick={submit} disabled={save.isPending}>{save.isPending ? "Saving…" : "Save Builder Deals settings"}</Button></section>;
-}
-
-function DealsMetric({ label, value }: { label: string; value: number }) {
-  return <div className="border border-border bg-card p-4"><p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{label}</p><p className="mt-1 font-serif text-3xl text-gold">{value}</p></div>;
 }

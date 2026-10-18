@@ -332,7 +332,11 @@ export async function recordTwilioVerifyFailure(input: { sourceCode: string; dev
   const recent = await db.select({ kind: dealEvents.kind }).from(dealEvents).where(gt(dealEvents.createdAt, new Date(Date.now() - 60 * 60_000))).orderBy(desc(dealEvents.createdAt)).limit(400);
   const sends = recent.filter((row) => row.kind === "code_sent").length;
   const errors = recent.filter((row) => row.kind === "twilio_api_error").length;
-  const consecutive = recent.slice(0, 3).length === 3 && recent.slice(0, 3).every((row) => row.kind === "twilio_api_error");
+  // Only terminal outcome events participate. A code_sent event sits between
+  // every send and its failure, so looking at raw adjacent events can never
+  // observe three failed verification attempts.
+  const outcomes = recent.filter((row) => row.kind === "twilio_api_error" || row.kind === "twilio_verify_success");
+  const consecutive = outcomes.slice(0, 3).length === 3 && outcomes.slice(0, 3).every((row) => row.kind === "twilio_api_error");
   const alertSent = (await db.select({ id: dealEvents.id }).from(dealEvents).where(and(eq(dealEvents.kind, "twilio_alert"), gt(dealEvents.createdAt, new Date(Date.now() - 6 * 60 * 60_000)))).limit(1))[0];
   if (!alertSent && (consecutive || (sends >= 10 && errors / sends > 0.2))) {
     await logDealEvent({ kind: "twilio_alert", sourceCode: input.sourceCode, deviceHash: input.deviceHash, ip: input.ip, detail: `sends:${sends};errors:${errors}` });
@@ -620,17 +624,34 @@ export async function completeVerification(input: { req: Request; res: Response;
     await logDealEvent({ kind: "blocked", sourceCode: pending.sourceCode, deviceHash, ip: pending.clientIp, detail: eligibility.blockedBy ?? "post_verification" });
     return { ok: false as const, kind: "blocked" };
   }
-  const old = (await db.select().from(dealLeads).where(eq(dealLeads.phoneE164, pending.phoneE164)).limit(1))[0];
-  const reverifiedActive = Boolean(old && old.expiresAt > new Date());
-  const expiresAt = old && old.expiresAt > new Date() ? old.expiresAt : new Date(Date.now() + settings.expiryHours * 60 * 60_000);
+  let old = (await db.select().from(dealLeads).where(eq(dealLeads.phoneE164, pending.phoneE164)).limit(1))[0];
+  let reverifiedActive = Boolean(old && old.expiresAt > new Date());
+  let expiresAt = old && old.expiresAt > new Date() ? old.expiresAt : new Date(Date.now() + settings.expiryHours * 60 * 60_000);
   const flags = Array.from(new Set([...(identity.flags ?? []), ...eligibility.flags]));
   let leadId: number;
   if (old) {
     await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? pending.instagramHandle, email: old.email ?? identity.google?.email ?? null, name: old.name ?? identity.google?.name ?? null, flags: JSON.stringify(flags) }).where(eq(dealLeads.id, old.id));
     leadId = old.id;
   } else {
-    const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle: pending.instagramHandle, email: identity.google?.email ?? null, name: identity.google?.name ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentAt: pending.consentAt, consentIp: pending.clientIp, deviceHash, expiresAt, status: eligibility.team ? "team" : "verified", flags: JSON.stringify(flags) });
-    leadId = Number((result as unknown as [{ insertId: number }])[0].insertId);
+    // A forwarded DM handle belongs to its first verified phone. Do not expose
+    // that identity in another person’s private watermark or list.
+    const handleOwner = pending.instagramHandle ? (await db.select({ id: dealLeads.id }).from(dealLeads).where(and(eq(dealLeads.instagramHandle, pending.instagramHandle), sql`${dealLeads.phoneE164} <> ${pending.phoneE164}`)).limit(1))[0] : null;
+    const instagramHandle = handleOwner ? null : pending.instagramHandle;
+    try {
+      const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle, email: identity.google?.email ?? null, name: identity.google?.name ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentAt: pending.consentAt, consentIp: pending.clientIp, deviceHash, expiresAt, status: eligibility.team ? "team" : "verified", flags: JSON.stringify(flags) });
+      leadId = Number((result as unknown as [{ insertId: number }])[0].insertId);
+    } catch (error) {
+      // Two verify submissions can legitimately race. The unique normalized
+      // phone key makes this safe: retrieve the winner and continue exactly as
+      // a re-verification instead of leaking an ER_DUP_ENTRY out of Express.
+      const raced = (await db.select().from(dealLeads).where(eq(dealLeads.phoneE164, pending.phoneE164)).limit(1))[0];
+      if (!raced) throw error;
+      old = raced;
+      reverifiedActive = raced.expiresAt > new Date();
+      expiresAt = reverifiedActive ? raced.expiresAt : expiresAt;
+      await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, flags: JSON.stringify(flags) }).where(eq(dealLeads.id, raced.id));
+      leadId = raced.id;
+    }
   }
   const token = await issueAccessToken(leadId, deviceHash, expiresAt);
   await db.delete(dealPendingVerifications).where(eq(dealPendingVerifications.id, pending.id));

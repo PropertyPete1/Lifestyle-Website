@@ -2,6 +2,7 @@ import { and, eq, or } from "drizzle-orm";
 import { dealDoNotAutoImport, dealKnownAgents, dealTeamAllowlist } from "../drizzle/schema";
 import { getDb } from "./db";
 import { getActiveBlock } from "./dealsService";
+import { fubHeaders } from "./fub";
 
 export type DealEligibility = {
   allowed: boolean;
@@ -41,22 +42,24 @@ export async function classifyDealsAccess(input: {
   )).limit(1);
   if (team) return { allowed: true, team: true, flags: ["team"] };
 
+  const [phoneSuppressed, emailSuppressed] = await Promise.all([isDoNotAutoImport(input.phone), email ? isDoNotAutoImport(email) : Promise.resolve(false)]);
+  const skipAutoImport = phoneSuppressed || emailSuppressed;
   const [block, known] = await Promise.all([
     getActiveBlock({ phone: input.phone, email: email ?? undefined, deviceHash: input.deviceHash }),
-    db.select().from(dealKnownAgents).where(and(eq(dealKnownAgents.active, true), or(
+    skipAutoImport ? Promise.resolve([]) : db.select().from(dealKnownAgents).where(and(eq(dealKnownAgents.active, true), or(
       eq(dealKnownAgents.phoneE164, input.phone), ...(email ? [eq(dealKnownAgents.email, email)] : []),
     ))).limit(1),
   ]);
   if (block) return { allowed: false, team: false, blockedBy: "blocklist", matchOn: block.phoneE164 ? "phone" : block.email ? "email" : "device", flags: ["blocked"] };
   if (known[0]) return { allowed: false, team: false, blockedBy: "known_agent", matchOn: known[0].phoneE164 === input.phone ? "phone" : "email", flags: ["known_agent"] };
+  // FUB is authoritative only when reachable. A timeout never blocks a buyer:
+  // post-verification reconciliation can revoke access if a match is discovered.
+  const fubFlags = skipAutoImport ? { match: false, matchOn: "phone" as const, unavailable: false } : await fubRealtorMatch(input.phone, email, input.fubRealtorTags, input.fubRealtorSources);
+  if (fubFlags.match) return { allowed: false, team: false, blockedBy: "fub_realtor", matchOn: fubFlags.matchOn, flags: ["fub_realtor"] };
   const domain = emailDomain(email);
   if (domain && input.brokerageDomains.map((value) => value.toLowerCase()).includes(domain)) {
     return { allowed: false, team: false, blockedBy: "brokerage_domain", matchOn: "email", flags: ["brokerage_domain"] };
   }
-  // FUB is authoritative only when reachable. A timeout never blocks a buyer:
-  // post-verification reconciliation can revoke access if a match is discovered.
-  const fubFlags = await fubRealtorMatch(input.phone, email, input.fubRealtorTags, input.fubRealtorSources);
-  if (fubFlags.match) return { allowed: false, team: false, blockedBy: "fub_realtor", matchOn: fubFlags.matchOn, flags: ["fub_realtor"] };
   return { allowed: true, team: false, flags: fubFlags.unavailable ? ["fub_check_deferred"] : [] };
 }
 
@@ -66,7 +69,7 @@ async function fubRealtorMatch(phone: string, email: string | null, tags: string
   try {
     const lookup = async (kind: "phone" | "email", value: string) => {
       const query = new URL("https://api.followupboss.com/v1/people"); query.searchParams.set(kind, value);
-      const response = await fetch(query, { headers: { Authorization: `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`, "User-Agent": "LifestyleDesignRealty-Website/1.0" }, signal: AbortSignal.timeout(3_000) });
+      const response = await fetch(query, { headers: fubHeaders(apiKey), signal: AbortSignal.timeout(3_000) });
       if (!response.ok) throw new Error("FUB unavailable"); return (await response.json().catch(() => ({})) as { people?: Array<{ tags?: string[]; source?: string }> }).people ?? [];
     };
     const normalizedTags = tags.map((value) => value.toLowerCase());

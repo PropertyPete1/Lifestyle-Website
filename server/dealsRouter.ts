@@ -5,9 +5,9 @@ import { DEALS_CONSENT_TEXT, maskPhone, sanitizeInstagramHandle, sanitizeSourceC
 import { ENV } from "./_core/env";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { dealAccessTokens, dealBlocklist, dealCommunities, dealCommunityViews, dealDoNotAutoImport, dealFubJobs, dealHomes, dealIncentives, dealKnownAgents, dealLeads, dealPhotos, dealTeamAllowlist, dealTourRequests, dealTrecImports, dealTrecLicenses, dealTrecVerifications } from "../drizzle/schema";
+import { dealAccessTokens, dealBlocklist, dealCommunities, dealCommunityViews, dealDoNotAutoImport, dealEvents, dealFubJobs, dealHomes, dealIncentives, dealKnownAgents, dealLeads, dealPhotos, dealTeamAllowlist, dealTourRequests, dealTrecImports, dealTrecLicenses, dealTrecVerifications } from "../drizzle/schema";
 import { checkTwilioVerify, sendTwilioVerify } from "./dealsVerification";
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import {
   currentPending,
   currentDealSource,
@@ -92,6 +92,7 @@ export const dealsRouter = router({
       await removePending(ctx.req, ctx.res);
       return { ok: false as const, kind: sent.reason, message: sent.reason === "cannot_receive" ? "That number can't receive texts. Try a mobile number or tap Call me." : "We couldn't send a code right now. Please try again." };
     }
+    await logDealEvent({ kind: "twilio_verify_success", sourceCode: result.sourceCode, deviceHash: result.deviceHash, ip: result.ip, phone: result.phone });
     return { ok: true as const, status: "code_sent", displayPhone: result.displayPhone, test: false };
   }),
   resend: publicProcedure.input(z.object({ channel: z.enum(["sms", "call"]).default("sms") })).mutation(async ({ input, ctx }) => {
@@ -108,6 +109,7 @@ export const dealsRouter = router({
     if (isTest && settings.skipTwilioForTestNumbers) return { ok: true as const, test: true };
     const sent = await sendTwilioVerify(pending.phoneE164, input.channel);
     if (!sent.ok && sent.reason === "twilio") await recordTwilioVerifyFailure({ sourceCode: pending.sourceCode, deviceHash: pending.deviceHash, ip: pending.clientIp });
+    if (sent.ok) await logDealEvent({ kind: "twilio_verify_success", sourceCode: pending.sourceCode, deviceHash: pending.deviceHash, ip: pending.clientIp, phone: pending.phoneE164 });
     return sent.ok ? { ok: true as const, test: false } : { ok: false as const, kind: sent.reason, message: "We couldn't send a code right now. Please try again." };
   }),
   gateFocused: publicProcedure.input(z.object({ src: z.string().max(120).optional() })).mutation(async ({ input, ctx }) => {
@@ -129,10 +131,15 @@ export const dealsRouter = router({
     const communities = await gatedDealsCatalog(session.leadId);
     const connection = await getDb();
     if (connection) {
-      const all = await connection.select({ id: dealCommunities.id }).from(dealCommunities);
-      await Promise.all(all.map((community) => connection.insert(dealCommunityViews).values({ leadId: session.leadId, communityId: community.id })));
+      const active = await connection.select({ id: dealCommunities.id }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)));
+      const hourAgo = new Date(Date.now() - 60 * 60_000);
+      for (const community of active) {
+        const recent = (await connection.select({ id: dealCommunityViews.id }).from(dealCommunityViews).where(and(eq(dealCommunityViews.leadId, session.leadId), eq(dealCommunityViews.communityId, community.id), sql`${dealCommunityViews.viewedAt} > ${hourAgo}`)).limit(1))[0];
+        if (!recent) await connection.insert(dealCommunityViews).values({ leadId: session.leadId, communityId: community.id });
+      }
+      const recentListView = (await connection.select({ id: dealEvents.id }).from(dealEvents).where(and(eq(dealEvents.leadId, session.leadId), eq(dealEvents.kind, "viewed_listings"), sql`${dealEvents.createdAt} > ${hourAgo}`)).limit(1))[0];
+      if (!recentListView) await logDealEvent({ leadId: session.leadId, kind: "viewed_listings", sourceCode: session.lead.sourceCode, deviceHash: session.deviceHash, ip: ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0" });
     }
-    await logDealEvent({ leadId: session.leadId, kind: "viewed_listings", sourceCode: session.lead.sourceCode, deviceHash: session.deviceHash, ip: ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0" });
     return { lead: leadPresentation(session.lead), communities };
   }),
   requestHome: publicProcedure.input(z.object({ card: z.string().length(20), requestType: z.enum(["tour", "ask"]), preferredAt: z.string().datetime() })).mutation(async ({ input, ctx }) => {

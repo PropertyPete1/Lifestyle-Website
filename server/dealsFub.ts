@@ -126,6 +126,22 @@ async function findPerson(lead: Pick<BuilderLead, "phone" | "email">): Promise<F
   return null;
 }
 
+/** Best-effort screening annotation. It is deliberately independent from buyer
+ * gating: FUB being unavailable must not change a completed gate response. */
+export async function tagBuilderDealsScreeningContact(input: { phone: string | null; email: string | null; personId?: string; tag: "Agent - FUB Match" | "Possible Agent - Email Domain"; matchOn?: "phone" | "email" }) {
+  try {
+    const personId = input.personId ?? (input.phone ? (await findPerson({ phone: input.phone, email: input.email }))?.id : null);
+    if (!personId) return { ok: false as const, error: "FUB contact unavailable" };
+    const personResponse = await fub(`/people/${encodeURIComponent(String(personId))}`);
+    const person = await personResponse.json().catch(() => ({})) as FubPerson;
+    const tags = Array.from(new Set([...fubTags(person), input.tag]));
+    await fub(`/people/${encodeURIComponent(String(personId))}`, { method: "PUT", body: JSON.stringify({ tags, mergeTags: false }) });
+    const marker = `Builder Deals screening: ${input.tag}; match ${input.matchOn ?? "identity"}.`;
+    await postFubNote(String(personId), "Builder Deals screening", marker);
+    return { ok: true as const, personId: String(personId) };
+  } catch { return { ok: false as const, error: "FUB screening update failed" }; }
+}
+
 function textInFubObject(value: unknown): string[] {
   if (typeof value === "string" || typeof value === "number") return [String(value)];
   if (Array.isArray(value)) return value.flatMap(textInFubObject);

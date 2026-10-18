@@ -10,6 +10,9 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
+    "test:deals:runtime": "vitest run server/dealsRuntimePrivacy.test.ts",
+    "test:deals:browser": "tsx scripts/test-deals-browser.mts",
+    "capture:deals:preview": "tsx scripts/capture-deals-preview.mts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "stats:site": "tsx server/writeSiteStats.ts"
   },

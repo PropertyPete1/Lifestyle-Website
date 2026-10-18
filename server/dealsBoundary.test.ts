@@ -1,45 +1,74 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
+import express from "express";
+import type { Server } from "node:http";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-const root = process.cwd();
-const page = readFileSync(join(root, "client/src/pages/Deals.tsx"), "utf8");
-const routes = readFileSync(join(root, "server/dealsRoutes.ts"), "utf8");
-const robots = readFileSync(join(root, "client/public/robots.txt"), "utf8");
-const og = readFileSync(join(root, "server/ogMeta.ts"), "utf8");
-const prohibitedOutbound = ["messages." + "create", "Messaging" + "Service", "TWILIO_" + "PHONE_NUMBER"];
+import { registerDealsRoutes } from "./dealsRoutes";
 
-// These values deliberately cover source brands, community names, plan names,
-// and street addresses. None can appear in browser-facing code, API DTO names,
-// or the generic share-card asset name.
-const privateTerms = ["Chesmar", "M/I Homes", "Sienna Lakes", "Vista Gardens", "Rio Grande", "Hanging Basket", "Onion Patch"];
+type LocalDealsServer = { baseUrl: URL; close: () => Promise<void> };
+
+async function startLocalDealsServer(): Promise<LocalDealsServer> {
+  const app = express();
+  app.use(express.json());
+  registerDealsRoutes(app);
+  const server = app.listen(0, "127.0.0.1") as Server;
+  await once(server, "listening");
+  const { port } = server.address() as AddressInfo;
+  return {
+    baseUrl: new URL(`http://127.0.0.1:${port}`),
+    close: async () => { server.close(); await once(server, "close"); },
+  };
+}
+
+function rootCookieNames(response: Response): string[] {
+  return response.headers.getSetCookie()
+    .filter((cookie) => /;\s*Path=\//i.test(cookie) && !/;\s*Path=\/deals(?:;|$)/i.test(cookie))
+    .map((cookie) => cookie.split("=", 1)[0]);
+}
 
 describe("Builder Deals public boundary", () => {
-  it("uses a direct browser redirect through the one-time token, not outbound SMS", () => {
-    expect(routes).toContain('app.post("/deals/verify"');
-    expect(routes).toContain('res.redirect(302, `/deals/v/${completed.token}`)');
-    const source = [routes, readFileSync(join(root, "server/dealsRouter.ts"), "utf8")].join("\n");
-    for (const term of prohibitedOutbound) expect(source).not.toContain(term);
+  let server: LocalDealsServer;
+
+  beforeAll(async () => { server = await startLocalDealsServer(); });
+  afterAll(async () => { await server.close(); });
+
+  it("redirects an unauthenticated private document before emitting catalog markup", async () => {
+    const response = await fetch(new URL("/deals/mine", server.baseUrl), { redirect: "manual" });
+    const body = await response.text();
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/deals?gate=1");
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(response.headers.get("referrer-policy")).toBe("same-origin");
+    expect(response.headers.get("x-robots-tag")).toContain("noindex");
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(rootCookieNames(response)).toEqual(expect.arrayContaining(["ldr_deals_device", "ldr_deals_probe"]));
+    expect(body).not.toContain("Private buyer list");
   });
 
-  it("server-enforces noindex and the protected document/image boundary", () => {
-    expect(routes).toContain('app.get("/deals/mine"');
-    expect(routes).toContain('app.get("/deals/mine/img/:photoId"');
-    expect(routes).toContain("return res.status(401).end()");
-    expect(og).toContain('<meta name="robots" content="noindex, nofollow" />');
-    expect(robots).toContain("Disallow: /deals/v/");
-    expect(robots).toContain("Disallow: /deals/mine");
-    expect(robots).not.toContain("Disallow: /deals\n");
+  it("returns no bytes for an unauthenticated protected image, including a valid-looking ID", async () => {
+    const response = await fetch(new URL("/deals/mine/img/1", server.baseUrl), { redirect: "manual" });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("location")).toBeNull();
+    expect((await response.arrayBuffer()).byteLength).toBe(0);
+    expect(response.headers.get("x-robots-tag")).toContain("noindex");
   });
 
-  it("does not embed private builder/catalog identity in public React code", () => {
-    for (const term of privateTerms) expect(page).not.toContain(term);
-    expect(page).toContain("Video coming soon");
-    expect(page).toContain("sms:${digits}");
-  });
+  it("rejects malformed token and verification requests without reaching a private document", async () => {
+    const malformedToken = await fetch(new URL("/deals/v/not-a-token", server.baseUrl), { redirect: "manual" });
+    expect(malformedToken.status).toBe(302);
+    expect(malformedToken.headers.get("location")).toBe("/deals?expired=1");
 
-  it("does not embed private identity in the public Builder Deals image bytes", () => {
-    const cardBytes = readFileSync(join(root, "docs/assets/builder-deals-og-card.png")).toString("latin1").toLowerCase();
-    for (const term of privateTerms) expect(cardBytes).not.toContain(term.toLowerCase());
+    const malformedCode = await fetch(new URL("/deals/verify", server.baseUrl), {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: "12" }),
+    });
+    expect(malformedCode.status).toBe(302);
+    expect(malformedCode.headers.get("location")).toBe("/deals?codeError=1");
+    expect(await malformedCode.text()).not.toContain("Private buyer list");
   });
 });

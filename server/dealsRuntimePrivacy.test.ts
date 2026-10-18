@@ -2,7 +2,6 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 
-const DEFAULT_DEALS_E2E_BASE_URL = "https://3000-ikqecsvrip83yuk510r73-be8e0622.us1.manus.computer";
 const REQUEST_TIMEOUT_MS = 6_000;
 
 // Keep this local list explicit: these are source-builder, community, plan, and
@@ -33,14 +32,17 @@ type RuntimeSnapshot = {
 };
 
 function configuredBaseUrl(): URL | undefined {
-  const value = process.env.DEALS_E2E_BASE_URL || DEFAULT_DEALS_E2E_BASE_URL;
+  const value = process.env.DEALS_E2E_BASE_URL?.trim();
+  if (!value) {
+    console.warn("[deals runtime privacy] skipping configured-runtime checks: DEALS_E2E_BASE_URL is not set.");
+    return undefined;
+  }
   try {
     const parsed = new URL(value);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("base URL must use HTTP(S)");
     return parsed;
   } catch (error) {
-    console.warn(`[deals runtime privacy] skipping remote checks: invalid DEALS_E2E_BASE_URL (${error instanceof Error ? error.message : String(error)})`);
-    return undefined;
+    throw new Error(`[deals runtime privacy] DEALS_E2E_BASE_URL is invalid: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -84,12 +86,6 @@ async function capture(url: URL, options: { redirect?: RequestRedirect; accept: 
   }
 }
 
-function isUnavailableStatus(status: number): boolean {
-  // Preview platforms commonly surface an offline target as one of these
-  // gateway statuses. Other HTTP statuses remain test failures.
-  return status === 502 || status === 503 || status === 504;
-}
-
 function assertNoPrivateTerms(body: Buffer, label: string) {
   const text = body.toString("utf8").toLowerCase();
   for (const term of PRIVATE_SOURCE_TERMS) {
@@ -116,23 +112,12 @@ function readBuiltClientArtifacts(): Array<{ path: string; body: Buffer }> {
   return artifacts;
 }
 
-let runtime: RuntimeSnapshot | undefined;
-let unavailableReason: string | undefined;
+let runtime: RuntimeSnapshot;
+const configuredRuntime = baseUrl ? describe : describe.skip;
 
-beforeAll(async () => {
-  if (!baseUrl) {
-    unavailableReason = "the configured base URL is invalid";
-    return;
-  }
-
-  try {
+configuredRuntime("Builder Deals runtime privacy boundary", () => {
+  beforeAll(async () => {
     const landing = await capture(endpoint("/deals"), { accept: "text/html,application/xhtml+xml" });
-    if (isUnavailableStatus(landing.status)) {
-      unavailableReason = `/deals returned ${landing.status}`;
-      console.warn(`[deals runtime privacy] skipping remote checks: ${unavailableReason}`);
-      return;
-    }
-
     const [catalog, mine, image] = await Promise.all([
       capture(publicCatalogEndpoint(), { accept: "application/json" }),
       // Do not follow this redirect: the status and location are the private
@@ -140,28 +125,10 @@ beforeAll(async () => {
       capture(endpoint("/deals/mine"), { accept: "text/html", redirect: "manual" }),
       capture(endpoint("/deals/mine/img/1"), { accept: "image/avif,image/webp,image/*", redirect: "manual" }),
     ]);
-    const unavailable = [catalog, mine, image].find((response) => isUnavailableStatus(response.status));
-    if (unavailable) {
-      unavailableReason = `${new URL(unavailable.url).pathname} returned ${unavailable.status}`;
-      console.warn(`[deals runtime privacy] skipping remote checks: ${unavailableReason}`);
-      return;
-    }
     runtime = { landing, catalog, mine, image };
-  } catch (error) {
-    unavailableReason = error instanceof Error ? error.message : String(error);
-    console.warn(`[deals runtime privacy] skipping remote checks: ${unavailableReason}`);
-  }
-}, 15_000);
-
-describe("Builder Deals runtime privacy boundary", () => {
-  it("is explicitly offline-safe when the preview target cannot be reached", () => {
-    if (runtime) return;
-    expect(unavailableReason).toBeTruthy();
-  });
+  }, 15_000);
 
   it("serves a noindex, non-cacheable public landing without private source terms", () => {
-    if (!runtime) return;
-
     expect(runtime.landing.status).toBe(200);
     expect(runtime.landing.headers.get("content-type")).toMatch(/^text\/html\b/i);
     expect(runtime.landing.headers.get("cache-control")).toContain("private");
@@ -174,8 +141,6 @@ describe("Builder Deals runtime privacy boundary", () => {
   });
 
   it("uses the tRPC batch input envelope and returns only public catalog output", () => {
-    if (!runtime) return;
-
     const requestUrl = new URL(runtime.catalog.url);
     expect(requestUrl.pathname).toBe("/api/trpc/deals.publicCatalog");
     expect(requestUrl.searchParams.get("batch")).toBe("1");
@@ -194,8 +159,6 @@ describe("Builder Deals runtime privacy boundary", () => {
   });
 
   it("redirects an unauthenticated private document and returns no private image bytes", () => {
-    if (!runtime) return;
-
     expect(runtime.mine.status).toBe(302);
     expect(runtime.mine.headers.get("location")).toBe("/deals?gate=1");
     assertNoPrivateTerms(runtime.mine.body, "unauthenticated /deals/mine response");

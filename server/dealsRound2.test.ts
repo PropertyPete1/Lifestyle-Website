@@ -1,43 +1,91 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { normalizeTestNumbers } from "./dealsService";
+import type { Request, Response } from "express";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-const root = process.cwd();
-const service = readFileSync(join(root, "server/dealsService.ts"), "utf8");
-const routes = readFileSync(join(root, "server/dealsRoutes.ts"), "utf8");
-const router = readFileSync(join(root, "server/dealsRouter.ts"), "utf8");
-const fubJobs = readFileSync(join(root, "server/dealsFubJobs.ts"), "utf8");
-const photos = readFileSync(join(root, "server/dealsPhotos.ts"), "utf8");
-const page = readFileSync(join(root, "client/src/pages/Deals.tsx"), "utf8");
+import {
+  chicagoDayStart,
+  clearDealCookie,
+  currentDealSource,
+  dealsCsp,
+  dealsPublicHeaders,
+  getGoogleDealsIdentity,
+  normalizeTestNumbers,
+  publicNoPrivateNames,
+  setDealCookie,
+  setGoogleDealsIdentity,
+} from "./dealsService";
 
-describe("Builder Deals Round 2 regression contract", () => {
-  it("scopes all Deals cookies to the root API path and detects an incoming probe", () => {
-    expect(service).toContain('function cookieBase(maxAgeSeconds: number, path = "/")');
-    expect(service).toContain('const hasProbe = Boolean(cookies[DEALS_COOKIE.probe])');
-    expect(service).toContain('res.clearCookie(name, cookieBase(0, "/deals"))');
-    expect(routes).toContain('result === "cookie_blocked"');
+type CookieCall = { name: string; value?: string; options: Record<string, unknown> };
+
+function responseRecorder(): { response: Response; cookies: CookieCall[]; cleared: CookieCall[]; headers: Headers } {
+  const cookies: CookieCall[] = [];
+  const cleared: CookieCall[] = [];
+  const headers = new Headers();
+  const response = {
+    cookie: (name: string, value: string, options: Record<string, unknown>) => { cookies.push({ name, value, options }); return response; },
+    clearCookie: (name: string, options: Record<string, unknown>) => { cleared.push({ name, options }); return response; },
+    setHeader: (name: string, value: string) => { headers.set(name, value); return response; },
+  } as unknown as Response;
+  return { response, cookies, cleared, headers };
+}
+
+function requestWithCookies(cookies: Record<string, string>): Request {
+  return { headers: { cookie: Object.entries(cookies).map(([name, value]) => `${name}=${value}`).join("; ") } } as Request;
+}
+
+describe("Builder Deals Round 2 regression behavior", () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it("writes root-scoped HTTP-only Deals cookies and retires legacy path-scoped copies", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const { response, cookies, cleared } = responseRecorder();
+
+    setDealCookie(response, "ldr_deals_session", "opaque", 120);
+    clearDealCookie(response, "ldr_deals_pending");
+
+    expect(cookies).toEqual([{ name: "ldr_deals_session", value: "opaque", options: expect.objectContaining({ path: "/", httpOnly: true, secure: true, sameSite: "lax", maxAge: 120_000 }) }]);
+    expect(cleared).toEqual([
+      { name: "ldr_deals_session", options: expect.objectContaining({ path: "/deals", maxAge: 0 }) },
+      { name: "ldr_deals_pending", options: expect.objectContaining({ path: "/", maxAge: 0 }) },
+      { name: "ldr_deals_pending", options: expect.objectContaining({ path: "/deals", maxAge: 0 }) },
+    ]);
   });
-  it("normalizes admin test numbers to E.164 before matching them", () => {
+
+  it("only accepts an intact, signed Google identity cookie", () => {
+    vi.stubEnv("JWT_SECRET", "round-two-test-signing-key");
+    const { response, cookies } = responseRecorder();
+    setGoogleDealsIdentity(response, { email: "Buyer@Example.test", name: "  Buyer Name  " });
+    const signed = cookies[0]?.value;
+    expect(signed).toBeTruthy();
+
+    expect(getGoogleDealsIdentity(requestWithCookies({ ldr_deals_google: signed! }))).toEqual({ email: "buyer@example.test", name: "Buyer Name" });
+    expect(getGoogleDealsIdentity(requestWithCookies({ ldr_deals_google: `${signed}tampered` }))).toBeNull();
+    expect(getGoogleDealsIdentity(requestWithCookies({ ldr_deals_google: `${Buffer.from(JSON.stringify({ email: "not-an-email" })).toString("base64url")}.signature` }))).toBeNull();
+  });
+
+  it("normalizes test phones, filters unknown campaign sources, and rejects residual private data", () => {
     expect(normalizeTestNumbers(["(210) 555-0123", "+1 210 555 0123"])).toEqual(["+12105550123"]);
+    expect(() => normalizeTestNumbers(["not a phone"])).toThrow("Invalid test number");
+    expect(currentDealSource("sl1", { activeReelCodes: ["sl1"] } as any)).toBe("sl1");
+    expect(currentDealSource("SL1", { activeReelCodes: ["sl1"] } as any)).toBe("other");
+    expect(currentDealSource("unapproved", { activeReelCodes: ["sl1"] } as any)).toBe("other");
+    expect(publicNoPrivateNames({ label: "Generic community" }, ["Secret Grove"])).toBe(true);
+    expect(publicNoPrivateNames({ label: "Secret Grove" }, ["Secret Grove"])).toBe(false);
   });
-  it("reserves and logs every code attempt before either delivery transport", () => {
-    expect(service).toContain('kind: "code_sent"');
-    expect(service).toContain('dailyVerificationCap');
-    expect(router).toContain('reserveVerificationAttempt');
-    expect(router).toContain('channel: input.channel');
+
+  it("sets concrete no-store, noindex, same-origin, and self-only CSP response protections", () => {
+    const { response, headers } = responseRecorder();
+    dealsPublicHeaders(response);
+    dealsCsp(response);
+
+    expect(headers.get("cache-control")).toBe("private, no-store");
+    expect(headers.get("referrer-policy")).toBe("same-origin");
+    expect(headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    expect(headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(headers.get("content-security-policy")).toContain("connect-src 'self'");
   });
-  it("keeps image bytes private and gives the browser only protected galleries", () => {
-    expect(photos).toContain('builder-deals-private/');
-    expect(photos).toContain('watermarkSvg');
-    expect(photos).toContain('ocrTerms');
-    expect(page).toContain('ProtectedGallery');
-    expect(service).toContain('`/deals/mine/img/${photo.id}`');
-  });
-  it("uses first-unlock versus re-verification FUB delivery paths", () => {
-    expect(routes).toContain('completed.firstUnlock');
-    expect(routes).toContain('enqueueDealsFubJob');
-    expect(fubJobs).toContain('updateBuilderDealsLeadInFub');
-    expect(routes).toContain('re-verified on a second device');
+
+  it("uses the Central calendar day across both daylight-saving offsets", () => {
+    expect(chicagoDayStart(new Date("2026-01-15T05:59:59.000Z")).toISOString()).toBe("2026-01-14T06:00:00.000Z");
+    expect(chicagoDayStart(new Date("2026-07-15T05:59:59.000Z")).toISOString()).toBe("2026-07-15T05:00:00.000Z");
   });
 });

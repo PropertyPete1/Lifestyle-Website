@@ -1,11 +1,20 @@
 import type { Express } from "express";
 import { ENV } from "./env";
+import { isSafeStorageObjectUrl, normalizeStorageKey } from "../storage";
 
 export function registerStorageProxy(app: Express) {
   app.get("/manus-storage/*", async (req, res) => {
-    const key = (req.params as Record<string, string>)[0];
-    if (!key) {
+    const rawKey = (req.params as Record<string, string>)[0];
+    if (!rawKey) {
       res.status(400).send("Missing storage key");
+      return;
+    }
+
+    let key: string;
+    try {
+      key = normalizeStorageKey(rawKey);
+    } catch {
+      res.status(400).send("Invalid storage key");
       return;
     }
 
@@ -30,6 +39,8 @@ export function registerStorageProxy(app: Express) {
 
       const forgeResp = await fetch(forgeUrl, {
         headers: { Authorization: `Bearer ${ENV.forgeApiKey}` },
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000),
       });
 
       if (!forgeResp.ok) {
@@ -40,8 +51,8 @@ export function registerStorageProxy(app: Express) {
       }
 
       const { url } = (await forgeResp.json()) as { url: string };
-      if (!url) {
-        res.status(502).send("Empty signed URL from backend");
+      if (!url || !isSafeStorageObjectUrl(url)) {
+        res.status(502).send("Unsafe signed URL from backend");
         return;
       }
 

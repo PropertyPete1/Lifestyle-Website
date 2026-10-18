@@ -4,6 +4,25 @@
 
 import { ENV } from "./_core/env";
 
+// Forge issues S3-compatible or CloudFront signed object URLs. Keep this
+// narrow so a bad Forge response cannot make the server fetch or redirect to
+// an arbitrary address.
+const APPROVED_OBJECT_HOST_SUFFIXES = ["amazonaws.com", "cloudfront.net"];
+
+export function isSafeStorageObjectUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    const hostname = url.hostname.toLowerCase();
+    return url.protocol === "https:"
+      && !url.username
+      && !url.password
+      && !url.port
+      && APPROVED_OBJECT_HOST_SUFFIXES.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`));
+  } catch {
+    return false;
+  }
+}
+
 function getForgeConfig() {
   const forgeUrl = ENV.forgeApiUrl;
   const forgeKey = ENV.forgeApiKey;
@@ -17,8 +36,12 @@ function getForgeConfig() {
   return { forgeUrl: forgeUrl.replace(/\/+$/, ""), forgeKey };
 }
 
-function normalizeKey(relKey: string): string {
-  return relKey.replace(/^\/+/, "");
+export function normalizeStorageKey(relKey: string): string {
+  const key = relKey.replace(/^\/+/, "");
+  if (!key || key.length > 1_024 || key.includes("\\") || key.split("/").some((part) => !part || part === "." || part === "..")) {
+    throw new Error("Invalid storage key");
+  }
+  return key;
 }
 
 function appendHashSuffix(relKey: string): string {
@@ -32,9 +55,15 @@ export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream",
+  options: { unique?: boolean } = {},
 ): Promise<{ key: string; url: string }> {
   const { forgeUrl, forgeKey } = getForgeConfig();
-  const key = appendHashSuffix(normalizeKey(relKey));
+  const normalizedKey = normalizeStorageKey(relKey);
+  // Most callers retain the historical collision-proof behavior. Private Deals
+  // image processors opt in to stable keys only after fully deriving and
+  // validating bytes server-side; this makes an overwrite idempotent and avoids
+  // creating a fresh orphan on each retry when no delete API is available.
+  const key = options.unique === false ? normalizedKey : appendHashSuffix(normalizedKey);
 
   // 1. Get presigned PUT URL from Forge
   const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
@@ -42,6 +71,8 @@ export async function storagePut(
 
   const presignResp = await fetch(presignUrl, {
     headers: { Authorization: `Bearer ${forgeKey}` },
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!presignResp.ok) {
@@ -50,7 +81,7 @@ export async function storagePut(
   }
 
   const { url: s3Url } = (await presignResp.json()) as { url: string };
-  if (!s3Url) throw new Error("Forge returned empty presign URL");
+  if (!s3Url || !isSafeStorageObjectUrl(s3Url)) throw new Error("Forge returned unsafe storage URL");
 
   // 2. PUT file directly to S3
   const blob =
@@ -62,6 +93,8 @@ export async function storagePut(
     method: "PUT",
     headers: { "Content-Type": contentType },
     body: blob,
+    redirect: "error",
+    signal: AbortSignal.timeout(20_000),
   });
 
   if (!uploadResp.ok) {
@@ -72,19 +105,21 @@ export async function storagePut(
 }
 
 export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
-  const key = normalizeKey(relKey);
+  const key = normalizeStorageKey(relKey);
   return { key, url: `/manus-storage/${key}` };
 }
 
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const { forgeUrl, forgeKey } = getForgeConfig();
-  const key = normalizeKey(relKey);
+  const key = normalizeStorageKey(relKey);
 
   const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
   getUrl.searchParams.set("path", key);
 
   const resp = await fetch(getUrl, {
     headers: { Authorization: `Bearer ${forgeKey}` },
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!resp.ok) {
@@ -93,6 +128,7 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
   }
 
   const { url } = (await resp.json()) as { url: string };
+  if (!url || !isSafeStorageObjectUrl(url)) throw new Error("Forge returned unsafe storage URL");
   return url;
 }
 
@@ -101,11 +137,12 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
  * remains inside the server process and the caller receives bytes, never it.
  */
 export async function storageReadPrivate(relKey: string): Promise<{ data: Buffer; contentType: string }> {
-  if (!normalizeKey(relKey).startsWith("builder-deals-private/")) {
+  const key = normalizeStorageKey(relKey);
+  if (!key.startsWith("builder-deals-private/")) {
     throw new Error("Private Deals storage key required");
   }
-  const url = await storageGetSignedUrl(relKey);
-  const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+  const url = await storageGetSignedUrl(key);
+  const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`Private storage read failed (${response.status})`);
   return {
     data: Buffer.from(await response.arrayBuffer()),

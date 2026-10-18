@@ -1,99 +1,494 @@
 import crypto from "node:crypto";
-import sharp from "sharp";
-import { and, eq, gt } from "drizzle-orm";
+import sharp, { type Metadata } from "sharp";
+import { and, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealPhotoRenders, dealPhotos, dealLeads } from "../drizzle/schema";
 import { getDb } from "./db";
 import { storagePut, storageReadPrivate } from "./storage";
 
 const PRIVATE_PREFIX = "builder-deals-private/";
-const MAX_BYTES = 18 * 1024 * 1024;
-const approvedImageHosts = new Set(["www.mihomes.com", "mihomes.com", "dam.mihomes.com", "www.chesmar.com", "chesmar.com", "images.ctfassets.net", "cdn.sanity.io"]);
+const MAX_DOWNLOAD_BYTES = 18 * 1024 * 1024;
+const MAX_INPUT_PIXELS = 50_000_000;
+const MAX_ORIGINAL_EDGE = 2_400;
+const MIN_OCR_WORD_CONFIDENCE = 75;
+const MAX_PROCESSING_ATTEMPTS = 5;
+const PROCESSING_LEASE_MS = 15 * 60_000;
+const APPROVED_IMAGE_HOSTS = new Set([
+  "www.mihomes.com",
+  "mihomes.com",
+  "dam.mihomes.com",
+  "www.chesmar.com",
+  "chesmar.com",
+  "images.ctfassets.net",
+  "cdn.sanity.io",
+]);
+const ACCEPTED_IMAGE_FORMATS = new Set(["jpeg", "png", "webp", "avif", "gif", "heif"]);
+
 const digest = (value: Buffer | string) => crypto.createHash("sha256").update(value).digest("hex");
 
-function safeImageUrl(raw: string) {
-  const url = new URL(raw);
-  if (url.protocol !== "https:" || !approvedImageHosts.has(url.hostname.toLowerCase())) throw new Error("Unapproved Builder Deals image host");
+class PhotoProcessingError extends Error {
+  constructor(readonly code: PhotoProcessingErrorCode) {
+    super(code);
+  }
+}
+
+type PhotoProcessingErrorCode =
+  | "unapproved_source"
+  | "source_unavailable"
+  | "invalid_image"
+  | "image_too_large"
+  | "invalid_crop"
+  | "storage_unavailable"
+  | "ocr_unavailable"
+  | "processing_failed";
+
+export type OcrWord = { text: string; confidence: number };
+export type OcrMatch = { term: string; confidence: number; words: string[] };
+
+/** Only explicitly reviewed HTTPS builder/CDN origins may supply a Deals image. */
+export function safeDealImageUrl(raw: string): URL {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new PhotoProcessingError("unapproved_source");
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.port ||
+    !APPROVED_IMAGE_HOSTS.has(url.hostname.toLowerCase())
+  ) {
+    throw new PhotoProcessingError("unapproved_source");
+  }
   return url;
 }
-function watermarkSvg(text: string, width: number, height: number) {
-  const safe = text.replace(/[<&>]/g, "");
-  return Buffer.from(`<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><g transform="rotate(-28 ${width / 2} ${height / 2})" fill="#ffffff" fill-opacity="0.32" font-family="Arial" font-size="${Math.max(13, Math.round(width / 42))}" font-weight="600">${Array.from({ length: 8 }, (_, i) => `<text x="${-width / 3}" y="${i * Math.max(48, height / 6) + 44}">${safe}</text>`).join("")}</g></svg>`);
-}
-let ocrWorkerPromise: Promise<any> | null = null;
-let ocrWork = Promise.resolve();
 
-async function ocrTerms(bytes: Buffer, terms: string[]) {
-  // Tesseract is deliberately best-effort only here; a processing/OCR failure
-  // hides the asset rather than risking a branded/lender image being served.
+function xmlText(value: string) {
+  return value.replace(/[&<>"']/g, "");
+}
+
+/**
+ * Covers the complete image after rotation. The identity is only ever used in
+ * the private render bytes and is never embedded in an object key or URL.
+ */
+export function tiledWatermarkSvg(text: string, width: number, height: number) {
+  const safe = xmlText(text).slice(0, 240);
+  const fontSize = Math.max(13, Math.round(width / 42));
+  const columnGap = Math.max(220, Math.round(width / 2.2));
+  const rowGap = Math.max(56, Math.round(height / 5));
+  const labels: string[] = [];
+  for (let y = -height; y < height * 2; y += rowGap) {
+    for (let x = -width; x < width * 2; x += columnGap) {
+      labels.push(`<text x="${x}" y="${y}">${safe}</text>`);
+    }
+  }
+  return Buffer.from(
+    `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><g transform="rotate(-28 ${width / 2} ${height / 2})" fill="#ffffff" fill-opacity="0.32" font-family="Arial" font-size="${fontSize}" font-weight="600">${labels.join("")}</g></svg>`,
+  );
+}
+
+/** Lowercase, punctuation-neutral OCR tokens. Matching is never substring-based. */
+export function normalizedOcrTokens(value: string): string[] {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US")
+    // Sources and configured builder names are ASCII in this deployment. Avoid
+    // Unicode-property escapes because this project currently downlevels tests.
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * A configured term only matches a consecutive sequence of complete OCR words,
+ * and every word in that sequence must meet the confidence floor. This avoids
+ * e.g. treating "chester" as an occurrence of "Chesmar".
+ */
+export function findExactOcrMatches(words: OcrWord[], terms: string[], minimumConfidence = MIN_OCR_WORD_CONFIDENCE): OcrMatch[] {
+  const expandedWords = words.flatMap((word) => normalizedOcrTokens(word.text).map((text) => ({ text, confidence: Number(word.confidence) })));
+  const uniqueTerms = new Map<string, { term: string; tokens: string[] }>();
+  for (const rawTerm of terms) {
+    const term = rawTerm.trim();
+    const tokens = normalizedOcrTokens(term);
+    if (term && tokens.length) uniqueTerms.set(tokens.join("\u0000"), { term, tokens });
+  }
+
+  const matches: OcrMatch[] = [];
+  for (const { term, tokens } of Array.from(uniqueTerms.values())) {
+    for (let start = 0; start <= expandedWords.length - tokens.length; start++) {
+      const candidate = expandedWords.slice(start, start + tokens.length);
+      if (candidate.every((word, index) => word.text === tokens[index] && Number.isFinite(word.confidence) && word.confidence >= minimumConfidence)) {
+        matches.push({
+          term,
+          confidence: Math.round(Math.min(...candidate.map((word) => word.confidence)) * 100) / 100,
+          words: candidate.map((word) => word.text),
+        });
+        break;
+      }
+    }
+  }
+  return matches;
+}
+
+type OcrWorker = {
+  recognize(bytes: Buffer): Promise<{ data?: { words?: Array<{ text?: string; confidence?: number }> } }>;
+  terminate(): Promise<unknown>;
+};
+
+let ocrWorkerPromise: Promise<OcrWorker> | null = null;
+let ocrWork: Promise<void> = Promise.resolve();
+
+async function runOcrExclusively<T>(work: () => Promise<T>): Promise<T> {
+  const previous = ocrWork;
+  let release: () => void = () => undefined;
+  ocrWork = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
+  }
+}
+
+async function ocrTerms(bytes: Buffer, terms: string[]): Promise<OcrMatch[]> {
   try {
     const { createWorker } = await import("tesseract.js");
-    ocrWorkerPromise ??= createWorker("eng", 1, { logger: () => undefined });
-    const text = await new Promise<string>((resolve, reject) => {
-      ocrWork = ocrWork.then(async () => {
-        try { resolve((await (await ocrWorkerPromise).recognize(bytes)).data.text.toLowerCase()); }
-        catch (error) { reject(error); }
-      });
-    });
-    return terms.filter((term) => term.trim().length >= 4 && text.includes(term.toLowerCase()));
-  } catch { return ["ocr_processing_failed"]; }
+    ocrWorkerPromise ??= createWorker("eng", 1, { logger: () => undefined }) as unknown as Promise<OcrWorker>;
+    const result = await runOcrExclusively(async () => (await ocrWorkerPromise!).recognize(bytes));
+    if (!Array.isArray(result.data?.words)) throw new Error("OCR returned no word data");
+    return findExactOcrMatches(
+      result.data.words
+        .filter((word): word is { text: string; confidence: number } => typeof word.text === "string" && typeof word.confidence === "number")
+        .map((word) => ({ text: word.text, confidence: word.confidence })),
+      terms,
+    );
+  } catch {
+    // A failed screen is not a clear screen. The queue retries this state and
+    // the asset remains unavailable until a later scan succeeds.
+    throw new PhotoProcessingError("ocr_unavailable");
+  }
 }
 
 export async function closeDealPhotoOcrWorker() {
-  if (ocrWorkerPromise) { await (await ocrWorkerPromise).terminate(); ocrWorkerPromise = null; ocrWork = Promise.resolve(); }
+  await ocrWork;
+  const worker = ocrWorkerPromise;
+  ocrWorkerPromise = null;
+  ocrWork = Promise.resolve();
+  if (worker) await (await worker).terminate();
 }
 
-/** Downloads, strips metadata, OCR-checks and stores one private image master. */
-export async function processDealPhoto(photoId: number) {
+function safeScrubList(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+function photoErrorCode(error: unknown): PhotoProcessingErrorCode {
+  if (error instanceof PhotoProcessingError) return error.code;
+  return "processing_failed";
+}
+
+function wasUpdated(result: unknown): boolean {
+  const packet = Array.isArray(result) ? result[0] : result;
+  return Number((packet as { affectedRows?: number } | undefined)?.affectedRows ?? 0) > 0;
+}
+
+function retryAt(attempt: number) {
+  const delay = Math.min(60 * 60_000, 30_000 * 2 ** Math.min(Math.max(attempt - 1, 0), 6));
+  return new Date(Date.now() + delay);
+}
+
+/** Deterministically rotate, resize, transcode, and strip all input metadata. */
+export async function normalizeDealPhotoOriginal(original: Buffer): Promise<Buffer> {
+  if (original.byteLength === 0 || original.byteLength > MAX_DOWNLOAD_BYTES) throw new PhotoProcessingError("image_too_large");
+  let metadata: Metadata;
+  try {
+    metadata = await sharp(original, { limitInputPixels: MAX_INPUT_PIXELS, animated: false }).metadata();
+  } catch {
+    throw new PhotoProcessingError("invalid_image");
+  }
+  if (
+    !metadata.width ||
+    !metadata.height ||
+    metadata.width * metadata.height > MAX_INPUT_PIXELS ||
+    !metadata.format ||
+    !ACCEPTED_IMAGE_FORMATS.has(metadata.format) ||
+    (metadata.pages !== undefined && metadata.pages > 1)
+  ) {
+    throw new PhotoProcessingError("invalid_image");
+  }
+  try {
+    // sharp does not copy EXIF/XMP/ICC metadata unless withMetadata() is used.
+    return await sharp(original, { limitInputPixels: MAX_INPUT_PIXELS, animated: false })
+      .rotate()
+      .resize({ width: MAX_ORIGINAL_EDGE, height: MAX_ORIGINAL_EDGE, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 90, effort: 4, smartSubsample: true })
+      .toBuffer();
+  } catch {
+    throw new PhotoProcessingError("invalid_image");
+  }
+}
+
+async function makeDealPhotoMaster(normalizedOriginal: Buffer, bottomCrop: number, cropApproved: boolean): Promise<Buffer> {
+  let source = sharp(normalizedOriginal, { limitInputPixels: MAX_INPUT_PIXELS, animated: false });
+  const metadata = await source.metadata();
+  if (!metadata.width || !metadata.height) throw new PhotoProcessingError("invalid_image");
+  if (cropApproved && bottomCrop > 0) {
+    if (!Number.isInteger(bottomCrop) || bottomCrop >= metadata.height) throw new PhotoProcessingError("invalid_crop");
+    source = source.extract({ left: 0, top: 0, width: metadata.width, height: metadata.height - bottomCrop });
+  }
+  return source.webp({ quality: 88, effort: 4, smartSubsample: true }).toBuffer();
+}
+
+async function claimDealPhoto(photoId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
-  const row = (await db.select({ photo: dealPhotos, home: dealHomes, community: dealCommunities }).from(dealPhotos).innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id)).innerJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id)).where(eq(dealPhotos.id, photoId)).limit(1))[0];
-  if (!row) throw new Error("Photo unavailable");
+  const now = new Date();
+  const claimed = await db
+    .update(dealPhotos)
+    .set({
+      processingState: "processing",
+      processingAttempts: sql`${dealPhotos.processingAttempts} + 1`,
+      processingStartedAt: now,
+      lastProcessingError: null,
+    })
+    .where(and(
+      eq(dealPhotos.id, photoId),
+      eq(dealPhotos.processingState, "pending"),
+      or(isNull(dealPhotos.nextProcessingAttemptAt), lte(dealPhotos.nextProcessingAttemptAt, now)),
+    ));
+  if (!wasUpdated(claimed)) return null;
+
+  return {
+    db,
+    row: (await db
+      .select({ photo: dealPhotos, home: dealHomes, community: dealCommunities })
+      .from(dealPhotos)
+      .innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
+      .innerJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
+      .where(eq(dealPhotos.id, photoId))
+      .limit(1))[0],
+  };
+}
+
+async function recordPhotoFailure(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, photoId: number, attempt: number, code: PhotoProcessingErrorCode) {
+  const retry = attempt < MAX_PROCESSING_ATTEMPTS && code !== "unapproved_source" && code !== "invalid_crop";
+  await db.update(dealPhotos).set({
+    automaticHidden: true,
+    processingState: retry ? "pending" : "failed",
+    nextProcessingAttemptAt: retry ? retryAt(attempt) : null,
+    processingStartedAt: null,
+    lastProcessingError: code,
+    ocrMatches: JSON.stringify([{ kind: "processing_error", code }]),
+  }).where(eq(dealPhotos.id, photoId));
+  return retry;
+}
+
+/**
+ * Claims and processes one durable queue entry. No source error, signed URL, or
+ * remote response is propagated to a browser or persisted as an admin message.
+ */
+export async function processDealPhoto(photoId: number): Promise<{ ok: boolean; hidden?: boolean; matches?: OcrMatch[]; retryScheduled?: boolean; skipped?: boolean }> {
+  const claimed = await claimDealPhoto(photoId);
+  if (!claimed) return { ok: false, skipped: true };
+  const { db, row } = claimed;
+  if (!row) return { ok: false, skipped: true };
+  const attempt = Math.max(1, row.photo.processingAttempts);
+
   try {
-    const url = safeImageUrl(row.photo.sourceUrl);
+    const url = safeDealImageUrl(row.photo.sourceUrl);
     const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(20_000) });
-    if (!response.ok) throw new Error("Image source unavailable");
-    const original = Buffer.from(await response.arrayBuffer());
-    if (original.byteLength === 0 || original.byteLength > MAX_BYTES) throw new Error("Image size rejected");
-    const metadata = await sharp(original).metadata();
-    if (!metadata.width || !metadata.height || metadata.width * metadata.height > 50_000_000) throw new Error("Image dimensions rejected");
-    let image = sharp(original, { limitInputPixels: 50_000_000 }).rotate();
-    if (row.community.watermarkRemovalApproved && row.photo.bottomCrop > 0) {
-      image = image.extract({ left: 0, top: 0, width: metadata.width, height: Math.max(1, metadata.height - row.photo.bottomCrop) });
+    if (!response.ok || !response.headers.get("content-type")?.toLowerCase().startsWith("image/")) {
+      throw new PhotoProcessingError("source_unavailable");
     }
-    const cleaned = await image.webp({ quality: 88 }).toBuffer();
-    const configuredTerms = Array.from(new Set([row.community.builder, row.community.privateName, row.home.privateAddress ?? "", row.home.privatePlanName ?? "", ...JSON.parse(row.community.scrubList || "[]")].filter(Boolean)));
-    const matches = await ocrTerms(cleaned, configuredTerms);
+    const normalizedOriginal = await normalizeDealPhotoOriginal(Buffer.from(await response.arrayBuffer()));
+    const master = await makeDealPhotoMaster(normalizedOriginal, row.photo.bottomCrop, row.community.watermarkRemovalApproved);
+    const configuredTerms = Array.from(new Set([
+      row.community.builder,
+      row.community.privateName,
+      row.home.privateAddress ?? "",
+      row.home.privatePlanName ?? "",
+      ...safeScrubList(row.community.scrubList),
+    ].filter((term): term is string => Boolean(term.trim()))));
+    const matches = await ocrTerms(master, configuredTerms);
     if (matches.length) {
-      await db.update(dealPhotos).set({ automaticHidden: true, processingState: "failed", ocrMatches: JSON.stringify(matches) }).where(eq(dealPhotos.id, photoId));
-      return { ok: false as const, hidden: true, matches };
+      await db.update(dealPhotos).set({
+        automaticHidden: true,
+        processingState: "failed",
+        nextProcessingAttemptAt: null,
+        processingStartedAt: null,
+        lastProcessingError: null,
+        ocrMatches: JSON.stringify(matches),
+      }).where(eq(dealPhotos.id, photoId));
+      return { ok: false, hidden: true, matches };
     }
-    const sourceHash = row.photo.sourceHash || digest(original);
-    const originalStored = await storagePut(`${PRIVATE_PREFIX}originals/${sourceHash}.webp`, cleaned, "image/webp");
-    const version = digest(cleaned).slice(0, 32);
-    const processedStored = await storagePut(`${PRIVATE_PREFIX}masters/${version}.webp`, cleaned, "image/webp");
-    await db.update(dealPhotos).set({ sourceHash, originalStorageKey: originalStored.key, processedStorageKey: processedStored.key, processedVersion: version, automaticHidden: false, ocrMatches: "[]", processingState: "processed" }).where(eq(dealPhotos.id, photoId));
-    return { ok: true as const, version };
+
+    const originalVersion = digest(normalizedOriginal);
+    const version = digest(master);
+    // Stable keys overwrite obsolete private bytes on reprocess. The object
+    // store API available to this app has no delete operation, so this prevents
+    // a new orphan for every retry/crop update while keeping all objects private.
+    const originalStored = await storagePut(`${PRIVATE_PREFIX}originals/${photoId}.webp`, normalizedOriginal, "image/webp", { unique: false });
+    const processedStored = await storagePut(`${PRIVATE_PREFIX}masters/${photoId}.webp`, master, "image/webp", { unique: false });
+    await db.update(dealPhotos).set({
+      // sourceHash remains the source-URL dedupe key used by dealsSync. The
+      // deterministic bytes are represented by originalVersion/version keys.
+      originalStorageKey: originalStored.key,
+      processedStorageKey: processedStored.key,
+      originalVersion,
+      processedVersion: version,
+      automaticHidden: false,
+      ocrMatches: "[]",
+      processingState: "processed",
+      nextProcessingAttemptAt: null,
+      processingStartedAt: null,
+      lastProcessingError: null,
+      processedAt: new Date(),
+    }).where(eq(dealPhotos.id, photoId));
+    return { ok: true };
   } catch (error) {
-    console.warn(`[deals-photo] private processing failed for photo ${photoId}: ${error instanceof Error ? error.message : "unknown error"}`);
-    await db.update(dealPhotos).set({ automaticHidden: true, processingState: "failed", ocrMatches: JSON.stringify(["processing_failed"]) }).where(eq(dealPhotos.id, photoId));
-    return { ok: false as const, hidden: true, matches: ["processing_failed"] };
+    const code = photoErrorCode(error);
+    console.warn(`[deals-photo] processing ${code} for photo ${photoId}`);
+    const retryScheduled = await recordPhotoFailure(db, photoId, attempt, code).catch(() => false);
+    return { ok: false, hidden: true, retryScheduled };
   }
+}
+
+/** Puts a photo back into the durable queue. Safe for admin reprocess controls. */
+export async function requeueDealPhoto(photoId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.update(dealPhotos).set({
+    automaticHidden: true,
+    processingState: "pending",
+    processingAttempts: 0,
+    nextProcessingAttemptAt: new Date(),
+    processingStartedAt: null,
+    lastProcessingError: null,
+    ocrMatches: "[]",
+  }).where(eq(dealPhotos.id, photoId));
+}
+
+/** Processes due retries and abandoned leases after a process restart. */
+export async function processPendingDealPhotos(limit = 10) {
+  const db = await getDb();
+  if (!db) return { processed: 0, retried: 0, skipped: 0 };
+  const now = new Date();
+  const leaseExpired = new Date(now.getTime() - PROCESSING_LEASE_MS);
+  await db.update(dealPhotos).set({
+    processingState: "pending",
+    nextProcessingAttemptAt: now,
+    processingStartedAt: null,
+    lastProcessingError: "processing_lease_expired",
+  }).where(and(eq(dealPhotos.processingState, "processing"), lt(dealPhotos.processingStartedAt, leaseExpired)));
+
+  const due = await db.select({ id: dealPhotos.id }).from(dealPhotos)
+    .where(and(eq(dealPhotos.processingState, "pending"), or(isNull(dealPhotos.nextProcessingAttemptAt), lte(dealPhotos.nextProcessingAttemptAt, now))))
+    .limit(Math.max(1, Math.min(50, Math.floor(limit))));
+  let processed = 0;
+  let retried = 0;
+  let skipped = 0;
+  for (const photo of due) {
+    const result = await processDealPhoto(photo.id);
+    if (result.skipped) skipped++;
+    else if (result.ok) processed++;
+    else if (result.retryScheduled) retried++;
+  }
+  return { processed, retried, skipped };
+}
+
+export function dealPhotoRenderCacheVersion(photoVersion: string, leadId: number, identity: string) {
+  return digest(`watermark-v1\u0000${photoVersion}\u0000${leadId}\u0000${identity}`).slice(0, 64);
+}
+
+function leadWatermarkIdentity(lead: { instagramHandle: string | null; name: string | null; phoneE164: string }) {
+  return lead.instagramHandle ? `@${lead.instagramHandle}` : lead.name?.trim() || `••••${lead.phoneE164.replace(/\D/g, "").slice(-4)}`;
 }
 
 /** Produces only per-lead watermarked image bytes; no object URL leaves the server. */
 export async function renderDealPhotoForLead(photoId: number, leadId: number) {
+  try {
+    const db = await getDb();
+    if (!db) return null;
+    const now = new Date();
+    const row = (await db.select({ photo: dealPhotos, home: dealHomes, community: dealCommunities, lead: dealLeads }).from(dealPhotos)
+      .innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
+      .innerJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
+      .innerJoin(dealLeads, eq(dealLeads.id, leadId))
+      .where(and(
+        eq(dealPhotos.id, photoId),
+        eq(dealPhotos.processingState, "processed"),
+        eq(dealPhotos.automaticHidden, false),
+        eq(dealPhotos.adminHidden, false),
+        eq(dealHomes.status, "available"),
+        eq(dealCommunities.paused, false),
+        eq(dealCommunities.active, true),
+        eq(dealLeads.status, "verified"),
+        gt(dealLeads.expiresAt, now),
+      )).limit(1))[0];
+    if (!row?.photo.processedStorageKey || !row.photo.processedVersion) return null;
+
+    const identity = leadWatermarkIdentity(row.lead);
+    const cacheVersion = dealPhotoRenderCacheVersion(row.photo.processedVersion, leadId, identity);
+    const cached = (await db.select().from(dealPhotoRenders).where(and(
+      eq(dealPhotoRenders.photoId, photoId),
+      eq(dealPhotoRenders.leadId, leadId),
+      eq(dealPhotoRenders.version, cacheVersion),
+      gt(dealPhotoRenders.expiresAt, now),
+    )).limit(1))[0];
+    if (cached) {
+      try {
+        return await storageReadPrivate(cached.storageKey);
+      } catch {
+        // A stale/missing cache object is regenerated below. Do not leak the
+        // signed-store error to a protected image response.
+      }
+    }
+
+    const source = await storageReadPrivate(row.photo.processedStorageKey);
+    const meta = await sharp(source.data, { limitInputPixels: MAX_INPUT_PIXELS, animated: false }).metadata();
+    if (!meta.width || !meta.height) return null;
+    const rendered = await sharp(source.data, { limitInputPixels: MAX_INPUT_PIXELS, animated: false })
+      .composite([{ input: tiledWatermarkSvg(`Prepared for ${identity} | Lifestyle Design Realty`, meta.width, meta.height), gravity: "center" }])
+      .webp({ quality: 88, effort: 4, smartSubsample: true })
+      .toBuffer();
+    const expiry = new Date(Math.min(row.lead.expiresAt.getTime(), Date.now() + 48 * 60 * 60_000));
+    // The versioned database cache key includes lead identity. The physical key
+    // is stable per lead/photo so reprocesses overwrite obsolete private bytes
+    // instead of accumulating objects when storage deletion is unavailable.
+    // Do not use a bare lead/photo key: an identity edit could otherwise race
+    // with an older request and make a previous cache row read another lead
+    // label. This opaque component is stable for the same lead identity.
+    const identityKey = digest(`${leadId}\u0000${identity}`).slice(0, 32);
+    const stored = await storagePut(`${PRIVATE_PREFIX}renders/${leadId}/${photoId}-${identityKey}.webp`, rendered, "image/webp", { unique: false });
+    await db.insert(dealPhotoRenders).values({ photoId, leadId, version: cacheVersion, storageKey: stored.key, expiresAt: expiry })
+      .onDuplicateKeyUpdate({ set: { storageKey: stored.key, expiresAt: expiry } });
+    return { data: rendered, contentType: "image/webp" };
+  } catch {
+    // Protected routes deliberately return the same not-found shape for an
+    // unavailable asset, unreadable private object, and invalid image.
+    return null;
+  }
+}
+
+/**
+ * Removes expired render metadata in bounded batches. Forge exposes put/get
+ * presigning to this app but no verified delete endpoint, so callers must not
+ * claim that remote S3 objects were deleted. Stable render keys prevent new
+ * reprocess or retry orphans; existing legacy random-key objects remain a
+ * storage-operator cleanup task.
+ */
+export async function cleanupExpiredDealPhotoRenders(limit = 100) {
   const db = await getDb();
-  if (!db) return null;
-  const row = (await db.select({ photo: dealPhotos, home: dealHomes, community: dealCommunities, lead: dealLeads }).from(dealPhotos).innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id)).innerJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id)).innerJoin(dealLeads, eq(dealLeads.id, leadId)).where(and(eq(dealPhotos.id, photoId), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false), eq(dealHomes.status, "available"), eq(dealCommunities.paused, false), eq(dealCommunities.active, true))).limit(1))[0];
-  if (!row?.photo.processedStorageKey || !row.photo.processedVersion) return null;
-  const cached = (await db.select().from(dealPhotoRenders).where(and(eq(dealPhotoRenders.photoId, photoId), eq(dealPhotoRenders.leadId, leadId), eq(dealPhotoRenders.version, row.photo.processedVersion), gt(dealPhotoRenders.expiresAt, new Date()))).limit(1))[0];
-  if (cached) return storageReadPrivate(cached.storageKey);
-  const source = await storageReadPrivate(row.photo.processedStorageKey);
-  const meta = await sharp(source.data).metadata();
-  const identity = row.lead.instagramHandle ? `@${row.lead.instagramHandle}` : row.lead.name?.trim() || `••••${row.lead.phoneE164.replace(/\D/g, "").slice(-4)}`;
-  const rendered = await sharp(source.data).composite([{ input: watermarkSvg(`Prepared for ${identity} | Lifestyle Design Realty`, meta.width || 1000, meta.height || 750), gravity: "center" }]).webp({ quality: 88 }).toBuffer();
-  const expiry = new Date(Math.min(row.lead.expiresAt.getTime() + 24 * 60 * 60_000, Date.now() + 48 * 60 * 60_000));
-  const stored = await storagePut(`${PRIVATE_PREFIX}renders/${leadId}/${photoId}-${row.photo.processedVersion}.webp`, rendered, "image/webp");
-  await db.insert(dealPhotoRenders).values({ photoId, leadId, version: row.photo.processedVersion, storageKey: stored.key, expiresAt: expiry }).onDuplicateKeyUpdate({ set: { storageKey: stored.key, expiresAt: expiry } });
-  return { data: rendered, contentType: "image/webp" };
+  if (!db) return { recordsDeleted: 0, storageObjectsDeleted: 0, storageCleanup: "unavailable" as const };
+  const rows = await db.select({ id: dealPhotoRenders.id }).from(dealPhotoRenders)
+    .where(lt(dealPhotoRenders.expiresAt, new Date()))
+    .limit(Math.max(1, Math.min(500, Math.floor(limit))));
+  for (const row of rows) await db.delete(dealPhotoRenders).where(eq(dealPhotoRenders.id, row.id));
+  return { recordsDeleted: rows.length, storageObjectsDeleted: 0, storageCleanup: "unavailable" as const };
 }

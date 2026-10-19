@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
@@ -29,15 +30,35 @@ const GALLERY_TIMEOUT_MS = 45_000;
 const captures: Capture[] = [];
 const skipped: Array<{ file: string; reason: string }> = [];
 
-async function settle(page: Page) {
-  // Images in view must have finished loading; the frame itself is what gets reviewed.
-  await page.evaluate(() => Promise.all(Array.from(document.images).filter((image) => image.loading !== "lazy" || image.getBoundingClientRect().top < window.innerHeight * 1.5).map((image) => image.complete ? Promise.resolve() : new Promise((resolve) => { image.addEventListener("load", resolve, { once: true }); image.addEventListener("error", resolve, { once: true }); }))));
+/** Upper bound for the images in a frame to finish loading before it is taken. */
+const SETTLE_TIMEOUT_MS = 20_000;
+
+async function settle(page: Page, label: string) {
+  // Images in view must have finished loading; the frame itself is what gets
+  // reviewed. Only images the browser will fetch on its own are awaited: a lazy
+  // image outside the viewport in either axis (the hidden slides of a carousel
+  // sit beside the visible one) never starts loading, so a wait on it would
+  // never end. The wait is bounded either way and a timeout is recorded.
+  const stillLoading = await page.evaluate((timeoutMs: number) => {
+    const inView = (image: HTMLImageElement) => {
+      const box = image.getBoundingClientRect();
+      return box.bottom > 0 && box.top < window.innerHeight && box.right > 0 && box.left < window.innerWidth;
+    };
+    const waiting = Array.from(document.images).filter((image) => !image.complete && (image.loading !== "lazy" || inView(image)));
+    const loaded = Promise.all(waiting.map((image) => new Promise<void>((resolve) => {
+      image.addEventListener("load", () => resolve(), { once: true });
+      image.addEventListener("error", () => resolve(), { once: true });
+    }))).then(() => 0);
+    const expired = new Promise<number>((resolve) => setTimeout(() => resolve(waiting.filter((image) => !image.complete).length), timeoutMs));
+    return Promise.race([loaded, expired]);
+  }, SETTLE_TIMEOUT_MS);
+  if (stillLoading) transcript.step(`settle ${label}`, "timeout", `${stillLoading} image(s) still loading after ${SETTLE_TIMEOUT_MS} ms`);
   await page.waitForTimeout(250);
 }
 
 async function capture(page: Page, filename: string, note?: string) {
   const redactions = await redactPhoneDigitsForCapture(page);
-  await settle(page);
+  await settle(page, filename);
   const geometry = await assertMobileGeometry(page, filename);
   const target = path.join(out, filename);
   await page.screenshot({ path: target, fullPage: false, animations: "disabled" });
@@ -176,6 +197,15 @@ function gitCommit(): string | null {
   try { return execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim(); } catch { return null; }
 }
 
+/** The whole run must finish in this time; a stall writes the partial evidence and fails instead of waiting. */
+const WATCHDOG_MS = 8 * 60_000;
+const watchdog = setTimeout(() => {
+  transcript.print();
+  const partial = { mode: "incomplete", capturedAt: new Date().toISOString(), commit: gitCommit(), note: `capture watchdog fired after ${WATCHDOG_MS} ms; frames below were taken before the stall`, captures, skipped };
+  try { writeFileSync(path.join(out, "capture-manifest.partial.json"), `${JSON.stringify(partial, null, 2)}\n`); } catch { /* the transcript above is the record */ }
+  console.error(`FAIL: capture watchdog fired after ${WATCHDOG_MS} ms (last step: ${transcript.entries.at(-1)?.step ?? "none"})`);
+  process.exit(1);
+}, WATCHDOG_MS);
 const browser = await chromium.launch({ executablePath: browserExecutable(), headless: true, args: ["--no-sandbox"] });
 try {
   if (credentials) await liveCaptures(browser, credentials.otp, credentials.phone);
@@ -203,5 +233,6 @@ try {
   console.error(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
 } finally {
+  clearTimeout(watchdog);
   await browser.close();
 }

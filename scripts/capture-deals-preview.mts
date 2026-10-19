@@ -24,6 +24,8 @@ const out = path.resolve(process.env.DEALS_CAPTURE_OUT_DIR || "docs/preview");
 await fs.mkdir(out, { recursive: true });
 const transcript = new Transcript(credentials ? "deals-capture live" : "deals-capture fixture");
 type Capture = { file: string; viewport: typeof PHONE_VIEWPORT; scrollWidth: number; width: number; height: number; redactions: string[]; note?: string };
+/** Upper bound for one protected image render through the live session; the first request also warms the server cache. */
+const GALLERY_TIMEOUT_MS = 45_000;
 const captures: Capture[] = [];
 const skipped: Array<{ file: string; reason: string }> = [];
 
@@ -60,10 +62,35 @@ async function captureGatedStates(page: Page) {
   await capture(page, "builder-deals-gated-catalog-375.png");
   const gallery = page.locator("img[src^='/deals/mine/img/']").first();
   if (await gallery.count()) {
+    // Live mode requests the first protected image through the session before
+    // the frame: its status, time and size are evidence, and a slow or failing
+    // render is reported instead of waited on without limit. (Fixture mode
+    // serves that route from the page's route handlers, which a direct request
+    // would bypass, so it only watches the element.)
+    const src = (await gallery.getAttribute("src")) ?? "";
+    const started = Date.now();
+    const probe = credentials ? await page.request.get(new URL(src, base).toString(), { timeout: GALLERY_TIMEOUT_MS }).then(
+      async (response) => ({ ok: response.ok(), status: response.status(), type: response.headers()["content-type"] ?? "", bytes: (await response.body()).length, error: "" }),
+      (error: unknown) => ({ ok: false, status: 0, type: "", bytes: 0, error: error instanceof Error ? error.message : String(error) }),
+    ) : null;
+    const elapsed = Date.now() - started;
+    if (probe) transcript.step("GET first protected gallery image", probe.status || "no response", `${elapsed} ms${probe.type ? `, ${probe.type}` : ""}${probe.bytes ? `, ${probe.bytes} bytes` : ""}${probe.error ? `, ${probe.error}` : ""}`);
     await gallery.scrollIntoViewIfNeeded();
-    await gallery.evaluate((image: HTMLImageElement) => image.complete ? undefined : new Promise((resolve) => { image.addEventListener("load", resolve, { once: true }); image.addEventListener("error", resolve, { once: true }); }));
+    const state = await gallery.evaluate((image: HTMLImageElement, timeoutMs: number) => image.complete && image.naturalWidth > 0 ? "loaded" : new Promise<string>((resolve) => {
+      image.addEventListener("load", () => resolve("loaded"), { once: true });
+      image.addEventListener("error", () => resolve("error"), { once: true });
+      setTimeout(() => resolve("timeout"), timeoutMs);
+    }), GALLERY_TIMEOUT_MS);
     await page.evaluate(() => window.scrollBy(0, -72));
-    await capture(page, "builder-deals-home-gallery-375.png", "one gallery frame with the per-lead watermark burned into the image bytes");
+    if (state === "loaded") {
+      await capture(page, "builder-deals-home-gallery-375.png", `one gallery frame with the per-lead watermark burned into the image bytes${probe ? ` (first image ${probe.status} in ${elapsed} ms)` : ""}`);
+    } else {
+      const reason = `the first protected image did not render in the page (${state}${probe ? `; direct request ${probe.status || "failed"} after ${elapsed} ms` : ""})`;
+      skipped.push({ file: "builder-deals-home-gallery-375.png", reason });
+      transcript.step("capture builder-deals-home-gallery-375.png", "skipped", reason);
+      // A listed photo that the protected route cannot serve is a defect, not a skip.
+      if (probe && !probe.ok) process.exitCode = 1;
+    }
   } else {
     skipped.push({ file: "builder-deals-home-gallery-375.png", reason: "the catalog served no processed photos to this session" });
     transcript.step("capture builder-deals-home-gallery-375.png", "skipped", "no photos served");

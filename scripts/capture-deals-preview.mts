@@ -39,12 +39,15 @@ async function settle(page: Page, label: string) {
   // image outside the viewport in either axis (the hidden slides of a carousel
   // sit beside the visible one) never starts loading, so a wait on it would
   // never end. The wait is bounded either way and a timeout is recorded.
+  // No named function bindings inside the page callback: tsx (esbuild keepNames)
+  // wraps those in a __name() helper that does not exist in the browser.
   const stillLoading = await page.evaluate((timeoutMs: number) => {
-    const inView = (image: HTMLImageElement) => {
+    const waiting = Array.from(document.images).filter((image) => {
+      if (image.complete) return false;
+      if (image.loading !== "lazy") return true;
       const box = image.getBoundingClientRect();
       return box.bottom > 0 && box.top < window.innerHeight && box.right > 0 && box.left < window.innerWidth;
-    };
-    const waiting = Array.from(document.images).filter((image) => !image.complete && (image.loading !== "lazy" || inView(image)));
+    });
     const loaded = Promise.all(waiting.map((image) => new Promise<void>((resolve) => {
       image.addEventListener("load", () => resolve(), { once: true });
       image.addEventListener("error", () => resolve(), { once: true });

@@ -25,7 +25,8 @@ vi.mock("./dealsFubJobs", () => ({
   requestTestMode: (...args: unknown[]) => mocks.requestTestMode(...args),
 }));
 
-import { agentForLead, agentWorkspace, createClientLink, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
+import { agentDisplayPhone, agentForLead, agentForTeamId, agentWorkspace, attachLiveSessionToClientLink, createClientLink, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
+import { dealEvents } from "../drizzle/schema";
 import { classifyDealsAccess } from "./dealsEligibility";
 import { createDealsHomeRequest, setDealsHomeSaved } from "./dealsRequests";
 import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, catalogViewForLead, completeVerification, createPendingVerification, gatedDealsCatalog, hashSecret, savedDealCards } from "./dealsService";
@@ -245,7 +246,7 @@ describe("the agent's workspace", () => {
     db.seed(dealClientLinks, { token: "o".repeat(32), agentTeamId: otherTeam, agentLeadId: 999, clientName: "Not Mine", expiresAt: new Date(Date.now() + HOUR) });
     const empty = await agentWorkspace(agent);
     expect(empty?.clients.map((client) => client.clientName)).toEqual(["Maria Lopez"]);
-    expect(empty?.clients[0]).toMatchObject({ clientPhone: "(210) 555-0202", note: "Wants 4 beds", verifiedAt: null, accessExpiresAt: null, saves: [], requests: [] });
+    expect(empty?.clients[0]).toMatchObject({ clientPhone: "(210) 555-0202", clientPhoneDigits: "2105550202", note: "Wants 4 beds", verifiedAt: null, accessExpiresAt: null, saves: [], requests: [] });
 
     const client = lead({ phoneE164: CLIENT_PHONE, agentTeamId: teamId, clientLinkId: created.link.id, sourceCode: AGENT_CLIENT_SOURCE, expiresAt: new Date(Date.now() + 48 * HOUR) });
     db.rows(dealClientLinks).find((row) => row.id === created.link.id)!.leadId = client.id;
@@ -262,5 +263,48 @@ describe("the agent's workspace", () => {
     expect(maria.lastViewedAt).toBeTruthy();
     expect(maria.saves).toEqual([expect.objectContaining({ card: card(homeId), description: "118 Fixture Lakes Blvd (Brandon)", price: 489_990, communityLabel: "Fixture Lakes (Southeast San Antonio | Half-Acre Lots)" })]);
     expect(maria.requests).toEqual([expect.objectContaining({ kind: "ask", description: "(Evan)" })]);
+  });
+});
+
+describe("attaching a live session to a client link", () => {
+  it("attributes an already-verified buyer without a code, extends their window, records the link and the event", async () => {
+    db.seed(dealSettings, { key: "builder_deals", value: JSON.stringify({ clientLinkExpiryHours: 72 }) });
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    const buyer = lead({ phoneE164: CLIENT_PHONE, expiresAt: new Date(Date.now() + 2 * HOUR) });
+    const result = await attachLiveSessionToClientLink({ lead: buyer, token: created.link.token, expiryHours: 72 });
+    expect(result).toMatchObject({ ok: true, attached: true, linkId: created.link.id, agent: expect.objectContaining({ teamId }) });
+    const stored = db.rows(dealLeads).find((row) => row.id === buyer.id)!;
+    expect(stored).toMatchObject({ agentTeamId: teamId, clientLinkId: created.link.id });
+    expect((stored.expiresAt as Date).getTime() - Date.now()).toBeGreaterThan(71 * HOUR);
+    expect(db.rows(dealClientLinks).find((row) => row.id === created.link.id)).toMatchObject({ leadId: buyer.id });
+    expect(db.rows(dealEvents).some((row) => row.kind === "client_link_attached" && row.leadId === buyer.id)).toBe(true);
+    // Idempotent: the same link again changes nothing.
+    expect(await attachLiveSessionToClientLink({ lead: { ...buyer, ...stored } as typeof buyer, token: created.link.token, expiryHours: 72 })).toEqual({ ok: true, attached: false, reason: "already_attached" });
+    // A longer existing window is kept.
+    const longBuyer = lead({ phoneE164: "+12105550505", expiresAt: new Date(Date.now() + 200 * HOUR) });
+    await attachLiveSessionToClientLink({ lead: longBuyer, token: created.link.token, expiryHours: 72 });
+    expect((db.rows(dealLeads).find((row) => row.id === longBuyer.id)!.expiresAt as Date).getTime() - Date.now()).toBeGreaterThan(199 * HOUR);
+  });
+
+  it("never attaches a team session and refuses a dead link", async () => {
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    expect(await attachLiveSessionToClientLink({ lead: agent, token: created.link.token, expiryHours: 72 })).toEqual({ ok: true, attached: false, reason: "team" });
+    await revokeClientLink(agent, created.link.id);
+    expect(await attachLiveSessionToClientLink({ lead: lead({ phoneE164: CLIENT_PHONE }), token: created.link.token, expiryHours: 72 })).toEqual({ ok: false, kind: "invalid_link" });
+  });
+});
+
+describe("agent identity details", () => {
+  it("formats the agent's number for the client and reports an inactive team row", async () => {
+    expect(agentDisplayPhone({ phoneE164: AGENT_PHONE })).toBe("(210) 555-0101");
+    expect(agentDisplayPhone({ phoneE164: null })).toBeNull();
+    expect((await agentForTeamId(teamId))?.active).toBe(true);
+    db.rows(dealTeamAllowlist).find((row) => row.id === teamId)!.active = false;
+    const gone = await agentForTeamId(teamId);
+    expect(gone).toMatchObject({ name: "Tiffany Agent", active: false });
   });
 });

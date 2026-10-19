@@ -57,6 +57,7 @@ describe("the gate for an agent's client", () => {
     const html = render({ pending: null, clientLink: null, consentText: "consent" } as GateDealsState);
     expect(html).toContain("Are you a realtor, or working with one?");
     expect(html).toContain("Private buyer access");
+    expect(html).toContain("On the Lifestyle Design Realty team?");
     const continueButton = html.match(/<button[^>]*>(?:(?!<\/button>).)*Continue(?:(?!<\/button>).)*<\/button>/)?.[0] ?? "";
     expect(continueButton).toContain('disabled=""');
   });
@@ -109,7 +110,7 @@ describe("agent tools on /deals/team", () => {
   const workspace = {
     agent: { name: "Tiffany Agent", email: "tiffany@example.com", fubLinked: true },
     clients: [
-      { id: 1, clientName: "Maria Lopez", clientPhone: "(210) •••-0202", note: "Wants 4 beds", path: `/deals?c=${TOKEN}`, createdAt: new Date(NOW - 86_400_000).toISOString(), expiresAt: new Date(NOW + 29 * 86_400_000).toISOString(), revoked: false, openedAt: new Date(NOW - 3_600_000).toISOString(), openCount: 2, verifiedAt: new Date(NOW - 1_800_000).toISOString(), accessExpiresAt: new Date(NOW + 60 * 3_600_000).toISOString(), lastViewedAt: new Date(NOW - 600_000).toISOString(), saves: [{ card: "a".repeat(20), description: "118 Demo Lakes Blvd (Brandon)", price: 489990, communityLabel: "Demo Lakes (Southeast demo area)", savedAt: new Date(NOW - 900_000).toISOString() }], requests: [{ kind: "tour" as const, description: "120 Demo Lakes Blvd (Evan)", preferredAt: new Date(NOW + 86_400_000).toISOString(), createdAt: new Date(NOW - 800_000).toISOString() }] },
+      { id: 1, clientName: "Maria Lopez", clientPhone: "(210) 555-0202", clientPhoneDigits: "2105550202", note: "Wants 4 beds", path: `/deals?c=${TOKEN}`, createdAt: new Date(NOW - 86_400_000).toISOString(), expiresAt: new Date(NOW + 29 * 86_400_000).toISOString(), revoked: false, openedAt: new Date(NOW - 3_600_000).toISOString(), openCount: 2, verifiedAt: new Date(NOW - 1_800_000).toISOString(), accessExpiresAt: new Date(NOW + 60 * 3_600_000).toISOString(), lastViewedAt: new Date(NOW - 600_000).toISOString(), saves: [{ card: "a".repeat(20), description: "118 Demo Lakes Blvd (Brandon)", price: 489990, communityLabel: "Demo Lakes (Southeast demo area)", savedAt: new Date(NOW - 900_000).toISOString() }], requests: [{ kind: "tour" as const, description: "120 Demo Lakes Blvd (Evan)", preferredAt: new Date(NOW + 86_400_000).toISOString(), createdAt: new Date(NOW - 800_000).toISOString() }] },
       { id: 2, clientName: "Sam Reyes", clientPhone: null, note: null, path: "/deals?c=other", createdAt: new Date(NOW - 7_200_000).toISOString(), expiresAt: new Date(NOW + 29 * 86_400_000).toISOString(), revoked: false, openedAt: null, openCount: 0, verifiedAt: null, accessExpiresAt: null, lastViewedAt: null, saves: [], requests: [] },
       { id: 3, clientName: "Old Link", clientPhone: null, note: null, path: "/deals?c=old", createdAt: new Date(NOW - 40 * 86_400_000).toISOString(), expiresAt: new Date(NOW - 86_400_000).toISOString(), revoked: false, openedAt: null, openCount: 0, verifiedAt: null, accessExpiresAt: null, lastViewedAt: null, saves: [], requests: [] },
     ],
@@ -129,7 +130,9 @@ describe("agent tools on /deals/team", () => {
     expect(html).toContain("118 Demo Lakes Blvd (Brandon) · $489,990 · Demo Lakes (Southeast demo area)");
     expect(html).toContain("Tour: 120 Demo Lakes Blvd (Evan)");
     expect(html).toContain("Note: Wants 4 beds");
-    expect(html).toContain(`href="sms:?&amp;body=`.replace("&amp;", "&"));
+    // Maria's number was typed by the agent, so her Text it is addressed; Sam's is not.
+    expect(html).toContain('href="sms:+12105550202?&body=');
+    expect(html).toContain('href="sms:?&body=');
     expect(html).not.toContain("Follow Up Boss user");
   });
 

@@ -450,6 +450,18 @@ describe("Builder Deals requests from an agent's client", () => {
     expect(mocks.createBuilderDealsTourTask).toHaveBeenCalledWith(expect.objectContaining({ lead: expect.objectContaining({ agent: { name: "Tiffany Agent", fubUserId: "77", email: "tiffany@example.com" } }), privateDescription: "8106 Private Street (Hidden Plan), $489,990" }));
   });
 
+  it("drops the agent once their team row is inactive: owners-only email, Peter's task", async () => {
+    const inactive = { ...teamRow, active: false };
+    const saveRequest = { ...tourRequest, id: 45, requestType: "save" as const };
+    const email = dbWithJob(job({ id: 11, operation: "request_email:45", payload: JSON.stringify({ requestId: 45, chicagoDay: "2026-10-18" }) }), agentClient, [[dealTourRequests, [saveRequest]], [dealHomes, [requestedHome]], [dealTeamAllowlist, [inactive]]]);
+    mocks.getDb.mockResolvedValue(email);
+    await runPendingDealsFubJobs();
+    const sent = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { subject: string; recipients: string[]; content: string };
+    expect(sent.recipients).toEqual(settings.alertRecipients);
+    expect(sent.subject).toBe("Builder Deals: a buyer saved a home");
+    expect(sent.content).not.toContain("Tiffany");
+  });
+
   it("sends the agent to the first-unlock job so FUB assigns the contact to them", async () => {
     mocks.classifyDealsAccess.mockResolvedValue({ allowed: true, team: false, flags: ["agent_client"] });
     mocks.sendBuilderDealsLeadToFub.mockResolvedValue({ ok: true, personId: "9002", records: [{ kind: "person", fubId: "9002", createdByUs: true }] });

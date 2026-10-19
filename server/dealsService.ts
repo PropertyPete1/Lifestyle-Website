@@ -673,6 +673,16 @@ export async function isLiveDealSession(req: Request): Promise<{ leadId: number;
   return lead ? { leadId: lead.id, lead, deviceHash } : null;
 }
 
+/** The live session's row and cookie follow a longer lead expiry (an agent's client link attached mid-session). */
+export async function extendLiveSession(req: Request, res: Response, expiresAt: Date) {
+  const token = parseCookie(req.headers.cookie || "")[DEALS_COOKIE.session];
+  const deviceHash = dealDeviceHash(req);
+  const db = await getDb();
+  if (!token || !deviceHash || !db) return;
+  await db.update(dealAccessTokens).set({ expiresAt }).where(and(eq(dealAccessTokens.kind, "session"), eq(dealAccessTokens.tokenHash, hashSecret(token)), eq(dealAccessTokens.deviceHash, deviceHash), isNull(dealAccessTokens.revokedAt)));
+  setDealCookie(res, DEALS_COOKIE.session, token, Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000)));
+}
+
 export async function issueAccessToken(leadId: number, deviceHash: string, expiresAt: Date): Promise<string> {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");

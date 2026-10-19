@@ -295,6 +295,7 @@ describe("agent client links through the router", () => {
     mocks.isLiveDealSession.mockResolvedValue({ leadId: 41, lead: client, deviceHash: client.deviceHash });
     const mine = await visitor().mine();
     expect(mine.fullDetails).toBe(true);
+    // The client gets the agent's real number, formatted, never a masked one.
     expect(mine.agent).toEqual({ name: "Tiffany Agent", phone: "(210) 555-0101" });
     expect(mine.lead.agentClient).toBe(true);
     expect(JSON.stringify(mine.communities)).toContain("Fixture Lakes");
@@ -322,6 +323,19 @@ describe("agent client links through the router", () => {
     await expect(visitor().saveHome({ card: "0".repeat(20), saved: true })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     mocks.isLiveDealSession.mockResolvedValue(null);
     await expect(visitor().saveHome({ card, saved: true })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("attaches a live buyer session to a client link without a second code and extends the session", async () => {
+    const buyer = row({ id: 42, phoneE164: "+12105550124", sourceCode: "sl1" });
+    db.seed(dealLeads, buyer);
+    db.seed(dealAccessTokens, { leadId: 42, tokenHash: "h", deviceHash: buyer.deviceHash, kind: "session", expiresAt: buyer.expiresAt });
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 42, lead: buyer, deviceHash: buyer.deviceHash });
+    await expect(visitor().attachClientLink({ c: TOKEN })).resolves.toEqual({ ok: true, attached: true, agentName: "Tiffany Agent" });
+    expect(db.rows(dealLeads).find((lead) => lead.id === 42)).toMatchObject({ agentTeamId: teamId, clientLinkId: 1 });
+    expect(db.rows(dealClientLinks)[0]).toMatchObject({ leadId: 42 });
+    await expect(visitor().attachClientLink({ c: "x".repeat(32) })).resolves.toEqual({ ok: false, kind: "invalid_link" });
+    mocks.isLiveDealSession.mockResolvedValue(null);
+    await expect(visitor().attachClientLink({ c: TOKEN })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   it("gives the team their workspace and link controls, and refuses buyers", async () => {

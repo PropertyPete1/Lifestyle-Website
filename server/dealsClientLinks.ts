@@ -1,6 +1,6 @@
 import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { dealClientLinks, dealCommunities, dealCommunityViews, dealHomes, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
-import { maskPhone, normalizeUsPhone } from "../shared/deals";
+import { normalizeUsPhone } from "../shared/deals";
 import { getDb } from "./db";
 import { getDealSettings, hashSecret, logDealEvent, randomOpaqueToken } from "./dealsService";
 
@@ -18,10 +18,18 @@ const OPEN_INTERVAL_MS = 60 * 60_000;
 type LeadRow = typeof dealLeads.$inferSelect;
 type TeamRow = typeof dealTeamAllowlist.$inferSelect;
 export type ClientLinkRow = typeof dealClientLinks.$inferSelect;
-export type DealsAgent = { teamId: number; name: string; email: string | null; phoneE164: string | null; fubUserId: string | null };
+/** `active` is false once the nightly FUB mirror or an admin removed the agent; their history keeps its name, but nothing new is assigned or emailed to them. */
+export type DealsAgent = { teamId: number; name: string; email: string | null; phoneE164: string | null; fubUserId: string | null; active: boolean };
 
 function agentFromTeamRow(row: TeamRow): DealsAgent {
-  return { teamId: row.id, name: row.name?.trim() || "Lifestyle Design Realty", email: row.email?.trim().toLowerCase() || null, phoneE164: row.phoneE164, fubUserId: row.fubUserId?.trim() || null };
+  return { teamId: row.id, name: row.name?.trim() || "Lifestyle Design Realty", email: row.email?.trim().toLowerCase() || null, phoneE164: row.phoneE164, fubUserId: row.fubUserId?.trim() || null, active: row.active };
+}
+
+/** The agent's number as their client may text it; a client is never shown a masked number for their own agent. */
+export function agentDisplayPhone(agent: Pick<DealsAgent, "phoneE164">): string | null {
+  if (!agent.phoneE164) return null;
+  const parsed = normalizeUsPhone(agent.phoneE164, { allowCanada: true });
+  return parsed.ok ? parsed.display : agent.phoneE164;
 }
 
 /** Every active team row behind a team session, matched on the session lead's phone or email. */
@@ -141,6 +149,33 @@ export async function attachLeadToClientLink(db: DealsWriteDb, linkId: number, l
   await db.update(dealClientLinks).set({ leadId, verifiedAt: new Date() }).where(eq(dealClientLinks.id, linkId));
 }
 
+export type AttachLiveSessionResult =
+  | { ok: true; attached: true; agent: DealsAgent; linkId: number; expiresAt: Date }
+  | { ok: true; attached: false; reason: "team" | "already_attached" }
+  | { ok: false; kind: "invalid_link" | "unavailable" };
+
+/**
+ * A buyer who already holds a live list (a reel link verified earlier today)
+ * opens an agent's client link: their phone is already verified in this
+ * browser, so the attribution is written without a second code. The latest
+ * link wins, as it does at verification, and the access window grows to the
+ * agent-client length. Team members are never attached.
+ */
+export async function attachLiveSessionToClientLink(input: { lead: LeadRow; token: string; expiryHours: number }): Promise<AttachLiveSessionResult> {
+  const db = await getDb();
+  if (!db) return { ok: false, kind: "unavailable" };
+  if (input.lead.status === "team") return { ok: true, attached: false, reason: "team" };
+  const resolved = await resolveClientLink(input.token);
+  if (!resolved) return { ok: false, kind: "invalid_link" };
+  if (input.lead.clientLinkId === resolved.link.id && input.lead.agentTeamId === resolved.agent.teamId) return { ok: true, attached: false, reason: "already_attached" };
+  const fresh = new Date(Date.now() + input.expiryHours * 60 * 60_000);
+  const expiresAt = input.lead.expiresAt > fresh ? input.lead.expiresAt : fresh;
+  await db.update(dealLeads).set({ agentTeamId: resolved.agent.teamId, clientLinkId: resolved.link.id, expiresAt }).where(eq(dealLeads.id, input.lead.id));
+  await attachLeadToClientLink(db, resolved.link.id, input.lead.id);
+  await logDealEvent({ leadId: input.lead.id, kind: "client_link_attached", sourceCode: input.lead.sourceCode, deviceHash: input.lead.deviceHash, phone: input.lead.phoneE164, detail: `link:${resolved.link.id};team:${resolved.agent.teamId}` });
+  return { ok: true, attached: true, agent: resolved.agent, linkId: resolved.link.id, expiresAt };
+}
+
 export async function revokeClientLink(agentLead: LeadRow, linkId: number): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
@@ -155,7 +190,10 @@ export async function revokeClientLink(agentLead: LeadRow, linkId: number): Prom
 export type ClientSummary = {
   id: number;
   clientName: string;
+  /** The number the agent typed, formatted; it is their own client, so it is not masked for them. */
   clientPhone: string | null;
+  /** National digits for a "Text it" link, or null when the agent typed no number. */
+  clientPhoneDigits: string | null;
   note: string | null;
   path: string;
   createdAt: string;
@@ -211,7 +249,8 @@ export async function agentWorkspace(agentLead: LeadRow): Promise<AgentWorkspace
     return {
       id: link.id,
       clientName: link.clientName,
-      clientPhone: link.clientPhoneE164 ? maskPhone(link.clientPhoneE164) : null,
+      clientPhone: link.clientPhoneE164 ? agentDisplayPhone({ phoneE164: link.clientPhoneE164 }) : null,
+      clientPhoneDigits: link.clientPhoneE164 ? link.clientPhoneE164.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "") : null,
       note: link.note,
       path: clientLinkPath(link.token),
       createdAt: link.createdAt.toISOString(),

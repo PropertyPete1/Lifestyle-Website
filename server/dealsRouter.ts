@@ -38,7 +38,7 @@ import {
   showGoogleDealsButton,
   createPendingVerification,
 } from "./dealsService";
-import { CLIENT_LINK_TOKEN_PATTERN, agentForTeamId, agentWorkspace, createClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
+import { CLIENT_LINK_TOKEN_PATTERN, agentDisplayPhone, agentForTeamId, agentWorkspace, attachLiveSessionToClientLink, createClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   const allowlisted = isAdminEmail(ctx.user.email) || ctx.user.openId === ENV.ownerOpenId;
@@ -339,7 +339,36 @@ export const dealsRouter = router({
       const recentListView = (await connection.select({ id: dealEvents.id }).from(dealEvents).where(and(eq(dealEvents.leadId, session.leadId), eq(dealEvents.kind, "viewed_listings"), sql`${dealEvents.createdAt} > ${hourAgo}`)).limit(1))[0];
       if (!recentListView) await logDealEvent({ leadId: session.leadId, kind: "viewed_listings", sourceCode: session.lead.sourceCode, deviceHash: session.deviceHash, ip: ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0" });
     }
-    return { lead: leadPresentation(session.lead), communities, saved, fullDetails: view.view === "full", agent: agent ? { name: agent.name, phone: agent.phoneE164 ? maskPhone(agent.phoneE164) : null } : null };
+    // The client sees their own agent's real number: they are meant to text it.
+    return { lead: leadPresentation(session.lead), communities, saved, fullDetails: view.view === "full", agent: agent ? { name: agent.name, phone: agentDisplayPhone(agent) } : null };
+  }),
+  /**
+   * A buyer who already holds a live list opens an agent's client link: attach
+   * without a second code (their phone is verified in this browser), extend the
+   * session to the agent-client window, note the agent in FUB and tell the agent.
+   */
+  attachClientLink: publicProcedure.input(z.object({ c: z.string().trim().min(20).max(80) })).mutation(async ({ input, ctx }) => {
+    dealsPublicHeaders(ctx.res);
+    const session = await isLiveDealSession(ctx.req);
+    if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
+    const settings = await getDealSettings();
+    const result = await attachLiveSessionToClientLink({ lead: session.lead, token: input.c, expiryHours: settings.clientLinkExpiryHours });
+    if (!result.ok) return { ok: false as const, kind: result.kind };
+    if (!result.attached) return { ok: true as const, attached: false as const, reason: result.reason };
+    const { extendLiveSession } = await import("./dealsService");
+    await extendLiveSession(ctx.req, ctx.res, result.expiresAt);
+    // The FUB note and the agent's email ride the durable outbox/alert paths; a quiet test number stays quiet.
+    const isTest = settings.testNumbers.includes(session.lead.phoneE164);
+    if (!isTest || settings.testModeFullPipeline) {
+      try {
+        const { enqueueDealsFubJob, runPendingDealsFubJobs } = await import("./dealsFubJobs");
+        await enqueueDealsFubJob(session.leadId, "reverify", { reason: "attached to an agent's client link", occurrenceId: new Date().toISOString() });
+        void runPendingDealsFubJobs(1).catch(console.error);
+        const { queueClientLinkAttachedAlert } = await import("./dealsAlerts");
+        if (result.agent.active) await queueClientLinkAttachedAlert({ ...session.lead, agentTeamId: result.agent.teamId }, { name: result.agent.name, email: result.agent.email }, result.linkId);
+      } catch { console.error("[deals] client link attach side effects failed"); }
+    }
+    return { ok: true as const, attached: true as const, agentName: result.agent.name };
   }),
   /** The buyer's save mark on a home; the first save of a home notifies the team and the buyer's agent. */
   saveHome: publicProcedure.input(z.object({ card: z.string().length(20), saved: z.boolean() })).mutation(async ({ input, ctx }) => {

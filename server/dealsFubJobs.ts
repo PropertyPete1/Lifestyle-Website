@@ -12,6 +12,7 @@ import {
   sendBuilderDealsLeadToFub,
   type FubAgentRef,
   type FubDeliveryResult,
+  type ReverifyReason,
   updateBuilderDealsLeadInFub,
   updateBuilderDealsProfileInFub,
 } from "./dealsFub";
@@ -27,7 +28,7 @@ export type FubOperation =
   | `request_note:${string}`
   | `request_email:${number}`;
 
-type LeadJobMetadata = { reason?: "re-verified on a second device" | "returned for a new link"; occurrenceId?: string; deferredCheck?: boolean };
+type LeadJobMetadata = { reason?: ReverifyReason; occurrenceId?: string; deferredCheck?: boolean };
 type RequestJobMetadata = { requestId: number; chicagoDay?: string };
 type ActivityJobMetadata = { chicagoDay?: string };
 type JobMetadata = LeadJobMetadata | RequestJobMetadata | ActivityJobMetadata;
@@ -87,7 +88,7 @@ export function previousChicagoDay(now = new Date()) {
 export async function enqueueDealsFubJob(
   leadId: number,
   operation: FubOperation,
-  metadata: JobMetadata | "re-verified on a second device" | "returned for a new link" = {},
+  metadata: JobMetadata | ReverifyReason = {},
 ) {
   const db = await getDb();
   if (!db) return;
@@ -245,12 +246,16 @@ async function loadRequestJob(job: typeof dealFubJobs.$inferSelect) {
   return { request, lead: { ...lead, isTest: testMode.isTest, agent: await leadAgent(lead) }, home, privateDescription: requestDescription(home) };
 }
 
-/** The agent who sent this buyer, for FUB ownership and the notification copy; null for reel leads. */
+/**
+ * The agent who sent this buyer, for FUB ownership and the notification copy;
+ * null for reel leads, and null again once the agent left the team (their
+ * clients' new FUB objects and emails then go to Peter like any other lead).
+ */
 async function leadAgent(lead: Pick<LeadRow, "agentTeamId">): Promise<FubAgentRef | null> {
   if (!lead.agentTeamId) return null;
   const { agentForTeamId } = await import("./dealsClientLinks");
   const agent = await agentForTeamId(lead.agentTeamId);
-  return agent ? { name: agent.name, fubUserId: agent.fubUserId, email: agent.email } : null;
+  return agent && agent.active ? { name: agent.name, fubUserId: agent.fubUserId, email: agent.email } : null;
 }
 
 function requestDescription(home: Pick<typeof dealHomes.$inferSelect, "privateAddress" | "privatePlanName" | "price">) {

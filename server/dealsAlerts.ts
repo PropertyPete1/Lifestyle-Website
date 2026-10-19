@@ -133,7 +133,30 @@ async function alertAgent(lead: AlertLead): Promise<AlertAgent | null> {
   if (!lead.agentTeamId) return null;
   const { agentForTeamId } = await import("./dealsClientLinks");
   const agent = await agentForTeamId(lead.agentTeamId);
-  return agent ? { name: agent.name, email: agent.email } : null;
+  // An agent who left the team is not emailed about a client they can no longer serve.
+  return agent && agent.active ? { name: agent.name, email: agent.email } : null;
+}
+
+/**
+ * A buyer with a live list opened an agent's client link and was attached
+ * without a second code: the owners and the agent hear about it once per
+ * link, through the same durable alert path as the first unlock.
+ */
+export async function queueClientLinkAttachedAlert(lead: AlertLead, agent: AlertAgent, linkId: number) {
+  return queueDealAlert({
+    dedupeKey: `client_link_attached:${lead.id}:${linkId}`,
+    lead,
+    kind: "first_unlock",
+    subject: `Builder Deals: ${agent.name}'s client is on their list`,
+    extraRecipients: agent.email ? [agent.email] : [],
+    content: [
+      `${agent.name}'s client already had Builder Deals access and opened ${agent.name}'s client link; they now see the full list and ${agent.name} is on their saves and requests.`,
+      "The existing FUB contact keeps its assignment; a note names the agent.",
+      "",
+      ...privateLeadLines(lead),
+      `Block and kill link (opens admin, login required, confirm button): ${adminLeadLink(lead.id)}`,
+    ].join("\n"),
+  });
 }
 
 /** Queue one alert only when a newly discovered profile screening flag exists (the name prompt answered later). */

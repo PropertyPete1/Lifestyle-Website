@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -30,10 +30,18 @@ function Landing() {
   const state = trpc.deals.state.useQuery(clientToken ? { c: clientToken } : undefined);
   const catalog = trpc.deals.publicCatalog.useQuery();
   const [gateOpen, setGateOpen] = useState(true);
+  // A buyer with a live list who opens an agent's link is attached without a second code, then sent to the list.
+  const attach = trpc.deals.attachClientLink.useMutation({ onSettled: () => window.location.assign("/deals/mine") });
+  const attachStarted = useRef(false);
   useInstagramEmbeds();
   const hasSession = Boolean(state.data?.session);
   const teamSession = Boolean(state.data?.session?.teamPreview);
-  useEffect(() => { if (hasSession) window.location.assign(teamSession ? "/deals/team" : "/deals/mine"); }, [hasSession, teamSession]);
+  useEffect(() => {
+    if (!hasSession) return;
+    if (teamSession) { window.location.assign("/deals/team"); return; }
+    if (clientToken && !attachStarted.current) { attachStarted.current = true; attach.mutate({ c: clientToken }); return; }
+    if (!clientToken) window.location.assign("/deals/mine");
+  }, [hasSession, teamSession, clientToken]); // eslint-disable-line react-hooks/exhaustive-deps
   const pendingKey = state.data?.pending?.expiresAt ?? null;
   useEffect(() => { if (pendingKey) setGateOpen(true); }, [pendingKey]);
   const updatedAt = catalog.data?.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);

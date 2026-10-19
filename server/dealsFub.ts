@@ -407,8 +407,11 @@ export async function sendBuilderDealsLeadToFub(lead: BuilderLead): Promise<FubD
   } catch { return { ok: false, error: "FUB delivery failed" }; }
 }
 
+/** Why a lead's FUB contact is being noted again; the wording lands in the note as written. */
+export type ReverifyReason = "re-verified on a second device" | "returned for a new link" | "attached to an agent's client link";
+
 /** Later device/expiry rechecks update and note an existing person, never re-fire events. */
-export async function updateBuilderDealsLeadInFub(lead: BuilderLead, reason: "re-verified on a second device" | "returned for a new link", occurrenceId?: string): Promise<FubDeliveryResult> {
+export async function updateBuilderDealsLeadInFub(lead: BuilderLead, reason: ReverifyReason, occurrenceId?: string): Promise<FubDeliveryResult> {
   try {
     const person = await findPerson(lead);
     // Search both phone forms before this fallback. It remains necessary when a

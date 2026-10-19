@@ -40,6 +40,7 @@ vi.mock("@/lib/trpc", () => ({
       updateProfile: { useMutation: (options: Record<string, unknown>) => { mocks.updateProfile.options = options; return mocks.updateProfileResult; } },
       requestHome: { useMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }) },
       saveHome: { useMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }) },
+      attachClientLink: { useMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }) },
       team: {
         workspace: { useQuery: () => ({ data: undefined, isLoading: true, isError: false, error: null }) },
         createClientLink: { useMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null, data: undefined }) },

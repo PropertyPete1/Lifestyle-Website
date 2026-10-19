@@ -25,11 +25,11 @@ vi.mock("./dealsFubJobs", () => ({
   requestTestMode: (...args: unknown[]) => mocks.requestTestMode(...args),
 }));
 
-import { agentDisplayPhone, agentForLead, agentForTeamId, agentWorkspace, attachLiveSessionToClientLink, clientLinkForPhone, clientLinkTokenForLead, createClientLink, liveAgentForClient, presentClientLink, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
+import { agentDisplayPhone, agentForLead, agentForTeamId, agentWorkspace, attachLeadToClientLink, attachLiveSessionToClientLink, clientLinkForPhone, clientLinkTokenForLead, connectOfferFor, createClientLink, liveAgentForClient, presentClientLink, reassignTeamRowBeforeRemoval, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
 import { dealEvents } from "../drizzle/schema";
-import { classifyDealsAccess } from "./dealsEligibility";
+import { classifyDealsAccess, revokeNonTeamMatchingDealLinks } from "./dealsEligibility";
 import { createDealsHomeRequest, setDealsHomeSaved } from "./dealsRequests";
-import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, catalogViewForSession, completeVerification, createPendingVerification, gatedDealsCatalog, hashSecret, savedDealCards } from "./dealsService";
+import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, catalogViewForSession, completeVerification, createPendingVerification, exchangeAccessToken, gatedDealsCatalog, getActiveBlock, hashSecret, savedDealCards } from "./dealsService";
 
 const HOUR = 3_600_000;
 const AGENT_PHONE = "+12105550101";
@@ -131,11 +131,11 @@ describe("eligibility for an agent's client", () => {
   });
 });
 
-type CookieCall = { name: string; value?: string };
+type CookieCall = { name: string; value?: string; options?: { maxAge?: number } };
 function responseRecorder() {
   const cookies: CookieCall[] = [];
   const response = {
-    cookie: (name: string, value: string) => { cookies.push({ name, value }); return response; },
+    cookie: (name: string, value: string, options?: { maxAge?: number }) => { cookies.push({ name, value, options }); return response; },
     clearCookie: (name: string) => { cookies.push({ name }); return response; },
     setHeader: () => response,
   } as unknown as Response;
@@ -418,5 +418,130 @@ describe("agent identity details", () => {
     db.rows(dealTeamAllowlist).find((row) => row.id === teamId)!.active = false;
     const gone = await agentForTeamId(teamId);
     expect(gone).toMatchObject({ name: "Tiffany Agent", active: false });
+  });
+});
+
+describe("round 3: what a returning client, the nightly screening and team changes do", () => {
+  it("keeps the agent's view of a client's activity when the client renews access through the same link", async () => {
+    vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
+    testSettings();
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    const { done } = await verifyThrough(created.link.token, CLIENT_PHONE);
+    if (!done?.ok) throw new Error("not verified");
+    const link = db.rows(dealClientLinks).find((row) => row.id === created.link.id)!;
+    const connectedAt = new Date(Date.now() - 3 * HOUR);
+    link.verifiedAt = connectedAt;
+    await setDealsHomeSaved({ leadId: done.leadId, card: card(homeId), saved: true, sourceCode: AGENT_CLIENT_SOURCE, deviceHash: "d".repeat(64) });
+    db.rows(dealTourRequests)[0].createdAt = new Date(Date.now() - 2 * HOUR);
+    // Access lapses; the client comes back through the same link on another device.
+    db.rows(dealLeads).find((row) => row.id === done.leadId)!.expiresAt = new Date(Date.now() - HOUR);
+    expect((await verifyThrough(created.link.token, CLIENT_PHONE)).done?.ok).toBe(true);
+    expect(link.verifiedAt).toEqual(connectedAt);
+    expect((await agentWorkspace(agent))?.clients[0]?.saves).toHaveLength(1);
+    // A client who moved to another link and came back connects again from now.
+    await attachLeadToClientLink(db, created.link.id, done.leadId, 999);
+    expect(link.verifiedAt!.getTime()).toBeGreaterThan(connectedAt.getTime());
+  });
+
+  it("leaves a vouched-for client alone when the nightly realtor import matches them, until the link is turned off", async () => {
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    const client = lead({ phoneE164: CLIENT_PHONE, agentTeamId: teamId, clientLinkId: created.link.id });
+    db.rows(dealClientLinks)[0].leadId = client.id;
+    const reel = lead({ phoneE164: OTHER_PHONE });
+    expect(await revokeNonTeamMatchingDealLinks(db, { phoneE164: CLIENT_PHONE })).toBe(0);
+    expect(db.rows(dealLeads).find((row) => row.id === client.id)?.status).toBe("verified");
+    expect(await revokeNonTeamMatchingDealLinks(db, { phoneE164: OTHER_PHONE })).toBe(1);
+    expect(db.rows(dealLeads).find((row) => row.id === reel.id)?.status).toBe("blocked");
+    await revokeClientLink(agent, created.link.id);
+    expect(await revokeNonTeamMatchingDealLinks(db, { phoneE164: CLIENT_PHONE })).toBe(1);
+  });
+
+  it("does not let a pile of has-agent blocks hide an admin block from an agent's client", async () => {
+    const device = "f".repeat(64);
+    for (let index = 0; index < 25; index++) db.seed(dealBlocklist, { deviceHash: device, reason: index % 2 ? HAS_AGENT_BLOCK_REASON : "known_agent device cooldown", expiresAt: new Date(Date.now() + HOUR) });
+    expect(await getActiveBlock({ deviceHash: device, ignoreHasAgent: true })).toBeUndefined();
+    db.seed(dealBlocklist, { deviceHash: device, reason: "Admin block" });
+    expect(await getActiveBlock({ deviceHash: device, ignoreHasAgent: true })).toMatchObject({ reason: "Admin block" });
+  });
+
+  it("asks a buyer with a live list to connect only to a new link that is theirs", async () => {
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const open = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    const typed = await createClientLink({ agentLead: agent, clientName: "Sam Reyes", clientPhone: OTHER_PHONE });
+    if (!open.ok || !typed.ok) throw new Error("links not created");
+    const buyer = lead({ phoneE164: CLIENT_PHONE });
+    expect(await connectOfferFor(buyer, open.link.token)).toBe("ask");
+    expect(await connectOfferFor(buyer, typed.link.token)).toBe("not_theirs");
+    const attached = await attachLiveSessionToClientLink({ lead: buyer, token: open.link.token, expiryHours: 72 });
+    expect(attached).toMatchObject({ ok: true, attached: true });
+    const after = db.rows(dealLeads).find((row) => row.id === buyer.id) as typeof dealLeads.$inferSelect;
+    expect(await connectOfferFor(after, open.link.token)).toBe("connected");
+    await revokeClientLink(agent, open.link.id);
+    expect(await connectOfferFor(after, open.link.token)).toBeNull();
+  });
+
+  it("shows clients the agent's current number after FUB changes it", async () => {
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Client" });
+    if (!created.ok) throw new Error("link not created");
+    db.rows(dealTeamAllowlist).find((row) => row.id === teamId)!.active = false;
+    db.seed(dealTeamAllowlist, { name: "Tiffany Agent", phoneE164: "+12105550707", email: "tiffany@example.com", fubUserId: "77", fubIdentityKey: "fub:77:+12105550707", source: "fub", active: true });
+    expect(await agentForTeamId(teamId)).toMatchObject({ teamId, active: true, phoneE164: "+12105550707", fubUserId: "77" });
+  });
+
+  it("carries a hand-added agent's links over to their FUB user, and never merges two agents over a shared office line", async () => {
+    const NEW_AGENT = "+12105550808";
+    const manualId = db.seed(dealTeamAllowlist, { name: "New Agent", phoneE164: NEW_AGENT, source: "manual", active: true });
+    const session = lead({ phoneE164: NEW_AGENT, status: "team" });
+    const created = await createClientLink({ agentLead: session, clientName: "Early Client" });
+    if (!created.ok) throw new Error("link not created");
+    expect(created.link.agentTeamId).toBe(manualId);
+    expect((await agentForTeamId(manualId))?.fubUserId).toBeNull();
+    // The FUB mirror adds the same person under their new FUB user: tasks now go to them.
+    const fubRow = db.seed(dealTeamAllowlist, { name: "New Agent", phoneE164: NEW_AGENT, email: "new@example.com", fubUserId: "88", fubIdentityKey: "fub:88:+12105550808", source: "fub", active: true });
+    expect(await agentForTeamId(manualId)).toMatchObject({ fubUserId: "88", email: "new@example.com", active: true });
+    // Admin removes the now redundant hand-added row: the link and its client move to the FUB row.
+    const client = lead({ phoneE164: CLIENT_PHONE, agentTeamId: manualId, clientLinkId: created.link.id });
+    expect(await reassignTeamRowBeforeRemoval(manualId)).toBe(fubRow);
+    db.rows(dealTeamAllowlist).splice(db.rows(dealTeamAllowlist).findIndex((row) => row.id === manualId), 1);
+    expect(db.rows(dealClientLinks).find((row) => row.id === created.link.id)?.agentTeamId).toBe(fubRow);
+    expect(db.rows(dealLeads).find((row) => row.id === client.id)?.agentTeamId).toBe(fubRow);
+    expect((await resolveClientLink(created.link.token))?.agent).toMatchObject({ fubUserId: "88", active: true });
+    expect((await agentWorkspace(session))?.clients.map((row) => row.clientName)).toEqual(["Early Client"]);
+    // A shared office number on two agents' FUB profiles does not let one see the other's links.
+    const OFFICE = "+12105550900";
+    db.seed(dealTeamAllowlist, { name: "Tiffany Agent", phoneE164: OFFICE, fubUserId: "77", fubIdentityKey: "fub:77:office", source: "fub", active: true });
+    db.seed(dealTeamAllowlist, { name: "New Agent", phoneE164: OFFICE, fubUserId: "88", fubIdentityKey: "fub:88:office", source: "fub", active: true });
+    const tiffany = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const hers = await createClientLink({ agentLead: tiffany, clientName: "Tiffany's Client" });
+    if (!hers.ok) throw new Error("link not created");
+    expect((await agentWorkspace(session))?.clients.map((row) => row.clientName)).toEqual(["Early Client"]);
+    expect((await agentWorkspace(tiffany))?.clients.map((row) => row.clientName)).toEqual(["Tiffany's Client"]);
+    // A hand-added row on that shared line belongs to neither agent's FUB user: its clients stay with Peter, not a guess.
+    const frontDesk = db.seed(dealTeamAllowlist, { name: "Front Desk", phoneE164: OFFICE, source: "manual", active: true });
+    expect(await agentForTeamId(frontDesk)).toMatchObject({ name: "Front Desk", fubUserId: null });
+  });
+
+  it("keeps an agent client's session cookie past their access so a lapsed visit still finds their link; a reel buyer's ends with access", async () => {
+    vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
+    testSettings();
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    const sessionCookieDays = async (token: string | null, phone: string) => {
+      const device = `device-${phone}`;
+      const { done } = await verifyThrough(token, phone, device);
+      if (!done?.ok) throw new Error("not verified");
+      const exchange = responseRecorder();
+      expect(await exchangeAccessToken(request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.probe]: "p" }), exchange.response, done.token)).toBe("ok");
+      const maxAge = exchange.cookies.find((entry) => entry.name === DEALS_COOKIE.session && entry.value)?.options?.maxAge ?? 0;
+      return maxAge / (24 * HOUR);
+    };
+    expect(await sessionCookieDays(created.link.token, CLIENT_PHONE)).toBeGreaterThan(32);
+    expect(await sessionCookieDays(null, OTHER_PHONE)).toBeLessThan(1.01);
   });
 });

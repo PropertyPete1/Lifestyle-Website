@@ -292,6 +292,45 @@ describe("agent client links through the router", () => {
     expect((await visitor().state({ c: TOKEN })).clientLink).toEqual({ state: "dead", agentName: "Tiffany Agent" });
   });
 
+  it("offers to connect only a new link that is the buyer's own, and says the link-client blocked line on the gate", async () => {
+    const buyer = row();
+    db.seed(dealLeads, buyer);
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 41, lead: buyer, deviceHash: buyer.deviceHash });
+    expect((await visitor().state({ c: TOKEN })).connectOffer).toBe("ask");
+    // Already on this link: straight to the list, every time they tap the agent's text again.
+    const attached = row({ agentTeamId: teamId, clientLinkId: 1 });
+    db.rows(dealClientLinks)[0].leadId = 41;
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 41, lead: attached, deviceHash: attached.deviceHash });
+    expect((await visitor().state({ c: TOKEN })).connectOffer).toBe("connected");
+    // A link the agent made for another number is not offered to this buyer.
+    db.rows(dealClientLinks)[0].leadId = null;
+    db.rows(dealClientLinks)[0].clientPhoneE164 = "+12105550999";
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 41, lead: buyer, deviceHash: buyer.deviceHash });
+    expect((await visitor().state({ c: TOKEN })).connectOffer).toBe("not_theirs");
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 9, lead: row({ id: 9, status: "team" }), deviceHash: "d" });
+    expect((await visitor().state({ c: TOKEN })).connectOffer).toBeNull();
+    // On the gate, a refused link client reads the agent's line, never the reel's "not working with an agent".
+    mocks.isLiveDealSession.mockResolvedValue(null);
+    expect((await visitor().state({ c: TOKEN })).blockedMessage).toBe("This number can't open the list right now. Text Tiffany Agent, or text (512) 542-1477.");
+    expect((await visitor().state()).blockedMessage).not.toContain("Tiffany");
+  });
+
+  it("finds an agent client's link from their lapsed session on the bare landing page, but never a dead one", async () => {
+    const { hashSecret } = await import("./dealsService");
+    db.seed(dealLeads, row({ agentTeamId: teamId, clientLinkId: 1, expiresAt: new Date(Date.now() - 3600_000) }));
+    db.rows(dealClientLinks)[0].leadId = 41;
+    db.seed(dealAccessTokens, { leadId: 41, tokenHash: hashSecret("lapsed-session"), deviceHash: hashSecret("device-1"), expiresAt: new Date(Date.now() - 3600_000), kind: "session" });
+    const ctx = makeCtx(null);
+    (ctx.req as unknown as { headers: Record<string, string> }).headers = { cookie: "ldr_deals_session=lapsed-session; ldr_deals_device=device-1" };
+    const lapsed = () => dealsRouter.createCaller(ctx);
+    const state = await lapsed().state();
+    expect(state).toMatchObject({ session: null, clientLink: { state: "live", agentName: "Tiffany Agent" }, clientLinkToken: TOKEN });
+    db.rows(dealClientLinks)[0].revokedAt = new Date();
+    expect(await lapsed().state()).toMatchObject({ clientLink: null, clientLinkToken: null });
+    // Another browser (no lapsed session) gets nothing.
+    expect((await visitor().state()).clientLinkToken).toBeNull();
+  });
+
   it("turns link refusals into the agent's copy and never into the reel buyer's has-agent message", async () => {
     mocks.createPendingVerification.mockResolvedValueOnce({ ok: false, kind: "link_other_phone", agentName: "Tiffany Agent" });
     await expect(visitor().start({ phone: "(210) 555-0123", choice: "buyer", c: TOKEN })).resolves.toEqual({ ok: false, kind: "link_other_phone", message: "This link was sent for a different mobile number. Ask Tiffany Agent to send a new link to this number, or text (512) 542-1477." });

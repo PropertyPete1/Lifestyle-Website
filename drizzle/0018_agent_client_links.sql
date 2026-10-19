@@ -18,6 +18,7 @@ CREATE TABLE `deal_client_links` (
 	CONSTRAINT `deal_client_links_token_unique` UNIQUE(`token`)
 );
 --> statement-breakpoint
+ALTER TABLE `deal_alerts` MODIFY COLUMN `kind` enum('first_unlock','profile_flag','agent_update') NOT NULL;--> statement-breakpoint
 ALTER TABLE `deal_tour_requests` MODIFY COLUMN `request_type` enum('tour','ask','save') NOT NULL;--> statement-breakpoint
 ALTER TABLE `deal_leads` ADD `agent_team_id` int;--> statement-breakpoint
 ALTER TABLE `deal_leads` ADD `client_link_id` int;--> statement-breakpoint

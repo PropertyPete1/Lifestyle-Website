@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { dealClientLinks, dealCommunities, dealCommunityViews, dealHomes, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
 import { normalizeUsPhone } from "../shared/deals";
 import { getDb } from "./db";
@@ -32,22 +32,72 @@ export type ClientLinkRow = typeof dealClientLinks.$inferSelect;
  */
 export type DealsAgent = { teamId: number; name: string; firstName: string | null; email: string | null; phoneE164: string | null; fubUserId: string | null; active: boolean };
 
-function agentFromTeamRow(row: TeamRow): DealsAgent {
-  const name = row.name?.trim() || null;
-  return { teamId: row.id, name: name ?? BROKERAGE_NAME, firstName: name ? name.split(/\s+/)[0]! : null, email: row.email?.trim().toLowerCase() || null, phoneE164: row.phoneE164, fubUserId: row.fubUserId?.trim() || null, active: row.active };
+/**
+ * One agent from every row of the same person (FUB mirrors one row per phone).
+ * Current details win: active rows first, then the row the link or lead was
+ * made under, then rows carrying a FUB user, newest first. So after FUB changes
+ * an agent's mobile, clients are shown the new number, not the retired row's.
+ */
+function agentFromRows(teamId: number, rows: TeamRow[]): DealsAgent {
+  const ordered = [...rows].sort((a, b) =>
+    Number(b.active) - Number(a.active)
+    || Number(b.id === teamId) - Number(a.id === teamId)
+    || Number(Boolean(b.fubUserId?.trim())) - Number(Boolean(a.fubUserId?.trim()))
+    || b.id - a.id);
+  const pick = (value: (row: TeamRow) => string | null | undefined) => {
+    for (const row of ordered) { const found = value(row)?.trim(); if (found) return found; }
+    return null;
+  };
+  const name = pick((row) => row.name);
+  return {
+    teamId,
+    name: name ?? BROKERAGE_NAME,
+    firstName: name ? name.split(/\s+/)[0]! : null,
+    email: pick((row) => row.email)?.toLowerCase() ?? null,
+    phoneE164: pick((row) => row.phoneE164),
+    fubUserId: pick((row) => row.fubUserId),
+    active: rows.some((row) => row.active),
+  };
 }
 
-/** Name, contact details and activity from the other rows of the same person (FUB mirrors one row per phone). */
-function mergeAgentRows(agent: DealsAgent, rows: TeamRow[]) {
-  const active = rows.filter((row) => row.active);
-  if (active.length) agent.active = true;
-  for (const row of [...active, ...rows]) {
-    if (agent.firstName === null && row.name?.trim()) { agent.name = row.name.trim(); agent.firstName = agent.name.split(/\s+/)[0]!; }
-    if (!agent.email && row.email) agent.email = row.email.trim().toLowerCase();
-    if (!agent.phoneE164 && row.phoneE164) agent.phoneE164 = row.phoneE164;
-    if (!agent.fubUserId && row.fubUserId) agent.fubUserId = row.fubUserId.trim();
+const unique = <T,>(values: T[]) => Array.from(new Set(values));
+
+/**
+ * Every team row of the same person as `seed`, active or not:
+ * - rows sharing a FUB user id (FUB mirrors one row per phone; a changed phone
+ *   leaves the old row behind, deactivated);
+ * - hand-added rows (no FUB user) with the same phone or email;
+ * - for a hand-added seed row, the FUB user that its phone or email belongs to,
+ *   when exactly one FUB user has it, with all of that user's rows.
+ * Phones and emails are only matched from the seed rows, so a shared office
+ * line on another agent's FUB profile never merges two agents.
+ */
+async function samePersonRows(seed: TeamRow[]): Promise<TeamRow[]> {
+  const db = await getDb();
+  const byId = new Map(seed.map((row) => [row.id, row]));
+  if (!db || !seed.length) return seed;
+  const fubIds = new Set(seed.flatMap((row) => row.fubUserId?.trim() ? [row.fubUserId.trim()] : []));
+  const phones = unique(seed.flatMap((row) => row.phoneE164 ? [row.phoneE164] : []));
+  const emails = unique(seed.flatMap((row) => row.email?.trim() ? [row.email.trim().toLowerCase()] : []));
+  const sameContact = (row: TeamRow, of: TeamRow) =>
+    Boolean((row.phoneE164 && row.phoneE164 === of.phoneE164) || (row.email?.trim() && row.email.trim().toLowerCase() === of.email?.trim().toLowerCase()));
+  const predicates = [
+    fubIds.size ? inArray(dealTeamAllowlist.fubUserId, Array.from(fubIds)) : undefined,
+    phones.length ? inArray(dealTeamAllowlist.phoneE164, phones) : undefined,
+    emails.length ? inArray(dealTeamAllowlist.email, emails) : undefined,
+  ].filter(Boolean) as SQL[];
+  const candidates = predicates.length ? await db.select().from(dealTeamAllowlist).where(or(...predicates)) : [];
+  for (const manual of seed.filter((row) => !row.fubUserId?.trim())) {
+    const owners = unique(candidates.filter((row) => row.fubUserId?.trim() && sameContact(row, manual)).map((row) => row.fubUserId!.trim()));
+    if (owners.length === 1) fubIds.add(owners[0]!);
   }
-  return agent;
+  const extra = Array.from(fubIds).filter((id) => !candidates.some((row) => row.fubUserId?.trim() === id));
+  const more = extra.length ? await db.select().from(dealTeamAllowlist).where(inArray(dealTeamAllowlist.fubUserId, extra)) : [];
+  for (const row of [...candidates, ...more]) {
+    const fubId = row.fubUserId?.trim();
+    if (fubId ? fubIds.has(fubId) : seed.some((seedRow) => sameContact(row, seedRow))) byId.set(row.id, row);
+  }
+  return Array.from(byId.values());
 }
 
 /** The agent's number as their client may text it; a client is never shown a masked number for their own agent. */
@@ -70,17 +120,11 @@ export async function teamRowsForLead(lead: Pick<LeadRow, "phoneE164" | "email">
 
 /**
  * Every team row id of the same people as `rows`, active or not: a link made
- * under a phone that FUB later changed (the mirror deactivates the old row and
- * creates a new one) still belongs to the agent.
+ * under a phone that FUB later changed, or under a hand-added row before the
+ * agent's FUB user existed, still belongs to the agent.
  */
 async function sameAgentTeamIds(rows: TeamRow[]): Promise<number[]> {
-  const db = await getDb();
-  const ids = new Set(rows.map((row) => row.id));
-  const fubUserIds = Array.from(new Set(rows.flatMap((row) => row.fubUserId ? [row.fubUserId] : [])));
-  if (db && fubUserIds.length) {
-    for (const row of await db.select({ id: dealTeamAllowlist.id }).from(dealTeamAllowlist).where(inArray(dealTeamAllowlist.fubUserId, fubUserIds))) ids.add(row.id);
-  }
-  return Array.from(ids);
+  return (await samePersonRows(rows)).map((row) => row.id);
 }
 
 /**
@@ -92,7 +136,7 @@ export async function agentForLead(lead: Pick<LeadRow, "phoneE164" | "email">): 
   const rows = await teamRowsForLead(lead);
   if (!rows.length) return null;
   const primary = rows.find((row) => row.fubUserId && row.name) ?? rows.find((row) => row.fubUserId) ?? rows.find((row) => row.name) ?? rows[0]!;
-  return mergeAgentRows(agentFromTeamRow(primary), rows);
+  return agentFromRows(primary.id, await samePersonRows(rows));
 }
 
 /** The agent behind a link or client (by the team row id stored on it). Inactive agents still resolve so history keeps its name. */
@@ -102,10 +146,29 @@ export async function agentForTeamId(teamId: number | null | undefined): Promise
   if (!db) return null;
   const row = (await db.select().from(dealTeamAllowlist).where(eq(dealTeamAllowlist.id, teamId)).limit(1))[0];
   if (!row) return null;
-  const agent = agentFromTeamRow(row);
-  if (!row.fubUserId) return agent;
-  const siblings = await db.select().from(dealTeamAllowlist).where(eq(dealTeamAllowlist.fubUserId, row.fubUserId));
-  return mergeAgentRows(agent, siblings.filter((sibling) => sibling.id !== row.id));
+  return agentFromRows(row.id, await samePersonRows([row]));
+}
+
+/**
+ * Admin is removing a team row. Links and clients made under it move to
+ * another row of the same person (a hand-added row made redundant by the FUB
+ * mirror), so they keep working; with no such row the agent is gone and their
+ * links stop, as for an agent who left.
+ */
+export async function reassignTeamRowBeforeRemoval(teamId: number): Promise<number | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const row = (await db.select().from(dealTeamAllowlist).where(eq(dealTeamAllowlist.id, teamId)).limit(1))[0];
+  if (!row) return null;
+  const others = (await samePersonRows([row])).filter((other) => other.id !== row.id);
+  const target = others.sort((a, b) =>
+    Number(b.active) - Number(a.active)
+    || Number(Boolean(b.fubUserId?.trim())) - Number(Boolean(a.fubUserId?.trim()))
+    || b.id - a.id)[0];
+  if (!target) return null;
+  await db.update(dealClientLinks).set({ agentTeamId: target.id }).where(eq(dealClientLinks.agentTeamId, row.id));
+  await db.update(dealLeads).set({ agentTeamId: target.id }).where(eq(dealLeads.agentTeamId, row.id));
+  return target.id;
 }
 
 export type CreateClientLinkInput = { agentLead: LeadRow; clientName: string; clientPhone?: string | null; note?: string | null };
@@ -243,6 +306,19 @@ export async function liveAgentForClient(lead: Pick<LeadRow, "id" | "agentTeamId
   return agent?.active ? agent : null;
 }
 
+export type ConnectOffer = "ask" | "connected" | "not_theirs";
+/**
+ * What a buyer with a live list sees when they open a live client link: their
+ * own link again goes straight to the list, a link made for another number is
+ * not offered, anything else asks "Connect your list with X?".
+ */
+export async function connectOfferFor(lead: Pick<LeadRow, "id" | "phoneE164" | "clientLinkId">, token: string): Promise<ConnectOffer | null> {
+  const usable = await clientLinkForPhone(token, lead.phoneE164);
+  if (!usable) return null;
+  if (!usable.ok) return usable.kind === "other_phone" ? "not_theirs" : null;
+  return lead.clientLinkId === usable.resolved.link.id && usable.resolved.link.leadId === lead.id ? "connected" : "ask";
+}
+
 export async function recordClientLinkOpen(linkId: number) {
   const db = await getDb();
   if (!db) return;
@@ -255,9 +331,22 @@ export async function recordClientLinkOpen(linkId: number) {
 
 // The verification transaction and the project database share this write surface.
 type DealsWriteDb = any;
-/** Called inside the verification transaction once the buyer's phone is approved; the first verified phone binds the link. */
-export async function attachLeadToClientLink(db: DealsWriteDb, linkId: number, leadId: number) {
-  await db.update(dealClientLinks).set({ leadId, verifiedAt: new Date() }).where(and(eq(dealClientLinks.id, linkId), or(isNull(dealClientLinks.leadId), eq(dealClientLinks.leadId, leadId))));
+/**
+ * Called inside the verification transaction once the buyer's phone is
+ * approved; the first verified phone binds the link. `verifiedAt` marks when
+ * the client connected through this link (the agent sees what they did from
+ * then on), so renewing access through the same link, or verifying on a second
+ * device, keeps it. A client who moved to another link and came back connects
+ * again from now.
+ */
+export async function attachLeadToClientLink(db: DealsWriteDb, linkId: number, leadId: number, previousLinkId: number | null | undefined) {
+  const owned = and(eq(dealClientLinks.id, linkId), or(isNull(dealClientLinks.leadId), eq(dealClientLinks.leadId, leadId)));
+  if (previousLinkId !== linkId) {
+    await db.update(dealClientLinks).set({ leadId, verifiedAt: new Date() }).where(owned);
+    return;
+  }
+  await db.update(dealClientLinks).set({ leadId }).where(owned);
+  await db.update(dealClientLinks).set({ verifiedAt: new Date() }).where(and(eq(dealClientLinks.id, linkId), eq(dealClientLinks.leadId, leadId), isNull(dealClientLinks.verifiedAt)));
 }
 
 export type AttachLiveSessionResult =
@@ -283,7 +372,7 @@ export async function attachLiveSessionToClientLink(input: { lead: LeadRow; toke
   const fresh = new Date(Date.now() + input.expiryHours * 60 * 60_000);
   const expiresAt = input.lead.expiresAt > fresh ? input.lead.expiresAt : fresh;
   await db.update(dealLeads).set({ agentTeamId: resolved.agent.teamId, clientLinkId: resolved.link.id, expiresAt }).where(eq(dealLeads.id, input.lead.id));
-  await attachLeadToClientLink(db, resolved.link.id, input.lead.id);
+  await attachLeadToClientLink(db, resolved.link.id, input.lead.id, input.lead.clientLinkId);
   await logDealEvent({ leadId: input.lead.id, kind: "client_link_attached", sourceCode: input.lead.sourceCode, deviceHash: input.lead.deviceHash, phone: input.lead.phoneE164, detail: `link:${resolved.link.id};team:${resolved.agent.teamId}` });
   return { ok: true, attached: true, agent: resolved.agent, linkId: resolved.link.id, expiresAt };
 }

@@ -376,16 +376,28 @@ async function executeRequestEmail(job: typeof dealFubJobs.$inferSelect): Promis
   const agent = loaded.lead.agent;
   const who = agent ? `${agent.name}'s client ${loaded.lead.name?.trim() || `lead ${loaded.lead.id}`}` : `Builder Deals lead ${loaded.lead.id}`;
   const subjects = { tour: "Builder Deals tour request", ask: "Builder Deals question", save: "Builder Deals: a buyer saved a home" } as const;
+  const when = formatChicagoDateTime(loaded.request.preferredAt);
+  // The task job usually runs first; until it has, the copy says the task is on its way rather than assigned.
+  const taskCreated = Boolean(loaded.request.fubTaskId);
+  if (agent?.email) {
+    // The agent's own copy (no admin links), queued once per request before the owners' email, so a retry never repeats it.
+    const { queueAgentRequestAlert } = await import("./dealsAlerts");
+    await queueAgentRequestAlert({ lead: loaded.lead, agent, requestId: loaded.request.id, requestType: loaded.request.requestType, description: loaded.privateDescription, when, taskCreated, isTest: loaded.lead.isTest });
+  }
+  const taskLine = !agent ? null
+    : !agent.fubUserId ? `Sent through ${agent.name}'s client link. ${agent.name} has no Follow Up Boss user yet, so the FUB task is assigned to Peter.`
+      : taskCreated ? `Sent through ${agent.name}'s client link; the FUB task is assigned to ${agent.name}.`
+        : `Sent through ${agent.name}'s client link; the FUB task for ${agent.name} is still being created.`;
   const sent = await sendBuilderDealsEmail({
     category: loaded.request.requestType === "save" ? "home_saved" : "tour_request",
-    // The buyer's own agent is told alongside the owners; a reel lead has no agent to add.
-    recipients: Array.from(new Set([...settings.alertRecipients, ...(agent?.email ? [agent.email] : [])])),
+    recipients: settings.alertRecipients,
     subject: `${testTag}${agent ? `${agent.name}'s client: ` : ""}${subjects[loaded.request.requestType]}`,
     content: [
       loaded.lead.isTest ? "TEST RECORD (full-pipeline test mode): eligible for Builder Deals cleanup." : null,
       loaded.request.requestType === "save" ? `${who} saved ${loaded.privateDescription}.` : `${who} requested ${loaded.privateDescription}.`,
-      loaded.request.requestType === "save" ? `Saved at: ${formatChicagoDateTime(loaded.request.preferredAt)}` : `Preferred: ${formatChicagoDateTime(loaded.request.preferredAt)}`,
-      agent ? (agent.fubUserId ? `Sent through ${agent.name}'s client link; the FUB task is assigned to ${agent.name}.` : `Sent through ${agent.name}'s client link. ${agent.name} has no Follow Up Boss user yet, so the FUB task is assigned to Peter.`) : null,
+      loaded.request.requestType === "save" ? `Saved at: ${when}` : `Preferred: ${when}`,
+      taskLine,
+      agent && !agent.email ? `${agent.name} has no email on the team list, so they were not emailed.` : null,
       "Review the protected request in Admin, Builder Deals.",
     ].filter(Boolean).join("\n"),
   });
@@ -402,8 +414,11 @@ type DeferredCheckOutcome = "clear" | "blocked" | "team" | "unavailable";
  */
 async function runDeferredRealtorCheck(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, lead: LeadRow, settings: Awaited<ReturnType<typeof getDealSettings>>): Promise<DeferredCheckOutcome> {
   const { classifyDealsAccess } = await import("./dealsEligibility");
+  // An agent's own client skips the realtor screening here exactly as at the gate.
+  const { liveAgentForClient } = await import("./dealsClientLinks");
+  const clientLink = Boolean(lead.clientLinkId && await liveAgentForClient(lead));
   const eligibility = await classifyDealsAccess({
-    phone: lead.phoneE164, email: lead.email, deviceHash: lead.deviceHash,
+    phone: lead.phoneE164, email: lead.email, deviceHash: lead.deviceHash, clientLink,
     isTest: settings.testNumbers.includes(lead.phoneE164), testSkipChecks: settings.testNumbersSkipChecks, testTeamNumbers: settings.testTeamNumbers,
     brokerageDomains: settings.brokerageDomains, fubRealtorTags: settings.fubRealtorTags, fubRealtorSources: settings.fubRealtorSources,
     fubTimeoutMs: DEFERRED_CHECK_TIMEOUT_MS,
@@ -523,6 +538,7 @@ async function queueUnlockAlertIfDue(job: typeof dealFubJobs.$inferSelect, resul
     alreadyAssignedTo: result.ok ? result.screening?.alreadyAssignedTo ?? null : null,
     previouslyOptedOut: result.ok ? Boolean(result.screening?.previouslyOptedOut) : false,
     fubIssue: result.ok ? null : result.error,
+    fubWarning: result.ok ? result.warning ?? null : null,
   });
   return queued.queued;
 }

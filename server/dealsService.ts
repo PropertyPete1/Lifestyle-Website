@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, asc, desc, eq, gt, inArray, isNull, lte, notLike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lte, notInArray, notLike, or, sql } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { parse as parseCookie } from "cookie";
 import {
@@ -427,6 +427,8 @@ export async function recordDealsLanding(input: { sourceCode: string; deviceHash
 export const HAS_AGENT_BLOCK_REASON = "Confirmed working with an agent";
 /** Reasons the automatic realtor screening writes. An agent's own client is exempt from these; an admin's block is not. */
 const SCREENING_BLOCK_REASONS = new Set([HAS_AGENT_BLOCK_REASON, "has_agent", "known_agent", "fub_realtor", "brokerage_domain", "post_verification", "realtor screening"]);
+/** Every stored form of a screening reason: the reason itself and its 24 h device cooldown row. */
+const SCREENING_REASON_VALUES = Array.from(SCREENING_BLOCK_REASONS).flatMap((reason) => [reason, `${reason} device cooldown`]);
 export function isScreeningBlockReason(reason: string) {
   return SCREENING_BLOCK_REASONS.has(reason) || (reason.endsWith(" device cooldown") && SCREENING_BLOCK_REASONS.has(reason.slice(0, -" device cooldown".length)));
 }
@@ -441,8 +443,9 @@ export async function getActiveBlock(input: { phone?: string; email?: string; de
   ].filter(Boolean) as any[];
   if (!matches.length) return undefined;
   const now = new Date();
-  const rows = await db.select().from(dealBlocklist).where(and(or(...matches), or(isNull(dealBlocklist.expiresAt), gt(dealBlocklist.expiresAt, now)))).limit(input.ignoreHasAgent ? 20 : 1);
-  return input.ignoreHasAgent ? rows.find((row) => !isScreeningBlockReason(row.reason)) : rows[0];
+  // An agent's client: the screening reasons are excluded in SQL, so no number of them can hide an admin block.
+  const screening = input.ignoreHasAgent ? [notInArray(dealBlocklist.reason, SCREENING_REASON_VALUES)] : [];
+  return (await db.select().from(dealBlocklist).where(and(or(...matches), or(isNull(dealBlocklist.expiresAt), gt(dealBlocklist.expiresAt, now)), ...screening)).limit(1))[0];
 }
 
 export async function blockDealAccess(input: { phone?: string | null; email?: string | null; deviceHash?: string | null; searchPhone?: string | null; reason: string; expiresAt?: Date | null }) {
@@ -683,6 +686,17 @@ export async function isLiveDealSession(req: Request): Promise<{ leadId: number;
   return lead ? { leadId: lead.id, lead, deviceHash } : null;
 }
 
+/**
+ * An agent's client keeps the session cookie 30 days past their access. A
+ * lapsed cookie unlocks nothing (the session row has expired); it only names
+ * their agent's link, so the expired page and the gate send them back through
+ * it instead of the reel gate and its "are you working with an agent" question.
+ */
+const CLIENT_SESSION_COOKIE_GRACE_SECONDS = 30 * 24 * 60 * 60;
+function sessionCookieSeconds(expiresAt: Date, agentClient: boolean) {
+  return Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) + (agentClient ? CLIENT_SESSION_COOKIE_GRACE_SECONDS : 0);
+}
+
 /** The lead behind this browser's session cookie even after it lapsed or was revoked; used only to keep an agent's link on the expired page. */
 export async function staleSessionLeadId(req: Request): Promise<number | null> {
   const token = parseCookie(req.headers.cookie || "")[DEALS_COOKIE.session];
@@ -700,7 +714,7 @@ export async function extendLiveSession(req: Request, res: Response, expiresAt: 
   const db = await getDb();
   if (!token || !deviceHash || !db) return;
   await db.update(dealAccessTokens).set({ expiresAt }).where(and(eq(dealAccessTokens.kind, "session"), eq(dealAccessTokens.tokenHash, hashSecret(token)), eq(dealAccessTokens.deviceHash, deviceHash), isNull(dealAccessTokens.revokedAt)));
-  setDealCookie(res, DEALS_COOKIE.session, token, Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000)));
+  setDealCookie(res, DEALS_COOKIE.session, token, sessionCookieSeconds(expiresAt, true));
 }
 
 export async function issueAccessToken(leadId: number, deviceHash: string, expiresAt: Date): Promise<string> {
@@ -730,7 +744,7 @@ export async function exchangeAccessToken(req: Request, res: Response, rawToken:
   const session = randomOpaqueToken(32);
   await db.insert(dealAccessTokens).values({ leadId: lead.id, tokenHash: hashSecret(session), deviceHash, expiresAt: lead.expiresAt, kind: "session" });
   if (!token.consumedAt) await db.update(dealAccessTokens).set({ consumedAt: new Date() }).where(eq(dealAccessTokens.id, token.id));
-  setDealCookie(res, DEALS_COOKIE.session, session, Math.max(60, Math.floor((lead.expiresAt.getTime() - Date.now()) / 1000)));
+  setDealCookie(res, DEALS_COOKIE.session, session, sessionCookieSeconds(lead.expiresAt, Boolean(lead.clientLinkId && lead.status !== "team")));
   return lead.status === "team" ? "ok_team" : "ok";
 }
 
@@ -957,7 +971,7 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   }
   if (attachLink) {
     const { attachLeadToClientLink } = await import("./dealsClientLinks");
-    await attachLeadToClientLink(db, attachLink.linkId, leadId);
+    await attachLeadToClientLink(db, attachLink.linkId, leadId, old?.clientLinkId ?? null);
   }
   await db.insert(dealAccessTokens).values({ leadId, tokenHash: hashSecret(token), deviceHash, expiresAt, kind: "exchange" });
   await db.update(dealPendingVerifications).set({ flags: JSON.stringify({ ...identity, completed: { codeHash: hashSecret(input.code), leadId, expiresAt: expiresAt.toISOString(), isTeam: eligibility.team, isTest, fubCheckDeferred } satisfies VerificationReceipt }) }).where(eq(dealPendingVerifications.id, pending.id));

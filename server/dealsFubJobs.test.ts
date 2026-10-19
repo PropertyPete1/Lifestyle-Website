@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   appendBuilderDealsRequestNote: vi.fn(),
   queueFirstUnlockAlert: vi.fn(),
   queueProfileFlagAlert: vi.fn(),
+  queueAgentRequestAlert: vi.fn(),
   sendBuilderDealsEmail: vi.fn(),
 }));
 
@@ -41,10 +42,11 @@ vi.mock("./dealsFub", async (importOriginal) => ({
 vi.mock("./dealsAlerts", () => ({
   queueFirstUnlockAlert: (...args: unknown[]) => mocks.queueFirstUnlockAlert(...args),
   queueProfileFlagAlert: (...args: unknown[]) => mocks.queueProfileFlagAlert(...args),
+  queueAgentRequestAlert: (...args: unknown[]) => mocks.queueAgentRequestAlert(...args),
 }));
 vi.mock("./dealsEmail", () => ({ sendBuilderDealsEmail: (...args: unknown[]) => mocks.sendBuilderDealsEmail(...args) }));
 
-import { dealCommunities, dealCommunityViews, dealEvents, dealFubJobs, dealFubRecords, dealHomes, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
+import { dealClientLinks, dealCommunities, dealCommunityViews, dealEvents, dealFubJobs, dealFubRecords, dealHomes, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
 import { createFakeDealsDb, type FakeDealsDb } from "./dealsFubFakeDb.test-support";
 import {
   LEASE_MS,
@@ -171,7 +173,7 @@ describe("Builder Deals deferred realtor re-check in the job runner", () => {
     expect(updatesOf(db, dealLeads)).toEqual(expect.arrayContaining([{ flags: JSON.stringify(["Possible Agent - Handle"]) }]));
     expect(mocks.sendBuilderDealsLeadToFub).toHaveBeenCalledWith(expect.objectContaining({ id: lead.id, phone: lead.phoneE164, flags: ["Possible Agent - Handle"], isTest: false }));
     expect(mocks.queueFirstUnlockAlert).toHaveBeenCalledTimes(1);
-    expect(mocks.queueFirstUnlockAlert).toHaveBeenCalledWith(expect.objectContaining({ id: lead.id }), { flags: ["Possible Agent - Handle"], fubPersonId: "9001", alreadyAssignedTo: "Jane Agent", previouslyOptedOut: true, fubIssue: null });
+    expect(mocks.queueFirstUnlockAlert).toHaveBeenCalledWith(expect.objectContaining({ id: lead.id }), { flags: ["Possible Agent - Handle"], fubPersonId: "9001", alreadyAssignedTo: "Jane Agent", previouslyOptedOut: true, fubIssue: null, fubWarning: null });
     expect(insertsOf(db, dealFubRecords)).toEqual([expect.objectContaining({ leadId: lead.id, kind: "person", fubId: "9001", createdByUs: true })]);
     expect(updatesOf(db, dealFubJobs)).toEqual(expect.arrayContaining([expect.objectContaining({ status: "synced" })]));
     expect(updatesOf(db, dealLeads)).toEqual(expect.arrayContaining([expect.objectContaining({ fubStatus: "synced", fubPersonId: "9001" })]));
@@ -431,17 +433,32 @@ describe("Builder Deals requests from an agent's client", () => {
   const teamRow = { id: 5, name: "Tiffany Agent", phoneE164: "+12105550101", email: "tiffany@example.com", fubUserId: "77", fubIdentityKey: "fub:77:+12105550101", source: "fub" as const, active: true, createdAt: new Date() };
   const agentClient = { ...lead, flags: "[]", name: "Maria Lopez", sourceCode: "agent", agentTeamId: 5, clientLinkId: 3 };
 
-  it("emails the agent alongside the owners, names the client and the agent, and hands the task to the agent", async () => {
+  it("emails the owners and queues the agent's own copy, names the client and the agent, and hands the task to the agent", async () => {
     const saveRequest = { ...tourRequest, id: 44, requestType: "save" as const };
     const email = dbWithJob(job({ id: 9, operation: "request_email:44", payload: JSON.stringify({ requestId: 44, chicagoDay: "2026-10-18" }) }), agentClient, [[dealTourRequests, [saveRequest]], [dealHomes, [{ ...requestedHome, price: 489_990 }]], [dealTeamAllowlist, [teamRow]]]);
     mocks.getDb.mockResolvedValue(email);
     await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ sent: 0, failed: 0 });
     const sent = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { category: string; subject: string; content: string; recipients: string[] };
     expect(sent.category).toBe("home_saved");
-    expect(sent.recipients).toEqual([...settings.alertRecipients, "tiffany@example.com"]);
+    // The owners' email carries the admin pointer; the agent gets a copy of their own without it.
+    expect(sent.recipients).toEqual(settings.alertRecipients);
     expect(sent.subject).toBe("Tiffany Agent's client: Builder Deals: a buyer saved a home");
     expect(sent.content).toContain("Tiffany Agent's client Maria Lopez saved 8106 Private Street (Hidden Plan), $489,990.");
-    expect(sent.content).toContain("assigned to Tiffany Agent");
+    // The task job has not run yet, so the copy does not claim an assignment that has not happened.
+    expect(sent.content).toContain("the FUB task for Tiffany Agent is still being created");
+    expect(mocks.queueAgentRequestAlert).toHaveBeenCalledWith(expect.objectContaining({
+      agent: { name: "Tiffany Agent", fubUserId: "77", email: "tiffany@example.com" },
+      requestId: 44, requestType: "save", description: "8106 Private Street (Hidden Plan), $489,990", taskCreated: false, isTest: false,
+    }));
+
+    // Once the task exists, both copies say it is assigned.
+    mocks.sendBuilderDealsEmail.mockClear();
+    mocks.queueAgentRequestAlert.mockClear();
+    const withTask = dbWithJob(job({ id: 19, operation: "request_email:44", payload: JSON.stringify({ requestId: 44, chicagoDay: "2026-10-18" }) }), agentClient, [[dealTourRequests, [{ ...saveRequest, fubTaskId: "T9" }]], [dealHomes, [{ ...requestedHome, price: 489_990 }]], [dealTeamAllowlist, [teamRow]]]);
+    mocks.getDb.mockResolvedValue(withTask);
+    await runPendingDealsFubJobs();
+    expect((mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { content: string }).content).toContain("the FUB task is assigned to Tiffany Agent.");
+    expect(mocks.queueAgentRequestAlert).toHaveBeenCalledWith(expect.objectContaining({ taskCreated: true }));
 
     mocks.createBuilderDealsTourTask.mockResolvedValue({ ok: true, taskId: "T9", records: [{ kind: "task", fubId: "T9", createdByUs: true }] });
     const task = dbWithJob(job({ id: 10, operation: "request_task:2026-10-18", payload: JSON.stringify({ requestId: 44, chicagoDay: "2026-10-18" }) }), agentClient, [[dealTourRequests, [saveRequest]], [dealHomes, [{ ...requestedHome, price: 489_990 }]], [dealTeamAllowlist, [teamRow]]]);
@@ -460,6 +477,7 @@ describe("Builder Deals requests from an agent's client", () => {
     expect(sent.recipients).toEqual(settings.alertRecipients);
     expect(sent.subject).toBe("Builder Deals: a buyer saved a home");
     expect(sent.content).not.toContain("Tiffany");
+    expect(mocks.queueAgentRequestAlert).not.toHaveBeenCalled();
   });
 
   it("keeps saves and tours in separate FUB tasks on the same day", async () => {
@@ -500,6 +518,21 @@ describe("Builder Deals requests from an agent's client", () => {
     await runPendingDealsFubJobs();
     const sent = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { content: string };
     expect(sent.content).toContain("has no Follow Up Boss user yet, so the FUB task is assigned to Peter.");
+  });
+
+  it("re-runs a deferred realtor check as the gate did: an agent's live client skips the screening", async () => {
+    mocks.classifyDealsAccess.mockResolvedValue({ allowed: true, team: false, flags: ["agent_client"] });
+    mocks.sendBuilderDealsLeadToFub.mockResolvedValue({ ok: true, personId: "9003", records: [{ kind: "person", fubId: "9003", createdByUs: true }] });
+    const db = dbWithJob(job(), agentClient, [[dealClientLinks, [{ id: 3, leadId: lead.id, revokedAt: null }]], [dealTeamAllowlist, [teamRow]]]);
+    mocks.getDb.mockResolvedValue(db);
+    await runPendingDealsFubJobs();
+    expect(mocks.classifyDealsAccess).toHaveBeenCalledWith(expect.objectContaining({ phone: lead.phoneE164, clientLink: true }));
+    // A turned-off link: the screening applies again.
+    mocks.classifyDealsAccess.mockClear();
+    const revoked = dbWithJob(job(), agentClient, [[dealClientLinks, [{ id: 3, leadId: lead.id, revokedAt: new Date() }]], [dealTeamAllowlist, [teamRow]]]);
+    mocks.getDb.mockResolvedValue(revoked);
+    await runPendingDealsFubJobs();
+    expect(mocks.classifyDealsAccess).toHaveBeenCalledWith(expect.objectContaining({ clientLink: false }));
   });
 
   it("sends the agent to the first-unlock job so FUB assigns the contact to them", async () => {

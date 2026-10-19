@@ -614,7 +614,7 @@ export const dealAlerts = mysqlTable("deal_alerts", {
   id: int("id").autoincrement().primaryKey(),
   dedupeKey: varchar("dedupe_key", { length: 191 }).notNull().unique(),
   leadId: int("lead_id").notNull(),
-  kind: mysqlEnum("kind", ["first_unlock", "profile_flag"]).notNull(),
+  kind: mysqlEnum("kind", ["first_unlock", "profile_flag", "agent_update"]).notNull(),
   deliveryMode: mysqlEnum("delivery_mode", ["immediate", "hourly_digest"]).notNull(),
   recipients: text("recipients").notNull(),
   subject: varchar("subject", { length: 255 }).notNull(),

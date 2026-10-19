@@ -1,14 +1,19 @@
 import { and, eq, lt, lte, or, sql } from "drizzle-orm";
-import { dealAlerts, dealLeads } from "../drizzle/schema";
+import { dealAlerts, dealClientLinks, dealLeads } from "../drizzle/schema";
+import { normalizeUsPhone } from "../shared/deals";
 import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { fubPersonLink } from "./dealsFub";
 import { getDealSettings } from "./dealsService";
 
-export type DealAlertKind = "first_unlock" | "profile_flag";
+export type DealAlertKind = "first_unlock" | "profile_flag" | "agent_update";
 type AlertRow = typeof dealAlerts.$inferSelect;
-type AlertLead = Pick<typeof dealLeads.$inferSelect, "id" | "name" | "phoneE164" | "email" | "instagramHandle" | "sourceCode" | "timeline"> & { agentTeamId?: number | null };
-/** The agent who sent the buyer; they receive the buyer's alerts alongside the owners. */
+type AlertLead = Pick<typeof dealLeads.$inferSelect, "id" | "name" | "phoneE164" | "email" | "instagramHandle" | "sourceCode" | "timeline"> & { agentTeamId?: number | null; clientLinkId?: number | null };
+/**
+ * The agent who sent the buyer. They get their own copy of the buyer's alerts:
+ * written to them, with their client's details, and without the owners' admin
+ * links (agents have no admin login).
+ */
 type AlertAgent = { name: string; email: string | null; fubUserId?: string | null };
 
 const STALE_SEND_MS = 15 * 60_000;
@@ -40,6 +45,35 @@ export function adminLeadLink(leadId: number) {
   return `${origin}/admin/deals?lead=${leadId}`;
 }
 
+/** The agent's own page: their client links and what each client did. */
+export function agentTeamLink() {
+  const origin = (process.env.DEALS_SITE_ORIGIN?.trim() || DEFAULT_SITE_ORIGIN).replace(/\/+$/, "");
+  return `${origin}/deals/team`;
+}
+
+function displayPhone(phoneE164: string) {
+  const parsed = normalizeUsPhone(phoneE164, { allowCanada: true });
+  return parsed.ok ? parsed.display : phoneE164;
+}
+
+/** How the agent knows this client: the name they typed on the link, else the profile name, else the number. */
+async function clientLabel(lead: AlertLead) {
+  const db = lead.clientLinkId ? await getDb() : null;
+  const link = db && lead.clientLinkId ? (await db.select({ clientName: dealClientLinks.clientName }).from(dealClientLinks).where(eq(dealClientLinks.id, lead.clientLinkId)).limit(1))[0] : undefined;
+  return link?.clientName?.trim() || lead.name?.trim() || displayPhone(lead.phoneE164);
+}
+
+/** The client's details for their own agent: contact lines and the FUB contact, never admin links. */
+function agentClientLines(lead: AlertLead, fubPersonId?: string | null) {
+  return [
+    `Phone: ${displayPhone(lead.phoneE164)}`,
+    ...(lead.email ? [`Email: ${lead.email}`] : []),
+    ...(lead.timeline ? [`Timeline: ${lead.timeline}`] : []),
+    ...(fubPersonId ? [`Follow Up Boss: ${fubPersonLink(fubPersonId)}`] : []),
+    `Your clients and their activity: ${agentTeamLink()}`,
+  ];
+}
+
 function privateLeadLines(lead: AlertLead) {
   return [
     `Phone: ${lead.phoneE164}`,
@@ -58,13 +92,15 @@ async function queueDealAlert(input: {
   kind: DealAlertKind;
   subject: string;
   content: string;
-  extraRecipients?: readonly string[];
+  /** The agent's own copy: sent to them alone, right away (the owners' digest setting is theirs). */
+  agentEmail?: string;
 }) {
   const db = await getDb();
   if (!db) return { queued: false, reason: "database_unavailable" as const };
   const settings = await getDealSettings();
-  const recipients = validRecipients([...settings.alertRecipients, ...(input.extraRecipients ?? [])]);
-  const deliveryMode = settings.alertMode;
+  const recipients = validRecipients(input.agentEmail ? [input.agentEmail] : settings.alertRecipients);
+  if (!recipients.length) return { queued: false, reason: "no_recipients" as const };
+  const deliveryMode = input.agentEmail ? "immediate" : settings.alertMode;
   const scheduledFor = deliveryMode === "immediate" ? new Date() : nextHour();
   const result = await db.insert(dealAlerts).values({
     dedupeKey: input.dedupeKey,
@@ -97,6 +133,8 @@ export type FirstUnlockAlertDetails = {
   previouslyOptedOut?: boolean;
   /** Why the FUB sync has not completed, when the alert goes out before FUB answered. */
   fubIssue?: string | null;
+  /** FUB took the contact but a follow-up write (the assignment to the agent) failed. */
+  fubWarning?: string | null;
 };
 
 /**
@@ -107,12 +145,27 @@ export type FirstUnlockAlertDetails = {
 export async function queueFirstUnlockAlert(lead: AlertLead, details: FirstUnlockAlertDetails = {}) {
   const flags = Array.from(new Set((details.flags ?? []).map((flag) => flag.trim()).filter(Boolean)));
   const agent = await alertAgent(lead);
+  if (agent?.email) {
+    const client = await clientLabel(lead);
+    await queueDealAlert({
+      dedupeKey: `first_unlock:${lead.id}:agent`,
+      lead,
+      kind: "agent_update",
+      agentEmail: agent.email,
+      subject: `Builder Deals: ${client} opened the list you sent`,
+      content: [
+        `${client} opened the Builder Deals list you sent and verified their number. They see every address, and you get an email when they save a home or ask for a tour.`,
+        agentAssignmentLine(agent, details),
+        "",
+        ...agentClientLines(lead, details.fubPersonId),
+      ].join("\n"),
+    });
+  }
   return queueDealAlert({
     dedupeKey: `first_unlock:${lead.id}`,
     lead,
     kind: "first_unlock",
     subject: agent ? `Builder Deals: ${agent.name}'s client unlocked the list` : "Builder Deals: new buyer unlocked the list",
-    extraRecipients: agent?.email ? [agent.email] : [],
     content: [
       agent ? `${agent.name}'s client unlocked Builder Deals through their client link. ${assignmentLine(agent, details)}` : "A buyer unlocked Builder Deals for the first time.",
       ...(details.previouslyOptedOut ? ["", "Previously opted out, do not text manually."] : []),
@@ -133,7 +186,18 @@ export async function queueFirstUnlockAlert(lead: AlertLead, details: FirstUnloc
 function assignmentLine(agent: AlertAgent, details: FirstUnlockAlertDetails) {
   if (details.alreadyAssignedTo) return `The FUB contact was already assigned to ${details.alreadyAssignedTo}; the assignment was left alone.`;
   if (!details.fubPersonId) return `The FUB contact is not synced yet; it will be assigned to ${agent.fubUserId ? agent.name : "Peter"}.`;
-  return agent.fubUserId ? `The FUB contact is assigned to ${agent.name}.` : `${agent.name} has no Follow Up Boss user yet, so the FUB contact is assigned to Peter.`;
+  if (!agent.fubUserId) return `${agent.name} has no Follow Up Boss user yet, so the FUB contact is assigned to Peter.`;
+  if (details.fubWarning) return `Assigning the FUB contact to ${agent.name} did not go through (${details.fubWarning}); assign it in FUB.`;
+  return `The FUB contact is assigned to ${agent.name}.`;
+}
+
+/** The same facts, written to the agent. */
+function agentAssignmentLine(agent: AlertAgent, details: FirstUnlockAlertDetails) {
+  if (details.alreadyAssignedTo) return `They were already in Follow Up Boss with ${details.alreadyAssignedTo}, so that assignment was left alone; a note names you.`;
+  if (!agent.fubUserId) return "Your team profile has no Follow Up Boss user yet, so their Follow Up Boss contact is assigned to Peter for now.";
+  if (!details.fubPersonId) return "Their Follow Up Boss contact is still syncing; it will be assigned to you.";
+  if (details.fubWarning) return "Their Follow Up Boss contact could not be assigned to you automatically; Peter has been told and will assign it.";
+  return "Their Follow Up Boss contact is assigned to you.";
 }
 
 async function alertAgent(lead: AlertLead): Promise<AlertAgent | null> {
@@ -153,7 +217,46 @@ export async function notifyClientLinkAttached(leadId: number, linkId: number) {
   const { agentForTeamId } = await import("./dealsClientLinks");
   const agent = await agentForTeamId(lead.agentTeamId);
   if (!agent?.active) return { queued: false };
-  return queueClientLinkAttachedAlert(lead, { name: agent.name, email: agent.email }, linkId);
+  return queueClientLinkAttachedAlert(lead, { name: agent.name, email: agent.email, fubUserId: agent.fubUserId }, linkId);
+}
+
+/**
+ * The agent's copy of a client's save, tour request or question. The owners'
+ * email (with the admin link) is sent by the request job; this one is the
+ * agent's, once per request.
+ */
+export async function queueAgentRequestAlert(input: {
+  lead: AlertLead;
+  agent: AlertAgent;
+  requestId: number;
+  requestType: "tour" | "ask" | "save";
+  description: string;
+  when: string;
+  taskCreated: boolean;
+  isTest: boolean;
+}) {
+  if (!input.agent.email) return { queued: false, reason: "no_recipients" as const };
+  const client = await clientLabel(input.lead);
+  const action = { save: "saved a home", tour: "asked for a tour", ask: "asked about a home" }[input.requestType];
+  const sentence = { save: `${client} saved ${input.description}.`, tour: `${client} asked to tour ${input.description}.`, ask: `${client} asked about ${input.description}.` }[input.requestType];
+  const task = !input.agent.fubUserId
+    ? "Your team profile has no Follow Up Boss user yet, so the Follow Up Boss task is assigned to Peter for now."
+    : input.taskCreated ? "A Follow Up Boss task for this is assigned to you." : "A Follow Up Boss task for you is being created.";
+  return queueDealAlert({
+    dedupeKey: `request:${input.requestId}:agent`,
+    lead: input.lead,
+    kind: "agent_update",
+    agentEmail: input.agent.email,
+    subject: `${input.isTest ? "TEST: " : ""}Builder Deals: ${client} ${action}`,
+    content: [
+      input.isTest ? "TEST RECORD (full-pipeline test mode)." : null,
+      sentence,
+      input.requestType === "save" ? `Saved: ${input.when}` : `Preferred time: ${input.when}`,
+      task,
+      "",
+      ...agentClientLines(input.lead),
+    ].filter((line): line is string => line !== null).join("\n"),
+  });
 }
 
 /**
@@ -162,12 +265,27 @@ export async function notifyClientLinkAttached(leadId: number, linkId: number) {
  * link, through the same durable alert path as the first unlock.
  */
 export async function queueClientLinkAttachedAlert(lead: AlertLead, agent: AlertAgent, linkId: number) {
+  if (agent.email) {
+    const client = await clientLabel({ ...lead, clientLinkId: lead.clientLinkId ?? linkId });
+    await queueDealAlert({
+      dedupeKey: `client_link_attached:${lead.id}:${linkId}:agent`,
+      lead,
+      kind: "agent_update",
+      agentEmail: agent.email,
+      subject: `Builder Deals: ${client} connected to the list you sent`,
+      content: [
+        `${client} already had a Builder Deals list and connected it to the link you sent. They now see every address, and you get an email when they save a home or ask for a tour.`,
+        "They were already in Follow Up Boss, so their contact keeps its current assignment; a note on it names you.",
+        "",
+        ...agentClientLines(lead),
+      ].join("\n"),
+    });
+  }
   return queueDealAlert({
     dedupeKey: `client_link_attached:${lead.id}:${linkId}`,
     lead,
     kind: "first_unlock",
     subject: `Builder Deals: ${agent.name}'s client is on their list`,
-    extraRecipients: agent.email ? [agent.email] : [],
     content: [
       `${agent.name}'s client is now connected through ${agent.name}'s client link: they see the full list, and ${agent.name} hears about their saves and tour requests.`,
       `They already had a Builder Deals contact, so the FUB contact keeps its current assignment; a note on it names ${agent.name}.`,

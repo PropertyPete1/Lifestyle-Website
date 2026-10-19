@@ -38,8 +38,8 @@ import {
   showGoogleDealsButton,
   createPendingVerification,
 } from "./dealsService";
-import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
-import { AGENT_CLIENT_SOURCE } from "./dealsService";
+import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
+import { AGENT_CLIENT_SOURCE, staleSessionLeadId } from "./dealsService";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   const allowlisted = isAdminEmail(ctx.user.email) || ctx.user.openId === ENV.ownerOpenId;
@@ -228,6 +228,16 @@ async function clientLinkPresentation(token: string | undefined, viewerIsTeam: b
   }
   return shown;
 }
+/** The client link behind this browser's lapsed session, if any; never fails the state query. */
+async function rememberedClientLinkToken(req: Parameters<typeof staleSessionLeadId>[0]) {
+  try { return await clientLinkTokenForLead(await staleSessionLeadId(req)); } catch { return null; }
+}
+
+/** An agent's client is never told the page is for buyers without an agent. */
+function linkClientBlockedMessage(agentName: string | null | undefined, textLine: string) {
+  return `This number can't open the list right now. Text ${agentName ?? "your agent"}, or text ${textLine}.`;
+}
+
 /** What an agent's client is told when the gate cannot open their link. */
 function clientLinkRefusal(kind: "link_other_phone" | "link_dead", agentName: string | null, textLine: string) {
   const who = agentName ?? "your agent";
@@ -251,7 +261,15 @@ export const dealsRouter = router({
   state: publicProcedure.input(z.object({ c: clientLinkToken }).optional()).query(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);
     const [settings, session, pending] = await Promise.all([getDealSettings(), isLiveDealSession(ctx.req), currentPending(ctx.req)]);
-    const clientLink = await clientLinkPresentation(input?.c, session?.lead.status === "team");
+    // An agent's client whose access lapsed keeps their agent's link on the bare
+    // landing page too (a new tab, a bookmark): this browser's lapsed session
+    // names the link. Only a live link is used, so a dead one never traps them.
+    const remembered = !input?.c && !session ? await rememberedClientLinkToken(ctx.req) : null;
+    const rememberedLive = remembered ? (await presentClientLink(remembered))?.state === "live" : false;
+    const token = input?.c ?? (rememberedLive ? remembered! : undefined);
+    const clientLink = await clientLinkPresentation(token, session?.lead.status === "team");
+    // A buyer with a live list: their own link goes straight to the list, another number's link is not offered.
+    const connectOffer = session && session.lead.status !== "team" && clientLink?.state === "live" && token ? await connectOfferFor(session.lead, token) : null;
     return {
       session: session ? leadPresentation(session.lead) : null,
       pending: pending ? { displayPhone: maskPhone(pending.phoneE164), expiresAt: pending.expiresAt.toISOString() } : null,
@@ -259,8 +277,11 @@ export const dealsRouter = router({
       consentText: DEALS_CONSENT_TEXT,
       commentKeyword: settings.commentKeyword,
       textLine: settings.textLine,
-      blockedMessage: safeBlockedMessage(settings),
+      blockedMessage: clientLink ? linkClientBlockedMessage(clientLink.agentName, settings.textLine) : safeBlockedMessage(settings),
       clientLink,
+      /** The link found from this browser's lapsed session, for the gate to post with the code. */
+      clientLinkToken: rememberedLive ? remembered : null,
+      connectOffer,
     };
   }),
   start: publicProcedure.input(gateInput).mutation(async ({ input, ctx }) => {
@@ -279,7 +300,7 @@ export const dealsRouter = router({
       if ((result.kind === "has_agent" || result.kind === "blocked") && input.c) {
         // An agent's client is never told the page is for buyers without an agent.
         const shown = await presentClientLink(input.c);
-        return { ok: false as const, kind: "blocked", message: `This number can't open the list right now. Text ${shown?.agentName ?? "your agent"}, or text ${settings.textLine}.` };
+        return { ok: false as const, kind: "blocked", message: linkClientBlockedMessage(shown?.agentName, settings.textLine) };
       }
       if (result.kind === "has_agent" || result.kind === "blocked") return { ok: false as const, kind: "blocked", message: safeBlockedMessage(settings) };
       if (result.kind === "cookie_blocked") return { ok: false as const, kind: "cookie_blocked", message: `Your browser is blocking cookies. Open this link in Safari or Chrome. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
@@ -603,6 +624,9 @@ export const dealsRouter = router({
     removeTeam: adminProcedure.input(z.object({ id: z.number().int().positive(), confirm: z.literal(true) })).mutation(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const member = (await db.select().from(dealTeamAllowlist).where(eq(dealTeamAllowlist.id, input.id)).limit(1))[0]; if (!member) throw new TRPCError({ code: "NOT_FOUND" });
+      // A redundant row of an agent who stays (a hand-added row next to their FUB row) hands its client links over first.
+      const { reassignTeamRowBeforeRemoval } = await import("./dealsClientLinks");
+      await reassignTeamRowBeforeRemoval(member.id);
       await db.delete(dealTeamAllowlist).where(eq(dealTeamAllowlist.id, input.id));
       const remaining = await db.select().from(dealTeamAllowlist).where(eq(dealTeamAllowlist.active, true));
       for (const [kind, value] of [["phone", member.phoneE164], ["email", member.email]] as const) {

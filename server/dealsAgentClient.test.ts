@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
-import { initialGateState, readGateParams, rememberClientLinkToken, stripTransientGateParams, type GateDealsState } from "../client/src/lib/dealsGate";
+import { clientLinkTokenInUrl, forgetClientLinkToken, initialGateState, keepClientLinkToken, readGateParams, rememberClientLinkToken, stripTransientGateParams, type GateDealsState } from "../client/src/lib/dealsGate";
 import { countdownLabel } from "../client/src/lib/dealsMine";
 import type { GateSheetViewProps } from "../client/src/components/deals/GateSheet";
 import type { GatedCatalogProps, GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
@@ -200,13 +200,44 @@ describe("round 2: links survive the routine detours", () => {
 
   it("keeps the token for the tab when a redirect drops it, and survives storage that throws", () => {
     const store = new Map<string, string>();
-    const storage = { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); } };
+    const storage = { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); }, removeItem: (key: string) => { store.delete(key); } };
     expect(rememberClientLinkToken(`?c=${TOKEN}`, storage)).toBe(TOKEN);
     expect(rememberClientLinkToken("?expired=1", storage)).toBe(TOKEN);
-    expect(rememberClientLinkToken("?c=bad", { getItem: () => null, setItem: () => undefined })).toBeUndefined();
-    const broken = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+    expect(rememberClientLinkToken("?c=bad", { getItem: () => null, setItem: () => undefined, removeItem: () => undefined })).toBeUndefined();
+    const broken = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); }, removeItem: () => { throw new Error("blocked"); } };
     expect(rememberClientLinkToken(`?c=${TOKEN}`, broken)).toBe(TOKEN);
     expect(rememberClientLinkToken("", broken)).toBeUndefined();
+    expect(() => forgetClientLinkToken(broken)).not.toThrow();
+  });
+
+  it("lets a reel link or a dead kept token free the tab, and keeps a token the server found", () => {
+    const store = new Map<string, string>();
+    const storage = { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); }, removeItem: (key: string) => { store.delete(key); } };
+    expect(rememberClientLinkToken(`?c=${TOKEN}`, storage)).toBe(TOKEN);
+    // A reel link in the same tab is a fresh start: no agent gate, and the kept token is gone.
+    expect(rememberClientLinkToken("?src=sl5", storage)).toBeUndefined();
+    expect(rememberClientLinkToken("", storage)).toBeUndefined();
+    keepClientLinkToken(TOKEN, storage);
+    expect(rememberClientLinkToken("", storage)).toBe(TOKEN);
+    forgetClientLinkToken(storage);
+    expect(rememberClientLinkToken("", storage)).toBeUndefined();
+    expect(clientLinkTokenInUrl(`?expired=1&c=${TOKEN}`)).toBe(true);
+    expect(clientLinkTokenInUrl("?expired=1")).toBe(false);
+  });
+
+  it("tells a client whose access ended to reopen their agent's list, or to ask for a new link when it is dead", () => {
+    const expiredGate = (state: GateDealsState) => view(state, `?expired=1&c=${TOKEN}`);
+    const live = expiredGate({ pending: null, clientLink: { state: "live", agentName: "Tiffany Agent", clientFirstName: "Maria" } } as GateDealsState);
+    expect(live).toContain("Your list access ended.");
+    expect(live).toContain("reopen the list Tiffany Agent shared with you");
+    expect(live).toContain("Reopen my list");
+    expect(live).not.toContain("Get a new link now");
+    const dead = expiredGate({ pending: null, clientLink: { state: "dead", agentName: "Tiffany Agent" } } as GateDealsState);
+    expect(dead).toContain("Ask Tiffany Agent to send you a new one.");
+    expect(dead).not.toContain("Reopen my list");
+    const reel = expiredGate({ pending: null, clientLink: null } as GateDealsState);
+    expect(reel).toContain("This link expired.");
+    expect(reel).toContain("Get a new link now");
   });
 
   it("reads a week-long window in days and keeps the clock under two days", () => {

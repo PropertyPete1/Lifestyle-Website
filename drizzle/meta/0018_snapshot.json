@@ -249,7 +249,7 @@
         },
         "kind": {
           "name": "kind",
-          "type": "enum('first_unlock','profile_flag')",
+          "type": "enum('first_unlock','profile_flag','agent_update')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false

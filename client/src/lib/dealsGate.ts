@@ -116,19 +116,42 @@ export function boundClientLinkToken(value: string | null | undefined): string |
 }
 
 const CLIENT_LINK_STORAGE_KEY = "ldr_deals_client_link";
+type LinkStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+function linkStore(storage: LinkStore | null | undefined): LinkStore | null {
+  return storage === undefined ? (typeof window === "undefined" ? null : window.sessionStorage) : storage;
+}
+
 /**
  * The agent's client-link token for this tab: from the URL when present (and
  * kept for the rest of the tab), otherwise the one kept earlier, so a redirect
  * that dropped ?c= (a lapsed list, a reload in Instagram) still shows the
- * agent's gate. Storage can be unavailable; the URL alone then decides.
+ * agent's gate. A reel link (?src= without ?c=) is a fresh start and forgets
+ * the kept token. Storage can be unavailable; the URL alone then decides.
  */
-export function rememberClientLinkToken(search: string, storage?: Pick<Storage, "getItem" | "setItem"> | null): string | undefined {
-  const fromUrl = boundClientLinkToken(new URLSearchParams(search).get("c"));
+export function rememberClientLinkToken(search: string, storage?: LinkStore | null): string | undefined {
+  const params = new URLSearchParams(search);
+  const fromUrl = boundClientLinkToken(params.get("c"));
   try {
-    const store = storage === undefined ? (typeof window === "undefined" ? null : window.sessionStorage) : storage;
+    const store = linkStore(storage);
     if (fromUrl) { store?.setItem(CLIENT_LINK_STORAGE_KEY, fromUrl); return fromUrl; }
+    if (params.get("src")) { store?.removeItem(CLIENT_LINK_STORAGE_KEY); return undefined; }
     return boundClientLinkToken(store?.getItem(CLIENT_LINK_STORAGE_KEY) ?? null);
   } catch { return fromUrl; }
+}
+
+/** Keep a token the server found for this browser (a lapsed agent-client session), for the rest of the tab. */
+export function keepClientLinkToken(token: string, storage?: LinkStore | null) {
+  try { linkStore(storage)?.setItem(CLIENT_LINK_STORAGE_KEY, token); } catch { /* storage unavailable */ }
+}
+
+/** A kept token whose link is dead: forget it so this tab can reach the regular gate again. */
+export function forgetClientLinkToken(storage?: LinkStore | null) {
+  try { linkStore(storage)?.removeItem(CLIENT_LINK_STORAGE_KEY); } catch { /* storage unavailable */ }
+}
+
+/** Whether the token in use came from this page's own URL (an agent's link the visitor just opened). */
+export function clientLinkTokenInUrl(search: string): boolean {
+  return Boolean(boundClientLinkToken(new URLSearchParams(search).get("c")));
 }
 
 export function readGateParams(search: string): GateParams {

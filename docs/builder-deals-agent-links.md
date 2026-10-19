@@ -15,9 +15,19 @@ redirect lands on `/deals/team` instead of `/deals/mine`.
 
 The FUB mirror writes one row per phone number, so one agent can have several
 rows. Everything keyed to an agent (their links, their clients, whether they
-are still active) is resolved across every row that carries the same FUB user
-id: an agent who changes their mobile number in FUB keeps their links and
-clients, and an agent stays active while any of their rows is active.
+are still active, the number and email their clients see) is resolved across
+every row of the same person:
+
+- rows that carry the same FUB user id (an agent who changes their mobile in
+  FUB keeps their links and clients, and clients see the new number);
+- hand-added rows with the same phone or email;
+- for a hand-added row, the FUB user its phone or email belongs to, when
+  exactly one FUB user has it. A shared office line on two agents' FUB
+  profiles never merges them.
+
+An agent stays active while any of their rows is active. When Admin removes a
+team row and the same person has another row (a hand-added row next to their
+FUB row), that row's links and clients move over first, so nothing breaks.
 
 A team row without a FUB user id (a manual row) still gets the tools; the
 contacts and tasks of that agent's clients are assigned to Peter in FUB until
@@ -43,7 +53,9 @@ addresses) on their next page load, and new saves and requests go to Peter.
   off / moved to another agent's link), the client's saved homes, tour and
   question requests, and the last time they looked at the list. Activity shows
   only while the client is on this agent's link, and only from the moment they
-  connected through it. Turning a link off asks for confirmation first.
+  first connected through it; renewing access through the same link, or
+  verifying on a second device, keeps the history. Turning a link off asks for
+  confirmation first.
 
 ## What the client sees
 
@@ -57,10 +69,20 @@ After that:
   (no sales lines, no builder page links);
 - a Save button on every home, Tour / Ask buttons as before;
 - access for `clientLinkExpiryHours` (default 7 days, Settings) instead of the
-  reel buyer's 24 hours. When it lapses, the same link renews it with one code.
-  The link keeps the token through every redirect (code errors, an expired
-  session on `/deals/mine`), and the browser tab remembers it, so a client who
-  comes back to `/deals` in the same tab is still on their agent's link.
+  reel buyer's 24 hours. When it lapses, the same link renews it with one code
+  ("Your list access ended. Reopen my list"); saved homes stay saved.
+
+The client never loses their agent's link on the way:
+
+- the token rides through every redirect (code errors, an expired session on
+  `/deals/mine`), and the browser tab remembers it;
+- an agent client's session cookie is kept 30 days past their access. A lapsed
+  cookie unlocks nothing; it only names their link, so `/deals/mine` from
+  history, or a bare `/deals` in a new tab, goes back through the agent's link
+  instead of the reel gate and its realtor question;
+- a reel link (`?src=` without `?c=`) in the same tab is a fresh start, and a
+  remembered link that has died is forgotten, so the tab is never stuck on the
+  dead-link panel.
 
 ### One link, one client
 
@@ -77,8 +99,9 @@ An unused link (nobody has verified through it) stops working after
 the agent turns it off or leaves the team. A dead link shows "This link has
 expired. Ask Tiffany Agent to send you a new one." instead of the gate.
 
-A team member who opens an agent's link with their own number is signed in as
-team, and their open is not counted on the link.
+A browser already signed in as team does not count opens on a link. An agent
+testing their own link in a private window is not signed in, so that open is
+counted ("Opened, not verified yet") until the test number verifies.
 
 ### A client who already had a list
 
@@ -89,6 +112,19 @@ lead, adds a note to their FUB contact naming the agent, and emails the agent
 (once per link). Their FUB contact keeps its current assignment; reassigning
 is done in FUB.
 
+The question is only asked for a new link that is theirs. A client already on
+this link goes straight to their list every time they tap the agent's text
+again, and a link the agent made for another number is not offered to them.
+
+### Screening after the gate
+
+The vouched-for exemption holds after the gate too. The nightly known-agent
+and FUB recruit import, and the re-check that runs when FUB was down at
+verification, skip a client whose link is live and whose agent is on the team.
+Once the link is turned off or the agent leaves, the screening applies again.
+Admin blocks always apply, and a pile of screening blocks on the same device
+can never hide one.
+
 Blocks still apply: an explicit admin block on the phone or device keeps the
 client out. The "confirmed working with an agent" device block and the realtor
 screening (known agents, FUB recruits, brokerage domains) do not apply to a
@@ -96,12 +132,18 @@ vouched-for client.
 
 ## What the agent hears about
 
+Every email to an agent is their own copy: written to them, with their
+client's name (as typed on the link), phone and FUB contact, and a link to
+`/deals/team`. It never carries the owners' admin links (agents have no admin
+login), and it goes out right away even when the owners take an hourly digest.
+The owners keep their own email with the admin links.
+
 | Event | FUB | Email |
 | --- | --- | --- |
-| Client verifies for the first time | Person created/updated through the usual lead event, assigned to the agent's FUB user, tagged `IG Builder Deals` + `Agent Client`, note names the agent | First-unlock alert to the owners **and the agent**, saying who the contact is actually assigned to |
-| Existing buyer connects through a link | Note on the existing contact naming the agent; assignment unchanged | "Builder Deals: Tiffany Agent's client is on their list" to the owners and the agent |
-| Client saves a home | Its own task, "Builder Deals saved home: …" (type Follow Up), assigned to the agent; the day's request note gets a "Saved:" line | "Tiffany Agent's client: Builder Deals: a buyer saved a home" to the owners and the agent |
-| Client asks for a tour / asks a question | Task (Appointment) assigned to the agent; request note | Request email to the owners and the agent |
+| Client verifies for the first time | Person created/updated through the usual lead event, assigned to the agent's FUB user, tagged `IG Builder Deals` + `Agent Client`, note names the agent | Owners: first-unlock alert. Agent: "Maria Lopez opened the list you sent". Both say who the contact is actually assigned to |
+| Existing buyer connects through a link | Note on the existing contact naming the agent; assignment unchanged | Owners: "Tiffany Agent's client is on their list". Agent: "Maria Lopez connected to the list you sent" |
+| Client saves a home | Its own task, "Builder Deals saved home: …" (type Follow Up), assigned to the agent; the day's request note gets a "Saved:" line | Owners: "Tiffany Agent's client: Builder Deals: a buyer saved a home". Agent: "Maria Lopez saved a home" |
+| Client asks for a tour / asks a question | Task (Appointment) assigned to the agent; request note | Owners: request email. Agent: "Maria Lopez asked for a tour" / "asked about a home" |
 | Client looks at the list | Nightly activity note (views, requests, saves) | none |
 
 Saves and tour requests never share a FUB task. Saving the same home again
@@ -112,8 +154,10 @@ so an agent saving homes on their own list only records the mark.
 The first-unlock alert's assignment line is truthful about what happened: "The
 FUB contact is assigned to Tiffany Agent", "Tiffany Agent has no Follow Up Boss
 user yet, so the FUB contact is assigned to Peter", "The FUB contact was
-already assigned to Jane Agent; the assignment was left alone", or "not synced
-yet".
+already assigned to Jane Agent; the assignment was left alone", "Assigning the
+FUB contact to Tiffany Agent did not go through; assign it in FUB", or "not
+synced yet". Request emails say the FUB task "is assigned" only once the task
+exists; until then they say it is still being created.
 
 Emails go through the Builder Deals transport (Resend when `RESEND_API_KEY`
 and `RESEND_FROM_EMAIL` are set; otherwise the owner-only fallback, which does
@@ -133,6 +177,7 @@ removed", and tour counts leave saves out.
   optional phone, note, opened/verified timestamps, expiry, revocation).
 - `deal_leads.agent_team_id`, `deal_leads.client_link_id`: set at verification
   (or when an existing buyer connects). A link attaches to one lead only.
+- `deal_alerts.kind` gained `agent_update` (the agents' own copies).
 - `deal_tour_requests.request_type` gained `save`, plus `removed_at`; the
   unique key is now (lead, home, Chicago day, type) so a save and a tour on the
   same home on the same day both go through.
@@ -144,7 +189,7 @@ removed", and tour counts leave saves out.
 Migration `0018_agent_client_links.sql` must run before the new build serves
 traffic: in the Manus sandbox, `pnpm db:push` (generate is a no-op, migrate
 applies 0018), then restart the dev server / publish. The migration adds a
-table and nullable columns, changes an enum by appending a value, and swaps
+table and nullable columns, changes two enums by appending a value, and swaps
 one unique index (the new one is added before the old one is dropped, so the
 table always has a unique key); it does not touch existing rows.
 

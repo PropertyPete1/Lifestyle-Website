@@ -43,14 +43,25 @@ function teamIdentityMatch(
  * Revokes current buyer access for an identity that is newly classified as an
  * agent. Team previews are deliberately excluded: team has precedence at the
  * gate and an automatic known-agent import may never invalidate staff access.
+ * An LDR agent's own client (live link, agent still on the team) is excluded
+ * too: the agent vouched for them, so the automatic realtor screening does not
+ * apply to them after the gate any more than at it. Admin blocks use
+ * revokeAllMatchingDealLinks and still remove them.
  */
 export async function revokeNonTeamMatchingDealLinks(db: DealsDb, identity: DealIdentity): Promise<number> {
   const predicates = identityPredicates(identity);
   if (!predicates.length) return 0;
-  const matches = await db.select({ id: dealLeads.id, status: dealLeads.status })
+  type Match = { id: number; status: string; agentTeamId: number | null; clientLinkId: number | null };
+  const matches: Match[] = await db.select({ id: dealLeads.id, status: dealLeads.status, agentTeamId: dealLeads.agentTeamId, clientLinkId: dealLeads.clientLinkId })
     .from(dealLeads)
     .where(or(...predicates));
-  const ids = matches.filter((lead: { id: number; status: string }) => lead.status === "verified").map((lead: { id: number; status: string }) => lead.id);
+  const { liveAgentForClient } = await import("./dealsClientLinks");
+  const ids: number[] = [];
+  for (const lead of matches) {
+    if (lead.status !== "verified") continue;
+    if (lead.clientLinkId && await liveAgentForClient(lead)) continue;
+    ids.push(lead.id);
+  }
   if (!ids.length) return 0;
   const now = new Date();
   await db.update(dealLeads).set({ status: "blocked", revokedAt: now }).where(inArray(dealLeads.id, ids));

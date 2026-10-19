@@ -78,6 +78,10 @@ export type DealSettings = {
   paymentDownPercent: number;
   /** Best Deals: builders never featured (still listed). */
   featuredExcludedBuilders: string[];
+  /** Area map circle on the private list, in miles, around the ZIP code centroid. */
+  areaMapRadiusMiles: number;
+  /** Area map circle on the public landing card (wider, zoomed out). */
+  publicAreaMapRadiusMiles: number;
 };
 
 const DEFAULT_SETTINGS: DealSettings = {
@@ -112,6 +116,8 @@ const DEFAULT_SETTINGS: DealSettings = {
   paymentMarketRate: 7.4,
   paymentDownPercent: 5,
   featuredExcludedBuilders: ["Lennar"],
+  areaMapRadiusMiles: 5,
+  publicAreaMapRadiusMiles: 8,
 };
 
 /** Operational owner alerts go through the one Builder Deals email transport (owner notification is its fallback). */
@@ -543,7 +549,9 @@ export async function publicDealsCatalog() {
   const now = new Date();
   const settings = await getDealSettings();
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
-  const result = [] as Array<{ label: string; area: string; fromPrice: number | null; reelUrl: string | null; homesAvailable: number; incentive: ReturnType<typeof publicIncentive> | null; updatedAt: string | null }>;
+  const { areaMapRadius, communityAreaMap } = await import("./dealsMap");
+  const publicRadius = areaMapRadius(settings, "public");
+  const result = [] as Array<{ label: string; area: string; fromPrice: number | null; reelUrl: string | null; homesAvailable: number; incentive: ReturnType<typeof publicIncentive> | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap> }>;
   for (const community of communities) {
     const [homes, incentives] = await Promise.all([
       db.select({ n: sql<number>`count(*)` }).from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.status, "available"), eq(dealHomes.kind, "quick_move_in"))),
@@ -557,6 +565,8 @@ export async function publicDealsCatalog() {
       homesAvailable: Number(homes[0]?.n ?? 0),
       incentive: incentives[0] ? publicIncentive(incentives[0]) : null,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
+      // A wide circle around the ZIP code centroid: "this side of town", never the community.
+      areaMap: communityAreaMap(community, { variant: "public", radiusMiles: publicRadius }),
     };
     if (await dropPrivateResidue(community.id, entry, communityScrubConfig(community), "public")) continue;
     result.push(entry);
@@ -617,7 +627,8 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
   const full = view.view === "full";
   const now = new Date();
   const settings = await getDealSettings();
-  const { communityAreaMap } = await import("./dealsMap");
+  const { areaMapRadius, communityAreaMap } = await import("./dealsMap");
+  const gatedRadius = areaMapRadius(settings, "gated");
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
   const data = [] as unknown[];
   for (const community of communities) {
@@ -659,7 +670,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
       amenities: (JSON.parse(community.amenities ?? "[]") as string[]).map(scrub),
       driveTimes: (JSON.parse(community.driveTimeChips ?? "[]") as string[]).map(scrub),
       // Only the ZIP centroid and radius; never the community's own coordinates.
-      areaMap: communityAreaMap(community),
+      areaMap: communityAreaMap(community, { radiusMiles: gatedRadius }),
       fromPrice: community.fromPrice,
       reelUrl: community.reelUrl,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),

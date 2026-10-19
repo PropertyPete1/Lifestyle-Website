@@ -187,9 +187,10 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
         <p className="eyebrow text-gold">{community.area}{community.schoolDistrict ? ` · ${community.schoolDistrict}` : ""}</p>
         <h2 className="mt-2 text-4xl">{community.label}</h2>
         <CommunityDetails details={community.details} />
-        <AreaMap chips={community.driveTimes} map={community.areaMap} />
         {community.lotSizes && <p className="mt-2 text-sm text-muted-foreground">{community.lotSizes}</p>}
         <div className="mt-5"><ReelCard reelUrl={community.reelUrl} label={community.label} /></div>
+        {/* The area map sits right under the reel: the general area, never the community. */}
+        <AreaMap chips={community.driveTimes} map={community.areaMap} />
         <div className="mt-5"><Incentive incentive={community.incentive} /></div>
         {community.amenities && community.amenities.length > 0 && <div className="mt-5 flex flex-wrap gap-2">{community.amenities.map((item) => <span key={item} className="border border-border px-3 py-1.5 text-xs text-muted-foreground">{item}</span>)}</div>}
         <div className="mt-7 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">{community.homes.map((home) => <HomeCard key={home.card} home={home} teamPreview={lead.teamPreview} saved={savedSet.has(home.card)} saving={savingCard === home.card} onRequest={onRequest} onSave={onSave} />)}</div>

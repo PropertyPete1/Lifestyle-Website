@@ -15,7 +15,7 @@ vi.mock("./_core/map", () => ({ makeRequest: (...args: unknown[]) => mocks.makeR
 vi.mock("./_core/env", () => ({ ENV: { forgeApiUrl: "https://forge.example", forgeApiKey: "forge-key", isProduction: false, appId: "", cookieSecret: "", databaseUrl: "", oAuthServerUrl: "", ownerOpenId: "" } }));
 vi.mock("./dealsService", async (importOriginal) => ({ ...(await importOriginal<typeof import("./dealsService")>()), isLiveDealSession: (...args: unknown[]) => mocks.isLiveDealSession(...args) }));
 
-import { communityAreaMap, dealsMapImageHandler, driveTimeChips, mapCommunityIdFromPath, refreshCommunityGeography, resetAreaMapCache, roundToFiveMinutes, zipFromAddress } from "./dealsMap";
+import { areaMapRadius, communityAreaMap, zoomForRadius, dealsMapImageHandler, driveTimeChips, mapCommunityIdFromPath, refreshCommunityGeography, resetAreaMapCache, roundToFiveMinutes, zipFromAddress } from "./dealsMap";
 import { gatedDealsCatalog } from "./dealsService";
 
 /** Synthetic points: a ZIP centroid and a home about 1.6 miles away from it. */
@@ -97,7 +97,7 @@ describe("area map geography", () => {
     const leadId = db.seed(dealLeads, { phoneE164: "+12105550123", status: "verified", expiresAt: new Date(Date.now() + 3_600_000), deviceHash: "d".repeat(64), consentText: "c", flags: "[]", sourceCode: "vg1" });
     const data = await gatedDealsCatalog(leadId) as Array<{ areaMap: unknown; homes: unknown[] }>;
     expect(data).toHaveLength(1);
-    expect(data[0].areaMap).toEqual({ lat: CENTROID.lat, lng: CENTROID.lng, radiusMiles: 2, zoom: 11, imageUrl: `/deals/mine/maps/${communityId}.png`, attribution: expect.any(String) });
+    expect(data[0].areaMap).toEqual({ lat: CENTROID.lat, lng: CENTROID.lng, radiusMiles: 5, zoom: 11, imageUrl: `/deals/mine/maps/${communityId}.png`, attribution: expect.any(String) });
     const json = JSON.stringify(data);
     // Any coordinate-shaped decimal in the whole payload (timestamps have at most three decimals).
     const coordinates = Array.from(json.matchAll(/-?\d{2,3}\.\d{4,}/g), (match) => Number(match[0]));
@@ -111,7 +111,15 @@ describe("area map geography", () => {
 
   it("reports no map when the community has no centroid", () => {
     expect(communityAreaMap({ id: 7, zipCentroidLat: null, zipCentroidLng: null })).toBeNull();
-    expect(communityAreaMap({ id: 7, zipCentroidLat: "29.3", zipCentroidLng: "-98.3" })).toMatchObject({ imageUrl: "/deals/mine/maps/7.png", radiusMiles: 2, zoom: 11 });
+    expect(communityAreaMap({ id: 7, zipCentroidLat: "29.3", zipCentroidLng: "-98.3" })).toMatchObject({ imageUrl: "/deals/mine/maps/7.png", radiusMiles: 5, zoom: 11 });
+    // The public card: a wider circle, zoomed out one level so it still fits, on its own session-free route.
+    expect(communityAreaMap({ id: 7, zipCentroidLat: "29.3", zipCentroidLng: "-98.3" }, { variant: "public", radiusMiles: 8 })).toMatchObject({ imageUrl: "/deals/maps/7.png", radiusMiles: 8, zoom: 10 });
+    // A tighter radius Admin chooses zooms in; the circle always stays within 150 px of the 800 x 400 image.
+    expect(zoomForRadius(2, 29.3)).toBe(12);
+    expect(zoomForRadius(20, 29.3)).toBe(9);
+    expect(areaMapRadius({ areaMapRadiusMiles: 3, publicAreaMapRadiusMiles: "x" }, "gated")).toBe(3);
+    expect(areaMapRadius({ areaMapRadiusMiles: 3, publicAreaMapRadiusMiles: "x" }, "public")).toBe(8);
+    expect(areaMapRadius({ areaMapRadiusMiles: 0.2 }, "gated")).toBe(5);
     expect(mapCommunityIdFromPath("7.png")).toBe(7);
     expect(mapCommunityIdFromPath("7")).toBe(7);
     expect(mapCommunityIdFromPath("../7")).toBeNull();
@@ -162,6 +170,31 @@ describe("area map image route", () => {
       await dealsMapImageHandler({ params: { communityId: String(communityId) }, headers: {} } as unknown as Request, again.response);
       expect(fetcher).toHaveBeenCalledTimes(2);
       expect(again.raw.send).toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("serves the landing card's wide map without a session: zoomed out, cacheable, still marker-free on the centroid", async () => {
+    await refreshCommunityGeography(communityId);
+    mocks.isLiveDealSession.mockResolvedValue(null);
+    const { default: sharp } = await import("sharp");
+    const providerImage = await sharp({ create: { width: 800, height: 400, channels: 3, background: { r: 200, g: 210, b: 220 } } }).png().toBuffer();
+    const fetcher = vi.fn(async () => new Response(providerImage, { status: 200, headers: { "content-type": "image/png" } }));
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      const { response, raw, headers } = responseRecorder();
+      await dealsMapImageHandler({ params: { communityId: `${communityId}.png` }, headers: {} } as unknown as Request, response, "public");
+      expect(raw.status).not.toHaveBeenCalledWith(401);
+      expect(headers["cache-control"]).toBe("public, max-age=3600");
+      const request = new URL(fetcher.mock.calls[0]![0] as unknown as string);
+      expect(request.searchParams.get("zoom")).toBe("10");
+      expect(request.searchParams.get("center")).toBe(`${CENTROID.lat},${CENTROID.lng}`);
+      expect(request.searchParams.has("markers")).toBe(false);
+      // The private list's closer map is still behind the session check.
+      const gated = responseRecorder();
+      await dealsMapImageHandler({ params: { communityId: `${communityId}.png` }, headers: {} } as unknown as Request, gated.response);
+      expect(gated.raw.status).toHaveBeenCalledWith(401);
     } finally {
       vi.unstubAllGlobals();
     }

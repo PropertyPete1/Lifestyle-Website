@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   requestTestMode: vi.fn(),
 }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
-vi.mock("./dealsMap", () => ({ communityAreaMap: () => null }));
+vi.mock("./dealsMap", () => ({ communityAreaMap: () => null, areaMapRadius: () => 5 }));
 vi.mock("./dealsEmail", () => ({ sendBuilderDealsEmail: vi.fn(async () => ({ ok: true, status: "sent", deliveryLog: "test" })) }));
 vi.mock("./dealsFubJobs", () => ({
   enqueueDealsRequestJobs: (...args: unknown[]) => mocks.enqueueDealsRequestJobs(...args),

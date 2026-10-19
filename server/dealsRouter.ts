@@ -712,6 +712,7 @@ export const dealsRouter = router({
       syncEmailRecipients: z.array(z.string().email()).min(1).max(20).optional(), driveDestinations: z.array(z.string().trim().min(2).max(80)).min(1).max(8).optional(),
       clientLinkExpiryHours: z.number().int().min(1).max(24 * 90).optional(), clientLinkDays: z.number().int().min(1).max(365).optional(),
       paymentMarketRate: z.number().min(1).max(15).optional(), paymentDownPercent: z.number().min(0).max(100).optional(), featuredExcludedBuilders: z.array(z.string().trim().max(80)).max(50).optional(),
+      areaMapRadiusMiles: z.number().min(1).max(20).optional(), publicAreaMapRadiusMiles: z.number().min(1).max(20).optional(),
     })).mutation(async ({ input }) => {
       const { saveDealSettings } = await import("./dealsService");
       return saveDealSettings(input);

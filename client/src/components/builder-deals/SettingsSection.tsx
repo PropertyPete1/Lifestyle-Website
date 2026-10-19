@@ -10,7 +10,7 @@ import { Field, GOLD_BUTTON, ListField, Metric, Section, SwitchRow, TAP, Warning
 import { ageLabel, displayDate, mergeUntouched, touchedKeys, touchedPatch } from "./helpers";
 import type { Health, Overview, Settings } from "./types";
 
-type NumberKey = "expiryHours" | "clientLinkExpiryHours" | "clientLinkDays" | "paymentMarketRate" | "paymentDownPercent" | "hasAgentBlockDays" | "incentiveLapseDays" | "dailyVerificationCap" | "phoneLimitPerHour" | "ipLimitPerHour" | "testPhoneLimitPerHour";
+type NumberKey = "expiryHours" | "clientLinkExpiryHours" | "clientLinkDays" | "paymentMarketRate" | "paymentDownPercent" | "areaMapRadiusMiles" | "publicAreaMapRadiusMiles" | "hasAgentBlockDays" | "incentiveLapseDays" | "dailyVerificationCap" | "phoneLimitPerHour" | "ipLimitPerHour" | "testPhoneLimitPerHour";
 type ToggleKey = "allowCanada" | "skipTwilioForTestNumbers" | "testNumbersSkipChecks" | "testModeFullPipeline";
 type ListKey = "testNumbers" | "testTeamNumbers" | "activeReelCodes" | "brokerageDomains" | "fubRealtorTags" | "fubRealtorSources" | "handleKeywords" | "trecCounties" | "alertRecipients" | "syncEmailRecipients" | "driveDestinations" | "featuredExcludedBuilders";
 
@@ -20,6 +20,8 @@ const NUMBER_FIELDS: Array<{ key: NumberKey; label: string; min: number; max: nu
   { key: "clientLinkDays", label: "Agent client link valid (days)", min: 1, max: 365 },
   { key: "paymentMarketRate", label: "Best Deals market rate (%)", min: 1, max: 15, step: 0.01 },
   { key: "paymentDownPercent", label: "Best Deals default down payment (%)", min: 0, max: 100, step: 0.5 },
+  { key: "areaMapRadiusMiles", label: "Area map circle after sign-up (miles)", min: 1, max: 20, step: 0.5 },
+  { key: "publicAreaMapRadiusMiles", label: "Area map circle on the public card (miles)", min: 1, max: 20, step: 0.5 },
   { key: "hasAgentBlockDays", label: "Has-agent device block (days)", min: 1, max: 400 },
   { key: "incentiveLapseDays", label: "Incentive lapse with no dates (days)", min: 1, max: 90 },
   { key: "dailyVerificationCap", label: "Daily verification cap", min: 1, max: 10000 },

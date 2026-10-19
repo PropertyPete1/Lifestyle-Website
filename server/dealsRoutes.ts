@@ -123,6 +123,11 @@ export function registerDealsRoutes(app: Express) {
     next();
   }));
   // Static area map for a community: session-checked, marker-free, no-store (AREA MAP). The param may be "12" or "12.png".
+  // The landing card's wide area map: no session, a wider circle, still centered on the ZIP code.
+  app.get("/deals/maps/:communityId", safe(async (req, res) => {
+    const { dealsMapImageHandler } = await import("./dealsMap");
+    await dealsMapImageHandler(req, res, "public");
+  }));
   app.get("/deals/mine/maps/:communityId", safe(async (req, res) => {
     const { dealsMapImageHandler } = await import("./dealsMap");
     await dealsMapImageHandler(req, res);

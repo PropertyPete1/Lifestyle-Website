@@ -22,7 +22,7 @@ export function validDealsAreaMap(value: unknown): value is DealsAreaMap {
   return Number.isFinite(map.lat) && Math.abs(map.lat) <= 85 && Number.isFinite(map.lng) && Math.abs(map.lng) <= 180
     && Number.isFinite(map.radiusMiles) && map.radiusMiles > 0 && map.radiusMiles <= 20
     && Number.isInteger(map.zoom) && map.zoom >= 0 && map.zoom <= 18
-    && typeof map.imageUrl === "string" && /^\/deals\/mine\/maps\/[A-Za-z0-9_-]+\.(?:png|webp)$/.test(map.imageUrl)
+    && typeof map.imageUrl === "string" && /^\/deals\/(?:mine\/)?maps\/[A-Za-z0-9_-]+\.(?:png|webp)$/.test(map.imageUrl)
     && typeof map.attribution === "string" && map.attribution.trim().length > 0;
 }
 

@@ -72,6 +72,12 @@ export type DealSettings = {
   clientLinkExpiryHours: number;
   /** How long an agent's client link can still be opened and verified through. */
   clientLinkDays: number;
+  /** Best Deals: the 30-year market rate a payment is figured at when the builder offers no rate. */
+  paymentMarketRate: number;
+  /** Best Deals: the down payment assumed when the builder's offer does not state one (percent). */
+  paymentDownPercent: number;
+  /** Best Deals: builders never featured (still listed). */
+  featuredExcludedBuilders: string[];
 };
 
 const DEFAULT_SETTINGS: DealSettings = {
@@ -102,6 +108,10 @@ const DEFAULT_SETTINGS: DealSettings = {
   driveDestinations: ["downtown San Antonio", "Randolph AFB", "Lackland AFB", "The Pearl"],
   clientLinkExpiryHours: 24 * 7,
   clientLinkDays: 30,
+  // Freddie Mac's 30-year average was 7.4% in mid-October 2026; Admin updates it as rates move.
+  paymentMarketRate: 7.4,
+  paymentDownPercent: 5,
+  featuredExcludedBuilders: ["Lennar"],
 };
 
 /** Operational owner alerts go through the one Builder Deals email transport (owner notification is its fallback). */
@@ -462,7 +472,7 @@ export async function blockDealAccess(input: { phone?: string | null; email?: st
 }
 
 /** Private per-community scrub categories (admin-excluded false positives removed); a legacy flat list lands in "other". */
-function communityScrubConfig(community: Pick<typeof dealCommunities.$inferSelect, "builder" | "privateName" | "scrubList">): DealScrubConfig {
+export function communityScrubConfig(community: Pick<typeof dealCommunities.$inferSelect, "builder" | "privateName" | "scrubList">): DealScrubConfig {
   const config = effectiveScrubConfig(community.scrubList);
   if (community.builder !== "Manual" && !config.builder.some((term) => term.toLowerCase() === community.builder.toLowerCase())) config.builder.push(community.builder);
   if (!config.community.some((term) => term.toLowerCase() === community.privateName.toLowerCase())) config.community.push(community.privateName);
@@ -687,14 +697,16 @@ export async function isLiveDealSession(req: Request): Promise<{ leadId: number;
 }
 
 /**
- * An agent's client keeps the session cookie 30 days past their access. A
- * lapsed cookie unlocks nothing (the session row has expired); it only names
- * their agent's link, so the expired page and the gate send them back through
- * it instead of the reel gate and its "are you working with an agent" question.
+ * A buyer keeps the session cookie 30 days past their access. A lapsed cookie
+ * unlocks nothing (the session row has expired). For an agent's client it names
+ * their agent's link, so they go back through it instead of the reel gate and
+ * its "are you working with an agent" question; for a reel buyer it shows the
+ * expired screen (comment again or reach out) when they come back from a
+ * bookmark instead of a fresh DM link. Team sessions end with their access.
  */
-const CLIENT_SESSION_COOKIE_GRACE_SECONDS = 30 * 24 * 60 * 60;
-function sessionCookieSeconds(expiresAt: Date, agentClient: boolean) {
-  return Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) + (agentClient ? CLIENT_SESSION_COOKIE_GRACE_SECONDS : 0);
+const LAPSED_SESSION_COOKIE_GRACE_SECONDS = 30 * 24 * 60 * 60;
+function sessionCookieSeconds(expiresAt: Date, keepAfterExpiry: boolean) {
+  return Math.max(60, Math.floor((expiresAt.getTime() - Date.now()) / 1000)) + (keepAfterExpiry ? LAPSED_SESSION_COOKIE_GRACE_SECONDS : 0);
 }
 
 /** The lead behind this browser's session cookie even after it lapsed or was revoked; used only to keep an agent's link on the expired page. */
@@ -744,7 +756,7 @@ export async function exchangeAccessToken(req: Request, res: Response, rawToken:
   const session = randomOpaqueToken(32);
   await db.insert(dealAccessTokens).values({ leadId: lead.id, tokenHash: hashSecret(session), deviceHash, expiresAt: lead.expiresAt, kind: "session" });
   if (!token.consumedAt) await db.update(dealAccessTokens).set({ consumedAt: new Date() }).where(eq(dealAccessTokens.id, token.id));
-  setDealCookie(res, DEALS_COOKIE.session, session, sessionCookieSeconds(lead.expiresAt, Boolean(lead.clientLinkId && lead.status !== "team")));
+  setDealCookie(res, DEALS_COOKIE.session, session, sessionCookieSeconds(lead.expiresAt, lead.status !== "team"));
   return lead.status === "team" ? "ok_team" : "ok";
 }
 

@@ -9,6 +9,7 @@ import { PROFILE_NAME_MAX, PROFILE_TIMELINES, profileInput, type ProfileInput } 
 import { AreaMap } from "./AreaMap";
 import { Countdown } from "./Countdown";
 import { DealsFooter, Incentive, ReelCard, formatChicagoDate, money, type DealsIncentive } from "./shared";
+import { FeaturedDeals, type FeaturedDealsData } from "./FeaturedDeals";
 
 export { countdownLabel } from "@/lib/dealsMine";
 export type { ProfileInput } from "@/lib/dealsMine";
@@ -105,7 +106,7 @@ function HomeCard({ home, teamPreview, saved, saving, onRequest, onSave }: { hom
   const toBeBuilt = home.kind === "to_be_built";
   const dropped = Boolean(home.previousPrice && home.price && home.price < home.previousPrice);
   const details = home.details ?? null;
-  return <article className="min-w-0 max-w-full overflow-hidden border border-border bg-card p-5">
+  return <article id={`home-${home.card}`} className="min-w-0 max-w-full scroll-mt-6 overflow-hidden border border-border bg-card p-5">
     <div className="flex items-start justify-between gap-4"><p className="eyebrow text-gold">{toBeBuilt ? "To Be Built" : "Available now"}</p>{dropped && <span className="bg-gold px-2 py-1 text-[10px] uppercase tracking-widest text-primary-foreground">Price drop</span>}</div>
     <ProtectedGallery photos={home.photos} />
     <h3 className="mt-3 text-3xl">{home.price ? money.format(home.price) : "Ask for current pricing"}</h3>
@@ -155,6 +156,8 @@ export type GatedCatalogProps = {
   profileError?: string | null;
   /** The countdown reached 00:00:00: the owner refetches rather than leaving stale listings up. */
   onExpire?: () => void;
+  /** Best Deals across every community; each deal jumps to its home's card. */
+  featured?: FeaturedDealsData | null;
 };
 
 /**
@@ -162,7 +165,13 @@ export type GatedCatalogProps = {
  * session-cookie query, and the page background repeats the lead's identity as
  * a faint pattern (the same text burned into every photo).
  */
-export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire }: GatedCatalogProps) {
+/** Jump to a featured home's card on this page. */
+export function scrollToHomeCard(card: string | undefined) {
+  if (!card || typeof document === "undefined") return;
+  document.getElementById(`home-${card}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire, featured }: GatedCatalogProps) {
   const [promptDismissed, setPromptDismissed] = useState(false);
   const updatedAt = communities.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
   const savedSet = new Set(saved ?? []);
@@ -173,6 +182,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
       <div className="border-b border-border pb-7"><p className="eyebrow text-gold">{eyebrow}</p><h1 className="mt-2 break-words text-4xl sm:text-5xl">Prepared for {lead.display}</h1><p className="mt-3 text-sm text-muted-foreground">Updated {formatChicagoDate(updatedAt)}. Your access expires in <Countdown expiresAt={lead.expiresAt} now={now} />.</p>{agent && !lead.teamPreview && <p className="mt-3 text-sm text-foreground" data-deals-agent-note="true">Shared with you by {agent.name}. Tap Save on any home and {agent.firstName ?? "your agent"} hears about it right away.{agent.phone ? ` Questions? Text ${agent.firstName ?? agent.name} at ${agent.phone}.` : ""}</p>}</div>
       {tools}
       {!promptDismissed && !profileSaved && !lead.name && !lead.teamPreview && <NamePrompt onSave={onSaveProfile} saving={savingProfile} error={profileError} onDismiss={() => setPromptDismissed(true)} />}
+      <FeaturedDeals featured={featured} onSelect={(deal) => scrollToHomeCard(deal.card)} />
       <div className="mt-10 space-y-12">{communities.map((community, index) => <section key={index} className="border-t border-border pt-8">
         <p className="eyebrow text-gold">{community.area}{community.schoolDistrict ? ` · ${community.schoolDistrict}` : ""}</p>
         <h2 className="mt-2 text-4xl">{community.label}</h2>

@@ -124,6 +124,23 @@ export function BuyerTextLine({ state, verb = "Text" }: { state: DealsContactSta
   return <a href={`sms:${digits}?body=${encodeURIComponent(keyword)}`} className="text-gold underline underline-offset-4">{verb} {keyword} to {line}</a>;
 }
 
+/**
+ * A reel buyer's 24 hours are up. There is no self-serve way back from here:
+ * they comment again or reach out, and the team helps them find their home.
+ */
+export function ExpiredHelp({ state }: { state: DealsContactState }) {
+  const keyword = state?.commentKeyword || "HOME";
+  const line = state?.textLine;
+  const digits = line ? String(line).replace(/\D/g, "") : "";
+  return <div className="mt-4 space-y-4 text-sm leading-relaxed" data-deals-expired-help="true">
+    <p className="text-foreground">Comment {keyword} on one of our videos again, or reach out to us so we can help you find your home.</p>
+    <div className="flex flex-wrap gap-3">
+      <a href="https://www.instagram.com/lifestyledesignrealtytexas/" target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center border border-gold/45 px-4 text-xs uppercase tracking-widest text-gold hover:bg-gold/10">@lifestyledesignrealtytexas</a>
+      {line && <a href={`tel:${digits}`} className="inline-flex min-h-11 items-center border border-border px-4 text-xs uppercase tracking-widest text-foreground hover:text-gold">Call or text {line}</a>}
+    </div>
+  </div>;
+}
+
 export function InstagramHelp({ state }: { state: DealsContactState }) {
   const keyword = state?.commentKeyword || "HOME";
   return <div className="mt-5 space-y-3 text-sm leading-relaxed text-muted-foreground"><p>Comment {keyword} on any of our reels for the latest deals.</p><a href="https://www.instagram.com/lifestyledesignrealtytexas/" target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center border border-gold/45 px-4 text-xs uppercase tracking-widest text-gold hover:bg-gold/10">@lifestyledesignrealtytexas</a>{state?.textLine && <p>Or <BuyerTextLine state={state} verb="text" />.</p>}</div>;

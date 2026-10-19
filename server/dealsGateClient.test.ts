@@ -157,12 +157,19 @@ describe("codeError lives in state and is cleared on step changes", () => {
 });
 
 describe("expired and error redirects map to gate messages", () => {
-  it("shows the expired page first and carries the explanation onto the gate when a new link is requested", () => {
+  it("tells a reel buyer whose list expired to comment again or reach out, with no self-serve way back in", () => {
     const expired = fresh("?expired=1", noPending);
     expect(expired.step).toBe("expired");
     const html = render(expired, { pending: null, commentKeyword: "HOME", textLine: "(512) 542-1477" } as GateDealsState);
-    expect(html).toContain("This link expired.");
-    expect(html).toContain("Get a new link now");
+    expect(html).toContain("Your list has expired.");
+    expect(html).toContain("Comment HOME on one of our videos again, or reach out to us so we can help you find your home.");
+    expect(html).toContain('href="https://www.instagram.com/lifestyledesignrealtytexas/"');
+    expect(html).toContain('href="tel:5125421477"');
+    expect(html).toContain("Call or text (512) 542-1477");
+    expect(html).not.toContain("Get a new link now");
+    expect(html).not.toContain('id="deals-phone"');
+    expect(html).not.toContain("?body=");
+    // The reducer still carries the explanation if a later step sends the visitor to the gate.
     const gate = gateReducer(expired, { type: "go", step: "gate" });
     expect(gate.step).toBe("gate");
     expect(gateStepAlert(gate, noPending)).toBe(GATE_COPY.linkExpired);

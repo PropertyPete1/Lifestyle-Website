@@ -236,8 +236,9 @@ describe("round 2: links survive the routine detours", () => {
     expect(dead).toContain("Ask Tiffany Agent to send you a new one.");
     expect(dead).not.toContain("Reopen my list");
     const reel = expiredGate({ pending: null, clientLink: null } as GateDealsState);
-    expect(reel).toContain("This link expired.");
-    expect(reel).toContain("Get a new link now");
+    expect(reel).toContain("Your list has expired.");
+    expect(reel).toContain("Comment HOME on one of our videos again, or reach out to us");
+    expect(reel).not.toContain("Get a new link now");
   });
 
   it("reads a week-long window in days and keeps the clock under two days", () => {

@@ -29,7 +29,7 @@ import { agentDisplayPhone, agentForLead, agentForTeamId, agentWorkspace, attach
 import { dealEvents } from "../drizzle/schema";
 import { classifyDealsAccess, revokeNonTeamMatchingDealLinks } from "./dealsEligibility";
 import { createDealsHomeRequest, setDealsHomeSaved } from "./dealsRequests";
-import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, catalogViewForSession, completeVerification, createPendingVerification, exchangeAccessToken, gatedDealsCatalog, getActiveBlock, hashSecret, savedDealCards } from "./dealsService";
+import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, catalogViewForSession, completeVerification, createPendingVerification, exchangeAccessToken, gatedDealsCatalog, getActiveBlock, hashSecret, issueAccessToken, savedDealCards } from "./dealsService";
 
 const HOUR = 3_600_000;
 const AGENT_PHONE = "+12105550101";
@@ -526,7 +526,7 @@ describe("round 3: what a returning client, the nightly screening and team chang
     expect(await agentForTeamId(frontDesk)).toMatchObject({ name: "Front Desk", fubUserId: null });
   });
 
-  it("keeps an agent client's session cookie past their access so a lapsed visit still finds their link; a reel buyer's ends with access", async () => {
+  it("keeps a buyer's session cookie past their access so a lapsed visit finds their link or the expired screen; a team session ends with access", async () => {
     vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
     testSettings();
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
@@ -542,6 +542,12 @@ describe("round 3: what a returning client, the nightly screening and team chang
       return maxAge / (24 * HOUR);
     };
     expect(await sessionCookieDays(created.link.token, CLIENT_PHONE)).toBeGreaterThan(32);
-    expect(await sessionCookieDays(null, OTHER_PHONE)).toBeLessThan(1.01);
+    expect(await sessionCookieDays(null, OTHER_PHONE)).toBeGreaterThan(30);
+    const teamDevice = "device-team";
+    const exchangeToken = await issueAccessToken(agent.id, hashSecret(teamDevice), agent.expiresAt);
+    const teamExchange = responseRecorder();
+    expect(await exchangeAccessToken(request({ [DEALS_COOKIE.device]: teamDevice, [DEALS_COOKIE.probe]: "p" }), teamExchange.response, exchangeToken)).toBe("ok_team");
+    const teamMaxAge = teamExchange.cookies.find((entry) => entry.name === DEALS_COOKIE.session && entry.value)?.options?.maxAge ?? 0;
+    expect(teamMaxAge / (24 * HOUR)).toBeLessThan(1.01);
   });
 });

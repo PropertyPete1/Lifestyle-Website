@@ -228,9 +228,16 @@ async function clientLinkPresentation(token: string | undefined, viewerIsTeam: b
   }
   return shown;
 }
-/** The client link behind this browser's lapsed session, if any; never fails the state query. */
-async function rememberedClientLinkToken(req: Parameters<typeof staleSessionLeadId>[0]) {
-  try { return await clientLinkTokenForLead(await staleSessionLeadId(req)); } catch { return null; }
+/** This browser's lapsed session, if any, and the client link behind it; never fails the state query. */
+async function lapsedSession(req: Parameters<typeof staleSessionLeadId>[0]) {
+  try {
+    const leadId = await staleSessionLeadId(req);
+    if (!leadId) return null;
+    const db = await getDb();
+    const lead = db ? (await db.select({ status: dealLeads.status }).from(dealLeads).where(eq(dealLeads.id, leadId)).limit(1))[0] : undefined;
+    if (!lead || lead.status === "team") return null;
+    return { token: await clientLinkTokenForLead(leadId) };
+  } catch { return null; }
 }
 
 /** An agent's client is never told the page is for buyers without an agent. */
@@ -258,13 +265,20 @@ export const dealsRouter = router({
     dealsPublicHeaders(ctx.res);
     return publicDealsCatalog();
   }),
+  /** Best Deals on the landing page: public labels, prices and payments only, no card handles or names. */
+  featured: publicProcedure.query(async ({ ctx }) => {
+    dealsPublicHeaders(ctx.res);
+    const { featuredDeals } = await import("./dealsFeatured");
+    return featuredDeals("public");
+  }),
   state: publicProcedure.input(z.object({ c: clientLinkToken }).optional()).query(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);
     const [settings, session, pending] = await Promise.all([getDealSettings(), isLiveDealSession(ctx.req), currentPending(ctx.req)]);
     // An agent's client whose access lapsed keeps their agent's link on the bare
     // landing page too (a new tab, a bookmark): this browser's lapsed session
     // names the link. Only a live link is used, so a dead one never traps them.
-    const remembered = !input?.c && !session ? await rememberedClientLinkToken(ctx.req) : null;
+    const lapsed = !input?.c && !session ? await lapsedSession(ctx.req) : null;
+    const remembered = lapsed?.token ?? null;
     const rememberedLive = remembered ? (await presentClientLink(remembered))?.state === "live" : false;
     const token = input?.c ?? (rememberedLive ? remembered! : undefined);
     const clientLink = await clientLinkPresentation(token, session?.lead.status === "team");
@@ -281,6 +295,8 @@ export const dealsRouter = router({
       clientLink,
       /** The link found from this browser's lapsed session, for the gate to post with the code. */
       clientLinkToken: rememberedLive ? remembered : null,
+      /** A reel buyer whose list lapsed (no live agent link behind it): the landing shows the expired screen, not the gate. */
+      lapsed: Boolean(lapsed) && !rememberedLive,
       connectOffer,
     };
   }),
@@ -375,7 +391,8 @@ export const dealsRouter = router({
     if (!session) throw new TRPCError({ code: "UNAUTHORIZED", message: "A current Builder Deals session is required." });
     // The team and buyers with a live agent link get the full list; everyone else the scrubbed one.
     const { view, agent } = await catalogViewForSession(session.lead);
-    const [communities, saved] = await Promise.all([gatedDealsCatalog(session.leadId, view), savedDealCards(session.leadId)]);
+    const { featuredDeals } = await import("./dealsFeatured");
+    const [communities, saved, featured] = await Promise.all([gatedDealsCatalog(session.leadId, view), savedDealCards(session.leadId), featuredDeals(view)]);
     const connection = await getDb();
     if (connection) {
       const active = await connection.select({ id: dealCommunities.id }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)));
@@ -388,7 +405,11 @@ export const dealsRouter = router({
       if (!recentListView) await logDealEvent({ leadId: session.leadId, kind: "viewed_listings", sourceCode: session.lead.sourceCode, deviceHash: session.deviceHash, ip: ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0" });
     }
     // The client sees their own agent's real number: they are meant to text it.
-    return { lead: { ...leadPresentation(session.lead), agentClient: Boolean(agent) }, communities, saved, fullDetails: view.view === "full", agent: agent ? { name: agent.name, firstName: agent.firstName, phone: agentDisplayPhone(agent) } : null };
+    // A featured home always has its card in this list: deals whose card is not shown are dropped.
+    const cards = new Set((communities as Array<{ homes?: Array<{ card?: string }> }>).flatMap((community) => (community.homes ?? []).flatMap((home) => home.card ? [home.card] : [])));
+    const onList = <T extends { card?: string }>(deal: T) => Boolean(deal.card && cards.has(deal.card));
+    const featuredOnList = { ...featured, lowestPayment: featured.lowestPayment.filter(onList), bestRate: featured.bestRate && onList(featured.bestRate) ? featured.bestRate : null, bigLots: featured.bigLots.filter(onList) };
+    return { lead: { ...leadPresentation(session.lead), agentClient: Boolean(agent) }, communities, saved, featured: featuredOnList, fullDetails: view.view === "full", agent: agent ? { name: agent.name, firstName: agent.firstName, phone: agentDisplayPhone(agent) } : null };
   }),
   /**
    * A buyer who already holds a live list opens an agent's client link: attach
@@ -690,6 +711,7 @@ export const dealsRouter = router({
       allowCanada: z.boolean().optional(), commentKeyword: z.string().min(1).max(30).optional(), textLine: z.string().min(1).max(40).optional(), expiryHours: z.number().int().min(1).max(168).optional(), hasAgentBlockDays: z.number().int().min(1).max(400).optional(), incentiveLapseDays: z.number().int().min(1).max(90).optional(), dailyVerificationCap: z.number().int().min(1).max(10000).optional(), phoneLimitPerHour: z.number().int().min(1).max(50).optional(), ipLimitPerHour: z.number().int().min(1).max(1000).optional(), testPhoneLimitPerHour: z.number().int().min(1).max(100).optional(), skipTwilioForTestNumbers: z.boolean().optional(), testNumbersSkipChecks: z.boolean().optional(), testModeFullPipeline: z.boolean().optional(), testNumbers: z.array(z.string()).max(20).optional(), testTeamNumbers: z.array(z.string()).max(20).optional(), activeReelCodes: z.array(z.string()).max(50).optional(), brokerageDomains: z.array(z.string().min(3)).max(100).optional(), fubRealtorTags: z.array(z.string()).max(100).optional(), fubRealtorSources: z.array(z.string()).max(100).optional(), handleKeywords: z.array(z.string()).max(100).optional(), trecCounties: z.array(z.string()).max(100).optional(), alertRecipients: z.array(z.string().email()).min(1).max(20).optional(), alertMode: z.enum(["immediate", "hourly_digest"]).optional(),
       syncEmailRecipients: z.array(z.string().email()).min(1).max(20).optional(), driveDestinations: z.array(z.string().trim().min(2).max(80)).min(1).max(8).optional(),
       clientLinkExpiryHours: z.number().int().min(1).max(24 * 90).optional(), clientLinkDays: z.number().int().min(1).max(365).optional(),
+      paymentMarketRate: z.number().min(1).max(15).optional(), paymentDownPercent: z.number().min(0).max(100).optional(), featuredExcludedBuilders: z.array(z.string().trim().max(80)).max(50).optional(),
     })).mutation(async ({ input }) => {
       const { saveDealSettings } = await import("./dealsService");
       return saveDealSettings(input);

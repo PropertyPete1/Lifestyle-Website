@@ -10,14 +10,16 @@ import { Field, GOLD_BUTTON, ListField, Metric, Section, SwitchRow, TAP, Warning
 import { ageLabel, displayDate, mergeUntouched, touchedKeys, touchedPatch } from "./helpers";
 import type { Health, Overview, Settings } from "./types";
 
-type NumberKey = "expiryHours" | "clientLinkExpiryHours" | "clientLinkDays" | "hasAgentBlockDays" | "incentiveLapseDays" | "dailyVerificationCap" | "phoneLimitPerHour" | "ipLimitPerHour" | "testPhoneLimitPerHour";
+type NumberKey = "expiryHours" | "clientLinkExpiryHours" | "clientLinkDays" | "paymentMarketRate" | "paymentDownPercent" | "hasAgentBlockDays" | "incentiveLapseDays" | "dailyVerificationCap" | "phoneLimitPerHour" | "ipLimitPerHour" | "testPhoneLimitPerHour";
 type ToggleKey = "allowCanada" | "skipTwilioForTestNumbers" | "testNumbersSkipChecks" | "testModeFullPipeline";
-type ListKey = "testNumbers" | "testTeamNumbers" | "activeReelCodes" | "brokerageDomains" | "fubRealtorTags" | "fubRealtorSources" | "handleKeywords" | "trecCounties" | "alertRecipients" | "syncEmailRecipients" | "driveDestinations";
+type ListKey = "testNumbers" | "testTeamNumbers" | "activeReelCodes" | "brokerageDomains" | "fubRealtorTags" | "fubRealtorSources" | "handleKeywords" | "trecCounties" | "alertRecipients" | "syncEmailRecipients" | "driveDestinations" | "featuredExcludedBuilders";
 
-const NUMBER_FIELDS: Array<{ key: NumberKey; label: string; min: number; max: number }> = [
+const NUMBER_FIELDS: Array<{ key: NumberKey; label: string; min: number; max: number; step?: number }> = [
   { key: "expiryHours", label: "Link expiry (hours)", min: 1, max: 168 },
   { key: "clientLinkExpiryHours", label: "Agent client access (hours)", min: 1, max: 24 * 90 },
   { key: "clientLinkDays", label: "Agent client link valid (days)", min: 1, max: 365 },
+  { key: "paymentMarketRate", label: "Best Deals market rate (%)", min: 1, max: 15, step: 0.01 },
+  { key: "paymentDownPercent", label: "Best Deals default down payment (%)", min: 0, max: 100, step: 0.5 },
   { key: "hasAgentBlockDays", label: "Has-agent device block (days)", min: 1, max: 400 },
   { key: "incentiveLapseDays", label: "Incentive lapse with no dates (days)", min: 1, max: 90 },
   { key: "dailyVerificationCap", label: "Daily verification cap", min: 1, max: 10000 },
@@ -149,7 +151,7 @@ export function SettingsSection({ overview, settings }: { overview: Overview; se
       <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {NUMBER_FIELDS.map((field) => (
           <Field key={field.key} id={`builder-deals-${field.key}`} label={field.label}>
-            <Input id={`builder-deals-${field.key}`} className={inputClass} type="number" inputMode="numeric" min={field.min} max={field.max} value={draft[field.key]} onChange={(event) => update({ [field.key]: Number(event.target.value) } as Partial<Settings>)} />
+            <Input id={`builder-deals-${field.key}`} className={inputClass} type="number" inputMode={field.step ? "decimal" : "numeric"} min={field.min} max={field.max} step={field.step ?? 1} value={draft[field.key]} onChange={(event) => update({ [field.key]: Number(event.target.value) } as Partial<Settings>)} />
           </Field>
         ))}
       </div>
@@ -169,6 +171,7 @@ export function SettingsSection({ overview, settings }: { overview: Overview; se
         {listField("trecCounties", "TREC counties", "Counties included in the TREC name flag.", "Bexar")}
         {listField("alertRecipients", "Alert email recipients", "Unlock, flag, tour and operational alerts.", "peter@lifestyledesignrealty.com")}
         {listField("syncEmailRecipients", "Builder update email recipients", "Change summaries, holds and incentive expiry notices from every refresh.", "peter@lifestyledesignrealty.com")}
+        {listField("featuredExcludedBuilders", "Builders never featured in Best Deals", "Still listed, never ranked in the Best Deals strip. Matches any builder name containing the entry.", "Lennar")}
         {listField("driveDestinations", "Drive-time destinations (up to 8)", "Chips under each area map, measured from the ZIP centroid and rounded to 5 minutes. Re-save a community to recompute its chips.", "downtown San Antonio")}
       </div>
       <p className="mt-4 flex items-center gap-1 text-xs text-muted-foreground">{dirty ? "Unsaved changes." : <><CheckCircle2 className="h-3.5 w-3.5 text-gold" /> Everything shown matches the saved settings.</>}</p>

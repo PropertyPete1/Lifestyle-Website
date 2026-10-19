@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import { GATE_COPY, codeStepAlert, gateReducer, gateStepAlert, initialGateState, isGateStatusMessage, readGateParams, startLeavesPending, stripTransientGateParams, type GateParams, type GatePending, type GateState, type GateStep } from "@/lib/dealsGate";
-import { InstagramHelp, formatPhoneInput } from "./shared";
+import { ExpiredHelp, InstagramHelp, formatPhoneInput } from "./shared";
 
 /** deals.state as the sheet needs it; undefined while the query is still loading. */
 export type GateSheetState = {
@@ -67,7 +67,7 @@ export function GateSheetView({ gate, state, phone, code, choice, starting, rese
     {step === "cookie-blocked" && <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">Your browser is blocking cookies. Open this link in Safari or Chrome</h2><p className="mt-4 text-sm text-muted-foreground">Your personal list needs a private browser cookie to protect access.</p><Button onClick={onCopyLink} className="mt-6 w-full bg-gold py-6 text-primary-foreground"><Copy className="mr-2 h-4 w-4" />Copy link</Button>{gate.message && notice(gate.message)}</>}
     {step === "expired" && !deadLink && (shared
       ? <><p className="eyebrow text-gold" data-deals-shared-by="true">Shared by {shared.agentName}</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Your list access ended.</h2><p className="mt-3 text-sm text-muted-foreground">Verify your number again to reopen the list {shared.agentName} shared with you. Your saved homes are still there.</p><Button onClick={() => onGo("gate")} className="mt-6 w-full bg-gold py-6 text-primary-foreground">Reopen my list <ArrowRight className="ml-2 h-4 w-4" /></Button></>
-      : <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-4xl">This link expired.</h2><p className="mt-3 text-sm text-muted-foreground">Get a fresh personal link for the latest available homes.</p><Button onClick={() => onGo("gate")} className="mt-6 w-full bg-gold py-6 text-primary-foreground">Get a new link now <ArrowRight className="ml-2 h-4 w-4" /></Button><InstagramHelp state={state} /></>)}
+      : <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Your list has expired.</h2><ExpiredHelp state={state} /></>)}
     {step === "blocked" && <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">{state?.clientLink ? "We can't open this list" : "Buyer access only"}</h2><p role="alert" className="mt-4 text-sm leading-relaxed text-muted-foreground">{gate.message || state?.blockedMessage || "This page is for buyers who are not working with an agent yet."}</p><InstagramHelp state={state} /></>}
     {step === "confirm-agent" && <><p className="eyebrow text-gold">One quick confirmation</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">Just to confirm: you're a licensed agent, or already working with one?</h2><div className="mt-6 grid gap-3"><Button onClick={onConfirmAgent} disabled={starting} className="bg-gold py-6 text-primary-foreground">Yes, that's right</Button><Button variant="outline" onClick={() => onGo("gate")} className="py-6">No, go back</Button></div></>}
     {step === "code" && <><p className="eyebrow text-gold">One more step</p>
@@ -95,9 +95,10 @@ export function GateSheetView({ gate, state, phone, code, choice, starting, rese
 }
 
 /** Data wiring for the sheet: deals.state, the gate mutations and the one-time URL flags. */
-export function GateSheet({ state, onClose, clientToken }: { state: GateSheetState; onClose: () => void; clientToken?: string }) {
+export function GateSheet({ state, onClose, clientToken, lapsed = false }: { state: GateSheetState; onClose: () => void; clientToken?: string; lapsed?: boolean }) {
   // The landing page passes the token it kept (URL or this tab's storage), so "Change number" and a wrong code keep it.
-  const [params] = useState<GateParams>(() => { const read = readGateParams(window.location.search); return { ...read, c: read.c ?? clientToken }; });
+  // A reel buyer whose list lapsed, back from a bookmark rather than a fresh DM link, starts on the expired screen.
+  const [params] = useState<GateParams>(() => { const read = readGateParams(window.location.search); return { ...read, c: read.c ?? clientToken, expired: read.expired || lapsed }; });
   const [gate, dispatch] = useReducer(gateReducer, undefined, () => initialGateState(params, state));
   const [phone, setPhone] = useState("");
   const [choice, setChoice] = useState<"buyer" | "has_agent" | null>(null);

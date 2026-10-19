@@ -133,6 +133,7 @@ const settings = {
   testNumbers: [], testTeamNumbers: [], activeReelCodes: ["sl1", "vg1"], brokerageDomains: [], fubRealtorTags: [], fubRealtorSources: [], handleKeywords: ["realtor", "realty"], trecCounties: ["Bexar"],
   alertRecipients: ["peter@lifestyledesignrealty.com"], alertMode: "immediate" as const, syncEmailRecipients: ["peter@lifestyledesignrealty.com"], driveDestinations: ["downtown San Antonio"],
   clientLinkExpiryHours: 168, clientLinkDays: 30,
+  paymentMarketRate: 7.4, paymentDownPercent: 5, featuredExcludedBuilders: ["Lennar"],
 };
 
 const pendingResult = {
@@ -329,6 +330,19 @@ describe("agent client links through the router", () => {
     expect(await lapsed().state()).toMatchObject({ clientLink: null, clientLinkToken: null });
     // Another browser (no lapsed session) gets nothing.
     expect((await visitor().state()).clientLinkToken).toBeNull();
+  });
+
+  it("serves Best Deals on the landing page without card handles, and on the private list only for cards on that list", async () => {
+    const landing = await visitor().featured();
+    expect(landing.lowestPayment).toEqual([expect.objectContaining({ label: "Southeast San Antonio | Lots", price: 489_990, estMonthly: expect.any(Number) })]);
+    expect(JSON.stringify(landing)).not.toMatch(/"card"|"detail"|Fixture|118 Fixture/);
+    const buyer = row({ id: 52, phoneE164: "+12105550152" });
+    db.seed(dealLeads, buyer);
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 52, lead: buyer, deviceHash: buyer.deviceHash });
+    const mine = await visitor().mine();
+    const cards = (mine.communities as Array<{ homes: Array<{ card: string }> }>).flatMap((community) => community.homes.map((home) => home.card));
+    expect(mine.featured.lowestPayment.map((deal) => deal.card)).toEqual([cards[0]]);
+    expect(mine.featured.lowestPayment[0]).not.toHaveProperty("detail");
   });
 
   it("turns link refusals into the agent's copy and never into the reel buyer's has-agent message", async () => {

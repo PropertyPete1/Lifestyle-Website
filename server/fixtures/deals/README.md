@@ -31,3 +31,13 @@ read these files by name.
 | chesmar-inventory-page.html | Chesmar quick move-in home page |
 | chesmar-model-page.html | Chesmar model home page (never a QMI) |
 | chesmar-incentives.html | Chesmar /incentives/ page |
+
+## Live-structure Chesmar fixtures (October 2026)
+
+`chesmar-community-live.html`, `chesmar-plan-page-live.html`, `chesmar-home-page-live.html` and the
+`chesmar-sitemap-live-*.xml` files mirror the markup the official site served in October 2026 (Blazor server
+pages with synthetic names, prices and photo ids): the community page renders its floor-plan list client-side,
+so the served HTML only carries an empty results container; plan and home pages keep their photos in a
+`#heroSlider` carousel of `<picture>` elements with `.webp` and `.jpg` sources, their facts in a labelled
+Overview list and icon tiles, the plan name in `.f-title`, the lot address in the breadcrumb, and the sale
+status in the document title ("... | Model For Tour in ..."). `server/dealsAdapters.live.test.ts` covers them.

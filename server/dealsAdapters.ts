@@ -218,7 +218,10 @@ const CHESMAR_SITEMAP_INDEX = "https://www.chesmar.com/sitemap.xml";
 const DEFAULT_DETAIL_LIMIT = 24;
 /** Safety cap only: a community whose plan and home pages exceed it is held, never truncated. */
 export const MAX_DETAIL_LIMIT = 60;
-const FETCH_TIMEOUT_MS = 20_000;
+/** Builder pages have answered in 5 to 10 seconds from the cloud; nightly runs saw longer. */
+const FETCH_TIMEOUT_MS = 45_000;
+/** One further attempt after a network failure, timeout or server-side error. */
+const FETCH_RETRY_DELAY_MS = 1_500;
 const CHESMAR_INCENTIVES_URL = "https://www.chesmar.com/incentives/";
 const MI_INVENTORY_PATH = "/sitecore/api/ssc/MIHomes-Project-Website-Api-Controllers/PlansQmi/";
 const MAX_MI_CATALOG_ITEMS = 500;
@@ -320,33 +323,48 @@ async function getDocument(
   accept: string,
   expectedHost: string,
 ): Promise<{ ok: true; text: string } | { ok: false; redirectedOffOfficialHost: boolean }> {
+  // A slow or briefly failing official site gets one more attempt; a redirect
+  // off the official host or a definite client error does not.
+  for (let attempt = 0; ; attempt++) {
+    const result = await getDocumentOnce(url, fetcher, accept, expectedHost);
+    if (result.ok || result.redirectedOffOfficialHost || !result.retryable || attempt >= 1) return result.ok ? result : { ok: false, redirectedOffOfficialHost: result.redirectedOffOfficialHost };
+    await new Promise((resolve) => setTimeout(resolve, FETCH_RETRY_DELAY_MS));
+  }
+}
+
+async function getDocumentOnce(
+  url: string,
+  fetcher: HtmlFetcher,
+  accept: string,
+  expectedHost: string,
+): Promise<{ ok: true; text: string } | { ok: false; redirectedOffOfficialHost: boolean; retryable: boolean }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     let target = asUrl(url);
     for (let hop = 0; hop <= 5; hop++) {
-      if (!target || !sameOfficialHost(target, expectedHost)) return { ok: false, redirectedOffOfficialHost: true };
+      if (!target || !sameOfficialHost(target, expectedHost)) return { ok: false, redirectedOffOfficialHost: true, retryable: false };
       const response = await fetcher(target.toString(), {
         method: "GET", redirect: "manual", signal: controller.signal,
         headers: { Accept: accept, "User-Agent": "LifestyleDesignRealtyDeals/1.0 (read-only official-page parser)" },
       });
       // Check BEFORE the next request; checking only Response.url is too late for SSRF.
-      if (response.url && !sameOfficialHost(new URL(response.url), expectedHost)) return { ok: false, redirectedOffOfficialHost: true };
+      if (response.url && !sameOfficialHost(new URL(response.url), expectedHost)) return { ok: false, redirectedOffOfficialHost: true, retryable: false };
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("location");
         target = location ? absoluteUrl(location, target) : null;
-        if (!target || !sameOfficialHost(target, expectedHost)) return { ok: false, redirectedOffOfficialHost: true };
+        if (!target || !sameOfficialHost(target, expectedHost)) return { ok: false, redirectedOffOfficialHost: true, retryable: false };
         continue;
       }
-      if (!response.ok) return { ok: false, redirectedOffOfficialHost: false };
+      if (!response.ok) return { ok: false, redirectedOffOfficialHost: false, retryable: response.status === 429 || response.status >= 500 };
       const text = await response.text();
-      if (text.length > 8_000_000) return { ok: false, redirectedOffOfficialHost: false };
+      if (text.length > 8_000_000) return { ok: false, redirectedOffOfficialHost: false, retryable: false };
       return { ok: true, text };
     }
-    return { ok: false, redirectedOffOfficialHost: false };
+    return { ok: false, redirectedOffOfficialHost: false, retryable: false };
   } catch {
     // Do not include url in logs or errors: it is private source metadata.
-    return { ok: false, redirectedOffOfficialHost: false };
+    return { ok: false, redirectedOffOfficialHost: false, retryable: true };
   } finally {
     clearTimeout(timer);
   }
@@ -773,7 +791,7 @@ function imageWidthHint(image: HtmlElement, url: URL): number | null {
  * chrome, plan drawings or brand graphics scattered across the page. Null means
  * the expected container is missing (a layout change), which holds the catalog.
  */
-function chesmarGallery(sourceUrl: string, html: string): PrivateGalleryImage[] | null {
+export function chesmarGallery(sourceUrl: string, html: string): PrivateGalleryImage[] | null {
   const root = parseHtmlElements(html);
   if (!root) return null;
   const elements = descendants(root);
@@ -793,9 +811,15 @@ function chesmarGallery(sourceUrl: string, html: string): PrivateGalleryImage[] 
       if (/logo|icon|avatar|thumbnail|thumb|placeholder|spinner|sprite|\.svg$/i.test(url.pathname)) continue;
       const width = fromSet?.width ?? imageWidthHint(image, url);
       if (width !== null && width < MIN_GALLERY_IMAGE_WIDTH) continue;
-      if (result.has(url.toString())) continue;
-      result.set(url.toString(), { sourceUrl: url.toString(), caption: image.attributes.alt || null, width, height: schemaNumber(image.attributes.height), srcSet: image.attributes.srcset ?? null });
-      if (result.size >= 12) return Array.from(result.values());
+      // The live site serves every slide as a <picture> with a .webp source, a
+      // .jpg source and an <img>: one photo, three URLs. Key on the stem so the
+      // card gets each photo once, preferring the JPEG variant.
+      const stem = `${url.origin}${url.pathname.replace(/\.(?:webp|avif|jpe?g|png)$/i, "")}`;
+      const existing = result.get(stem);
+      const jpeg = /\.jpe?g$/i.test(url.pathname);
+      if (existing && !(jpeg && !/\.jpe?g$/i.test(new URL(existing.sourceUrl).pathname))) continue;
+      result.set(stem, { sourceUrl: url.toString(), caption: image.attributes.alt || null, width, height: schemaNumber(image.attributes.height), srcSet: image.attributes.srcset ?? null });
+      if (result.size >= 12 && !existing) return Array.from(result.values());
     }
   }
   return Array.from(result.values());
@@ -843,22 +867,55 @@ export function detailStatBlock(html: string): { block: string; region: string; 
   };
 }
 
-/** Null when the page has no h1 stat block or no gallery container; the caller holds. */
+/**
+ * The live Chesmar detail layout labels its facts: an Overview list
+ * ("Beds: 4", "Baths: 3.5", "Sq. Ft.: 2,982"), a "Starting from $499,990"
+ * price block, icon tiles ("2982 Square Feet"), the plan name in the
+ * f-title block, the lot address in the breadcrumb, and the sale status in
+ * the document title ("... | Model For Tour in ..."). Absent facts stay null.
+ */
+export function chesmarDetailFacts(html: string): { price: number | null; bedrooms: number | null; bathrooms: number | null; squareFeet: number | null; status: string | null; planName: string | null; address: string | null } {
+  const text = htmlToText(html);
+  const title = htmlToText(/<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? "");
+  const block = (pattern: RegExp) => { const match = pattern.exec(html); return match ? htmlToText(match[1]) : ""; };
+  const planName = block(/class=["'][^"']*\bf-title\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) || null;
+  const crumb = block(/class=["'][^"']*\bbread-current\b[^"']*["'][^>]*>([\s\S]*?)<\/li>/i);
+  const mapLink = block(/class=["'][^"']*\bmaplink\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i);
+  const address = [crumb, mapLink].find((value) => looksLikeStreetAddress(value)) ?? null;
+  const price = numberMatch(text, /\bStarting\s+From\s*:?\s*\$\s*([\d,]+)/i) ?? numberMatch(block(/class=["'][^"']*\bf-price\b[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*<a/i), /\$\s*([\d,]+)/);
+  const bedrooms = numberMatch(text, /\bBeds?\s*:\s*(\d+(?:\.\d+)?)\b/i) ?? numberMatch(text, /\b(\d+(?:\.\d+)?)\s+Bedrooms?\b/i);
+  const bathrooms = numberMatch(text, /\bBaths?\s*:\s*(\d+(?:\.\d+)?)\b/i) ?? numberMatch(text, /\b(\d+(?:\.\d+)?)\s+Bathrooms?\b/i);
+  const squareFeet = numberMatch(text, /\bSq\.?\s*Ft\.?\s*:\s*([\d,]+)\b/i) ?? numberMatch(text, /\b([\d,]{3,})\s+Square\s+Feet\b/i);
+  return { price, bedrooms, bathrooms, squareFeet, status: extractStatus(title), planName, address };
+}
+
+/** Null when the page has neither labelled room facts nor an h1 stat block, or no gallery container; the caller holds. */
 function parsePrivateProperty(sourceUrl: string, html: string): PrivatePlanOrHome | null {
+  const facts = chesmarDetailFacts(html);
   const stats = detailStatBlock(html);
-  if (!stats) return null;
+  if (!stats && facts.bedrooms === null && facts.bathrooms === null && facts.squareFeet === null) return null;
   const gallery = chesmarGallery(sourceUrl, html);
   if (gallery === null) return null;
   return {
     sourceUrl,
     privateName: extractFirstHeading(html),
-    status: extractStatus(stats.block) ?? extractStatus(stats.region) ?? extractStatus(stats.near),
-    price: extractPrice(stats.block) ?? extractPrice(stats.region),
-    bedrooms: extractBedrooms(stats.block),
-    bathrooms: extractBathrooms(stats.block),
-    squareFeet: extractSquareFeet(stats.block),
+    privatePlanName: facts.planName,
+    privateAddress: facts.address,
+    status: facts.status ?? (stats ? extractStatus(stats.block) ?? extractStatus(stats.region) ?? extractStatus(stats.near) : null),
+    price: facts.price ?? (stats ? extractPrice(stats.block) ?? extractPrice(stats.region) : null),
+    bedrooms: facts.bedrooms ?? (stats ? extractBedrooms(stats.block) : null),
+    bathrooms: facts.bathrooms ?? (stats ? extractBathrooms(stats.block) : null),
+    squareFeet: facts.squareFeet ?? (stats ? extractSquareFeet(stats.block) : null),
     gallery,
   };
+}
+
+/** A Chesmar plan page: a FloorPlan breadcrumb, the floor-plan info block, or an "About the <plan>" heading. */
+function looksLikeChesmarPlanPage(html: string): boolean {
+  return /<a\b[^>]*\btitle=["']FloorPlan["']/i.test(html)
+    || /class=["'][^"']*\bbread-current\b[^"']*["'][^>]*>[\s\S]{0,200}?Floor\s*Plan/i.test(html)
+    || /class=["'][^"']*\bfloor-plan-info\b[^"']*["']/i.test(html)
+    || /<h1\b[^>]*>\s*About\s+the\b/i.test(html);
 }
 
 /**
@@ -870,7 +927,8 @@ export function parseCommunityFacts(html: string): NonNullable<PrivateDealSnapsh
   const range = /\$\s*(\d{3},\d{3}(?:,\d{3})?)\s*(?:-|–|to)\s*\$\s*(\d{3},\d{3}(?:,\d{3})?)/i.exec(text);
   const from = /(?:priced\s+from|starting\s+(?:from|at)|from|as\s+low\s+as)\s*:?\s*\$\s*(\d{3},\d{3}(?:,\d{3})?)/i.exec(text);
   const fromPrice = numericValue(range?.[1] ?? from?.[1] ?? "");
-  const district = /\b((?:[A-Z][A-Za-z.'-]+\s+){1,4}(?:ISD|CISD|Independent\s+School\s+District|School\s+District))\b/.exec(text);
+  const district = /\bSchool\s+Districts?(?:\(s\))?\s*:\s*((?:[A-Z][A-Za-z.'-]+\s+){1,4}(?:ISD|CISD|Independent\s+School\s+District|School\s+District))\b/.exec(text)
+    ?? /\b((?:[A-Z][A-Za-z.'-]+\s+){1,4}(?:ISD|CISD|Independent\s+School\s+District|School\s+District))\b/.exec(text);
   const lots = /\b((?:half|quarter|third|one|two)[- ]acre\+?(?:\s+(?:home)?sites|\s+lots)?|\d+(?:\.\d+)?\s*(?:-|–|to)\s*\d+(?:\.\d+)?[- ]acre\+?(?:\s+(?:home)?sites|\s+lots)?|\d+(?:\.\d+)?\+?[- ]acre(?:\s+(?:home)?sites|\s+lots)|\d{2,3}(?:'|\s*-?\s*(?:ft|foot|feet))(?:\s+wide)?\s+(?:home)?sites)\b/i.exec(text);
   return {
     fromPrice: fromPrice !== null && Number.isInteger(fromPrice) && fromPrice >= 50_000 ? fromPrice : null,
@@ -1090,19 +1148,22 @@ async function fetchDiscoveredProperties(
   privateSnapshot: PrivateDealSnapshot,
   expectedHost: string,
   mode: "approved" | "probe" = "approved",
+  /** Paths parsed strictly even in probe mode: a home's parent is a plan page by the site's URL grammar. */
+  strictPaths: ReadonlySet<string> = new Set(),
 ): Promise<{ holds: DealHoldReason[]; skipped: number }> {
   const results = await mapWithConcurrency(urls, 4, async (url) => {
+    const strict = mode === "approved" || strictPaths.has(normalizePathname(new URL(url).pathname));
     const page = await getDocument(url, fetcher, "text/html,application/xhtml+xml", expectedHost);
     if (!page.ok) {
       const hold: DealHoldReason = page.redirectedOffOfficialHost ? "unsupported_official_host" : "detail_fetch_failed";
       return { hold, property: null, skipped: false };
     }
-    if (kind === "plan" && mode === "probe" && !/<a\b[^>]*\btitle=["']FloorPlan["']/i.test(page.text)) return { hold: null, property: null, skipped: true };
+    if (kind === "plan" && !strict && !looksLikeChesmarPlanPage(page.text)) return { hold: null, property: null, skipped: true };
     const property = containsExpectedDetailContainer(page.text) ? parsePrivateProperty(url, page.text) : null;
     // A plan or home record must contain at least one first-party property
     // fact; an arbitrary branded detail page is not a successful discovery.
     if (!property || (property.price === null && property.bedrooms === null && property.bathrooms === null && property.squareFeet === null)) {
-      return mode === "probe" ? { hold: null, property: null, skipped: true } : { hold: "expected_detail_container_not_found" as const, property: null, skipped: false };
+      return strict ? { hold: "expected_detail_container_not_found" as const, property: null, skipped: false } : { hold: null, property: null, skipped: true };
     }
     return { hold: null, property, skipped: false };
   });
@@ -1215,16 +1276,21 @@ class ChesmarAdapter implements DealAdapter {
     const sitemap = await chesmarSitemapCandidates(fetcher, privateSnapshot);
     if (sitemap.holds.length) return failedResult(config, fetchedAt, privateSnapshot, sitemap.holds);
     const candidates = sitemap.urls;
-    // Plan pages are whitelisted by reviewed slugs, explicit plan links inside the
-    // community's floorplans container, and the parent slug of every home URL.
-    // Other single-segment children (site-map, virtual-tour, ...) are not fetched.
+    // Plan pages are whitelisted by reviewed slugs and by explicit plan links
+    // inside the community's floorplans container. The live community page
+    // renders that container client-side (it is empty in the served HTML), so
+    // the usual case is probe mode: every single-segment child the sitemap
+    // lists is fetched and kept only when it looks like a floor-plan page.
+    // Other single-segment children (site-map, virtual-tour, ...) are skipped
+    // by name. The parent slug of every home URL is always a candidate.
     const approved = new Set((config.planSlugs ?? []).map((slug) => slug.toLowerCase()));
     const tree = parseHtmlElements(page.text);
     const planContainer = tree ? descendants(tree).find((item) => item.attributes.id === "floorplans") : null;
     if (planContainer) for (const href of extractHrefValues(page.text.slice(planContainer.contentStart, planContainer.contentEnd))) {
       const link = absoluteUrl(href, community); if (link && isChesmarPlan(link, community)) approved.add(link.pathname.split("/").filter(Boolean).at(-1)!.toLowerCase());
     }
-    for (const raw of candidates) { const link = asUrl(raw); if (link && isChesmarHome(link, community)) approved.add(link.pathname.split("/").filter(Boolean).at(-2)!.toLowerCase()); }
+    const homeParents = new Set<string>();
+    for (const raw of candidates) { const link = asUrl(raw); if (link && isChesmarHome(link, community)) homeParents.add(link.pathname.split("/").filter(Boolean).at(-2)!.toLowerCase()); }
     const planUrls: string[] = [];
     const homeUrls: string[] = [];
     const slugOf = (url: URL) => url.pathname.split("/").filter(Boolean).at(-1)!.toLowerCase();
@@ -1235,10 +1301,13 @@ class ChesmarAdapter implements DealAdapter {
       else if (isChesmarHome(url, community)) homeUrls.push(url.toString());
     }
     const mode: "approved" | "probe" = approved.size ? "approved" : "probe";
-    // An approved slug missing from a lagging sitemap is still fetched at its official path.
+    // An approved slug (or a home's parent plan) missing from a lagging sitemap is still fetched at its official path.
     const planBase = new URL(normalizePathname(community.pathname), community.origin).toString();
     const planByPath = new Map<string, string>();
-    for (const url of mode === "approved" ? [...planUrls.filter((url) => approved.has(slugOf(new URL(url)))), ...Array.from(approved, (slug) => `${planBase}${slug}/`)] : planUrls) {
+    const wanted = mode === "approved"
+      ? [...planUrls.filter((url) => approved.has(slugOf(new URL(url))) || homeParents.has(slugOf(new URL(url)))), ...Array.from(approved, (slug) => `${planBase}${slug}/`), ...Array.from(homeParents, (slug) => `${planBase}${slug}/`)]
+      : [...planUrls, ...Array.from(homeParents, (slug) => `${planBase}${slug}/`)];
+    for (const url of wanted) {
       const path = normalizePathname(new URL(url).pathname);
       if (!planByPath.has(path)) planByPath.set(path, url);
     }
@@ -1246,7 +1315,8 @@ class ChesmarAdapter implements DealAdapter {
     const distinctHomeUrls = Array.from(new Set(homeUrls));
     if (!distinctPlanUrls.length && !distinctHomeUrls.length) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (distinctPlanUrls.length + distinctHomeUrls.length > detailLimit(config)) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
-    const planResults = await fetchDiscoveredProperties(distinctPlanUrls, "plan", fetcher, privateSnapshot, CHESMAR_HOST, mode);
+    const strictPlanPaths = new Set(Array.from(homeParents, (slug) => normalizePathname(`${new URL(planBase).pathname}${slug}/`)));
+    const planResults = await fetchDiscoveredProperties(distinctPlanUrls, "plan", fetcher, privateSnapshot, CHESMAR_HOST, mode, strictPlanPaths);
     const homeResults = await fetchDiscoveredProperties(distinctHomeUrls, "home", fetcher, privateSnapshot, CHESMAR_HOST, "approved");
     const detailHolds = [...planResults.holds, ...homeResults.holds];
     if (detailHolds.length > 0) return failedResult(config, fetchedAt, privateSnapshot, detailHolds);

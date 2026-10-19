@@ -25,6 +25,7 @@ import {
   isCrawler,
   isInAppBrowser,
   maskPhone,
+  normalizeRateFigure,
   normalizeUsPhone,
   sanitizeInstagramHandle,
   sanitizeSourceCode,
@@ -544,10 +545,12 @@ function publicIncentive(row: typeof dealIncentives.$inferSelect) {
   return {
     text: row.publicText,
     teaser,
-    headlineRate: row.headlineRate,
-    followOnRate: row.followOnRate,
+    // Rows stored before the figure-only rule, and admin-typed values, may
+    // still carry their own "APR" or "rate" label; the card prints the label.
+    headlineRate: normalizeRateFigure(row.headlineRate),
+    followOnRate: normalizeRateFigure(row.followOnRate),
     followOnPeriod: row.followOnPeriod,
-    apr: row.apr,
+    apr: normalizeRateFigure(row.apr),
     loanType: row.loanType,
     downPayment: row.downPayment,
     repaymentTerms: row.repaymentTerms,

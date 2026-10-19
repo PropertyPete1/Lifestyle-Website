@@ -6,7 +6,7 @@ import { chicagoDay, chicagoEndOfDay } from "./dealsService";
 import { normalizeExcludedTerms, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
 import { activeCatalogHold, builderScrubConfig, communityRefreshDue, refreshOfficialDeals, storedExcludedScrubTerms, storedScrubConfig, summarizeHolds } from "./dealsSync";
 import { communityAreaMap, refreshCommunityGeography } from "./dealsMap";
-import { DEAL_SCRUB_CATEGORIES, hasPrivateTerm, mergeDealScrubConfig, normalizedText, scrubPrivateNames, type DealScrubConfig, type DealScrubConfigInput } from "../shared/deals";
+import { DEAL_SCRUB_CATEGORIES, hasPrivateTerm, mergeDealScrubConfig, normalizeRateFigure, normalizedText, scrubPrivateNames, type DealScrubConfig, type DealScrubConfigInput } from "../shared/deals";
 
 /**
  * Plain functions for the admin router to wire. They throw DealsAdminError with
@@ -192,7 +192,7 @@ export async function saveIncentiveForCommunity(input: AdminIncentiveInput): Pro
   const now = new Date();
   const values = {
     communityId, publicText, normalizedText: normalizedText(publicText), manual,
-    headlineRate: fields.headlineRate ?? null, followOnRate: fields.followOnRate ?? null, followOnPeriod: fields.followOnPeriod ?? null, apr: fields.apr ?? null,
+    headlineRate: normalizeRateFigure(fields.headlineRate), followOnRate: normalizeRateFigure(fields.followOnRate), followOnPeriod: fields.followOnPeriod ?? null, apr: normalizeRateFigure(fields.apr),
     loanType: fields.loanType ?? null, downPayment: fields.downPayment ?? null, repaymentTerms: fields.repaymentTerms ?? null,
     contractBy, closeBy, contractByManual: contractBy !== null, closeByManual: closeBy !== null, expiresAt: earliest(contractBy, closeBy),
     confirmedAt: now, active: true, held: false, holdReason: null,
@@ -281,8 +281,8 @@ export async function acceptIncentiveHold(input: AcceptIncentiveHoldInput): Prom
     await tx.update(dealIncentives).set({ active: false }).where(eq(dealIncentives.communityId, incentive.communityId));
     await tx.update(dealIncentives).set({
       publicText, normalizedText: normalizedText(publicText),
-      headlineRate: patch.headlineRate ?? incentive.headlineRate, apr: patch.apr ?? incentive.apr,
-      followOnRate: patch.followOnRate ?? incentive.followOnRate, followOnPeriod: patch.followOnPeriod ?? incentive.followOnPeriod,
+      headlineRate: normalizeRateFigure(patch.headlineRate ?? incentive.headlineRate), apr: normalizeRateFigure(patch.apr ?? incentive.apr),
+      followOnRate: normalizeRateFigure(patch.followOnRate ?? incentive.followOnRate), followOnPeriod: patch.followOnPeriod ?? incentive.followOnPeriod,
       loanType: patch.loanType ?? incentive.loanType, downPayment: patch.downPayment ?? incentive.downPayment, repaymentTerms: patch.repaymentTerms ?? incentive.repaymentTerms,
       contractBy, closeBy, contractByManual: incentive.contractByManual || Boolean(patch.contractBy), closeByManual: incentive.closeByManual || Boolean(patch.closeBy),
       expiresAt: earliest(contractBy, closeBy), active: true, held: false, holdReason: null, confirmedAt: now,

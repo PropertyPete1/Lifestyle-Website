@@ -85,9 +85,10 @@ describe("incentive admin", () => {
     db.seed(dealIncentives, { communityId, normalizedText: "old", publicText: "Old promo", active: true, confirmedAt: new Date(Date.now() - 86_400_000) });
     db.rows(dealCommunities)[0].incentiveHoldReason = "missing_apr (text 12345678)";
     db.rows(dealCommunities)[0].holdReason = "incentive: missing_apr (text 12345678)";
-    const saved = await saveIncentiveForCommunity({ communityId, manual: true, publicText: "4.999% (5.737% APR) FHA 30-year fixed through M/I Financial on select homes with 3.5% down payment. Contract by 11/8/26.", headlineRate: "4.999%", apr: "5.737%", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5% down payment", contractBy: "2026-11-08" });
+    const saved = await saveIncentiveForCommunity({ communityId, manual: true, publicText: "4.999% (5.737% APR) FHA 30-year fixed through M/I Financial on select homes with 3.5% down payment. Contract by 11/8/26.", headlineRate: "4.999% rate", apr: "5.737% APR", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5% down payment", contractBy: "2026-11-08" });
     const row = db.rows(dealIncentives).find((value) => value.id === saved.id)!;
-    expect(row).toMatchObject({ manual: true, active: true, held: false, contractByManual: true, closeByManual: false, contractBy: chicagoEndOfDay(2026, 11, 8), expiresAt: chicagoEndOfDay(2026, 11, 8) });
+    // Admin-typed labels are dropped: the card prints "APR:" itself.
+    expect(row).toMatchObject({ manual: true, active: true, held: false, headlineRate: "4.999%", apr: "5.737%", contractByManual: true, closeByManual: false, contractBy: chicagoEndOfDay(2026, 11, 8), expiresAt: chicagoEndOfDay(2026, 11, 8) });
     expect(row.publicText).toContain("the builder's lender");
     expect(row.publicText).not.toContain("M/I");
     expect(db.rows(dealIncentives).filter((value) => value.active)).toHaveLength(1);
@@ -111,7 +112,7 @@ describe("incentive admin", () => {
     const held = db.rows(dealIncentives).find((row) => row.id === heldId)! as typeof dealIncentives.$inferSelect;
     expect(heldIncentiveMissingFields(held)).toEqual(["followOnRate", "followOnPeriod", "contractBy"]);
     await expect(acceptIncentiveHold({ id: heldId, followOnRate: "5.25%" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    await acceptIncentiveHold({ id: heldId, followOnRate: "5.25%", followOnPeriod: "years 2-30", contractBy: "2026-10-18" });
+    await acceptIncentiveHold({ id: heldId, followOnRate: "5.25% interest rate", followOnPeriod: "years 2-30", contractBy: "2026-10-18" });
     expect(db.rows(dealIncentives).find((row) => row.id === heldId)).toMatchObject({ active: true, held: false, holdReason: null, followOnRate: "5.25%", contractBy: chicagoEndOfDay(2026, 10, 18), contractByManual: true, expiresAt: chicagoEndOfDay(2026, 10, 18) });
     expect(db.rows(dealIncentives).find((row) => row.id === manualId)?.active).toBe(false);
     expect(db.rows(dealCommunities)[0].incentiveHoldReason).toBeNull();

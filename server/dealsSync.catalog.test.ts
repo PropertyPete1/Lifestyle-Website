@@ -102,4 +102,14 @@ describe("gated catalog selection and privacy", () => {
     seedIncentive({ publicText: "Future date promo", confirmedAt: new Date(Date.now() - 30 * DAY), expiresAt: new Date(Date.now() + DAY) });
     expect((await catalog()).incentive).toMatchObject({ text: "Future date promo" });
   });
+
+  it("prints rate figures without their own label, however an older row or an admin stored them", async () => {
+    db.seed(dealIncentives, {
+      communityId, normalizedText: "labelled", publicText: "4.999% (5.737% APR) FHA 30-year financing.", active: true, held: false, confirmedAt: new Date(),
+      headlineRate: "4.999% rate", followOnRate: "5.25 % interest rate", followOnPeriod: "Years 2 to 30", apr: "5.737% APR.",
+    });
+    const expected = { headlineRate: "4.999%", followOnRate: "5.25%", followOnPeriod: "Years 2 to 30", apr: "5.737%" };
+    expect((await catalog()).incentive).toMatchObject(expected);
+    expect((await publicDealsCatalog())[0].incentive).toMatchObject(expected);
+  });
 });

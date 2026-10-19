@@ -76,6 +76,21 @@ export function normalizedText(input: string): string {
 }
 
 /**
+ * A rate figure as the cards print it, "5.737%". Builder pages, older stored
+ * rows and admins write "5.737% APR", "4.25% interest rate" or a bare "5.737";
+ * the card adds its own label, so the figure itself must not carry one.
+ */
+export function normalizeRateFigure(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  let figure = value.replace(/\s+/g, " ").trim();
+  figure = figure.replace(/^(?:annual percentage rate|interest rate|apr|rate)\s*[:\-]?\s*/i, "");
+  figure = figure.replace(/\s*(?:annual percentage rate|interest rate|apr|rate|fixed)\s*[.;:,]*$/i, "");
+  figure = figure.replace(/(\d)\s+%/g, "$1%").replace(/[.;:,]+$/, "").trim();
+  if (!figure) return null;
+  return /^\d+(?:\.\d+)?$/.test(figure) ? `${figure}%` : figure;
+}
+
+/**
  * Stable private identity input for a builder record. Tracking parameters,
  * fragments, host case, and an incidental trailing slash must not create a
  * second listing row. Invalid values stay distinguishable rather than being

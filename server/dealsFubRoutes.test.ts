@@ -12,13 +12,18 @@ const mocks = vi.hoisted(() => ({
   runPendingDealsFubJobs: vi.fn(),
   queueFirstUnlockAlert: vi.fn(),
   queueProfileFlagAlert: vi.fn(),
+  notifyClientLinkAttached: vi.fn(),
+  staleSessionLeadId: vi.fn(),
+  clientLinkTokenForLead: vi.fn(),
 }));
 vi.mock("./dealsService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./dealsService")>()),
   completeVerification: (...args: unknown[]) => mocks.completeVerification(...args),
   isLiveDealSession: (...args: unknown[]) => mocks.isLiveDealSession(...args),
   getDealSettings: (...args: unknown[]) => mocks.getDealSettings(...args),
+  staleSessionLeadId: (...args: unknown[]) => mocks.staleSessionLeadId(...args),
 }));
+vi.mock("./dealsClientLinks", () => ({ clientLinkTokenForLead: (...args: unknown[]) => mocks.clientLinkTokenForLead(...args) }));
 vi.mock("./dealsFubJobs", () => ({
   enqueueDealsFubJob: (...args: unknown[]) => mocks.enqueueDealsFubJob(...args),
   runPendingDealsFubJobs: (...args: unknown[]) => mocks.runPendingDealsFubJobs(...args),
@@ -26,13 +31,15 @@ vi.mock("./dealsFubJobs", () => ({
 vi.mock("./dealsAlerts", () => ({
   queueFirstUnlockAlert: (...args: unknown[]) => mocks.queueFirstUnlockAlert(...args),
   queueProfileFlagAlert: (...args: unknown[]) => mocks.queueProfileFlagAlert(...args),
+  notifyClientLinkAttached: (...args: unknown[]) => mocks.notifyClientLinkAttached(...args),
 }));
 
 import { registerDealsRoutes } from "./dealsRoutes";
 import { DEALS_COOKIE } from "../shared/deals";
 
 const settings = { testModeFullPipeline: false, activeReelCodes: ["sl1"] };
-const completed = { ok: true as const, token: "t".repeat(40), leadId: 31, expiresAt: new Date(Date.now() + 3_600_000), firstUnlock: true, reverifiedActive: false, isTeam: false, isTest: false, fubCheckDeferred: false, duplicate: false };
+const completed = { ok: true as const, token: "t".repeat(40), leadId: 31, expiresAt: new Date(Date.now() + 3_600_000), firstUnlock: true, reverifiedActive: false, isTeam: false, isTest: false, fubCheckDeferred: false, duplicate: false, clientLinkAttached: null as number | null };
+const LINK = "Lnk_".repeat(8);
 
 let server: Server;
 let baseUrl: string;
@@ -51,6 +58,9 @@ beforeEach(() => {
   mocks.getDealSettings.mockResolvedValue(settings);
   mocks.enqueueDealsFubJob.mockResolvedValue(undefined);
   mocks.runPendingDealsFubJobs.mockResolvedValue({ sent: 0, failed: 0, skipped: 0, leased: 0 });
+  mocks.staleSessionLeadId.mockResolvedValue(null);
+  mocks.clientLinkTokenForLead.mockResolvedValue(null);
+  mocks.notifyClientLinkAttached.mockResolvedValue({ queued: true });
 });
 
 async function verify() {
@@ -158,5 +168,37 @@ describe("Builder Deals expiry redirect contract", () => {
     mocks.isLiveDealSession.mockResolvedValue({ leadId: 9, lead: { status: "team" }, deviceHash: "d" });
     const team = await fetch(`${baseUrl}/deals/team`, { redirect: "manual", headers: { cookie: `${DEALS_COOKIE.session}=live` } });
     expect(team.status).toBe(404);
+  });
+});
+
+describe("agent client links through the Express routes", () => {
+  it("keeps the client-link token on every verify redirect so the visitor stays on the agent's gate", async () => {
+    const post = (body: Record<string, string>) => fetch(`${baseUrl}/deals/verify`, { method: "POST", redirect: "manual", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await post({ code: "12", c: LINK })).headers.get("location")).toBe(`/deals?codeError=1&c=${LINK}`);
+    mocks.completeVerification.mockResolvedValue({ ok: false, kind: "invalid_code" });
+    expect((await post({ code: "123456", c: LINK })).headers.get("location")).toBe(`/deals?codeError=invalid_code&c=${LINK}`);
+    mocks.completeVerification.mockResolvedValue({ ok: false, kind: "blocked" });
+    expect((await post({ code: "123456", c: LINK })).headers.get("location")).toBe(`/deals?gate=1&blocked=1&c=${LINK}`);
+    // A malformed token is dropped rather than echoed.
+    expect((await post({ code: "123456", c: "<script>" })).headers.get("location")).toBe("/deals?gate=1&blocked=1");
+  });
+
+  it("notes the agent and alerts them when a returning buyer verifies through their link", async () => {
+    mocks.completeVerification.mockResolvedValue({ ...completed, firstUnlock: false, reverifiedActive: true, clientLinkAttached: 7 });
+    await verify();
+    expect(mocks.enqueueDealsFubJob).toHaveBeenCalledWith(31, "reverify", expect.objectContaining({ reason: "attached to an agent's client link" }));
+    expect(mocks.notifyClientLinkAttached).toHaveBeenCalledWith(31, 7);
+    // A first unlock already tells the agent through the unlock alert.
+    mocks.notifyClientLinkAttached.mockClear();
+    mocks.completeVerification.mockResolvedValue({ ...completed, clientLinkAttached: 7 });
+    await verify();
+    expect(mocks.notifyClientLinkAttached).not.toHaveBeenCalled();
+  });
+
+  it("sends a lapsed agent client to the expired page of their own link", async () => {
+    mocks.staleSessionLeadId.mockResolvedValue(31);
+    mocks.clientLinkTokenForLead.mockResolvedValue(LINK);
+    const dead = await fetch(`${baseUrl}/deals/mine`, { redirect: "manual", headers: { cookie: `${DEALS_COOKIE.session}=stale` } });
+    expect(dead.headers.get("location")).toBe(`/deals?expired=1&c=${LINK}`);
   });
 });

@@ -9,7 +9,7 @@ export type DealAlertKind = "first_unlock" | "profile_flag";
 type AlertRow = typeof dealAlerts.$inferSelect;
 type AlertLead = Pick<typeof dealLeads.$inferSelect, "id" | "name" | "phoneE164" | "email" | "instagramHandle" | "sourceCode" | "timeline"> & { agentTeamId?: number | null };
 /** The agent who sent the buyer; they receive the buyer's alerts alongside the owners. */
-type AlertAgent = { name: string; email: string | null };
+type AlertAgent = { name: string; email: string | null; fubUserId?: string | null };
 
 const STALE_SEND_MS = 15 * 60_000;
 const DEFAULT_SITE_ORIGIN = "https://lifestyledesignrealty.com";
@@ -114,7 +114,7 @@ export async function queueFirstUnlockAlert(lead: AlertLead, details: FirstUnloc
     subject: agent ? `Builder Deals: ${agent.name}'s client unlocked the list` : "Builder Deals: new buyer unlocked the list",
     extraRecipients: agent?.email ? [agent.email] : [],
     content: [
-      agent ? `${agent.name}'s client unlocked Builder Deals through their client link. The FUB contact is assigned to ${agent.name}.` : "A buyer unlocked Builder Deals for the first time.",
+      agent ? `${agent.name}'s client unlocked Builder Deals through their client link. ${assignmentLine(agent, details)}` : "A buyer unlocked Builder Deals for the first time.",
       ...(details.previouslyOptedOut ? ["", "Previously opted out, do not text manually."] : []),
       "",
       ...privateLeadLines(lead),
@@ -129,12 +129,31 @@ export async function queueFirstUnlockAlert(lead: AlertLead, details: FirstUnloc
   });
 }
 
+/** What actually happened to the FUB owner, never a promise the sync did not keep. */
+function assignmentLine(agent: AlertAgent, details: FirstUnlockAlertDetails) {
+  if (details.alreadyAssignedTo) return `The FUB contact was already assigned to ${details.alreadyAssignedTo}; the assignment was left alone.`;
+  if (!details.fubPersonId) return `The FUB contact is not synced yet; it will be assigned to ${agent.fubUserId ? agent.name : "Peter"}.`;
+  return agent.fubUserId ? `The FUB contact is assigned to ${agent.name}.` : `${agent.name} has no Follow Up Boss user yet, so the FUB contact is assigned to Peter.`;
+}
+
 async function alertAgent(lead: AlertLead): Promise<AlertAgent | null> {
   if (!lead.agentTeamId) return null;
   const { agentForTeamId } = await import("./dealsClientLinks");
   const agent = await agentForTeamId(lead.agentTeamId);
   // An agent who left the team is not emailed about a client they can no longer serve.
-  return agent && agent.active ? { name: agent.name, email: agent.email } : null;
+  return agent && agent.active ? { name: agent.name, email: agent.email, fubUserId: agent.fubUserId } : null;
+}
+
+/** The verify route's entry: load the lead and its live agent, then queue the once-per-link alert. */
+export async function notifyClientLinkAttached(leadId: number, linkId: number) {
+  const db = await getDb();
+  if (!db) return { queued: false };
+  const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, leadId)).limit(1))[0];
+  if (!lead?.agentTeamId) return { queued: false };
+  const { agentForTeamId } = await import("./dealsClientLinks");
+  const agent = await agentForTeamId(lead.agentTeamId);
+  if (!agent?.active) return { queued: false };
+  return queueClientLinkAttachedAlert(lead, { name: agent.name, email: agent.email }, linkId);
 }
 
 /**
@@ -150,8 +169,8 @@ export async function queueClientLinkAttachedAlert(lead: AlertLead, agent: Alert
     subject: `Builder Deals: ${agent.name}'s client is on their list`,
     extraRecipients: agent.email ? [agent.email] : [],
     content: [
-      `${agent.name}'s client already had Builder Deals access and opened ${agent.name}'s client link; they now see the full list and ${agent.name} is on their saves and requests.`,
-      "The existing FUB contact keeps its assignment; a note names the agent.",
+      `${agent.name}'s client is now connected through ${agent.name}'s client link: they see the full list, and ${agent.name} hears about their saves and tour requests.`,
+      `They already had a Builder Deals contact, so the FUB contact keeps its current assignment; a note on it names ${agent.name}.`,
       "",
       ...privateLeadLines(lead),
       `Block and kill link (opens admin, login required, confirm button): ${adminLeadLink(lead.id)}`,

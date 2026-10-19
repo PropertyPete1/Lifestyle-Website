@@ -305,27 +305,30 @@ async function executeRequestTask(job: typeof dealFubJobs.$inferSelect): Promise
   const group = taskGroupTypes(loaded.request.requestType);
   const dayRequests = await loadDayRequestJobs(loaded, group);
   if (!dayRequests?.length) return { ok: false, error: "Builder Deals request home unavailable" };
-  const groupWhere = and(eq(dealTourRequests.leadId, loaded.lead.id), eq(dealTourRequests.chicagoDay, loaded.request.chicagoDay), inArray(dealTourRequests.requestType, group));
+  let taskId = dayRequests.find(({ request }) => request.fubTaskId)?.request.fubTaskId ?? null;
+  // Only entries not yet in the task, and never a home the buyer already unsaved:
+  // each run touches FUB once per new entry instead of re-reading the whole day.
+  const pending = dayRequests.filter(({ request }) => !request.fubTaskId && !request.removedAt);
+  if (!pending.length) return { ok: true, records: [] };
   const results: Array<Extract<FubDeliveryResult, { ok: true }>> = [];
-  let taskId = dayRequests.find(({ request }) => request.fubTaskId)?.request.fubTaskId;
   let createdRequestId: number | null = null;
   if (!taskId) {
-    const first = dayRequests[0]!;
+    const first = pending[0]!;
     const created = await createBuilderDealsTourTask({ lead: loaded.lead, request: first.request, privateDescription: first.privateDescription });
     if (!created.ok) return created;
     if (!created.taskId) return { ok: false, error: "FUB task did not return an id" };
     taskId = created.taskId;
     createdRequestId = first.request.id;
     results.push(created);
-    await db.update(dealTourRequests).set({ fubTaskId: taskId }).where(groupWhere);
+    await db.update(dealTourRequests).set({ fubTaskId: taskId }).where(eq(dealTourRequests.id, first.request.id));
   }
-  for (const entry of dayRequests) {
+  for (const entry of pending) {
     if (entry.request.id === createdRequestId) continue;
     const appended = await appendBuilderDealsTourTask({ lead: loaded.lead, request: entry.request, taskId, privateDescription: entry.privateDescription });
     if (!appended.ok) return appended;
     results.push(appended);
+    await db.update(dealTourRequests).set({ fubTaskId: taskId }).where(eq(dealTourRequests.id, entry.request.id));
   }
-  await db.update(dealTourRequests).set({ fubTaskId: taskId }).where(groupWhere);
   return combinedDelivery(results, taskId);
 }
 
@@ -336,7 +339,7 @@ async function executeRequestNote(job: typeof dealFubJobs.$inferSelect): Promise
   if (!loaded) return { ok: true, records: [] };
   const dayRequests = await loadDayRequestJobs(loaded);
   if (!dayRequests?.length) return { ok: false, error: "Builder Deals request home unavailable" };
-  const pending = dayRequests.filter(({ request }) => !request.fubNoteSentAt);
+  const pending = dayRequests.filter(({ request }) => !request.fubNoteSentAt && !request.removedAt);
   if (!pending.length) return { ok: true, records: [] };
   const results: Array<Extract<FubDeliveryResult, { ok: true }>> = [];
   let noteId = dayRequests.find(({ request }) => request.fubNoteId)?.request.fubNoteId;
@@ -366,7 +369,8 @@ async function executeRequestEmail(job: typeof dealFubJobs.$inferSelect): Promis
   const db = await getDb();
   const loaded = await loadRequestJob(job);
   if (!db) return { ok: false, error: "Database unavailable" };
-  if (!loaded || loaded.request.emailSentAt) return { ok: true, records: [] };
+  // A save the buyer took back before the email went out is not announced.
+  if (!loaded || loaded.request.emailSentAt || loaded.request.removedAt) return { ok: true, records: [] };
   const settings = await getDealSettings();
   const testTag = loaded.lead.isTest ? "TEST: " : "";
   const agent = loaded.lead.agent;
@@ -381,7 +385,7 @@ async function executeRequestEmail(job: typeof dealFubJobs.$inferSelect): Promis
       loaded.lead.isTest ? "TEST RECORD (full-pipeline test mode): eligible for Builder Deals cleanup." : null,
       loaded.request.requestType === "save" ? `${who} saved ${loaded.privateDescription}.` : `${who} requested ${loaded.privateDescription}.`,
       loaded.request.requestType === "save" ? `Saved at: ${formatChicagoDateTime(loaded.request.preferredAt)}` : `Preferred: ${formatChicagoDateTime(loaded.request.preferredAt)}`,
-      agent ? `Sent through ${agent.name}'s client link; the FUB contact and task are assigned to ${agent.name}.` : null,
+      agent ? (agent.fubUserId ? `Sent through ${agent.name}'s client link; the FUB task is assigned to ${agent.name}.` : `Sent through ${agent.name}'s client link. ${agent.name} has no Follow Up Boss user yet, so the FUB task is assigned to Peter.`) : null,
       "Review the protected request in Admin, Builder Deals.",
     ].filter(Boolean).join("\n"),
   });

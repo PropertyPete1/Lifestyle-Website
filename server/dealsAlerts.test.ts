@@ -8,9 +8,9 @@ vi.mock("./dealsService", async (importOriginal) => ({
 }));
 vi.mock("./dealsEmail", () => ({ sendBuilderDealsEmail: (...args: unknown[]) => mocks.sendBuilderDealsEmail(...args) }));
 
-import { dealAlerts } from "../drizzle/schema";
+import { dealAlerts, dealTeamAllowlist } from "../drizzle/schema";
 import { createFakeDealsDb } from "./dealsFubFakeDb.test-support";
-import { adminLeadLink, digestContent, queueFirstUnlockAlert, queueProfileFlagAlert } from "./dealsAlerts";
+import { adminLeadLink, digestContent, queueClientLinkAttachedAlert, queueFirstUnlockAlert, queueProfileFlagAlert } from "./dealsAlerts";
 
 const EM_DASH = "—";
 const lead = { id: 31, name: null, phoneE164: "+12105550123", email: null, instagramHandle: "pete_buys", sourceCode: "sl1", timeline: "0-3 months" };
@@ -95,5 +95,47 @@ describe("Builder Deals follow-up flag alert and digest copy", () => {
     const digest = digestContent([{ subject: "Builder Deals: new buyer unlocked the list", content: "Phone: +12105550123" }]);
     expect(digest).toContain("Builder Deals hourly alert digest: 1 alert.");
     expect(digest).not.toContain(EM_DASH);
+  });
+});
+
+describe("alerts for an agent's client", () => {
+  const tiffany = { id: 5, name: "Tiffany Agent", phoneE164: "+12105550101", email: "tiffany@example.com", fubUserId: "77", fubIdentityKey: null, source: "fub", active: true, createdAt: new Date() };
+
+  it("adds the agent to the first-unlock alert and states the assignment that actually happened", async () => {
+    const cases: Array<[Record<string, unknown>, Record<string, unknown>, string]> = [
+      [tiffany, { fubPersonId: "9001" }, "The FUB contact is assigned to Tiffany Agent."],
+      [{ ...tiffany, fubUserId: null }, { fubPersonId: "9001" }, "Tiffany Agent has no Follow Up Boss user yet, so the FUB contact is assigned to Peter."],
+      [tiffany, { fubPersonId: "9001", alreadyAssignedTo: "Jane Agent" }, "The FUB contact was already assigned to Jane Agent; the assignment was left alone."],
+      [tiffany, { fubIssue: "FUB delivery failed" }, "The FUB contact is not synced yet; it will be assigned to Tiffany Agent."],
+    ];
+    for (const [row, details, line] of cases) {
+      const db = createFakeDealsDb([[dealTeamAllowlist, [row]], [dealTeamAllowlist, [row]], [dealAlerts, []]]);
+      mocks.getDb.mockResolvedValue(db);
+      await queueFirstUnlockAlert({ ...lead, agentTeamId: 5 }, details);
+      const alert = insertedAlert(db);
+      expect(alert.subject).toBe("Builder Deals: Tiffany Agent's client unlocked the list");
+      expect(JSON.parse(String(alert.recipients))).toEqual([...settings.alertRecipients, "tiffany@example.com"]);
+      expect(String(alert.content)).toContain(line);
+    }
+  });
+
+  it("leaves an agent who left the team off the alert", async () => {
+    const gone = { ...tiffany, active: false };
+    const db = createFakeDealsDb([[dealTeamAllowlist, [gone]], [dealTeamAllowlist, [gone]], [dealAlerts, []]]);
+    mocks.getDb.mockResolvedValue(db);
+    await queueFirstUnlockAlert({ ...lead, agentTeamId: 5 }, { fubPersonId: "9001" });
+    const alert = insertedAlert(db);
+    expect(alert.subject).toBe("Builder Deals: new buyer unlocked the list");
+    expect(JSON.parse(String(alert.recipients))).toEqual(settings.alertRecipients);
+  });
+
+  it("tells the agent once per link when an existing buyer connects through it", async () => {
+    const db = createFakeDealsDb([[dealAlerts, []]]);
+    mocks.getDb.mockResolvedValue(db);
+    await queueClientLinkAttachedAlert(lead, { name: "Tiffany Agent", email: "tiffany@example.com" }, 7);
+    const alert = insertedAlert(db);
+    expect(alert).toMatchObject({ dedupeKey: "client_link_attached:31:7", subject: "Builder Deals: Tiffany Agent's client is on their list" });
+    expect(String(alert.content)).toContain("keeps its current assignment; a note on it names Tiffany Agent");
+    expect(String(alert.content)).not.toContain(EM_DASH);
   });
 });

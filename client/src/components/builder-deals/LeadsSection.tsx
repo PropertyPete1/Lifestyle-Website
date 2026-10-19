@@ -45,7 +45,7 @@ export function LeadDetailView({ leadId }: { leadId: number }) {
       </div>
       <div>
         <p className="font-medium text-foreground">Tour requests and questions</p>
-        {tours.length ? <ul className="mt-1 space-y-1">{tours.map((tour) => <li key={tour.id}>{tour.requestType === "tour" ? "Tour" : "Ask"}: {tour.privateAddress || tour.privatePlanName || "home removed"}, preferred {displayDate(tour.preferredAt)}{tour.fubTaskId ? ", FUB task created" : ", FUB task pending"}</li>)}</ul> : <p className="text-muted-foreground">None yet.</p>}
+        {tours.length ? <ul className="mt-1 space-y-1">{tours.map((tour) => <li key={tour.id}>{tour.requestType === "tour" ? "Tour" : tour.requestType === "save" ? (tour.removedAt ? "Saved, then removed" : "Saved") : "Ask"}: {tour.privateAddress || tour.privatePlanName || "home removed"}, {tour.requestType === "save" ? `saved ${displayDate(tour.createdAt)}` : `preferred ${displayDate(tour.preferredAt)}`}{tour.fubTaskId ? ", FUB task created" : ", FUB task pending"}</li>)}</ul> : <p className="text-muted-foreground">None yet.</p>}
       </div>
       <div>
         <p className="font-medium text-foreground">FUB jobs</p>

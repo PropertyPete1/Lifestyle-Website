@@ -425,6 +425,11 @@ export async function recordDealsLanding(input: { sourceCode: string; deviceHash
 
 /** The reason written when a visitor answers "Yes" to the agent question; an LDR agent's own client is exempt from it. */
 export const HAS_AGENT_BLOCK_REASON = "Confirmed working with an agent";
+/** Reasons the automatic realtor screening writes. An agent's own client is exempt from these; an admin's block is not. */
+const SCREENING_BLOCK_REASONS = new Set([HAS_AGENT_BLOCK_REASON, "has_agent", "known_agent", "fub_realtor", "brokerage_domain", "post_verification", "realtor screening"]);
+export function isScreeningBlockReason(reason: string) {
+  return SCREENING_BLOCK_REASONS.has(reason) || (reason.endsWith(" device cooldown") && SCREENING_BLOCK_REASONS.has(reason.slice(0, -" device cooldown".length)));
+}
 
 export async function getActiveBlock(input: { phone?: string; email?: string; deviceHash?: string; ignoreHasAgent?: boolean }) {
   const db = await getDb();
@@ -437,7 +442,7 @@ export async function getActiveBlock(input: { phone?: string; email?: string; de
   if (!matches.length) return undefined;
   const now = new Date();
   const rows = await db.select().from(dealBlocklist).where(and(or(...matches), or(isNull(dealBlocklist.expiresAt), gt(dealBlocklist.expiresAt, now)))).limit(input.ignoreHasAgent ? 20 : 1);
-  return input.ignoreHasAgent ? rows.find((row) => row.reason !== HAS_AGENT_BLOCK_REASON) : rows[0];
+  return input.ignoreHasAgent ? rows.find((row) => !isScreeningBlockReason(row.reason)) : rows[0];
 }
 
 export async function blockDealAccess(input: { phone?: string | null; email?: string | null; deviceHash?: string | null; searchPhone?: string | null; reason: string; expiresAt?: Date | null }) {
@@ -579,11 +584,16 @@ function publicIncentive(row: typeof dealIncentives.$inferSelect) {
  */
 export type DealsCatalogView = { view: "gated" } | { view: "full"; builderPages: boolean };
 
-/** Team sessions and agent-sent buyers see the full list; everyone else the scrubbed one. */
-export function catalogViewForLead(lead: Pick<typeof dealLeads.$inferSelect, "status" | "agentTeamId">): DealsCatalogView {
-  if (lead.status === "team") return { view: "full", builderPages: true };
-  if (lead.agentTeamId) return { view: "full", builderPages: false };
-  return { view: "gated" };
+/**
+ * Team sessions and buyers whose agent link is still live (not turned off,
+ * agent still on the team) see the full list; everyone else the scrubbed one.
+ * The live agent comes back with it so the page can name them.
+ */
+export async function catalogViewForSession(lead: Pick<typeof dealLeads.$inferSelect, "id" | "status" | "agentTeamId" | "clientLinkId">): Promise<{ view: DealsCatalogView; agent: import("./dealsClientLinks").DealsAgent | null }> {
+  if (lead.status === "team") return { view: { view: "full", builderPages: true }, agent: null };
+  const { liveAgentForClient } = await import("./dealsClientLinks");
+  const agent = await liveAgentForClient(lead);
+  return agent ? { view: { view: "full", builderPages: false }, agent } : { view: { view: "gated" }, agent: null };
 }
 
 export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView = { view: "gated" }) {
@@ -642,7 +652,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       incentive: incentiveRows[0] ? publicIncentive(incentiveRows[0]) : null,
       homes,
-      ...(full ? { details: { builderName: community.builder === "Manual" ? null : community.builder, communityName: community.privateName, address: community.privateAddress || null, salesLine: community.salesPhone, builderPage: view.builderPages && /^https?:\/\//i.test(community.sourceUrl) ? community.sourceUrl : null } } : {}),
+      ...(full ? { details: { builderName: community.builder === "Manual" ? null : community.builder, communityName: community.privateName, address: community.privateAddress || null, salesLine: view.builderPages ? community.salesPhone : null, builderPage: view.builderPages && /^https?:\/\//i.test(community.sourceUrl) ? community.sourceUrl : null } } : {}),
     };
     if (!full && await dropPrivateResidue(community.id, entry, scrubNames, "gated")) continue;
     data.push(entry);
@@ -671,6 +681,16 @@ export async function isLiveDealSession(req: Request): Promise<{ leadId: number;
   if (!tokenRow) return null;
   const lead = (await db.select().from(dealLeads).where(and(eq(dealLeads.id, tokenRow.leadId), or(eq(dealLeads.status, "verified"), eq(dealLeads.status, "team")), gt(dealLeads.expiresAt, new Date()))).limit(1))[0];
   return lead ? { leadId: lead.id, lead, deviceHash } : null;
+}
+
+/** The lead behind this browser's session cookie even after it lapsed or was revoked; used only to keep an agent's link on the expired page. */
+export async function staleSessionLeadId(req: Request): Promise<number | null> {
+  const token = parseCookie(req.headers.cookie || "")[DEALS_COOKIE.session];
+  const deviceHash = dealDeviceHash(req);
+  const db = await getDb();
+  if (!token || !deviceHash || !db) return null;
+  const row = (await db.select({ leadId: dealAccessTokens.leadId }).from(dealAccessTokens).where(and(eq(dealAccessTokens.kind, "session"), eq(dealAccessTokens.tokenHash, hashSecret(token)), eq(dealAccessTokens.deviceHash, deviceHash))).limit(1))[0];
+  return row?.leadId ?? null;
 }
 
 /** The live session's row and cookie follow a longer lead expiry (an agent's client link attached mid-session). */
@@ -724,20 +744,30 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   const { deviceHash, hasProbe } = ensureDealsCookies(input.req, input.res);
   if (!hasProbe) return { ok: false as const, kind: "cookie_blocked" };
   const ip = realClientIp(input.req);
-  // An agent's client link wins over any reel code on the same URL; an expired
-  // or revoked link simply falls back to the ordinary gate.
-  const { resolveClientLink } = await import("./dealsClientLinks");
-  const clientLink = input.clientLinkToken ? await resolveClientLink(input.clientLinkToken) : null;
-  const sourceCode = clientLink ? AGENT_CLIENT_SOURCE : currentDealSource(input.source, settings);
   const ig = sanitizeInstagramHandle(input.ig);
   const google = getGoogleDealsIdentity(input.req);
   const isTest = settings.testNumbers.includes(normalized.e164);
+  // An agent's client link wins over any reel code on the same URL. It opens
+  // only for its own client (the number the agent typed, or the first number
+  // that verified through it); a dead link or another number is told so and
+  // never falls through to the realtor question. Team members pass either way.
+  const { clientLinkForPhone, teamRowsForLead } = await import("./dealsClientLinks");
+  const linkCheck = input.clientLinkToken ? await clientLinkForPhone(input.clientLinkToken, normalized.e164) : null;
+  if (linkCheck && !linkCheck.ok) {
+    const teamMember = settings.testTeamNumbers.includes(normalized.e164) || (await teamRowsForLead({ phoneE164: normalized.e164, email: google?.email ?? null })).length > 0;
+    if (!teamMember) {
+      await logDealEvent({ kind: "client_link_refused", sourceCode: AGENT_CLIENT_SOURCE, deviceHash, ip, phone: normalized.e164, detail: linkCheck.kind });
+      return { ok: false as const, kind: linkCheck.kind === "other_phone" ? "link_other_phone" as const : "link_dead" as const, agentName: linkCheck.agentName };
+    }
+  }
+  const clientLink = linkCheck?.ok ? linkCheck.resolved : null;
+  const sourceCode = input.clientLinkToken ? AGENT_CLIENT_SOURCE : currentDealSource(input.source, settings);
   const { classifyDealsAccess } = await import("./dealsEligibility");
   const eligibility = await classifyDealsAccess({
     phone: normalized.e164, email: google?.email, deviceHash, isTest,
     testSkipChecks: settings.testNumbersSkipChecks, testTeamNumbers: settings.testTeamNumbers,
     brokerageDomains: settings.brokerageDomains, fubRealtorTags: settings.fubRealtorTags,
-    fubRealtorSources: settings.fubRealtorSources, choice: clientLink ? "buyer" : input.choice, clientLink: Boolean(clientLink),
+    fubRealtorSources: settings.fubRealtorSources, choice: input.clientLinkToken ? "buyer" : input.choice, clientLink: Boolean(clientLink),
   });
   // Staff/test previews must not create an accidental "has agent" device
   // block merely because they test the visible confirmation choice.
@@ -758,7 +788,8 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   }
 
   const { profileRealtorFlags } = await import("./dealsEligibility");
-  const profileFlags = eligibility.team ? [] : await profileRealtorFlags({
+  // An agent vouches for their own client: no "possible agent" profile flags for them.
+  const profileFlags = eligibility.team || clientLink ? [] : await profileRealtorFlags({
     name: google?.name,
     instagramHandle: ig,
     handleKeywords: settings.handleKeywords,
@@ -839,7 +870,7 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   const settings = await getDealSettings();
   const isTest = settings.testNumbers.includes(pending.phoneE164);
   const identity = JSON.parse(pending.flags || "{}") as { google?: GoogleDealsIdentity; flags?: string[]; team?: boolean; completed?: VerificationReceipt; clientLinkId?: number; agentTeamId?: number };
-  const clientLink = Number.isSafeInteger(identity.clientLinkId) && Number.isSafeInteger(identity.agentTeamId) ? { linkId: identity.clientLinkId as number, agentTeamId: identity.agentTeamId as number } : null;
+  const storedLink = Number.isSafeInteger(identity.clientLinkId) && Number.isSafeInteger(identity.agentTeamId) ? { linkId: identity.clientLinkId as number, agentTeamId: identity.agentTeamId as number } : null;
   const cookies = parseCookie(input.req.headers.cookie || "");
   // Both cookie values are high-entropy, HTTP-only, device-bound secrets. This
   // stable value lets a concurrent response redirect to the very same link.
@@ -850,7 +881,7 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
     if (receipt.codeHash !== hashSecret(input.code)) return { ok: false as const, kind: "invalid_code" };
     if (!lead || lead.revokedAt || !["verified", "team"].includes(lead.status) || lead.expiresAt <= new Date()) return { ok: false as const, kind: "expired" };
     clearDealCookie(input.res, DEALS_COOKIE.pending);
-    return { ok: true as const, token, leadId: lead.id, expiresAt: lead.expiresAt, firstUnlock: false, reverifiedActive: true, isTeam: lead.status === "team", isTest: receipt.isTest, fubCheckDeferred: receipt.fubCheckDeferred, duplicate: true };
+    return { ok: true as const, token, leadId: lead.id, expiresAt: lead.expiresAt, firstUnlock: false, reverifiedActive: true, isTeam: lead.status === "team", isTest: receipt.isTest, fubCheckDeferred: receipt.fubCheckDeferred, duplicate: true, clientLinkAttached: null };
   }
   const expectedTestCode = process.env.DEALS_TEST_OTP?.trim();
   if (isTest && input.code === expectedTestCode) {
@@ -868,6 +899,8 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
 
   // Re-evaluate the mutable checks after the code is approved and before any
   // token is created. A discovered match cannot inherit an issued link.
+  // The link is checked again now: turned off, agent removed, or bound to another number meanwhile attaches nothing.
+  const clientLink = storedLink && await (await import("./dealsClientLinks")).clientLinkStillValid(storedLink.linkId, pending.phoneE164) ? storedLink : null;
   const eligibility = await (await import("./dealsEligibility")).classifyDealsAccess({
     phone: pending.phoneE164, email: identity.google?.email, deviceHash,
     isTest, testSkipChecks: settings.testNumbersSkipChecks, testTeamNumbers: settings.testTeamNumbers,
@@ -930,7 +963,9 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   await db.update(dealPendingVerifications).set({ flags: JSON.stringify({ ...identity, completed: { codeHash: hashSecret(input.code), leadId, expiresAt: expiresAt.toISOString(), isTeam: eligibility.team, isTest, fubCheckDeferred } satisfies VerificationReceipt }) }).where(eq(dealPendingVerifications.id, pending.id));
   clearDealCookie(input.res, DEALS_COOKIE.pending);
   await db.insert(dealEvents).values({ leadId, kind: eligibility.team ? "team" : "verified", sourceCode: pending.sourceCode, deviceHash, ipPrefix: clientIpKey(pending.clientIp), phoneE164: pending.phoneE164, detail: attachLink ? `${input.verifiedBy};client_link:${attachLink.linkId}` : input.verifiedBy });
-  return { ok: true as const, token, leadId, expiresAt, firstUnlock: !old, reverifiedActive, isTeam: eligibility.team, isTest, fubCheckDeferred, duplicate: false };
+  // An existing lead newly attached to this link: the agent is told (a first unlock already alerts them).
+  const clientLinkAttached = attachLink && old && old.clientLinkId !== attachLink.linkId ? attachLink.linkId : null;
+  return { ok: true as const, token, leadId, expiresAt, firstUnlock: !old, reverifiedActive, isTeam: eligibility.team, isTest, fubCheckDeferred, duplicate: false, clientLinkAttached };
 }
 
 export function dealsPublicHeaders(res: Response) {

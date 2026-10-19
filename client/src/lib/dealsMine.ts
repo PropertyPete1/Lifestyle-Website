@@ -67,6 +67,12 @@ export function countdownSeconds(expiresAt: string, now: number): number {
 
 export function countdownLabel(expiresAt: string, now: number): string {
   const seconds = countdownSeconds(expiresAt, now);
+  // A week-long agent-client window reads in days, not "167:59:59".
+  if (seconds > 48 * 3600) {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    return `${days}d ${hours}h`;
+  }
   return `${String(Math.floor(seconds / 3600)).padStart(2, "0")}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 

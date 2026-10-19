@@ -1,7 +1,21 @@
 import type { Express, Request, Response, NextFunction } from "express";
-import { completeVerification, currentDealSource, dealsCsp, dealsPublicHeaders, ensureDealsCookies, exchangeAccessToken, getDealSettings, isDealsCrawler, randomOpaqueToken, recordDealsLanding, setDealCookie, setGoogleDealsIdentity } from "./dealsService";
+import { AGENT_CLIENT_SOURCE, completeVerification, currentDealSource, dealsCsp, dealsPublicHeaders, ensureDealsCookies, exchangeAccessToken, getDealSettings, isDealsCrawler, randomOpaqueToken, recordDealsLanding, setDealCookie, setGoogleDealsIdentity } from "./dealsService";
 import { DEALS_COOKIE } from "../shared/deals";
 import { parse as parseCookie } from "cookie";
+
+/** An agent's client-link token, carried back onto every gate redirect so the visitor keeps their agent's gate. */
+function linkSuffix(value: unknown) {
+  const token = typeof value === "string" ? value.trim() : "";
+  return /^[A-Za-z0-9_-]{20,64}$/.test(token) ? `&c=${encodeURIComponent(token)}` : "";
+}
+
+/** A lapsed session that came through an agent's link goes back to that link's expired page, not the reel one. */
+async function expiredRedirect(req: Request) {
+  const { staleSessionLeadId } = await import("./dealsService");
+  const { clientLinkTokenForLead } = await import("./dealsClientLinks");
+  const token = await clientLinkTokenForLead(await staleSessionLeadId(req)).catch(() => null);
+  return `/deals?expired=1${linkSuffix(token)}`;
+}
 
 const safe = (handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
   (req: Request, res: Response, next: NextFunction) => { void handler(req, res, next).catch(next); };
@@ -20,7 +34,8 @@ export function registerDealsRoutes(app: Express) {
     if (req.method === "GET") {
       const cookies = ensureDealsCookies(req, res);
       if (req.path === "/" && !isDealsCrawler(req)) {
-        void getDealSettings().then((settings) => recordDealsLanding({ sourceCode: currentDealSource(String(req.query.src ?? ""), settings), deviceHash: cookies.deviceHash, ip: req.ip || req.socket.remoteAddress || "0.0.0.0" })).catch(() => console.error("[deals] landing event failed"));
+        const agentLink = Boolean(linkSuffix(req.query.c));
+        void getDealSettings().then((settings) => recordDealsLanding({ sourceCode: agentLink ? AGENT_CLIENT_SOURCE : currentDealSource(String(req.query.src ?? ""), settings), deviceHash: cookies.deviceHash, ip: req.ip || req.socket.remoteAddress || "0.0.0.0" })).catch(() => console.error("[deals] landing event failed"));
       }
     }
     next();
@@ -45,11 +60,12 @@ export function registerDealsRoutes(app: Express) {
 
   app.post("/deals/verify", safe(async (req, res) => {
     const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
-    if (!/^\d{6}$/.test(code)) return res.redirect(302, "/deals?codeError=1");
+    const link = linkSuffix(req.body?.c);
+    if (!/^\d{6}$/.test(code)) return res.redirect(302, `/deals?codeError=1${link}`);
     const completed = await completeVerification({ req, res, code });
     // An expired 10-minute code session is a gate outcome (?codeError=expired, "Your code
     // session expired. Start again."), not an expired personal link (?expired=1).
-    if (!completed.ok) return res.redirect(302, completed.kind === "blocked" ? "/deals?gate=1&blocked=1" : `/deals?codeError=${encodeURIComponent(completed.kind)}`);
+    if (!completed.ok) return res.redirect(302, completed.kind === "blocked" ? `/deals?gate=1&blocked=1${link}` : `/deals?codeError=${encodeURIComponent(completed.kind)}${link}`);
     const settings = await getDealSettings();
     const isTest = completed.isTest;
     // Access is never held hostage by CRM availability. A durable job re-reads
@@ -62,12 +78,17 @@ export function registerDealsRoutes(app: Express) {
       if (!completed.isTeam && !completed.duplicate && (!isTest || settings.testModeFullPipeline)) {
         const { enqueueDealsFubJob, runPendingDealsFubJobs } = await import("./dealsFubJobs");
         await enqueueDealsFubJob(completed.leadId, completed.firstUnlock ? "first_unlock" : "reverify", {
-          reason: completed.reverifiedActive ? "re-verified on a second device" : "returned for a new link",
+          reason: completed.clientLinkAttached ? "attached to an agent's client link" : completed.reverifiedActive ? "re-verified on a second device" : "returned for a new link",
           // FUB was unreachable at verification: the runner re-runs the realtor
           // check with the background timeout before any FUB write.
           deferredCheck: completed.fubCheckDeferred,
         });
         void runPendingDealsFubJobs(1).catch(console.error);
+        // A returning buyer who verified through an agent's link: that agent is told once per link.
+        if (completed.clientLinkAttached && !completed.firstUnlock) {
+          const { notifyClientLinkAttached } = await import("./dealsAlerts");
+          await notifyClientLinkAttached(completed.leadId, completed.clientLinkAttached);
+        }
       }
     } catch { console.error("[deals] verification side-effect enqueue failed"); }
     // The browser redirects through an opaque, device-bound, one-time token;
@@ -86,7 +107,7 @@ export function registerDealsRoutes(app: Express) {
       // A session cookie that no longer unlocks anything is an expired 24 h link: that
       // visitor gets the expired page; a browser with no session at all gets the gate.
       const hadSession = Boolean(parseCookie(req.headers.cookie || "")[DEALS_COOKIE.session]);
-      return res.redirect(302, hadSession ? "/deals?expired=1" : "/deals?gate=1");
+      return res.redirect(302, hadSession ? await expiredRedirect(req) : "/deals?gate=1");
     }
     next();
   }));

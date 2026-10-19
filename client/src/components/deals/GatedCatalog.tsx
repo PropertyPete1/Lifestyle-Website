@@ -53,7 +53,7 @@ export type GatedCommunity = {
 
 export type GatedLead = { display: string; expiresAt: string; name: string | null; timeline: string | null; teamPreview: boolean; agentClient?: boolean };
 /** The agent who shared the list with this buyer, as the page may name them. */
-export type GatedAgent = { name: string; phone: string | null } | null;
+export type GatedAgent = { name: string; firstName?: string | null; phone: string | null } | null;
 export type HomeRequest = { card: string; requestType: "tour" | "ask" };
 
 export const PHOTOS_ON_REQUEST = "Photos on request";
@@ -94,9 +94,10 @@ function HomeCard({ home, teamPreview, saved, saving, onRequest, onSave }: { hom
     {home.moveInDate && <p className="mt-2 text-sm text-muted-foreground">Est. move-in: {home.moveInDate}</p>}
     {home.lotSize && <p className="mt-1 text-sm text-muted-foreground">Lot: {home.lotSize}</p>}
     {details?.builderPage && <a href={details.builderPage} target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-11 items-center gap-1 text-xs uppercase tracking-widest text-gold underline-offset-4 hover:underline">Builder page <ExternalLink className="h-3.5 w-3.5" /></a>}
-    <div className="mt-6 flex items-stretch gap-3">
+    {/* Wraps on a narrow phone instead of clipping the request button. */}
+    <div className="mt-6 flex flex-wrap items-stretch gap-3">
       {onSave && <SaveButton saved={saved} saving={saving} onToggle={() => onSave(home.card, !saved)} />}
-      {teamPreview ? <p className="flex flex-1 items-center justify-center border border-gold/35 px-4 py-3 text-center text-xs uppercase tracking-widest text-gold">Team view</p> : <Button type="button" onClick={() => onRequest?.({ card: home.card, requestType: toBeBuilt ? "ask" : "tour" })} className="min-h-11 flex-1 bg-gold text-primary-foreground">{toBeBuilt ? "Ask about this one" : "Tour this home with us"}</Button>}
+      {teamPreview ? <p className="flex min-w-[10rem] flex-1 items-center justify-center border border-gold/35 px-4 py-3 text-center text-xs uppercase tracking-widest text-gold">Team view</p> : <Button type="button" onClick={() => onRequest?.({ card: home.card, requestType: toBeBuilt ? "ask" : "tour" })} className="h-auto min-h-11 min-w-[10rem] flex-1 whitespace-normal bg-gold text-primary-foreground">{toBeBuilt ? "Ask about this one" : "Tour this home with us"}</Button>}
     </div>
   </article>;
 }
@@ -148,7 +149,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
   return <main data-deals-gated="true" style={identityPatternStyle(lead.display)} className="min-h-screen max-w-full overflow-x-clip bg-background">
     <header className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link><span className="flex items-center gap-4 text-xs text-gold">{lead.teamPreview && <Link href="/deals/team" className="inline-flex min-h-11 items-center underline-offset-4 hover:underline">Agent tools</Link>}<span><Clock3 className="mr-1 inline h-3.5 w-3.5" /> <Countdown expiresAt={lead.expiresAt} now={now} onExpire={onExpire} /></span></span></header>
     <section className="px-5 py-10 sm:px-8"><div className="mx-auto max-w-5xl">
-      <div className="border-b border-border pb-7"><p className="eyebrow text-gold">{eyebrow}</p><h1 className="mt-2 break-words text-4xl sm:text-5xl">Prepared for {lead.display}</h1><p className="mt-3 text-sm text-muted-foreground">Updated {formatChicagoDate(updatedAt)}. Your access expires in <Countdown expiresAt={lead.expiresAt} now={now} />.</p>{agent && !lead.teamPreview && <p className="mt-3 text-sm text-foreground" data-deals-agent-note="true">{agent.name} picked these for you. Tap Save on any home and {agent.name.split(" ")[0]} hears about it right away.{agent.phone ? ` Questions? Text ${agent.name.split(" ")[0]} at ${agent.phone}.` : ""}</p>}</div>
+      <div className="border-b border-border pb-7"><p className="eyebrow text-gold">{eyebrow}</p><h1 className="mt-2 break-words text-4xl sm:text-5xl">Prepared for {lead.display}</h1><p className="mt-3 text-sm text-muted-foreground">Updated {formatChicagoDate(updatedAt)}. Your access expires in <Countdown expiresAt={lead.expiresAt} now={now} />.</p>{agent && !lead.teamPreview && <p className="mt-3 text-sm text-foreground" data-deals-agent-note="true">Shared with you by {agent.name}. Tap Save on any home and {agent.firstName ?? "your agent"} hears about it right away.{agent.phone ? ` Questions? Text ${agent.firstName ?? agent.name} at ${agent.phone}.` : ""}</p>}</div>
       {tools}
       {!promptDismissed && !profileSaved && !lead.name && !lead.teamPreview && <NamePrompt onSave={onSaveProfile} saving={savingProfile} error={profileError} onDismiss={() => setPromptDismissed(true)} />}
       <div className="mt-10 space-y-12">{communities.map((community, index) => <section key={index} className="border-t border-border pt-8">

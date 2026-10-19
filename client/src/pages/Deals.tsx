@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import { MINE_COPY, isUnauthorizedDealsError, profileErrorCopy } from "@/lib/dealsMine";
-import { boundClientLinkToken } from "@/lib/dealsGate";
+import { rememberClientLinkToken } from "@/lib/dealsGate";
 import { GateSheet } from "@/components/deals/GateSheet";
 import { GatedCatalog, type GatedCommunity, type HomeRequest } from "@/components/deals/GatedCatalog";
 import { AgentTools, type AgentWorkspaceData } from "@/components/deals/AgentTools";
@@ -24,29 +24,39 @@ function HomeRequestSheet({ request, onClose }: { request: HomeRequest | null; o
   return <div className="fixed inset-0 z-[95] flex items-end bg-black/70 p-4 sm:items-center sm:justify-center"><section role="dialog" aria-modal="true" aria-labelledby="deals-request-title" className="w-full max-w-md border border-gold/40 bg-[#07070a] p-6 shadow-2xl"><button type="button" onClick={onClose} className="float-right -mr-2 -mt-2 flex h-11 w-11 items-center justify-center text-muted-foreground hover:text-gold" aria-label="Close request form"><X className="h-4 w-4" /></button><p className="eyebrow text-gold">Personal assistance</p><h2 id="deals-request-title" className="mt-2 text-3xl">{request.requestType === "tour" ? "Tour this home with us" : "Ask about this one"}</h2><p className="mt-3 text-sm text-muted-foreground">Choose the day and time that works for you. We will confirm the details directly.</p><Label htmlFor="deals-preferred" className="mt-6 block text-xs uppercase tracking-widest">Preferred day and time</Label><Input id="deals-preferred" type="datetime-local" value={preferred} onChange={(event) => setPreferred(event.target.value)} className="mt-2 min-h-11" /><Button type="button" disabled={!preferred || submit.isPending} onClick={() => submit.mutate({ card: request.card, requestType: request.requestType, preferredAt: new Date(preferred).toISOString() })} className="mt-5 w-full bg-gold py-6 text-primary-foreground">{submit.isPending ? "Sending…" : "Send request"}</Button>{submit.isError && <p role="alert" className="mt-3 text-sm text-destructive">{submit.error.message}</p>}</section></div>;
 }
 
+/**
+ * A buyer who already has a live list opens an agent's client link: one tap
+ * connects the list to that agent (no second code), or they keep it as it is.
+ */
+function ConnectSheet({ agentName, token }: { agentName: string; token: string }) {
+  const goToList = () => window.location.assign("/deals/mine");
+  const attach = trpc.deals.attachClientLink.useMutation({
+    onSuccess: (result) => { if (!result.ok) toast.error(result.message); goToList(); },
+    onError: goToList,
+  });
+  return <div className="fixed inset-0 z-[95] flex items-end bg-black/70 p-4 sm:items-center sm:justify-center"><section role="dialog" aria-modal="true" aria-labelledby="deals-connect-title" data-deals-connect="true" className="w-full max-w-md border border-gold/40 bg-[#07070a] p-6 shadow-2xl"><p className="eyebrow text-gold">Shared by {agentName}</p><h2 id="deals-connect-title" className="mt-2 text-3xl leading-tight">Connect your list with {agentName}?</h2><p className="mt-3 text-sm text-muted-foreground">You already have access. Connecting shows every address on your list, and {agentName} hears about the homes you save.</p><Button type="button" disabled={attach.isPending} onClick={() => attach.mutate({ c: token })} className="mt-6 w-full bg-gold py-6 text-primary-foreground">{attach.isPending ? "Connecting…" : `Yes, connect with ${agentName}`}</Button><Button type="button" variant="outline" disabled={attach.isPending} onClick={goToList} className="mt-3 w-full py-6">No thanks, take me to my list</Button></section></div>;
+}
+
 function Landing() {
-  // An agent's client link (?c=) is read once; the gate and the start call carry it to the server.
-  const [clientToken] = useState(() => boundClientLinkToken(new URLSearchParams(window.location.search).get("c")));
+  // An agent's client link (?c=, or the one this tab kept) goes to the state query, the gate and the start call.
+  const [clientToken] = useState(() => rememberClientLinkToken(window.location.search));
   const state = trpc.deals.state.useQuery(clientToken ? { c: clientToken } : undefined);
   const catalog = trpc.deals.publicCatalog.useQuery();
   const [gateOpen, setGateOpen] = useState(true);
-  // A buyer with a live list who opens an agent's link is attached without a second code, then sent to the list.
-  const attach = trpc.deals.attachClientLink.useMutation({ onSettled: () => window.location.assign("/deals/mine") });
-  const attachStarted = useRef(false);
   useInstagramEmbeds();
   const hasSession = Boolean(state.data?.session);
   const teamSession = Boolean(state.data?.session?.teamPreview);
+  const shared = state.data?.clientLink?.state === "live" ? state.data.clientLink : null;
+  // A buyer with a live list and a live link is asked first; everyone else with a session goes straight to their page.
+  const askToConnect = hasSession && !teamSession && Boolean(clientToken && shared);
   useEffect(() => {
-    if (!hasSession) return;
-    if (teamSession) { window.location.assign("/deals/team"); return; }
-    if (clientToken && !attachStarted.current) { attachStarted.current = true; attach.mutate({ c: clientToken }); return; }
-    if (!clientToken) window.location.assign("/deals/mine");
-  }, [hasSession, teamSession, clientToken]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!hasSession || askToConnect) return;
+    window.location.assign(teamSession ? "/deals/team" : "/deals/mine");
+  }, [hasSession, teamSession, askToConnect]);
   const pendingKey = state.data?.pending?.expiresAt ?? null;
   useEffect(() => { if (pendingKey) setGateOpen(true); }, [pendingKey]);
   const updatedAt = catalog.data?.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
-  const shared = state.data?.clientLink ?? null;
-  return <main className="min-h-screen max-w-full overflow-x-clip bg-background"><header className="flex min-w-0 items-center justify-center border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link></header><section className="ambient-section px-5 pb-28 pt-14 sm:px-8"><div className="mx-auto max-w-6xl"><p className="eyebrow text-gold">{shared ? `Shared by ${shared.agentName}` : "Private buyer access"}</p><h1 className="mt-3 max-w-xl text-5xl leading-[0.9] sm:text-7xl">{sourceLabel}</h1><p className="mt-5 text-sm text-muted-foreground">{shared ? `${shared.agentName} picked these for you. Verify your number once to open every address, photo and incentive.` : "Hand-picked by Property Pete."} Updated {formatChicagoDate(updatedAt)}.</p><div className="mt-12 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-2">{(catalog.data ?? []).map((community, index) => <motion.article key={index} className="min-w-0 overflow-hidden border border-border bg-card" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}><ReelCard reelUrl={community.reelUrl} label={community.label} /><div className="p-5"><p className="eyebrow text-gold">{community.area}</p><h2 className="mt-2 text-3xl leading-tight">{community.label}</h2>{community.fromPrice && <p className="mt-4 text-xl text-gold">From {money.format(community.fromPrice)}</p>}<div className="mt-5"><Incentive incentive={community.incentive} compact /></div><p className="mt-4 text-sm text-muted-foreground">{community.homesAvailable > 0 ? `${community.homesAvailable} homes available now` : `To-be-built from ${community.fromPrice ? money.format(community.fromPrice) : "current pricing"}`}</p></div></motion.article>)}</div></div></section><button type="button" onClick={() => setGateOpen(true)} className="fixed bottom-5 left-5 right-5 z-30 min-h-14 bg-gold px-5 text-sm font-medium uppercase tracking-[0.14em] text-primary-foreground shadow-xl sm:left-auto sm:right-8 sm:w-72">Unlock the full list <LockKeyhole className="ml-2 inline h-4 w-4" /></button><DealsFooter />{gateOpen && <GateSheet state={state.data} onClose={() => setGateOpen(false)} />}</main>;
+  return <main className="min-h-screen max-w-full overflow-x-clip bg-background"><header className="flex min-w-0 items-center justify-center border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link></header><section className="ambient-section px-5 pb-28 pt-14 sm:px-8"><div className="mx-auto max-w-6xl"><p className="eyebrow text-gold">{shared ? `Shared by ${shared.agentName}` : "Private buyer access"}</p><h1 className="mt-3 max-w-xl text-5xl leading-[0.9] sm:text-7xl">{sourceLabel}</h1><p className="mt-5 text-sm text-muted-foreground">{shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : "Hand-picked by Property Pete."} Updated {formatChicagoDate(updatedAt)}.</p><div className="mt-12 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-2">{(catalog.data ?? []).map((community, index) => <motion.article key={index} className="min-w-0 overflow-hidden border border-border bg-card" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}><ReelCard reelUrl={community.reelUrl} label={community.label} /><div className="p-5"><p className="eyebrow text-gold">{community.area}</p><h2 className="mt-2 text-3xl leading-tight">{community.label}</h2>{community.fromPrice && <p className="mt-4 text-xl text-gold">From {money.format(community.fromPrice)}</p>}<div className="mt-5"><Incentive incentive={community.incentive} compact /></div><p className="mt-4 text-sm text-muted-foreground">{community.homesAvailable > 0 ? `${community.homesAvailable} homes available now` : `To-be-built from ${community.fromPrice ? money.format(community.fromPrice) : "current pricing"}`}</p></div></motion.article>)}</div></div></section><button type="button" onClick={() => setGateOpen(true)} className="fixed bottom-5 left-5 right-5 z-30 min-h-14 bg-gold px-5 text-sm font-medium uppercase tracking-[0.14em] text-primary-foreground shadow-xl sm:left-auto sm:right-8 sm:w-72">Unlock the full list <LockKeyhole className="ml-2 inline h-4 w-4" /></button><DealsFooter />{askToConnect && shared && clientToken ? <ConnectSheet agentName={shared.agentName} token={clientToken} /> : gateOpen && !hasSession && <GateSheet state={state.data} clientToken={clientToken} onClose={() => setGateOpen(false)} />}</main>;
 }
 
 /**
@@ -91,9 +101,8 @@ function Team() {
   const mine = trpc.deals.mine.useQuery(undefined, { retry: false });
   const workspace = trpc.deals.team.workspace.useQuery(undefined, { retry: false });
   const create = trpc.deals.team.createClientLink.useMutation({ onSuccess: () => { void workspace.refetch(); } });
-  const revoke = trpc.deals.team.revokeClientLink.useMutation({ onSuccess: () => { void workspace.refetch(); } });
+  const revoke = trpc.deals.team.revokeClientLink.useMutation({ onSuccess: () => { toast.success("Link turned off. That client now sees the standard list."); void workspace.refetch(); }, onError: (error) => toast.error(error.message || "Could not turn that link off.") });
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
-  const { savingCard, onSave } = useSaveHome(() => { void mine.refetch(); });
   useInstagramEmbeds();
   const forbidden = workspace.isError && workspace.error.data?.code === "FORBIDDEN";
   useEffect(() => { if (forbidden && !mine.data?.lead.teamPreview && mine.data) window.location.assign("/deals/mine"); }, [forbidden, mine.data]);
@@ -107,7 +116,8 @@ function Team() {
   const tools = <AgentTools workspace={workspace.data as AgentWorkspaceData | undefined} loading={workspace.isLoading} error={workspace.isError ? workspace.error.message : null}
     created={create.data ?? null} creating={create.isPending} createError={create.isError ? create.error.message : null}
     onCreate={(input) => create.mutate(input)} onRevoke={(id) => revoke.mutate({ id })} onCopy={(url) => { void copy(url); }} copiedUrl={copiedUrl} />;
-  return <GatedCatalog lead={mine.data.lead} communities={mine.data.communities as GatedCommunity[]} saved={mine.data.saved} savingCard={savingCard} onSave={onSave} tools={tools} onExpire={() => { void mine.refetch(); }} />;
+  // Agents send the list; their own view has no Save hearts (a heart there would belong to no client).
+  return <GatedCatalog lead={mine.data.lead} communities={mine.data.communities as GatedCommunity[]} tools={tools} onExpire={() => { void mine.refetch(); }} />;
 }
 
 export default function Deals() {

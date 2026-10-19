@@ -473,6 +473,35 @@ describe("Builder Deals requests from an agent's client", () => {
     expect(mocks.appendBuilderDealsTourTask).not.toHaveBeenCalled();
   });
 
+  it("never announces a save the buyer took back before the jobs ran, and appends only new entries", async () => {
+    const removed = { ...tourRequest, id: 47, requestType: "save" as const, removedAt: new Date() };
+    const email = dbWithJob(job({ id: 13, operation: "request_email:47", payload: JSON.stringify({ requestId: 47, chicagoDay: "2026-10-18" }) }), agentClient, [[dealTourRequests, [removed]], [dealHomes, [requestedHome]], [dealTeamAllowlist, [teamRow]]]);
+    mocks.getDb.mockResolvedValue(email);
+    await runPendingDealsFubJobs();
+    expect(mocks.sendBuilderDealsEmail).not.toHaveBeenCalled();
+
+    // Day task already holds the first save; a second save is appended once, the removed one never.
+    const inTask = { ...tourRequest, id: 48, requestType: "save" as const, fubTaskId: "S1", createdAt: new Date("2026-10-18T13:00:00.000Z") };
+    const fresh = { ...tourRequest, id: 49, requestType: "save" as const, createdAt: new Date("2026-10-18T16:00:00.000Z") };
+    mocks.appendBuilderDealsTourTask.mockResolvedValue({ ok: true, taskId: "S1", records: [{ kind: "task", fubId: "S1", createdByUs: true }] });
+    const task = dbWithJob(job({ id: 14, operation: "save_task:2026-10-18", payload: JSON.stringify({ requestId: 49, chicagoDay: "2026-10-18" }) }), agentClient, [[dealTourRequests, [fresh]], [dealHomes, [requestedHome]], [dealTeamAllowlist, [teamRow]], [dealTourRequests, [inTask, { ...removed, id: 50 }, fresh]]]);
+    mocks.getDb.mockResolvedValue(task);
+    await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ sent: 1 });
+    expect(mocks.createBuilderDealsTourTask).not.toHaveBeenCalled();
+    expect(mocks.appendBuilderDealsTourTask).toHaveBeenCalledTimes(1);
+    expect(mocks.appendBuilderDealsTourTask).toHaveBeenCalledWith(expect.objectContaining({ taskId: "S1", request: expect.objectContaining({ id: 49 }) }));
+  });
+
+  it("tells the truth about FUB ownership when the agent has no FUB user", async () => {
+    const noFub = { ...teamRow, fubUserId: null };
+    const saveRequest = { ...tourRequest, id: 51, requestType: "save" as const };
+    const email = dbWithJob(job({ id: 15, operation: "request_email:51", payload: JSON.stringify({ requestId: 51, chicagoDay: "2026-10-18" }) }), agentClient, [[dealTourRequests, [saveRequest]], [dealHomes, [requestedHome]], [dealTeamAllowlist, [noFub]]]);
+    mocks.getDb.mockResolvedValue(email);
+    await runPendingDealsFubJobs();
+    const sent = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { content: string };
+    expect(sent.content).toContain("has no Follow Up Boss user yet, so the FUB task is assigned to Peter.");
+  });
+
   it("sends the agent to the first-unlock job so FUB assigns the contact to them", async () => {
     mocks.classifyDealsAccess.mockResolvedValue({ allowed: true, team: false, flags: ["agent_client"] });
     mocks.sendBuilderDealsLeadToFub.mockResolvedValue({ ok: true, personId: "9002", records: [{ kind: "person", fubId: "9002", createdByUs: true }] });

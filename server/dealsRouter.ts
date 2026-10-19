@@ -13,7 +13,7 @@ import { type DealsAdminError, acceptIncentiveHold, dismissCatalogHold, dismissI
 import { type PhotoAdminError, getBuilderPhotoSettingsForAdmin, getDealPhotoPreview, listBuilderPhotoSamples, reprocessBuilderPhotos, saveBuilderPhotoSettings, uploadManualHomePhoto } from "./dealsPhotosAdmin";
 import { parseStoredScrubList } from "./dealsScrub";
 import {
-  catalogViewForLead,
+  catalogViewForSession,
   chicagoDayStart,
   hashSecret,
   randomOpaqueToken,
@@ -38,7 +38,8 @@ import {
   showGoogleDealsButton,
   createPendingVerification,
 } from "./dealsService";
-import { CLIENT_LINK_TOKEN_PATTERN, agentDisplayPhone, agentForTeamId, agentWorkspace, attachLiveSessionToClientLink, createClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
+import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
+import { AGENT_CLIENT_SOURCE } from "./dealsService";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   const allowlisted = isAdminEmail(ctx.user.email) || ctx.user.openId === ENV.ownerOpenId;
@@ -214,13 +215,32 @@ const gateInput = z.object({
   /** An LDR agent's client link token (?c=); the agent question is skipped for it. */
   c: clientLinkToken,
 });
-/** A client link as the gate shows it: the agent's name and the client's first name only, never the phone the agent typed. */
-async function clientLinkPresentation(token: string | undefined) {
-  if (!token || !CLIENT_LINK_TOKEN_PATTERN.test(token)) return null;
-  const resolved = await resolveClientLink(token);
-  if (!resolved) return null;
-  void recordClientLinkOpen(resolved.link.id).catch(() => undefined);
-  return { agentName: resolved.agent.name, clientFirstName: resolved.link.clientName.split(/\s+/)[0] ?? "" };
+/**
+ * A client link as the gate shows it: the agent's name and the client's first
+ * name only, never the phone the agent typed. A team member's own look at the
+ * page is not counted as the client opening it.
+ */
+async function clientLinkPresentation(token: string | undefined, viewerIsTeam: boolean) {
+  const shown = await presentClientLink(token);
+  if (shown?.state === "live" && !viewerIsTeam) {
+    const resolved = await resolveClientLink(token);
+    if (resolved) void recordClientLinkOpen(resolved.link.id).catch(() => undefined);
+  }
+  return shown;
+}
+/** What an agent's client is told when the gate cannot open their link. */
+function clientLinkRefusal(kind: "link_other_phone" | "link_dead", agentName: string | null, textLine: string) {
+  const who = agentName ?? "your agent";
+  return kind === "link_other_phone"
+    ? `This link was sent for a different mobile number. Ask ${who} to send a new link to this number, or text ${textLine}.`
+    : `This link has expired or was turned off. Ask ${who} for a new one, or text ${textLine}.`;
+}
+
+/** A test-team number previews the team view but has no team row to own links. */
+function settings_testTeamNote(phone: string, settings: { testTeamNumbers: string[] }) {
+  return settings.testTeamNumbers.includes(phone)
+    ? "This is a test team number: it previews the team list but cannot create client links. Add a real team member in Admin, Builder Deals, Team allowlist."
+    : "Your number is not on the team list yet. Ask Peter to add it in Admin, Builder Deals.";
 }
 
 export const dealsRouter = router({
@@ -230,7 +250,8 @@ export const dealsRouter = router({
   }),
   state: publicProcedure.input(z.object({ c: clientLinkToken }).optional()).query(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);
-    const [settings, session, pending, clientLink] = await Promise.all([getDealSettings(), isLiveDealSession(ctx.req), currentPending(ctx.req), clientLinkPresentation(input?.c)]);
+    const [settings, session, pending] = await Promise.all([getDealSettings(), isLiveDealSession(ctx.req), currentPending(ctx.req)]);
+    const clientLink = await clientLinkPresentation(input?.c, session?.lead.status === "team");
     return {
       session: session ? leadPresentation(session.lead) : null,
       pending: pending ? { displayPhone: maskPhone(pending.phoneE164), expiresAt: pending.expiresAt.toISOString() } : null,
@@ -246,7 +267,7 @@ export const dealsRouter = router({
     dealsPublicHeaders(ctx.res);
     const settings = await getDealSettings();
     const cookieState = ensureDealsCookies(ctx.req, ctx.res);
-    const sourceCode = currentDealSource(sanitizeSourceCode(input.src), settings);
+    const sourceCode = input.c ? AGENT_CLIENT_SOURCE : currentDealSource(sanitizeSourceCode(input.src), settings);
     const ip = ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0";
     if (!cookieState.hasProbe || !(await reserveGateSubmit({ ip, deviceHash: cookieState.deviceHash, sourceCode }))) {
       return { ok: false as const, kind: cookieState.hasProbe ? "rate_limited" : "cookie_blocked", message: cookieState.hasProbe ? `We're getting a lot of traffic, so please try again in a bit. Or text ${settings.commentKeyword} to ${settings.textLine}.` : `Your browser is blocking cookies. Open this link in Safari or Chrome. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
@@ -254,6 +275,12 @@ export const dealsRouter = router({
     const result = await createPendingVerification({ req: ctx.req, res: ctx.res, rawPhone: input.phone, choice: input.choice, source: sanitizeSourceCode(input.src), ig: sanitizeInstagramHandle(input.ig), clientLinkToken: input.c });
     if (!result.ok) {
       const settings = await getDealSettings();
+      if (result.kind === "link_other_phone" || result.kind === "link_dead") return { ok: false as const, kind: result.kind, message: clientLinkRefusal(result.kind, "agentName" in result ? result.agentName ?? null : null, settings.textLine) };
+      if ((result.kind === "has_agent" || result.kind === "blocked") && input.c) {
+        // An agent's client is never told the page is for buyers without an agent.
+        const shown = await presentClientLink(input.c);
+        return { ok: false as const, kind: "blocked", message: `This number can't open the list right now. Text ${shown?.agentName ?? "your agent"}, or text ${settings.textLine}.` };
+      }
       if (result.kind === "has_agent" || result.kind === "blocked") return { ok: false as const, kind: "blocked", message: safeBlockedMessage(settings) };
       if (result.kind === "cookie_blocked") return { ok: false as const, kind: "cookie_blocked", message: `Your browser is blocking cookies. Open this link in Safari or Chrome. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
       if (result.kind === "outside_us") return { ok: false as const, kind: "outside_us", message: `US mobile numbers only for now. Outside the US? Text ${settings.commentKeyword} to ${settings.textLine} and we'll help you directly.` };
@@ -309,13 +336,13 @@ export const dealsRouter = router({
     if (sent.reason === "rate_limited") return { ok: false as const, kind: "rate_limited" as const, message: `We're getting a lot of traffic, so please try again in a bit. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
     return { ok: false as const, kind: sent.reason, message: "We couldn't send a code right now. Please try again." };
   }),
-  gateFocused: publicProcedure.input(z.object({ src: z.string().max(120).optional() })).mutation(async ({ input, ctx }) => {
+  gateFocused: publicProcedure.input(z.object({ src: z.string().max(120).optional(), c: clientLinkToken })).mutation(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);
     const settings = await getDealSettings();
     const { ensureDealsCookies } = await import("./dealsService");
     const { deviceHash } = ensureDealsCookies(ctx.req, ctx.res);
     await recordGateFocus({
-      sourceCode: currentDealSource(input.src, settings), deviceHash,
+      sourceCode: input.c ? AGENT_CLIENT_SOURCE : currentDealSource(input.src, settings), deviceHash,
       ip: ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0",
     });
     return { ok: true as const };
@@ -325,9 +352,9 @@ export const dealsRouter = router({
     dealsPublicHeaders(ctx.res);
     const session = await isLiveDealSession(ctx.req);
     if (!session) throw new TRPCError({ code: "UNAUTHORIZED", message: "A current Builder Deals session is required." });
-    // The team and agent-sent buyers get the full list; the reel buyer the scrubbed one.
-    const view = catalogViewForLead(session.lead);
-    const [communities, saved, agent] = await Promise.all([gatedDealsCatalog(session.leadId, view), savedDealCards(session.leadId), session.lead.agentTeamId ? agentForTeamId(session.lead.agentTeamId) : Promise.resolve(null)]);
+    // The team and buyers with a live agent link get the full list; everyone else the scrubbed one.
+    const { view, agent } = await catalogViewForSession(session.lead);
+    const [communities, saved] = await Promise.all([gatedDealsCatalog(session.leadId, view), savedDealCards(session.leadId)]);
     const connection = await getDb();
     if (connection) {
       const active = await connection.select({ id: dealCommunities.id }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)));
@@ -340,7 +367,7 @@ export const dealsRouter = router({
       if (!recentListView) await logDealEvent({ leadId: session.leadId, kind: "viewed_listings", sourceCode: session.lead.sourceCode, deviceHash: session.deviceHash, ip: ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0" });
     }
     // The client sees their own agent's real number: they are meant to text it.
-    return { lead: leadPresentation(session.lead), communities, saved, fullDetails: view.view === "full", agent: agent ? { name: agent.name, phone: agentDisplayPhone(agent) } : null };
+    return { lead: { ...leadPresentation(session.lead), agentClient: Boolean(agent) }, communities, saved, fullDetails: view.view === "full", agent: agent ? { name: agent.name, firstName: agent.firstName, phone: agentDisplayPhone(agent) } : null };
   }),
   /**
    * A buyer who already holds a live list opens an agent's client link: attach
@@ -353,7 +380,7 @@ export const dealsRouter = router({
     if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
     const settings = await getDealSettings();
     const result = await attachLiveSessionToClientLink({ lead: session.lead, token: input.c, expiryHours: settings.clientLinkExpiryHours });
-    if (!result.ok) return { ok: false as const, kind: result.kind };
+    if (!result.ok) return { ok: false as const, kind: result.kind, message: result.kind === "other_phone" || result.kind === "invalid_link" ? clientLinkRefusal(result.kind === "other_phone" ? "link_other_phone" : "link_dead", (await presentClientLink(input.c))?.agentName ?? null, settings.textLine) : "Please try again in a moment." };
     if (!result.attached) return { ok: true as const, attached: false as const, reason: result.reason };
     const { extendLiveSession } = await import("./dealsService");
     await extendLiveSession(ctx.req, ctx.res, result.expiresAt);
@@ -366,7 +393,7 @@ export const dealsRouter = router({
         void runPendingDealsFubJobs(1).catch(console.error);
         const { queueClientLinkAttachedAlert } = await import("./dealsAlerts");
         if (result.agent.active) await queueClientLinkAttachedAlert({ ...session.lead, agentTeamId: result.agent.teamId }, { name: result.agent.name, email: result.agent.email }, result.linkId);
-      } catch { console.error("[deals] client link attach side effects failed"); }
+      } catch (error) { console.error("[deals] client link attach side effects failed", error instanceof Error ? error.message : error); }
     }
     return { ok: true as const, attached: true as const, agentName: result.agent.name };
   }),
@@ -388,7 +415,7 @@ export const dealsRouter = router({
       if (!session) throw new TRPCError({ code: "UNAUTHORIZED", message: "A current Builder Deals session is required." });
       if (session.lead.status !== "team") throw new TRPCError({ code: "FORBIDDEN", message: "Agent tools are for the Lifestyle Design Realty team." });
       const workspace = await agentWorkspace(session.lead);
-      if (!workspace) throw new TRPCError({ code: "FORBIDDEN", message: "Your number is not on the team list yet. Ask Peter to add it in Admin, Builder Deals." });
+      if (!workspace) throw new TRPCError({ code: "FORBIDDEN", message: settings_testTeamNote(session.lead.phoneE164, await getDealSettings()) });
       return { lead: leadPresentation(session.lead), agent: { name: workspace.agent.name, email: workspace.agent.email, fubLinked: Boolean(workspace.agent.fubUserId) }, clients: workspace.clients };
     }),
     createClientLink: publicProcedure.input(z.object({ clientName: z.string().trim().min(2).max(190), clientPhone: z.string().trim().max(60).optional(), note: z.string().trim().max(500).optional() })).mutation(async ({ input, ctx }) => {
@@ -401,7 +428,8 @@ export const dealsRouter = router({
         const messages = { not_team: "Your number is not on the team list yet. Ask Peter to add it in Admin, Builder Deals.", invalid_phone: "Enter a valid US mobile number, or leave the phone blank.", invalid_name: "Enter the client's name.", unavailable: "Links are unavailable right now. Try again in a moment." } as const;
         throw new TRPCError({ code: result.kind === "unavailable" ? "INTERNAL_SERVER_ERROR" : result.kind === "not_team" ? "FORBIDDEN" : "BAD_REQUEST", message: messages[result.kind] });
       }
-      return { ok: true as const, id: result.link.id, path: result.path, expiresAt: result.link.expiresAt.toISOString() };
+      const { nationalDigits } = await import("./dealsClientLinks");
+      return { ok: true as const, id: result.link.id, path: result.path, expiresAt: result.link.expiresAt.toISOString(), clientName: result.link.clientName, clientPhoneDigits: nationalDigits(result.link.clientPhoneE164) };
     }),
     revokeClientLink: publicProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input, ctx }) => {
       dealsPublicHeaders(ctx.res);
@@ -434,7 +462,8 @@ export const dealsRouter = router({
     const settings = await getDealSettings();
     const { profileRealtorFlags } = await import("./dealsEligibility");
     // Team previews save name/timeline only: no flags, no FUB write, no alert (A20).
-    const profileFlags = session.lead.status === "team" ? [] : await profileRealtorFlags({ name: input.name ?? session.lead.name, instagramHandle: session.lead.instagramHandle, handleKeywords: settings.handleKeywords, trecCounties: settings.trecCounties });
+    // Team previews and an agent's own clients (the agent vouches for them) get no "possible agent" flags.
+    const profileFlags = session.lead.status === "team" || session.lead.agentTeamId ? [] : await profileRealtorFlags({ name: input.name ?? session.lead.name, instagramHandle: session.lead.instagramHandle, handleKeywords: settings.handleKeywords, trecCounties: settings.trecCounties });
     const storedFlags = (() => { try { const value = JSON.parse(session.lead.flags); return Array.isArray(value) ? value : value.flags ?? []; } catch { return []; } })();
     const newProfileFlags = profileFlags.filter((flag) => !storedFlags.includes(flag));
     const nextLead = { ...session.lead, name: input.name ?? session.lead.name, timeline: input.timeline ?? session.lead.timeline, flags: JSON.stringify(Array.from(new Set([...storedFlags, ...profileFlags]))) };
@@ -459,7 +488,8 @@ export const dealsRouter = router({
         db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId, sourceUrl: dealPhotos.sourceUrl, processingState: dealPhotos.processingState, automaticHidden: dealPhotos.automaticHidden, adminHidden: dealPhotos.adminHidden, bottomCrop: dealPhotos.bottomCrop, lastProcessingError: dealPhotos.lastProcessingError, processedVersion: dealPhotos.processedVersion, ocrMatches: dealPhotos.ocrMatches, sortOrder: dealPhotos.sortOrder, processedAt: dealPhotos.processedAt }).from(dealPhotos).orderBy(desc(dealPhotos.createdAt)).limit(200),
         db.select().from(dealKnownAgents).orderBy(desc(dealKnownAgents.createdAt)).limit(100),
         db.select().from(dealTeamAllowlist).orderBy(desc(dealTeamAllowlist.createdAt)).limit(100),
-        db.select().from(dealTourRequests).orderBy(desc(dealTourRequests.createdAt)).limit(100),
+        // Saves are buyer bookmarks, listed per lead; the delivery table is tours and questions only.
+        db.select().from(dealTourRequests).where(inArray(dealTourRequests.requestType, ["tour", "ask"])).orderBy(desc(dealTourRequests.createdAt)).limit(100),
         db.select().from(dealTrecImports).orderBy(desc(dealTrecImports.createdAt)).limit(1),
         db.select({ id: dealFubJobs.id, leadId: dealFubJobs.leadId, operation: dealFubJobs.operation, status: dealFubJobs.status, attempts: dealFubJobs.attempts, nextAttemptAt: dealFubJobs.nextAttemptAt, lastError: dealFubJobs.lastError }).from(dealFubJobs).orderBy(desc(dealFubJobs.createdAt)).limit(100),
         db.select().from(dealDoNotAutoImport).orderBy(desc(dealDoNotAutoImport.createdAt)).limit(100),
@@ -477,7 +507,10 @@ export const dealsRouter = router({
         db.select({ n: sql<number>`count(*)` }).from(dealBlocklist),
       ]);
       const dailyCount = Number(daily[0]?.n ?? 0);
-      const clientLinkRows = clientLinks.map((link) => ({ ...link, agentName: team.find((member) => member.id === link.agentTeamId)?.name ?? `team #${link.agentTeamId}` }));
+      // The agents behind the links are read directly: the team list above is capped and may not include them.
+      const linkAgentIds = Array.from(new Set(clientLinks.map((link) => link.agentTeamId)));
+      const linkAgents = linkAgentIds.length ? await db.select({ id: dealTeamAllowlist.id, name: dealTeamAllowlist.name, email: dealTeamAllowlist.email }).from(dealTeamAllowlist).where(inArray(dealTeamAllowlist.id, linkAgentIds)) : [];
+      const clientLinkRows = clientLinks.map((link) => { const agent = linkAgents.find((member) => member.id === link.agentTeamId); return { ...link, agentName: agent?.name || agent?.email || `team #${link.agentTeamId}` }; });
       return { communities, leads, blocks, homes, photos, agents, team, tours, fubJobs, doNotAutoImport, alerts, emailLogs, incentives, clientLinks: clientLinkRows, email: builderDealsEmailStatus(settings.alertRecipients), import: imports[0] ?? null, trecSummary, dailyCount, capReached: dailyCount >= settings.dailyVerificationCap, leadCounts: Object.fromEntries(leadStats.map((row) => [row.status, Number(row.n)])), blockCount: Number(blockStats[0]?.n ?? 0), limits: { homes: 500, photos: 200, recentActivity: 100 } };
     }),
     leads: adminProcedure.input(z.object({ search: z.string().trim().max(190).default(""), status: z.enum(["all", "verified", "blocked", "expired", "team"]).default("all"), fubStatus: z.enum(["all", "pending", "synced", "failed"]).default("all"), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(100).default(25) })).query(async ({ input }) => {
@@ -492,7 +525,7 @@ export const dealsRouter = router({
       const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, input.id)).limit(1))[0]; if (!lead) throw new TRPCError({ code: "NOT_FOUND" });
       const [views, tours, jobs] = await Promise.all([
         db.select({ communityId: dealCommunityViews.communityId, publicLabel: dealCommunities.publicLabel, viewedAt: dealCommunityViews.viewedAt }).from(dealCommunityViews).leftJoin(dealCommunities, eq(dealCommunities.id, dealCommunityViews.communityId)).where(eq(dealCommunityViews.leadId, input.id)).orderBy(desc(dealCommunityViews.viewedAt)).limit(100),
-        db.select({ id: dealTourRequests.id, requestType: dealTourRequests.requestType, preferredAt: dealTourRequests.preferredAt, createdAt: dealTourRequests.createdAt, fubTaskId: dealTourRequests.fubTaskId, privateAddress: dealHomes.privateAddress, privatePlanName: dealHomes.privatePlanName }).from(dealTourRequests).leftJoin(dealHomes, eq(dealHomes.id, dealTourRequests.homeId)).where(eq(dealTourRequests.leadId, input.id)).orderBy(desc(dealTourRequests.createdAt)).limit(100),
+        db.select({ id: dealTourRequests.id, requestType: dealTourRequests.requestType, preferredAt: dealTourRequests.preferredAt, createdAt: dealTourRequests.createdAt, removedAt: dealTourRequests.removedAt, fubTaskId: dealTourRequests.fubTaskId, privateAddress: dealHomes.privateAddress, privatePlanName: dealHomes.privatePlanName }).from(dealTourRequests).leftJoin(dealHomes, eq(dealHomes.id, dealTourRequests.homeId)).where(eq(dealTourRequests.leadId, input.id)).orderBy(desc(dealTourRequests.createdAt)).limit(100),
         db.select({ id: dealFubJobs.id, status: dealFubJobs.status, operation: dealFubJobs.operation, lastError: dealFubJobs.lastError, attempts: dealFubJobs.attempts }).from(dealFubJobs).where(eq(dealFubJobs.leadId, input.id)).orderBy(desc(dealFubJobs.createdAt)).limit(100),
       ]);
       return { lead, views, tours, jobs };

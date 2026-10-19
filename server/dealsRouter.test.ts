@@ -276,14 +276,28 @@ describe("agent client links through the router", () => {
     mocks.currentPending.mockResolvedValue(null);
   });
 
-  it("names the agent on the landing state for a live link, counts the open, and says nothing for a dead one", async () => {
+  it("names the agent on the landing state for a live link, counts the open, and names them on a dead one too", async () => {
     const state = await visitor().state({ c: TOKEN });
-    expect(state.clientLink).toEqual({ agentName: "Tiffany Agent", clientFirstName: "Maria" });
+    expect(state.clientLink).toEqual({ state: "live", agentName: "Tiffany Agent", clientFirstName: "Maria" });
     expect(db.rows(dealClientLinks)[0]).toMatchObject({ openCount: 1 });
     expect((await visitor().state({ c: "nope" })).clientLink).toBeNull();
     expect((await visitor().state()).clientLink).toBeNull();
+    // The agent previewing their own link is not counted as the client opening it.
+    db.rows(dealClientLinks)[0].openedAt = null;
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 9, lead: row({ id: 9, status: "team" }), deviceHash: "d" });
+    await visitor().state({ c: TOKEN });
+    expect(db.rows(dealClientLinks)[0]).toMatchObject({ openCount: 1 });
+    mocks.isLiveDealSession.mockResolvedValue(null);
     db.rows(dealClientLinks)[0].revokedAt = new Date();
-    expect((await visitor().state({ c: TOKEN })).clientLink).toBeNull();
+    expect((await visitor().state({ c: TOKEN })).clientLink).toEqual({ state: "dead", agentName: "Tiffany Agent" });
+  });
+
+  it("turns link refusals into the agent's copy and never into the reel buyer's has-agent message", async () => {
+    mocks.createPendingVerification.mockResolvedValueOnce({ ok: false, kind: "link_other_phone", agentName: "Tiffany Agent" });
+    await expect(visitor().start({ phone: "(210) 555-0123", choice: "buyer", c: TOKEN })).resolves.toEqual({ ok: false, kind: "link_other_phone", message: "This link was sent for a different mobile number. Ask Tiffany Agent to send a new link to this number, or text (512) 542-1477." });
+    mocks.createPendingVerification.mockResolvedValueOnce({ ok: false, kind: "blocked" });
+    const blocked = await visitor().start({ phone: "(210) 555-0123", choice: "buyer", c: TOKEN });
+    expect(blocked).toEqual({ ok: false, kind: "blocked", message: "This number can't open the list right now. Text Tiffany Agent, or text (512) 542-1477." });
   });
 
   it("passes the token into the pending verification on start", async () => {
@@ -295,11 +309,12 @@ describe("agent client links through the router", () => {
   it("serves the full list with the agent's name to the agent's client, and the scrubbed list to a reel buyer", async () => {
     const client = row({ agentTeamId: teamId, clientLinkId: 1 });
     db.seed(dealLeads, client);
+    db.rows(dealClientLinks)[0].leadId = 41;
     mocks.isLiveDealSession.mockResolvedValue({ leadId: 41, lead: client, deviceHash: client.deviceHash });
     const mine = await visitor().mine();
     expect(mine.fullDetails).toBe(true);
     // The client gets the agent's real number, formatted, never a masked one.
-    expect(mine.agent).toEqual({ name: "Tiffany Agent", phone: "(210) 555-0101" });
+    expect(mine.agent).toEqual({ name: "Tiffany Agent", firstName: "Tiffany", phone: "(210) 555-0101" });
     expect(mine.lead.agentClient).toBe(true);
     expect(JSON.stringify(mine.communities)).toContain("Fixture Lakes");
     expect(JSON.stringify(mine.communities)).not.toContain("chesmar.com");
@@ -344,7 +359,7 @@ describe("agent client links through the router", () => {
     // The session row follows the longer window.
     expect((db.rows(dealAccessTokens)[0].expiresAt as Date).getTime() - Date.now()).toBeGreaterThan(160 * 3600_000);
     expect(db.rows(dealClientLinks)[0]).toMatchObject({ leadId: 42 });
-    await expect(visitor().attachClientLink({ c: "x".repeat(32) })).resolves.toEqual({ ok: false, kind: "invalid_link" });
+    await expect(visitor().attachClientLink({ c: "x".repeat(32) })).resolves.toMatchObject({ ok: false, kind: "invalid_link" });
     mocks.isLiveDealSession.mockResolvedValue(null);
     await expect(visitor().attachClientLink({ c: TOKEN })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });

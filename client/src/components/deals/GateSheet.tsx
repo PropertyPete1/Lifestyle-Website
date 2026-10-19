@@ -17,7 +17,7 @@ export type GateSheetState = {
   consentText?: string | null;
   googleEnabled?: boolean;
   /** The visitor opened an LDR agent's client link: the agent question is skipped and the sheet names the agent. */
-  clientLink?: { agentName: string; clientFirstName: string } | null;
+  clientLink?: { state: "live"; agentName: string; clientFirstName: string } | { state: "dead"; agentName: string | null } | null;
 } | undefined;
 
 export type GateSheetViewProps = {
@@ -39,14 +39,18 @@ export type GateSheetViewProps = {
   onChangeNumber: () => void;
   onCopyLink: () => void;
   onClose: () => void;
+  /** An agent's client-link token: posted with the code so every redirect keeps the agent's gate. */
+  clientToken?: string;
 };
 
 /**
  * The sheet itself, free of data hooks so every step can be rendered and
  * asserted without a browser. Server copy is rendered verbatim.
  */
-export function GateSheetView({ gate, state, phone, code, choice, starting, resending, onPhone, onCode, onChoice, onFocusPhone, onContinue, onConfirmAgent, onGo, onResend, onChangeNumber, onCopyLink, onClose }: GateSheetViewProps) {
+export function GateSheetView({ gate, state, phone, code, choice, starting, resending, onPhone, onCode, onChoice, onFocusPhone, onContinue, onConfirmAgent, onGo, onResend, onChangeNumber, onCopyLink, onClose, clientToken }: GateSheetViewProps) {
   const { step } = gate;
+  const shared = state?.clientLink?.state === "live" ? state.clientLink : null;
+  const deadLink = state?.clientLink?.state === "dead" ? state.clientLink : null;
   const displayPhone = gate.pendingDisplayPhone ?? state?.pending?.displayPhone ?? formatPhoneInput(phone);
   const gateAlert = step === "gate" ? gateStepAlert(gate, state) : null;
   const codeAlert = step === "code" ? codeStepAlert(gate) : null;
@@ -62,7 +66,7 @@ export function GateSheetView({ gate, state, phone, code, choice, starting, rese
     <button type="button" aria-label="Close gate" onClick={onClose} className="absolute right-1 top-1 flex h-11 w-11 items-center justify-center text-muted-foreground hover:text-gold"><X className="h-4 w-4" /></button>
     {step === "cookie-blocked" && <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">Your browser is blocking cookies. Open this link in Safari or Chrome</h2><p className="mt-4 text-sm text-muted-foreground">Your personal list needs a private browser cookie to protect access.</p><Button onClick={onCopyLink} className="mt-6 w-full bg-gold py-6 text-primary-foreground"><Copy className="mr-2 h-4 w-4" />Copy link</Button>{gate.message && notice(gate.message)}</>}
     {step === "expired" && <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-4xl">This link expired.</h2><p className="mt-3 text-sm text-muted-foreground">Get a fresh personal link for the latest available homes.</p><Button onClick={() => onGo("gate")} className="mt-6 w-full bg-gold py-6 text-primary-foreground">Get a new link now <ArrowRight className="ml-2 h-4 w-4" /></Button><InstagramHelp state={state} /></>}
-    {step === "blocked" && <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">Buyer access only</h2><p role="alert" className="mt-4 text-sm leading-relaxed text-muted-foreground">{gate.message || state?.blockedMessage || "This page is for buyers who are not working with an agent yet."}</p><InstagramHelp state={state} /></>}
+    {step === "blocked" && <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">{state?.clientLink ? "We can't open this list" : "Buyer access only"}</h2><p role="alert" className="mt-4 text-sm leading-relaxed text-muted-foreground">{gate.message || state?.blockedMessage || "This page is for buyers who are not working with an agent yet."}</p><InstagramHelp state={state} /></>}
     {step === "confirm-agent" && <><p className="eyebrow text-gold">One quick confirmation</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">Just to confirm: you're a licensed agent, or already working with one?</h2><div className="mt-6 grid gap-3"><Button onClick={onConfirmAgent} disabled={starting} className="bg-gold py-6 text-primary-foreground">Yes, that's right</Button><Button variant="outline" onClick={() => onGo("gate")} className="py-6">No, go back</Button></div></>}
     {step === "code" && <><p className="eyebrow text-gold">One more step</p>
       {gate.cannotReceive
@@ -70,27 +74,28 @@ export function GateSheetView({ gate, state, phone, code, choice, starting, rese
         : calling
           ? <><h2 id="deals-gate-title" className="mt-2 text-3xl">Pick up, we're calling you.</h2><p className="mt-3 text-sm text-muted-foreground">The call to {displayPhone} reads out a 6-digit code. Enter it below to unlock your personal list.</p></>
           : <><h2 id="deals-gate-title" className="mt-2 text-3xl">Check your messages.</h2><p className="mt-3 text-sm text-muted-foreground">We sent a code to {displayPhone}. Enter it below to unlock your personal list.</p></>}
-      <form action="/deals/verify" method="post"><Label htmlFor="deals-code" className="mt-6 block text-xs uppercase tracking-widest">6-digit code</Label><Input id="deals-code" name="code" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={code} onChange={(event) => onCode(event.target.value.replace(/\D/g, "").slice(0, 6))} className="mt-2 h-14 text-center text-2xl tracking-[0.45em]" /><Button type="submit" disabled={code.length !== 6} className="mt-4 w-full bg-gold py-6 text-primary-foreground">Unlock my list</Button></form>
+      <form action="/deals/verify" method="post">{clientToken && <input type="hidden" name="c" value={clientToken} />}<Label htmlFor="deals-code" className="mt-6 block text-xs uppercase tracking-widest">6-digit code</Label><Input id="deals-code" name="code" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={code} onChange={(event) => onCode(event.target.value.replace(/\D/g, "").slice(0, 6))} className="mt-2 h-14 text-center text-2xl tracking-[0.45em]" /><Button type="submit" disabled={code.length !== 6} className="mt-4 w-full bg-gold py-6 text-primary-foreground">Unlock my list</Button></form>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 text-xs"><button type="button" onClick={() => onResend("sms")} disabled={resending} className={`${recoveryLink} text-gold`}>Didn't get it? Resend</button>{!gate.cannotReceive && <button type="button" onClick={() => onResend("call")} disabled={resending} className={`${recoveryLink} text-gold`}>Call me with the code instead</button>}</div>
       <button type="button" onClick={onChangeNumber} className={`${recoveryLink} mt-1 text-xs text-muted-foreground`}>Wrong number? Change it</button>
       {codeAlert && notice(codeAlert)}</>}
-    {step === "gate" && (() => {
-      const shared = state?.clientLink ?? null;
+    {step === "gate" && deadLink && <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">This link has expired.</h2><p role="alert" data-deals-dead-link="true" className="mt-4 text-sm leading-relaxed text-muted-foreground">It was turned off or is no longer active. Ask {deadLink.agentName ?? "your agent"} to send you a new one.</p><InstagramHelp state={state} /></>}
+    {step === "gate" && !deadLink && (() => {
       // An agent's client is working with an agent by definition: no question, Continue needs only the phone.
       const ready = shared ? true : Boolean(choice);
       return <>{shared
-        ? <><p className="eyebrow text-gold" data-deals-shared-by="true">Shared by {shared.agentName}</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">{shared.clientFirstName ? `${shared.clientFirstName}, your homes are ready.` : "Your homes are ready."}</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{shared.agentName} picked these for you. Verify your mobile number once and the full list opens, with every address, photo and current incentive.</p></>
+        ? <><p className="eyebrow text-gold" data-deals-shared-by="true">Shared by {shared.agentName}</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">{shared.clientFirstName ? `${shared.clientFirstName}, your list is ready.` : "Your list is ready."}</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{shared.agentName} shared this week's new-build deals with you. Verify your mobile number once and the full list opens, with every address, photo and current incentive.</p></>
         : <><p className="eyebrow text-gold">Private buyer access</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Unlock the full list.</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">Phone verification protects these hand-picked deals for buyers who have not chosen an agent.</p></>}
       {state?.googleEnabled && !shared && <Button variant="outline" onClick={() => window.location.assign("/deals/auth/google")} className="mt-5 w-full py-6">Continue with Google</Button>}<Label htmlFor="deals-phone" className="mt-6 block text-xs uppercase tracking-widest">Mobile phone</Label><Input id="deals-phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="(210) 555-0123" value={phone} onChange={(event) => onPhone(formatPhoneInput(event.target.value))} onFocus={onFocusPhone} className="mt-2 h-14 text-lg" />
-      {!shared && <><p id="deals-agent-question" className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Are you a realtor, or working with one?</p><div role="group" aria-labelledby="deals-agent-question" className="mt-3 grid grid-cols-2 gap-3"><button type="button" aria-pressed={choice === "buyer"} onClick={() => onChoice("buyer")} className={`min-h-14 border px-3 text-sm transition-colors ${choice === "buyer" ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>No, just me</button><button type="button" aria-pressed={choice === "has_agent"} onClick={() => onChoice("has_agent")} className={`min-h-14 border px-3 text-sm transition-colors ${choice === "has_agent" ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>Yes</button></div><p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">On the Lifestyle Design Realty team? Use your own mobile number and either answer: your code opens your agent tools.</p></>}
+      {!shared && <><p id="deals-agent-question" className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Are you a realtor, or working with one?</p><div role="group" aria-labelledby="deals-agent-question" className="mt-3 grid grid-cols-2 gap-3"><button type="button" aria-pressed={choice === "buyer"} onClick={() => onChoice("buyer")} className={`min-h-14 border px-3 text-sm transition-colors ${choice === "buyer" ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>No, just me</button><button type="button" aria-pressed={choice === "has_agent"} onClick={() => onChoice("has_agent")} className={`min-h-14 border px-3 text-sm transition-colors ${choice === "has_agent" ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>Yes</button></div><p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">Lifestyle Design Realty agents: enter your own mobile number to open your agent tools.</p></>}
       {/* Continue waits for deals.state so the consent line below is on screen before anyone can agree to it. */}<Button disabled={!ready || phone.replace(/\D/g, "").length < 10 || starting || state === undefined} onClick={onContinue} className="mt-5 w-full bg-gold py-6 text-primary-foreground">{starting ? "Sending…" : "Continue"} <ArrowRight className="ml-2 h-4 w-4" /></Button>{gateAlert && notice(gateAlert)}<p className="mt-5 text-xs leading-relaxed text-foreground">{state?.consentText}</p></>;
     })()}
   </motion.section></motion.div></AnimatePresence>;
 }
 
 /** Data wiring for the sheet: deals.state, the gate mutations and the one-time URL flags. */
-export function GateSheet({ state, onClose }: { state: GateSheetState; onClose: () => void }) {
-  const [params] = useState<GateParams>(() => readGateParams(window.location.search));
+export function GateSheet({ state, onClose, clientToken }: { state: GateSheetState; onClose: () => void; clientToken?: string }) {
+  // The landing page passes the token it kept (URL or this tab's storage), so "Change number" and a wrong code keep it.
+  const [params] = useState<GateParams>(() => { const read = readGateParams(window.location.search); return { ...read, c: read.c ?? clientToken }; });
   const [gate, dispatch] = useReducer(gateReducer, undefined, () => initialGateState(params, state));
   const [phone, setPhone] = useState("");
   const [choice, setChoice] = useState<"buyer" | "has_agent" | null>(null);
@@ -130,18 +135,18 @@ export function GateSheet({ state, onClose }: { state: GateSheetState; onClose: 
   };
   const continueGate = () => {
     // A client link answers the agent question for the visitor; the token rides along so the server attributes them.
-    if (state?.clientLink) { start.mutate({ phone, choice: "buyer", src: params.src, ig: params.ig, c: params.c }); return; }
+    if (state?.clientLink?.state === "live") { start.mutate({ phone, choice: "buyer", src: params.src, ig: params.ig, c: params.c }); return; }
     if (choice === "has_agent") { dispatch({ type: "go", step: "confirm-agent" }); return; }
     if (choice) start.mutate({ phone, choice, src: params.src, ig: params.ig, c: params.c });
   };
   const focusPhone = () => {
     if (focusSent.current) return;
     focusSent.current = true;
-    focused.mutate({ src: params.src });
+    focused.mutate({ src: params.src, c: params.c });
   };
   return <GateSheetView gate={gate} state={state} phone={phone} code={code} choice={choice} starting={start.isPending} resending={resend.isPending}
     onPhone={setPhone} onCode={setCode} onChoice={setChoice} onFocusPhone={focusPhone} onContinue={continueGate}
     onConfirmAgent={() => start.mutate({ phone, choice: "has_agent", src: params.src, ig: params.ig, c: params.c })}
     onGo={(step) => { dispatch({ type: "go", step }); if (step === "gate") setCode(""); }}
-    onResend={(channel) => resend.mutate({ channel })} onChangeNumber={() => change.mutate()} onCopyLink={() => { void copyLink(); }} onClose={onClose} />;
+    onResend={(channel) => resend.mutate({ channel })} onChangeNumber={() => change.mutate()} onCopyLink={() => { void copyLink(); }} onClose={onClose} clientToken={params.c} />;
 }

@@ -2,7 +2,8 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
-import { initialGateState, readGateParams, stripTransientGateParams, type GateDealsState } from "../client/src/lib/dealsGate";
+import { initialGateState, readGateParams, rememberClientLinkToken, stripTransientGateParams, type GateDealsState } from "../client/src/lib/dealsGate";
+import { countdownLabel } from "../client/src/lib/dealsMine";
 import type { GateSheetViewProps } from "../client/src/components/deals/GateSheet";
 import type { GatedCatalogProps, GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
 
@@ -14,7 +15,7 @@ import type { GatedCatalogProps, GatedCommunity, GatedLead } from "../client/src
 (globalThis as { React?: typeof React }).React = React;
 const { GateSheetView } = await import("../client/src/components/deals/GateSheet");
 const { GatedCatalog } = await import("../client/src/components/deals/GatedCatalog");
-const { AgentTools, clientMessage, clientStatus, smsHref, absoluteLink } = await import("../client/src/components/deals/AgentTools");
+const { AgentTools, clientMessage, clientStatus, confirmAndRevoke, smsHref, absoluteLink } = await import("../client/src/components/deals/AgentTools");
 const { clientLinkState } = await import("../client/src/components/builder-deals/ClientLinksSection");
 const { createElement } = React;
 const decode = (value: string) => value.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
@@ -40,9 +41,10 @@ describe("the gate for an agent's client", () => {
   });
 
   it("names the agent, skips the realtor question and lets Continue go on the phone alone", () => {
-    const html = render({ pending: null, consentText: "By tapping Continue, you agree.", clientLink: { agentName: "Tiffany Agent", clientFirstName: "Maria" } } as GateDealsState);
+    const html = render({ pending: null, consentText: "By tapping Continue, you agree.", clientLink: { state: "live", agentName: "Tiffany Agent", clientFirstName: "Maria" } } as GateDealsState);
     expect(html).toContain("Shared by Tiffany Agent");
-    expect(html).toContain("Maria, your homes are ready.");
+    expect(html).toContain("Maria, your list is ready.");
+    expect(html).toContain("Tiffany Agent shared this week's new-build deals with you.");
     expect(html).not.toContain("Are you a realtor, or working with one?");
     expect(html).not.toContain("No, just me");
     expect(html).not.toContain("Continue with Google");
@@ -57,7 +59,7 @@ describe("the gate for an agent's client", () => {
     const html = render({ pending: null, clientLink: null, consentText: "consent" } as GateDealsState);
     expect(html).toContain("Are you a realtor, or working with one?");
     expect(html).toContain("Private buyer access");
-    expect(html).toContain("On the Lifestyle Design Realty team?");
+    expect(html).toContain("Lifestyle Design Realty agents: enter your own mobile number to open your agent tools.");
     const continueButton = html.match(/<button[^>]*>(?:(?!<\/button>).)*Continue(?:(?!<\/button>).)*<\/button>/)?.[0] ?? "";
     expect(continueButton).toContain('disabled=""');
   });
@@ -73,7 +75,7 @@ const communities: GatedCommunity[] = [{
   ],
 }];
 function renderList(overrides: Partial<GatedCatalogProps> = {}) {
-  return decode(renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead, communities, now: NOW, saved: ["a".repeat(20)], onSave: () => undefined, agent: { name: "Tiffany Agent", phone: "(210) •••-0101" }, ...overrides }))));
+  return decode(renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead, communities, now: NOW, saved: ["a".repeat(20)], onSave: () => undefined, agent: { name: "Tiffany Agent", firstName: "Tiffany", phone: "(210) 555-0101" }, ...overrides }))));
 }
 
 describe("the full list for an agent's client", () => {
@@ -84,8 +86,11 @@ describe("the full list for an agent's client", () => {
     expect(html).toContain("100 Demo Lakes Blvd, San Antonio, TX");
     expect(html).toContain("Sales office: (210) 555-0999");
     expect(html).toContain("Brandon · 118 Demo Lakes Blvd");
-    expect(html).toContain("Tiffany Agent picked these for you.");
-    expect(html).toContain("Text Tiffany at (210) •••-0101");
+    expect(html).toContain("Shared with you by Tiffany Agent.");
+    expect(html).toContain("Tiffany hears about it right away");
+    expect(html).toContain("Text Tiffany at (210) 555-0101");
+    // The action row wraps on a narrow phone instead of clipping the request button.
+    expect(html).toContain("mt-6 flex flex-wrap items-stretch gap-3");
     expect(html.match(/data-deals-save="saved"/g)?.length).toBe(1);
     expect(html.match(/data-deals-save="unsaved"/g)?.length).toBe(1);
     expect(html.match(/Tour this home with us/g)?.length).toBe(2);
@@ -100,7 +105,7 @@ describe("the full list for an agent's client", () => {
     expect(html).toContain("Private buyer list");
     expect(html).not.toContain("Demo Builder");
     expect(html).not.toContain("Demo Lakes");
-    expect(html).not.toContain("picked these for you");
+    expect(html).not.toContain("Shared with you by");
     expect(html.match(/data-deals-save="unsaved"/g)?.length).toBe(2);
     expect(html).toContain("Add your name so we know who to text.");
   });
@@ -121,11 +126,12 @@ describe("agent tools on /deals/team", () => {
   it("lists each client with their status, saves and requests, and a text/copy pair per live link", () => {
     const html = renderTools();
     expect(html).toContain("Agent tools · Tiffany Agent");
-    expect(html).toContain("Send homes to a client");
+    expect(html).toContain("Send the list to a client");
+    expect(html).toContain("Each link works for one client");
     expect(html.match(/data-deals-client="true"/g)?.length).toBe(3);
     expect(html).toContain("Verified Oct 19, 6:30 AM · list open until Oct 21, 7:00 PM");
     expect(html).toContain("Not opened yet");
-    expect(html).toContain("Link expired");
+    expect(html).toContain("Link expired before they used it");
     expect(html).toContain("Saved homes");
     expect(html).toContain("118 Demo Lakes Blvd (Brandon) · $489,990 · Demo Lakes (Southeast demo area)");
     expect(html).toContain("Tour: 120 Demo Lakes Blvd (Evan)");
@@ -133,31 +139,88 @@ describe("agent tools on /deals/team", () => {
     // Maria's number was typed by the agent, so her Text it is addressed; Sam's is not.
     expect(html).toContain('href="sms:+12105550202?&body=');
     expect(html).toContain('href="sms:?&body=');
+    // The expired, never-used link offers nothing to send.
+    expect(html.match(/ Text it</g)?.length).toBe(2);
     expect(html).not.toContain("Follow Up Boss user");
   });
 
   it("warns an agent whose team row has no FUB user, and shows the created link with the suggested text", () => {
-    const html = renderTools({ workspace: { ...workspace, agent: { ...workspace.agent, fubLinked: false }, clients: [] }, created: { id: 9, path: `/deals?c=${TOKEN}`, expiresAt: new Date(NOW + 30 * 86_400_000).toISOString() } });
+    const html = renderTools({ workspace: { ...workspace, agent: { ...workspace.agent, fubLinked: false }, clients: [] }, created: { id: 9, path: `/deals?c=${TOKEN}`, expiresAt: new Date(NOW + 30 * 86_400_000).toISOString(), clientName: "Maria Lopez", clientPhoneDigits: "2105550202" } });
     expect(html).toContain("without a Follow Up Boss user");
     expect(html).toContain("No client links yet. Send your first one above.");
-    // The created-link panel waits for the form submit (lastSent) in the browser; the pure helpers are asserted directly.
+    // The created link comes back from the server with the client's normalized number, so Text it is addressed.
+    expect(html).toContain("Link ready. Text it or copy it.");
+    expect(html).toContain(`https://lifestyledesignrealty.com/deals?c=${TOKEN}`);
+    expect(html).toContain('href="sms:+12105550202?&body=Hi%20Maria');
     const url = absoluteLink(`/deals?c=${TOKEN}`, "https://lifestyledesignrealty.com");
     expect(url).toBe(`https://lifestyledesignrealty.com/deals?c=${TOKEN}`);
     const message = clientMessage({ clientName: "Maria Lopez", agentName: "Tiffany Agent", url });
-    expect(message).toBe(`Hi Maria, here are the new-build homes I picked for you, with the current builder incentives. Open the link and verify your mobile number once: ${url} - Tiffany Agent`);
+    expect(message).toBe(`Hi Maria, here are the best new-build deals I'm tracking right now, with the current builder incentives. Open the link and verify your mobile number once: ${url} - Tiffany Agent`);
     expect(smsHref(message, "2105550202")).toBe(`sms:+12105550202?&body=${encodeURIComponent(message)}`);
+    // A number typed with the country code is not doubled.
+    expect(smsHref(message, "12105550202")).toBe(`sms:+12105550202?&body=${encodeURIComponent(message)}`);
     expect(smsHref(message)).toBe(`sms:?&body=${encodeURIComponent(message)}`);
   });
 
   it("derives one status per link for agents and admin alike", () => {
     expect(clientStatus(workspace.clients[1]!, NOW)).toEqual({ label: "Not opened yet", tone: "muted" });
     expect(clientStatus({ ...workspace.clients[1]!, openedAt: new Date(NOW - 60_000).toISOString() }, NOW).label).toMatch(/^Opened .* not verified yet$/);
-    expect(clientStatus({ ...workspace.clients[0]!, accessExpiresAt: null }, NOW).label).toContain("access expired, the same link renews it");
+    expect(clientStatus({ ...workspace.clients[0]!, accessExpiresAt: null }, NOW).label).toContain("access lapsed, the same link renews it");
+    expect(clientStatus({ ...workspace.clients[0]!, movedAway: true }, NOW).label).toBe("Now connected through another agent's link");
     expect(clientStatus({ ...workspace.clients[1]!, revoked: true }, NOW)).toEqual({ label: "Link turned off", tone: "muted" });
     expect(clientLinkState({ revokedAt: null, verifiedAt: null, openedAt: null, expiresAt: new Date(NOW + 1000) }, NOW)).toBe("sent");
     expect(clientLinkState({ revokedAt: null, verifiedAt: null, openedAt: new Date(NOW), expiresAt: new Date(NOW + 1000) }, NOW)).toBe("opened");
     expect(clientLinkState({ revokedAt: null, verifiedAt: new Date(NOW), openedAt: new Date(NOW), expiresAt: new Date(NOW - 1000) }, NOW)).toBe("verified");
     expect(clientLinkState({ revokedAt: new Date(NOW), verifiedAt: new Date(NOW), openedAt: null, expiresAt: new Date(NOW + 1000) }, NOW)).toBe("revoked");
     expect(clientLinkState({ revokedAt: null, verifiedAt: null, openedAt: null, expiresAt: new Date(NOW - 1000) }, NOW)).toBe("expired");
+  });
+});
+
+describe("round 2: links survive the routine detours", () => {
+  const noop = () => undefined;
+  const view = (state: GateDealsState, gateSearch = "", overrides: Record<string, unknown> = {}) => decode(renderToStaticMarkup(createElement(GateSheetView, {
+    gate: initialGateState(readGateParams(gateSearch), state), state: state as never, phone: "(210) 555-0202", code: "", choice: null,
+    onPhone: noop, onCode: noop, onChoice: noop, onContinue: noop, onConfirmAgent: noop, onGo: noop, onResend: noop, onChangeNumber: noop, onCopyLink: noop, onClose: noop, ...overrides,
+  })));
+
+  it("posts the token with the code so a wrong code comes back to the agent's gate", () => {
+    const html = view({ pending: { displayPhone: "(210) •••-0202", expiresAt: new Date(NOW + 600_000).toISOString() } } as GateDealsState, "", { clientToken: TOKEN });
+    expect(html).toContain(`<input type="hidden" name="c" value="${TOKEN}"/>`);
+    expect(view({ pending: { displayPhone: "x", expiresAt: "y" } } as GateDealsState)).not.toContain('name="c"');
+  });
+
+  it("shows a dead link as dead, naming the agent, with no phone form and no realtor question", () => {
+    const html = view({ pending: null, clientLink: { state: "dead", agentName: "Tiffany Agent" } } as GateDealsState);
+    expect(html).toContain("This link has expired.");
+    expect(html).toContain("Ask Tiffany Agent to send you a new one.");
+    expect(html).not.toContain("Are you a realtor");
+    expect(html).not.toContain('id="deals-phone"');
+    expect(view({ pending: null, clientLink: { state: "dead", agentName: null } } as GateDealsState)).toContain("Ask your agent to send you a new one.");
+  });
+
+  it("keeps the token for the tab when a redirect drops it, and survives storage that throws", () => {
+    const store = new Map<string, string>();
+    const storage = { getItem: (key: string) => store.get(key) ?? null, setItem: (key: string, value: string) => { store.set(key, value); } };
+    expect(rememberClientLinkToken(`?c=${TOKEN}`, storage)).toBe(TOKEN);
+    expect(rememberClientLinkToken("?expired=1", storage)).toBe(TOKEN);
+    expect(rememberClientLinkToken("?c=bad", { getItem: () => null, setItem: () => undefined })).toBeUndefined();
+    const broken = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } };
+    expect(rememberClientLinkToken(`?c=${TOKEN}`, broken)).toBe(TOKEN);
+    expect(rememberClientLinkToken("", broken)).toBeUndefined();
+  });
+
+  it("reads a week-long window in days and keeps the clock under two days", () => {
+    expect(countdownLabel(new Date(NOW + 7 * 86_400_000 - 1000).toISOString(), NOW)).toBe("6d 23h");
+    expect(countdownLabel(new Date(NOW + 47 * 3_600_000).toISOString(), NOW)).toBe("47:00:00");
+  });
+
+  it("asks before turning a link off and only revokes on yes", () => {
+    const asked: string[] = [];
+    const revoked: number[] = [];
+    expect(confirmAndRevoke({ id: 4, clientName: "Maria Lopez" }, (message) => { asked.push(message); return false; }, (id) => revoked.push(id))).toBe(false);
+    expect(revoked).toEqual([]);
+    expect(asked[0]).toContain("Maria Lopez: Turn off this link?");
+    expect(confirmAndRevoke({ id: 4, clientName: "Maria Lopez" }, () => true, (id) => revoked.push(id))).toBe(true);
+    expect(revoked).toEqual([4]);
   });
 });

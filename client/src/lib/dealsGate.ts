@@ -115,6 +115,22 @@ export function boundClientLinkToken(value: string | null | undefined): string |
   return /^[A-Za-z0-9_-]{20,64}$/.test(token) ? token : undefined;
 }
 
+const CLIENT_LINK_STORAGE_KEY = "ldr_deals_client_link";
+/**
+ * The agent's client-link token for this tab: from the URL when present (and
+ * kept for the rest of the tab), otherwise the one kept earlier, so a redirect
+ * that dropped ?c= (a lapsed list, a reload in Instagram) still shows the
+ * agent's gate. Storage can be unavailable; the URL alone then decides.
+ */
+export function rememberClientLinkToken(search: string, storage?: Pick<Storage, "getItem" | "setItem"> | null): string | undefined {
+  const fromUrl = boundClientLinkToken(new URLSearchParams(search).get("c"));
+  try {
+    const store = storage === undefined ? (typeof window === "undefined" ? null : window.sessionStorage) : storage;
+    if (fromUrl) { store?.setItem(CLIENT_LINK_STORAGE_KEY, fromUrl); return fromUrl; }
+    return boundClientLinkToken(store?.getItem(CLIENT_LINK_STORAGE_KEY) ?? null);
+  } catch { return fromUrl; }
+}
+
 export function readGateParams(search: string): GateParams {
   const params = new URLSearchParams(search);
   const codeError = params.get("codeError");

@@ -25,11 +25,11 @@ vi.mock("./dealsFubJobs", () => ({
   requestTestMode: (...args: unknown[]) => mocks.requestTestMode(...args),
 }));
 
-import { agentDisplayPhone, agentForLead, agentForTeamId, agentWorkspace, attachLiveSessionToClientLink, createClientLink, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
+import { agentDisplayPhone, agentForLead, agentForTeamId, agentWorkspace, attachLiveSessionToClientLink, clientLinkForPhone, clientLinkTokenForLead, createClientLink, liveAgentForClient, presentClientLink, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
 import { dealEvents } from "../drizzle/schema";
 import { classifyDealsAccess } from "./dealsEligibility";
 import { createDealsHomeRequest, setDealsHomeSaved } from "./dealsRequests";
-import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, catalogViewForLead, completeVerification, createPendingVerification, gatedDealsCatalog, hashSecret, savedDealCards } from "./dealsService";
+import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, catalogViewForSession, completeVerification, createPendingVerification, gatedDealsCatalog, hashSecret, savedDealCards } from "./dealsService";
 
 const HOUR = 3_600_000;
 const AGENT_PHONE = "+12105550101";
@@ -145,71 +145,174 @@ function request(cookies: Record<string, string>): Request {
   return { headers: { cookie: Object.entries(cookies).map(([name, value]) => `${name}=${value}`).join("; ") }, ip: "203.0.113.9", socket: { remoteAddress: "203.0.113.9" } } as unknown as Request;
 }
 
+/** Starts and completes a test-number verification through `token` from a fresh browser. */
+async function verifyThrough(token: string | null, rawPhone: string, device = `device-${Math.random()}`) {
+  const start = responseRecorder();
+  const pending = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.probe]: "p" }), res: start.response, rawPhone, choice: "buyer", source: "sl1", clientLinkToken: token });
+  if (!pending.ok) return { pending, done: null };
+  const finish = responseRecorder();
+  const done = await completeVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.pending]: start.cookie(DEALS_COOKIE.pending)! }), res: finish.response, code: TEST_OTP });
+  return { pending, done };
+}
+const OTHER_PHONE = "+12105550606";
+function testSettings(extra: Record<string, unknown> = {}) {
+  db.seed(dealSettings, { key: "builder_deals", value: JSON.stringify({ testNumbers: [CLIENT_PHONE, OTHER_PHONE, "+12105550404"], testNumbersSkipChecks: true, skipTwilioForTestNumbers: true, clientLinkExpiryHours: 72, expiryHours: 24, ...extra }) });
+}
+
 describe("verification through a client link", () => {
-  it("attributes the verified buyer to the agent, gives them the longer access window and records it on the link", async () => {
+  it("attributes the verified buyer to the agent, gives them the longer access window, binds the link and opens the full list", async () => {
     vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
-    db.seed(dealSettings, { key: "builder_deals", value: JSON.stringify({ testNumbers: [CLIENT_PHONE], testNumbersSkipChecks: true, skipTwilioForTestNumbers: true, clientLinkExpiryHours: 72, expiryHours: 24 }) });
+    testSettings();
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
     const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
-
-    const device = "device-secret";
-    const start = responseRecorder();
-    const pending = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.probe]: "p" }), res: start.response, rawPhone: "(210) 555-0202", choice: "buyer", source: "sl1", clientLinkToken: created.link.token });
-    expect(pending.ok).toBe(true);
-    if (!pending.ok) return;
-    expect(pending.sourceCode).toBe(AGENT_CLIENT_SOURCE);
-    expect(pending.clientLink).toBe(true);
-    const pendingCookie = start.cookie(DEALS_COOKIE.pending);
-    expect(pendingCookie).toBeTruthy();
-
-    const finish = responseRecorder();
-    const done = await completeVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.pending]: pendingCookie! }), res: finish.response, code: TEST_OTP });
-    expect(done.ok).toBe(true);
-    if (!done.ok) return;
+    const { pending, done } = await verifyThrough(created.link.token, "(210) 555-0202");
+    expect(pending).toMatchObject({ ok: true, sourceCode: AGENT_CLIENT_SOURCE, clientLink: true });
+    expect(done?.ok).toBe(true);
+    if (!done?.ok) return;
     const buyer = db.rows(dealLeads).find((row) => row.id === done.leadId) as typeof dealLeads.$inferSelect;
     expect(buyer).toMatchObject({ phoneE164: CLIENT_PHONE, status: "verified", sourceCode: AGENT_CLIENT_SOURCE, agentTeamId: teamId, clientLinkId: created.link.id });
     expect(buyer.expiresAt.getTime() - Date.now()).toBeGreaterThan(71 * HOUR);
     const link = db.rows(dealClientLinks).find((row) => row.id === created.link.id)!;
-    expect(link.leadId).toBe(done.leadId);
+    expect(link).toMatchObject({ leadId: done.leadId });
     expect(link.verifiedAt).toBeInstanceOf(Date);
-    expect(catalogViewForLead(buyer)).toEqual({ view: "full", builderPages: false });
+    expect(done.clientLinkAttached).toBeNull();
+    expect((await catalogViewForSession(buyer)).view).toEqual({ view: "full", builderPages: false });
   });
 
-  it("ignores a revoked link: the visitor goes through the ordinary gate unattributed", async () => {
+  it("refuses a forwarded link for any other number, with the agent's name and no realtor question", async () => {
     vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
-    db.seed(dealSettings, { key: "builder_deals", value: JSON.stringify({ testNumbers: [CLIENT_PHONE], testNumbersSkipChecks: true, skipTwilioForTestNumbers: true }) });
+    testSettings();
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    await verifyThrough(created.link.token, CLIENT_PHONE);
+    const stranger = await verifyThrough(created.link.token, OTHER_PHONE);
+    expect(stranger.pending).toEqual({ ok: false, kind: "link_other_phone", agentName: "Tiffany Agent" });
+    expect(db.rows(dealLeads).some((row) => row.phoneE164 === OTHER_PHONE)).toBe(false);
+    // The bound client can come back through the same link.
+    expect((await verifyThrough(created.link.token, CLIENT_PHONE)).done?.ok).toBe(true);
+    // A link made for a typed number only ever opens for that number, even before anyone used it.
+    const typed = await createClientLink({ agentLead: agent, clientName: "Sam Reyes", clientPhone: "(210) 555-0404" });
+    if (!typed.ok) throw new Error("link not created");
+    expect((await verifyThrough(typed.link.token, OTHER_PHONE)).pending).toMatchObject({ ok: false, kind: "link_other_phone" });
+    expect((await verifyThrough(typed.link.token, "+12105550404")).done?.ok).toBe(true);
+    // The agent can still preview their own link: team members pass.
+    expect(await clientLinkForPhone(created.link.token, AGENT_PHONE)).toEqual({ ok: false, kind: "other_phone", agentName: "Tiffany Agent" });
+  });
+
+  it("tells a visitor on a turned-off link to ask the agent, instead of falling to the reel gate", async () => {
+    vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
+    testSettings();
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
     const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
     await revokeClientLink(agent, created.link.id);
+    expect((await verifyThrough(created.link.token, CLIENT_PHONE)).pending).toEqual({ ok: false, kind: "link_dead", agentName: "Tiffany Agent" });
+    expect(await presentClientLink(created.link.token)).toEqual({ state: "dead", agentName: "Tiffany Agent" });
+    expect(await presentClientLink("Z".repeat(32))).toEqual({ state: "dead", agentName: null });
+    expect(await presentClientLink("short")).toBeNull();
+  });
+
+  it("re-checks the link when the code is approved: turned off during the code step attaches nothing", async () => {
+    vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
+    testSettings();
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    const device = "dev-race";
     const start = responseRecorder();
-    const pending = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: "dev", [DEALS_COOKIE.probe]: "p" }), res: start.response, rawPhone: CLIENT_PHONE, choice: "buyer", source: "sl1", clientLinkToken: created.link.token });
-    expect(pending.ok && pending.sourceCode).toBe("sl1");
-    expect(pending.ok && pending.clientLink).toBe(false);
+    const pending = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.probe]: "p" }), res: start.response, rawPhone: CLIENT_PHONE, choice: "buyer", clientLinkToken: created.link.token });
+    expect(pending.ok).toBe(true);
+    await revokeClientLink(agent, created.link.id);
+    const done = await completeVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.pending]: start.cookie(DEALS_COOKIE.pending)! }), res: responseRecorder().response, code: TEST_OTP });
+    expect(done.ok).toBe(true);
+    const buyer = db.rows(dealLeads).find((row) => row.phoneE164 === CLIENT_PHONE)!;
+    expect(buyer.agentTeamId).toBeNull();
+    expect(buyer.expiresAt.getTime() - Date.now()).toBeLessThan(25 * HOUR);
+  });
+
+  it("reports a returning buyer newly attached to a link so the agent is told", async () => {
+    vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
+    testSettings();
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    await verifyThrough(null, CLIENT_PHONE);
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez", clientPhone: CLIENT_PHONE });
+    if (!created.ok) throw new Error("link not created");
+    const { done } = await verifyThrough(created.link.token, CLIENT_PHONE);
+    expect(done).toMatchObject({ ok: true, firstUnlock: false, clientLinkAttached: created.link.id });
+    // The same link again is not news.
+    expect((await verifyThrough(created.link.token, CLIENT_PHONE)).done).toMatchObject({ ok: true, clientLinkAttached: null });
+  });
+
+  it("keeps the expired page on the agent's link for a client whose list lapsed", async () => {
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    const client = lead({ phoneE164: CLIENT_PHONE, agentTeamId: teamId, clientLinkId: created.link.id, expiresAt: new Date(Date.now() - HOUR) });
+    db.rows(dealClientLinks)[0].leadId = client.id;
+    expect(await clientLinkTokenForLead(client.id)).toBe(created.link.token);
+    expect(await clientLinkTokenForLead(lead({ phoneE164: OTHER_PHONE }).id)).toBeNull();
   });
 });
 
 describe("the full list versus the scrubbed list", () => {
-  it("hides every private field from a reel buyer and shows them to the team (with builder pages) and to an agent's client (without)", async () => {
+  it("hides every private value from a reel buyer and shows them to the team (with builder pages and sales line) and to a live agent client (without)", async () => {
     const buyer = lead({ phoneE164: CLIENT_PHONE });
-    const gated = JSON.stringify(await gatedDealsCatalog(buyer.id, catalogViewForLead(buyer)));
-    expect(gated).not.toContain("Fixture Lakes");
-    expect(gated).not.toContain("Chesmar");
-    expect(gated).not.toContain("details");
+    const gated = JSON.stringify(await gatedDealsCatalog(buyer.id, (await catalogViewForSession(buyer)).view));
+    // Values, not just key names: none of the private strings may travel under any key.
+    for (const value of ["Fixture Lakes", "Chesmar", "chesmar.com", "Fixture Lakes Blvd", "Brandon", "555-0999", "details"]) expect(gated).not.toContain(value);
     for (const field of DEALS_PRIVATE_FIELDS) expect(gated).not.toContain(`"${field}"`);
 
-    const client = lead({ phoneE164: "+12105550404", agentTeamId: teamId, sourceCode: AGENT_CLIENT_SOURCE });
-    const full = await gatedDealsCatalog(client.id, catalogViewForLead(client)) as Array<{ details: Record<string, unknown>; amenities: string[]; homes: Array<{ details: Record<string, unknown> }> }>;
-    expect(full[0].details).toEqual({ builderName: "Chesmar", communityName: "Fixture Lakes", address: "100 Fixture Lakes Blvd, San Antonio, TX 78263", salesLine: "+12105550999", builderPage: null });
-    // One quick move-in is available, so the To Be Built plan stays off the list (the same rule as the scrubbed list).
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Client" });
+    if (!created.ok) throw new Error("link not created");
+    const client = lead({ phoneE164: "+12105550404", agentTeamId: teamId, clientLinkId: created.link.id, sourceCode: AGENT_CLIENT_SOURCE });
+    db.rows(dealClientLinks)[0].leadId = client.id;
+    const full = await gatedDealsCatalog(client.id, (await catalogViewForSession(client)).view) as Array<{ details: Record<string, unknown>; amenities: string[]; homes: Array<{ details: Record<string, unknown> }> }>;
+    // The builder's sales line stays with the team: a client calling the builder directly can cost the agent the registration.
+    expect(full[0].details).toEqual({ builderName: "Chesmar", communityName: "Fixture Lakes", address: "100 Fixture Lakes Blvd, San Antonio, TX 78263", salesLine: null, builderPage: null });
     expect(full[0].homes.map((home) => home.details)).toEqual([{ address: "118 Fixture Lakes Blvd", planName: "Brandon", builderPage: null }]);
-    for (const field of DEALS_PRIVATE_FIELDS) expect(JSON.stringify(full)).not.toContain(`"${field}"`);
+    expect(JSON.stringify(full)).not.toContain("chesmar.com");
+    expect(JSON.stringify(full)).not.toContain("555-0999");
 
-    const team = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const teamList = await gatedDealsCatalog(team.id, catalogViewForLead(team)) as typeof full;
-    expect(teamList[0].details.builderPage).toBe("https://www.chesmar.com/fixture-lakes/");
+    const teamList = await gatedDealsCatalog(agent.id, (await catalogViewForSession(agent)).view) as typeof full;
+    expect(teamList[0].details).toMatchObject({ salesLine: "+12105550999", builderPage: "https://www.chesmar.com/fixture-lakes/" });
     expect(teamList[0].homes[0].details.builderPage).toBe("https://www.chesmar.com/fixture-lakes/brandon/1/");
+  });
+
+  it("drops a client back to the scrubbed list when the link is turned off, the agent leaves, or the link belongs to someone else", async () => {
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Client" });
+    if (!created.ok) throw new Error("link not created");
+    const client = lead({ phoneE164: CLIENT_PHONE, agentTeamId: teamId, clientLinkId: created.link.id });
+    const linkRow = db.rows(dealClientLinks)[0];
+    // Not bound to this lead: no full list.
+    expect(await liveAgentForClient(client)).toBeNull();
+    linkRow.leadId = client.id;
+    expect((await liveAgentForClient(client))?.teamId).toBe(teamId);
+    // An unused-link expiry does not matter once the client is bound.
+    linkRow.expiresAt = new Date(Date.now() - HOUR);
+    expect((await catalogViewForSession(client)).view).toEqual({ view: "full", builderPages: false });
+    // The agent leaves the team.
+    db.rows(dealTeamAllowlist).find((row) => row.id === teamId)!.active = false;
+    expect((await catalogViewForSession(client)).view).toEqual({ view: "gated" });
+    db.rows(dealTeamAllowlist).find((row) => row.id === teamId)!.active = true;
+    await revokeClientLink(agent, created.link.id);
+    expect((await catalogViewForSession(client)).view).toEqual({ view: "gated" });
+  });
+
+  it("keeps an agent's links alive when FUB changes their phone (old mirror row inactive, new row active)", async () => {
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Client" });
+    if (!created.ok) throw new Error("link not created");
+    db.rows(dealTeamAllowlist).find((row) => row.id === teamId)!.active = false;
+    db.seed(dealTeamAllowlist, { name: "Tiffany Agent", phoneE164: "+12105550707", email: "tiffany@example.com", fubUserId: "77", fubIdentityKey: "fub:77:+12105550707", source: "fub", active: true });
+    expect((await resolveClientLink(created.link.token))?.agent).toMatchObject({ teamId, active: true, fubUserId: "77" });
+    // From the new phone, the agent still sees and can turn off the link made under the old one.
+    const newSession = lead({ phoneE164: "+12105550707", status: "team" });
+    expect((await agentWorkspace(newSession))?.clients.map((client) => client.clientName)).toEqual(["Client"]);
+    expect(await revokeClientLink(newSession, created.link.id)).toBe(true);
   });
 });
 
@@ -262,6 +365,10 @@ describe("the agent's workspace", () => {
 
     const workspace = await agentWorkspace(agent);
     expect(workspace?.agent).toMatchObject({ teamId, name: "Tiffany Agent", fubUserId: "77" });
+    // Once the client is attached to another link, this agent no longer sees their activity.
+    db.rows(dealLeads).find((row) => row.id === client.id)!.clientLinkId = 999;
+    expect((await agentWorkspace(agent))?.clients[0]).toMatchObject({ movedAway: true, saves: [], requests: [], accessExpiresAt: null });
+    db.rows(dealLeads).find((row) => row.id === client.id)!.clientLinkId = created.link.id;
     const [maria] = workspace!.clients;
     expect(maria.verifiedAt).toBeTruthy();
     expect(maria.accessExpiresAt).toBeTruthy();

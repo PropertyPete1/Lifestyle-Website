@@ -14,6 +14,7 @@
     "test:deals:browser": "tsx scripts/test-deals-browser.mts",
     "capture:deals:preview": "tsx scripts/capture-deals-preview.mts",
     "seed:deals": "tsx scripts/seed-deals.mts",
+    "diagnose:deals": "tsx scripts/diagnose-deals-source.mts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
     "stats:site": "tsx server/writeSiteStats.ts"
   },

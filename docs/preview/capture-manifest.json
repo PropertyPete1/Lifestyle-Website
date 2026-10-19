@@ -1,0 +1,128 @@
+{
+  "mode": "live-deployment",
+  "capturedAt": "2026-10-19T03:55:43.845Z",
+  "commit": "01c81f6",
+  "target": "https://3000-ikqecsvrip83yuk510r73-be8e0622.us1.manus.computer",
+  "viewport": {
+    "width": 375,
+    "height": 812
+  },
+  "fullPage": false,
+  "note": "Real gate, real session cookies and the deployment's catalog; the tester's phone digits are masked in the DOM before each frame. No admin, FUB or settings writes.",
+  "captures": [
+    {
+      "file": "builder-deals-landing-gate-375.png",
+      "viewport": {
+        "width": 375,
+        "height": 812
+      },
+      "scrollWidth": 375,
+      "width": 375,
+      "height": 812,
+      "redactions": []
+    },
+    {
+      "file": "builder-deals-code-step-375.png",
+      "viewport": {
+        "width": 375,
+        "height": 812
+      },
+      "scrollWidth": 375,
+      "width": 375,
+      "height": 812,
+      "redactions": [
+        "code-step phone masked"
+      ],
+      "note": "the typed number is masked in the committed frame"
+    },
+    {
+      "file": "builder-deals-name-prompt-375.png",
+      "viewport": {
+        "width": 375,
+        "height": 812
+      },
+      "scrollWidth": 375,
+      "width": 375,
+      "height": 812,
+      "redactions": [
+        "identity last-4 masked",
+        "identity pattern digits masked"
+      ]
+    },
+    {
+      "file": "builder-deals-gated-catalog-375.png",
+      "viewport": {
+        "width": 375,
+        "height": 812
+      },
+      "scrollWidth": 375,
+      "width": 375,
+      "height": 812,
+      "redactions": []
+    },
+    {
+      "file": "builder-deals-home-gallery-375.png",
+      "viewport": {
+        "width": 375,
+        "height": 812
+      },
+      "scrollWidth": 375,
+      "width": 375,
+      "height": 812,
+      "redactions": [],
+      "note": "one gallery frame with the per-lead watermark burned into the image bytes (first image 200 in 139 ms)"
+    },
+    {
+      "file": "builder-deals-to-be-built-375.png",
+      "viewport": {
+        "width": 375,
+        "height": 812
+      },
+      "scrollWidth": 375,
+      "width": 375,
+      "height": 812,
+      "redactions": [],
+      "note": "To Be Built card; a photo-less card reads \"Photos on request\""
+    },
+    {
+      "file": "builder-deals-area-map-375.png",
+      "viewport": {
+        "width": 375,
+        "height": 812
+      },
+      "scrollWidth": 375,
+      "width": 375,
+      "height": 812,
+      "redactions": [],
+      "note": "static ZIP-centroid map with the shaded circle and drive-time chips, or the fail-closed fallback"
+    },
+    {
+      "file": "builder-deals-expired-375.png",
+      "viewport": {
+        "width": 375,
+        "height": 812
+      },
+      "scrollWidth": 375,
+      "width": 375,
+      "height": 812,
+      "redactions": []
+    },
+    {
+      "file": "builder-deals-blocked-375.png",
+      "viewport": {
+        "width": 375,
+        "height": 812
+      },
+      "scrollWidth": 375,
+      "width": 375,
+      "height": 812,
+      "redactions": []
+    }
+  ],
+  "skipped": [
+    {
+      "file": "builder-deals-admin-tab-375.png",
+      "reason": "DEALS_E2E_ADMIN_COOKIE not set"
+    }
+  ]
+}

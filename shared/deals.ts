@@ -120,6 +120,25 @@ export function dealScrubTerms(value: DealScrubConfig | readonly string[]): stri
   const config = parseDealScrubConfig(value);
   return Array.from(new Set(DEAL_SCRUB_CATEGORIES.flatMap((category) => config[category])));
 }
+export type DealScrubConfigInput = Partial<Record<DealScrubCategory, readonly string[]>> | readonly string[];
+/** Union per category; a term already known under one category is not duplicated into another. */
+export function mergeDealScrubConfig(...values: Array<DealScrubConfigInput | null | undefined>): DealScrubConfig {
+  const result = emptyDealScrubConfig();
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (!value) continue;
+    const config = parseDealScrubConfig(value);
+    for (const category of DEAL_SCRUB_CATEGORIES) {
+      for (const term of config[category]) {
+        const key = term.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result[category].push(term);
+      }
+    }
+  }
+  return result;
+}
 /** Public storage/output scrubber. It purposely performs no guessing. */
 export function scrubPrivateNames(
   input: string,
@@ -135,21 +154,33 @@ export function scrubPrivateNames(
     if (name.length < 4 && category !== "builder" && category !== "lender") continue;
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const boundary = `(?<![a-z0-9])${escaped}(?![a-z0-9])`;
+    // "the Magnolia", "Magnolia plan" and "the Magnolia plan" each become one "this plan".
     const pattern = category === "plan" && !options.planField
-      ? new RegExp(`(?<![a-z0-9])(?:the\\s+${escaped}(?![a-z0-9])|${escaped}\\s+plan(?![a-z0-9]))`, "gi")
+      ? new RegExp(`(?<![a-z0-9])(?:the\\s+${escaped}(?:\\s+plans?)?(?![a-z0-9])|${escaped}\\s+plans?(?![a-z0-9]))`, "gi")
       : new RegExp(boundary, "gi");
-    out = out.replace(pattern, options.planField ? "this plan" : replacements[category]);
+    out = out.replace(pattern, replacements[category]);
   }
   return out;
 }
 
-export function hasPrivateTerm(input: string, names: readonly string[] | DealScrubConfig): boolean {
+/**
+ * Residue check. Plan names are common words (Magnolia, Cypress), so outside a
+ * plan field a bare plan word is not residue; only "the {plan}" or "{plan} plan"
+ * is, mirroring how scrubPrivateNames replaces them.
+ */
+export function hasPrivateTerm(input: string, names: readonly string[] | DealScrubConfig, options: { planField?: boolean } = {}): boolean {
   const normalized = normalizedText(input);
-  return dealScrubTerms(names).some((raw) => {
+  const config = parseDealScrubConfig(names);
+  const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return DEAL_SCRUB_CATEGORIES.some((category) => config[category].some((raw) => {
     const value = normalizedText(raw);
-    const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return value.length > 0 && new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, "i").test(normalized);
-  });
+    if (!value) return false;
+    const escaped = escape(value);
+    if (category === "plan" && !options.planField) {
+      return new RegExp(`(?<![a-z0-9])(?:the\\s+${escaped}(?![a-z0-9])|${escaped}\\s+plan(?![a-z0-9]))`, "i").test(normalized);
+    }
+    return new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, "i").test(normalized);
+  }));
 }
 
 /** One community: available QMIs win; plans are the zero-QMI fallback only. */

@@ -2,12 +2,15 @@ import { and, eq, lt, lte, or, sql } from "drizzle-orm";
 import { dealAlerts, dealLeads } from "../drizzle/schema";
 import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
+import { fubPersonLink } from "./dealsFub";
 import { getDealSettings } from "./dealsService";
 
 export type DealAlertKind = "first_unlock" | "profile_flag";
 type AlertRow = typeof dealAlerts.$inferSelect;
+type AlertLead = Pick<typeof dealLeads.$inferSelect, "id" | "name" | "phoneE164" | "email" | "instagramHandle" | "sourceCode" | "timeline">;
 
 const STALE_SEND_MS = 15 * 60_000;
+const DEFAULT_SITE_ORIGIN = "https://lifestyledesignrealty.com";
 
 function validRecipients(values: readonly string[]) {
   return Array.from(new Set(values.map((value) => value.trim().toLowerCase()).filter((value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))));
@@ -29,21 +32,27 @@ function nextHour(now = new Date()) {
   return scheduled;
 }
 
-function privateLeadLines(lead: Pick<typeof dealLeads.$inferSelect, "id" | "name" | "phoneE164" | "email" | "instagramHandle" | "sourceCode" | "timeline">) {
+/** Every link in an alert opens admin (login required, confirm button); never the personal page. */
+export function adminLeadLink(leadId: number) {
+  const origin = (process.env.DEALS_SITE_ORIGIN?.trim() || DEFAULT_SITE_ORIGIN).replace(/\/+$/, "");
+  return `${origin}/admin/deals?lead=${leadId}`;
+}
+
+function privateLeadLines(lead: AlertLead) {
   return [
-    `Lead ID: ${lead.id}`,
-    `Name: ${lead.name || "Not provided"}`,
     `Phone: ${lead.phoneE164}`,
-    `Email: ${lead.email || "Not provided"}`,
     `Instagram: ${lead.instagramHandle ? `@${lead.instagramHandle}` : "Not provided"}`,
     `Source: ${lead.sourceCode}`,
+    `Name: ${lead.name || "Not provided"}`,
+    `Email: ${lead.email || "Not provided"}`,
     `Timeline: ${lead.timeline || "Not provided"}`,
+    `Lead ID: ${lead.id}`,
   ];
 }
 
 async function queueDealAlert(input: {
   dedupeKey: string;
-  lead: Pick<typeof dealLeads.$inferSelect, "id" | "name" | "phoneE164" | "email" | "instagramHandle" | "sourceCode" | "timeline">;
+  lead: AlertLead;
   kind: DealAlertKind;
   subject: string;
   content: string;
@@ -75,26 +84,49 @@ async function queueDealAlert(input: {
   return { queued, reason: queued ? undefined : "duplicate" as const };
 }
 
-/** Queue exactly one immutable, auditable first-unlock alert per lead. */
-export async function queueFirstUnlockAlert(lead: Pick<typeof dealLeads.$inferSelect, "id" | "name" | "phoneE164" | "email" | "instagramHandle" | "sourceCode" | "timeline">) {
+export type FirstUnlockAlertDetails = {
+  /** Stored screening flags, for example "Possible Agent - TREC Name Match". */
+  flags?: readonly string[];
+  fubPersonId?: string | null;
+  /** The agent FUB already had on the contact; the assignment was left alone. */
+  alreadyAssignedTo?: string | null;
+  /** From FUB's own opt-out fields or notes this system did not write. */
+  previouslyOptedOut?: boolean;
+  /** Why the FUB sync has not completed, when the alert goes out before FUB answered. */
+  fubIssue?: string | null;
+};
+
+/**
+ * Queue exactly one immutable, auditable first-unlock alert per lead. The job
+ * runner calls this after the first_unlock FUB job resolves, so the email can
+ * carry the FUB link, the prior assignment and the opt-out marker in ONE email.
+ */
+export async function queueFirstUnlockAlert(lead: AlertLead, details: FirstUnlockAlertDetails = {}) {
+  const flags = Array.from(new Set((details.flags ?? []).map((flag) => flag.trim()).filter(Boolean)));
   return queueDealAlert({
     dedupeKey: `first_unlock:${lead.id}`,
     lead,
     kind: "first_unlock",
-    subject: "Builder Deals — first buyer unlock",
+    subject: "Builder Deals: new buyer unlocked the list",
     content: [
       "A buyer unlocked Builder Deals for the first time.",
+      ...(details.previouslyOptedOut ? ["", "Previously opted out, do not text manually."] : []),
       "",
       ...privateLeadLines(lead),
+      `Flags: ${flags.length ? flags.join(", ") : "none"}`,
+      ...(details.alreadyAssignedTo ? [`FUB assignment: already assigned to ${details.alreadyAssignedTo}. The assignment was left alone and a note was added.`] : []),
       "",
-      "Review the protected record in Admin → Builder Deals.",
+      details.fubPersonId
+        ? `FUB contact: ${fubPersonLink(details.fubPersonId)}`
+        : `FUB contact: not synced yet${details.fubIssue ? ` (${details.fubIssue})` : ""}. The retry queue is in Admin, Builder Deals.`,
+      `Block and kill link (opens admin, login required, confirm button): ${adminLeadLink(lead.id)}`,
     ].join("\n"),
   });
 }
 
-/** Queue one alert only when a newly discovered profile screening flag exists. */
+/** Queue one alert only when a newly discovered profile screening flag exists (the name prompt answered later). */
 export async function queueProfileFlagAlert(
-  lead: Pick<typeof dealLeads.$inferSelect, "id" | "name" | "phoneE164" | "email" | "instagramHandle" | "sourceCode" | "timeline">,
+  lead: AlertLead,
   newFlags: readonly string[],
 ) {
   const flags = Array.from(new Set(newFlags.map((flag) => flag.trim()).filter(Boolean))).sort();
@@ -103,7 +135,7 @@ export async function queueProfileFlagAlert(
     dedupeKey: `profile_flag:${lead.id}:${flags.join("|").toLowerCase()}`,
     lead,
     kind: "profile_flag",
-    subject: "Builder Deals — buyer profile flag",
+    subject: "Builder Deals: buyer profile flag",
     content: [
       "A Builder Deals buyer profile needs review.",
       "",
@@ -112,7 +144,8 @@ export async function queueProfileFlagAlert(
       `New profile flag${flags.length === 1 ? "" : "s"}:`,
       ...flags.map((flag) => `- ${flag}`),
       "",
-      "This alert does not revoke buyer access. Review it in Admin → Builder Deals.",
+      "This alert does not revoke buyer access. The flag was added as a FUB tag.",
+      `Block and kill link (opens admin, login required, confirm button): ${adminLeadLink(lead.id)}`,
     ].join("\n"),
   });
 }
@@ -146,16 +179,16 @@ async function completeAlerts(alerts: AlertRow[], result: Awaited<ReturnType<typ
   }
 }
 
-function digestContent(alerts: AlertRow[]) {
+export function digestContent(alerts: Array<Pick<AlertRow, "subject" | "content">>) {
   return [
-    `Builder Deals hourly alert digest — ${alerts.length} alert${alerts.length === 1 ? "" : "s"}.`,
+    `Builder Deals hourly alert digest: ${alerts.length} alert${alerts.length === 1 ? "" : "s"}.`,
     "",
     ...alerts.flatMap((alert, index) => [
       `${index + 1}. ${alert.subject}`,
       alert.content,
       "",
     ]),
-    "Review the protected records in Admin → Builder Deals.",
+    "Review the protected records in Admin, Builder Deals.",
   ].join("\n");
 }
 

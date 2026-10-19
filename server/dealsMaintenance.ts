@@ -1,22 +1,24 @@
-import { and, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, lt, sql } from "drizzle-orm";
 import {
   dealCommunities,
+  dealEmailLogs,
   dealEvents,
   dealFubRecords,
   dealFubJobs,
   dealIncentives,
+  dealJobRuns,
   dealLeads,
   dealPhotos,
   dealTeamAllowlist,
   dealTrecImports,
 } from "../drizzle/schema";
 import { normalizeUsPhone } from "../shared/deals";
-import { notifyOwner } from "./_core/notification";
 import { getDb } from "./db";
 import { makeMatchingLeadsTeam, revokeOrphanedTeamPreviewLinks } from "./dealsEligibility";
-import { cleanupBuilderDealsFubRecord, stripBuilderDealsTestTag } from "./dealsFub";
+import { resendConfiguration, sendBuilderDealsEmail } from "./dealsEmail";
+import { cleanupBuilderDealsFubRecord, formatChicagoDateTime, stripBuilderDealsTestTag } from "./dealsFub";
+import { pruneDealPhotoRenders } from "./dealsPhotos";
 import { getDealSettings } from "./dealsService";
-import { syncKnownAgentsFromFub } from "./dealsKnownAgents";
 import { fubHeaders } from "./fub";
 
 export { syncKnownAgentsFromFub } from "./dealsKnownAgents";
@@ -26,6 +28,7 @@ const FUB_API_URL = "https://api.followupboss.com/v1";
 const FUB_TIMEOUT_MS = 15_000;
 const FUB_PAGE_SIZE = 100;
 const MAX_FUB_PAGES = 10_000;
+const HEALTH_JOB_NAME = "builder-deals-health";
 
 export type CredentialState = "configured" | "missing";
 export type AvailabilityState = "available" | "unavailable" | "not_checked";
@@ -39,9 +42,11 @@ type FubFetchResult =
 type FubFailure = Extract<FubFetchResult, { ok: false }>;
 type FubUserListResult = FubFailure | { ok: true; users: FubUser[] };
 
+type TeamSyncCounts = { usersFetched: number; activeUsers: number; upserted: number; skipped: number; deactivated: number; orphanedTeamLeads: number };
+export type TeamAllowlistSyncAbortReason = "database_unavailable" | "fub_no_users" | "fub_no_active_users" | FubErrorReason;
 type TeamAllowlistSyncResult =
-  | { ok: true; usersFetched: number; activeUsers: number; upserted: number; skipped: number; deactivated: number; orphanedTeamLeads: number }
-  | { ok: false; usersFetched: number; activeUsers: number; upserted: number; skipped: number; deactivated: number; orphanedTeamLeads: number; reason: "database_unavailable" | FubErrorReason };
+  | ({ ok: true } & TeamSyncCounts)
+  | ({ ok: false; reason: TeamAllowlistSyncAbortReason; emailed: boolean } & TeamSyncCounts);
 
 function credentialState(value: string | undefined): CredentialState {
   return value?.trim() ? "configured" : "missing";
@@ -65,32 +70,6 @@ export function normalizeFubPhone(value: unknown): string | null {
   return normalized.ok ? normalized.e164 : null;
 }
 
-/**
- * Extracts standalone ten-digit strings only. It deliberately does not try to
- * reconstruct formatted, partial, or longer digit sequences from CRM notes.
- */
-export function extractTenDigitPhoneStrings(value: unknown): string[] {
-  if (typeof value !== "string") return [];
-  const matches = value.match(/(?<!\d)\d{10}(?!\d)/g) ?? [];
-  return Array.from(new Set(matches));
-}
-
-/** Parses the two flag shapes used by Builder Deals without treating substrings such as CONTEST as TEST. */
-export function hasDealsTestFlag(flagsJson: string | null | undefined): boolean {
-  if (!flagsJson) return false;
-  try {
-    const parsed: unknown = JSON.parse(flagsJson);
-    const flags = Array.isArray(parsed)
-      ? parsed
-      : parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).flags)
-        ? (parsed as Record<string, unknown>).flags as unknown[]
-        : [];
-    return flags.some((value) => typeof value === "string" && value.trim().toUpperCase() === "TEST");
-  } catch {
-    return false;
-  }
-}
-
 function fubId(value: unknown): string | null {
   return nonEmptyString(value, 80);
 }
@@ -111,9 +90,10 @@ function firstFubEmail(record: FubUser): string | null {
     .find((value): value is string => Boolean(value)) ?? null;
 }
 
+/** Every phone field FUB exposes on a user; each one becomes its own mirror row. */
 function fubPhones(record: FubUser): string[] {
   return Array.from(new Set(
-    [record.phone, record.mobile, record.mobilePhone, record.phones]
+    [record.phone, record.mobile, record.mobilePhone, record.cellPhone, record.workPhone, record.homePhone, record.phones]
       .flatMap(valuesFromField)
       .map(normalizeFubPhone)
       .filter((value): value is string => Boolean(value)),
@@ -146,17 +126,14 @@ async function getFubJson(path: string): Promise<FubFetchResult> {
   }
 }
 
-/** FUB recommends cursor pagination; legacy accounts still work through offset fallback. */
+/** FUB recommends cursor pagination; legacy accounts still work through offset fallback. Only documented parameters are sent. */
 async function listAllFubUsers(): Promise<FubUserListResult> {
   const users: FubUser[] = [];
   const seenCursors = new Set<string>();
   let cursor: string | null = null;
   let offset = 0;
   for (let page = 0; page < MAX_FUB_PAGES; page += 1) {
-    const params = new URLSearchParams({
-      limit: String(FUB_PAGE_SIZE),
-      fields: "id,name,firstName,lastName,email,emails,phone,phones,status,active",
-    });
+    const params = new URLSearchParams({ limit: String(FUB_PAGE_SIZE) });
     if (cursor) params.set("next", cursor); else params.set("offset", String(offset));
     const response = await getFubJson(`/users?${params.toString()}`);
     if (!response.ok) return response;
@@ -182,11 +159,18 @@ async function listAllFubUsers(): Promise<FubUserListResult> {
   return { ok: false, reason: "fub_invalid_response" };
 }
 
-/** Only a documented Active status (or explicit true field) may grant team-preview access. */
-function isActiveFubUser(user: FubUser) {
+const INACTIVE_USER_STATUS = /^(inactive|deactivated|deleted|disabled|archived|suspended)$/i;
+/**
+ * A returned FUB user is a team member unless FUB explicitly says otherwise:
+ * `active: false`, `deleted: true`, or an inactive-style status. A response that
+ * simply omits these fields must never deactivate the whole team.
+ */
+export function isActiveFubUser(user: FubUser) {
   if (user.active === false) return false;
-  if (user.active === true) return true;
-  return nonEmptyString(user.status, 80)?.toLowerCase() === "active";
+  if (user.deleted === true || user.isDeleted === true) return false;
+  const status = nonEmptyString(user.status, 80);
+  if (status && INACTIVE_USER_STATUS.test(status)) return false;
+  return true;
 }
 
 function fubIdentityKey(userId: string, phoneE164: string | null, email: string | null) {
@@ -218,22 +202,49 @@ async function upsertFubTeamIdentity(
   return true;
 }
 
+/** An aborted mirror changes nothing and tells the alert recipients why. */
+async function abortTeamSync(counts: TeamSyncCounts, reason: TeamAllowlistSyncAbortReason, detail: string): Promise<TeamAllowlistSyncResult> {
+  let emailed = false;
+  try {
+    const settings = await getDealSettings();
+    const sent = await sendBuilderDealsEmail({
+      category: "team_sync",
+      recipients: settings.alertRecipients,
+      subject: "Builder Deals team sync aborted",
+      content: [
+        "The nightly Follow Up Boss team mirror was aborted and changed nothing.",
+        `Reason: ${detail}`,
+        `Users returned: ${counts.usersFetched}; active users: ${counts.activeUsers}.`,
+        "The current team allowlist was left exactly as it was. Check FUB_API_KEY and the FUB users list, then run the team sync again from Admin, Builder Deals.",
+      ].join("\n"),
+    });
+    emailed = sent.ok;
+  } catch (error) {
+    console.error("[deals team sync] abort email failed", error);
+  }
+  return { ok: false, ...counts, reason, emailed };
+}
+
 /**
  * Mirrors every identity of every active FUB user. A completed remote scan is
  * authoritative for FUB-sourced rows only; manual/test rows are untouched.
  * Missing or inactive remote users are deactivated, then their no-longer-team
- * sessions are expired and revoked by the reverse cascade.
+ * sessions are expired and revoked by the reverse cascade. An errored, empty or
+ * all-inactive users list aborts BEFORE any row changes and emails the owners.
  */
 export async function syncTeamAllowlistFromFub(): Promise<TeamAllowlistSyncResult> {
   const db = await getDb();
-  const empty = { usersFetched: 0, activeUsers: 0, upserted: 0, skipped: 0, deactivated: 0, orphanedTeamLeads: 0 };
-  if (!db) return { ok: false, ...empty, reason: "database_unavailable" };
+  const empty: TeamSyncCounts = { usersFetched: 0, activeUsers: 0, upserted: 0, skipped: 0, deactivated: 0, orphanedTeamLeads: 0 };
+  if (!db) return abortTeamSync(empty, "database_unavailable", "The database was unavailable.");
   const response = await listAllFubUsers();
-  if (!response.ok) return { ok: false, ...empty, reason: response.reason };
+  if (!response.ok) return abortTeamSync(empty, response.reason, `The FUB users request failed (${response.reason.replace(/_/g, " ")}).`);
+  if (response.users.length === 0) return abortTeamSync(empty, "fub_no_users", "FUB returned zero users.");
+  const activeUsers = response.users.filter(isActiveFubUser);
+  const counts: TeamSyncCounts = { ...empty, usersFetched: response.users.length, activeUsers: activeUsers.length };
+  if (activeUsers.length === 0) return abortTeamSync(counts, "fub_no_active_users", "FUB returned users but every one of them is marked inactive.");
 
   let upserted = 0;
   let skipped = 0;
-  const activeUsers = response.users.filter(isActiveFubUser);
   const remoteKeys = new Set<string>();
   try {
     for (const user of activeUsers) {
@@ -264,8 +275,8 @@ export async function syncTeamAllowlistFromFub(): Promise<TeamAllowlistSyncResul
       deactivated: staleRows.filter((row) => row.active).length,
       orphanedTeamLeads,
     };
-  } catch {
-    return { ok: false, usersFetched: response.users.length, activeUsers: activeUsers.length, upserted: 0, skipped: 0, deactivated: 0, orphanedTeamLeads: 0, reason: "database_unavailable" };
+  } catch (error) {
+    return abortTeamSync({ ...counts, upserted, skipped }, "database_unavailable", `A database write failed before the mirror completed (${error instanceof Error ? error.message.slice(0, 200) : "unknown error"}). Rows already refreshed are correct; nothing was deactivated.`);
   }
 }
 
@@ -378,17 +389,22 @@ export async function cleanupDealsTestRecords(now = new Date()): Promise<DealsTe
   }
 }
 
+/** The spec's daily health thresholds. */
 export const BUILDER_DEALS_HEALTH_THRESHOLDS = {
   /** The TREC source runs nightly; older than 36 hours needs review. */
   trecImportHours: 36,
-  /** Official community data is refreshed nightly, with room for a missed run. */
-  communityUpdateHours: 72,
-  /** A photo left in the queue for a day is operationally stale. */
-  pendingPhotoHours: 24,
-  /** A small queue is expected; ten pending/processing photos needs review. */
-  pendingPhotoCount: 10,
-  /** Never expose a precise balance to the admin client or scheduled result. */
-  twilioMinimumBalanceUsd: 5,
+  /** Official community data refreshes every 3 days; over 4 days means a missed run. */
+  communityUpdateHours: 96,
+  /** No photo may wait in the processing queue for over an hour. */
+  pendingPhotoMinutes: 60,
+  /** A FUB write still failing an hour after it was queued needs review. */
+  fubFailureMinutes: 60,
+  /** Alert emails that failed to send in the last day. */
+  emailFailureHours: 24,
+  /** Scheduled job runs that failed in the last day (team/agent sync, imports, refresh). */
+  jobFailureHours: 24,
+  /** Alert when the Twilio balance drops under this amount. */
+  twilioMinimumBalanceUsd: 20,
 } as const;
 
 export type HealthState = "ok" | "attention" | "unknown";
@@ -404,15 +420,20 @@ export function ageHours(at: Date | string | null | undefined, now = new Date())
   const value = new Date(at).getTime();
   return Number.isFinite(value) ? Math.max(0, Math.floor((now.getTime() - value) / 3_600_000)) : null;
 }
+export function ageMinutes(at: Date | string | null | undefined, now = new Date()): number | null {
+  if (!at) return null;
+  const value = new Date(at).getTime();
+  return Number.isFinite(value) ? Math.max(0, Math.floor((now.getTime() - value) / 60_000)) : null;
+}
 
-type TwilioInspection = { account: TwilioAccountState; balance: TwilioBalanceState };
+type TwilioInspection = { account: TwilioAccountState; accountStatus: string | null; balance: TwilioBalanceState; balanceUsd: number | null; currency: string | null };
 
-/** Queries both account status and balance, returning only threshold states—not amounts or credentials. */
+/** Reads the account status and the balance amount; the Monday email reports the amount, never a credential. */
 async function inspectTwilioAccount(): Promise<TwilioInspection> {
   const sid = process.env.TWILIO_ACCOUNT_SID?.trim();
   const token = process.env.TWILIO_AUTH_TOKEN?.trim();
   const service = process.env.TWILIO_VERIFY_SERVICE_SID?.trim();
-  if (!sid || !token || !service) return { account: "not_checked", balance: "not_checked" };
+  if (!sid || !token || !service) return { account: "not_checked", accountStatus: null, balance: "not_checked", balanceUsd: null, currency: null };
   const headers = { Authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString("base64")}` };
   try {
     const base = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}`;
@@ -424,14 +445,18 @@ async function inspectTwilioAccount(): Promise<TwilioInspection> {
     const balanceBody: unknown = balanceResponse.ok ? await balanceResponse.json().catch(() => null) : null;
     const accountStatus = accountBody && typeof accountBody === "object" && typeof (accountBody as { status?: unknown }).status === "string"
       ? (accountBody as { status: string }).status.toLowerCase()
-      : "";
+      : null;
     const balanceValue = balanceBody && typeof balanceBody === "object" ? Number((balanceBody as { balance?: unknown }).balance) : Number.NaN;
+    const currency = balanceBody && typeof balanceBody === "object" && typeof (balanceBody as { currency?: unknown }).currency === "string" ? (balanceBody as { currency: string }).currency : null;
     return {
       account: !accountResponse.ok ? "unavailable" : accountStatus === "active" ? "active" : "inactive",
+      accountStatus,
       balance: !balanceResponse.ok || !Number.isFinite(balanceValue) ? "unavailable" : balanceValue < BUILDER_DEALS_HEALTH_THRESHOLDS.twilioMinimumBalanceUsd ? "low" : "available",
+      balanceUsd: Number.isFinite(balanceValue) ? Math.round(balanceValue * 100) / 100 : null,
+      currency,
     };
   } catch {
-    return { account: "unavailable", balance: "unavailable" };
+    return { account: "unavailable", accountStatus: null, balance: "unavailable", balanceUsd: null, currency: null };
   }
 }
 
@@ -440,81 +465,124 @@ async function checkFubAvailability(): Promise<AvailabilityState> {
   return result.ok ? "available" : result.reason === "fub_not_configured" ? "not_checked" : "unavailable";
 }
 
+export type HoldItem = { kind: "community" | "incentive"; communityId: number; label: string; reason: string; since: Date | null; ageHours: number | null };
+
 type OperationalSnapshot = {
   available: boolean;
-  funnel: { landed: number; consented: number; verificationSends: number; verified: number; listingViews: number; requests: number };
+  funnel: { landed: number; consented: number; verificationSends: number; verified: number; listingViews: number; requests: number; newLeads: number };
   trecImport: { completedAt: Date | null; ageHours: number | null; state: HealthState };
-  sourceUpdates: { activeCommunities: number; staleCommunities: number; oldestAgeHours: number | null; state: HealthState };
-  photos: { pending: number; processing: number; failed: number; oldestPendingAgeHours: number | null; state: HealthState };
-  fubFailures: { jobs: number; leads: number; state: HealthState };
-  holds: { communities: number; incentives: number; state: HealthState };
+  sourceUpdates: { activeCommunities: number; staleCommunities: number; heldCommunities: number; oldestAgeHours: number | null; lastSuccessfulSyncAt: Date | null; state: HealthState };
+  photos: { pending: number; processing: number; failed: number; awaitingRegion: number; oldestPendingAgeHours: number | null; oldestPendingMinutes: number | null; state: HealthState };
+  fubFailures: { jobs: number; leads: number; failingOverAnHour: number; state: HealthState };
+  emailFailures: { failed: number; state: HealthState };
+  jobFailures: { failed: number; jobs: string[]; state: HealthState };
+  holds: { communities: number; incentives: number; items: HoldItem[]; state: HealthState };
 };
 
 const emptyOperationalSnapshot = (): OperationalSnapshot => ({
   available: false,
-  funnel: { landed: 0, consented: 0, verificationSends: 0, verified: 0, listingViews: 0, requests: 0 },
+  funnel: { landed: 0, consented: 0, verificationSends: 0, verified: 0, listingViews: 0, requests: 0, newLeads: 0 },
   trecImport: { completedAt: null, ageHours: null, state: "unknown" },
-  sourceUpdates: { activeCommunities: 0, staleCommunities: 0, oldestAgeHours: null, state: "unknown" },
-  photos: { pending: 0, processing: 0, failed: 0, oldestPendingAgeHours: null, state: "unknown" },
-  fubFailures: { jobs: 0, leads: 0, state: "unknown" },
-  holds: { communities: 0, incentives: 0, state: "unknown" },
+  sourceUpdates: { activeCommunities: 0, staleCommunities: 0, heldCommunities: 0, oldestAgeHours: null, lastSuccessfulSyncAt: null, state: "unknown" },
+  photos: { pending: 0, processing: 0, failed: 0, awaitingRegion: 0, oldestPendingAgeHours: null, oldestPendingMinutes: null, state: "unknown" },
+  fubFailures: { jobs: 0, leads: 0, failingOverAnHour: 0, state: "unknown" },
+  emailFailures: { failed: 0, state: "unknown" },
+  jobFailures: { failed: 0, jobs: [], state: "unknown" },
+  holds: { communities: 0, incentives: 0, items: [], state: "unknown" },
 });
 
-/** Collects all B9 local thresholds without making an outbound request or sending a notification. */
+function holdText(value: string | null | undefined) {
+  return (value ?? "").trim();
+}
+
+/** Collects every local B9 threshold without an outbound request or notification. */
 export async function builderDealsOperationalSnapshot(now = new Date()): Promise<OperationalSnapshot> {
   const db = await getDb();
   if (!db) return emptyOperationalSnapshot();
+  const thresholds = BUILDER_DEALS_HEALTH_THRESHOLDS;
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60_000);
+  const fubFailureCutoff = new Date(now.getTime() - thresholds.fubFailureMinutes * 60_000);
+  const emailFailureCutoff = new Date(now.getTime() - thresholds.emailFailureHours * 60 * 60_000);
+  const jobFailureCutoff = new Date(now.getTime() - thresholds.jobFailureHours * 60 * 60_000);
   try {
-    const [funnelRows, latestImport, communities, photoRows, failedJobRows, failedLeadRows, heldCommunityRows, heldIncentiveRows] = await Promise.all([
+    const [funnelRows, newLeadRows, latestImport, communities, photoRows, failedJobRows, staleJobRows, failedLeadRows, heldIncentives, failedEmailRows, failedRunRows] = await Promise.all([
       db.select({
         landed: sql<number>`SUM(${dealEvents.kind} = 'landed')`,
         consented: sql<number>`SUM(${dealEvents.kind} = 'consent')`,
-        verificationSends: sql<number>`SUM(${dealEvents.kind} = 'twilio_verify_success')`,
+        verificationSends: sql<number>`SUM(${dealEvents.kind} = 'code_sent')`,
         verified: sql<number>`SUM(${dealEvents.kind} = 'verified')`,
         listingViews: sql<number>`SUM(${dealEvents.kind} = 'viewed_listings')`,
         requests: sql<number>`SUM(${dealEvents.kind} = 'tour_request')`,
       }).from(dealEvents).where(gte(dealEvents.createdAt, sevenDaysAgo)),
+      db.select({ count: sql<number>`COUNT(*)` }).from(dealLeads).where(gte(dealLeads.createdAt, sevenDaysAgo)),
       db.select({ completedAt: dealTrecImports.completedAt }).from(dealTrecImports).where(eq(dealTrecImports.current, true)).orderBy(desc(dealTrecImports.completedAt)).limit(1),
-      db.select({ lastSuccessfulSyncAt: dealCommunities.lastSuccessfulSyncAt }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))),
+      db.select({ id: dealCommunities.id, privateName: dealCommunities.privateName, publicLabel: dealCommunities.publicLabel, lastSuccessfulSyncAt: dealCommunities.lastSuccessfulSyncAt, holdReason: dealCommunities.holdReason }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))),
       db.select({
         pending: sql<number>`SUM(${dealPhotos.processingState} = 'pending')`,
         processing: sql<number>`SUM(${dealPhotos.processingState} = 'processing')`,
         failed: sql<number>`SUM(${dealPhotos.processingState} = 'failed')`,
-        oldestPendingAt: sql<Date | null>`MIN(CASE WHEN ${dealPhotos.processingState} IN ('pending', 'processing') THEN ${dealPhotos.createdAt} END)`,
+        // Parked rows (awaiting a builder watermark region) are reported separately and never age the queue;
+        // updatedAt (not createdAt) so a requeued old photo does not trip the limit instantly.
+        oldestPendingAt: sql<Date | null>`MIN(CASE WHEN ${dealPhotos.processingState} IN ('pending', 'processing') AND (${dealPhotos.lastProcessingError} IS NULL OR ${dealPhotos.lastProcessingError} <> 'awaiting_region') THEN ${dealPhotos.updatedAt} END)`,
+        awaitingRegion: sql<number>`SUM(${dealPhotos.lastProcessingError} = 'awaiting_region' AND ${dealPhotos.processingState} = 'pending')`,
       }).from(dealPhotos),
       db.select({ count: sql<number>`COUNT(*)` }).from(dealFubJobs).where(eq(dealFubJobs.status, "failed")),
+      db.select({ count: sql<number>`COUNT(*)` }).from(dealFubJobs).where(and(eq(dealFubJobs.status, "failed"), lt(dealFubJobs.createdAt, fubFailureCutoff))),
       db.select({ count: sql<number>`COUNT(*)` }).from(dealLeads).where(eq(dealLeads.fubStatus, "failed")),
-      db.select({ count: sql<number>`COUNT(*)` }).from(dealCommunities).where(sql`${dealCommunities.holdReason} IS NOT NULL AND TRIM(${dealCommunities.holdReason}) <> ''`),
-      db.select({ count: sql<number>`COUNT(*)` }).from(dealIncentives).where(sql`${dealIncentives.held} = true OR (${dealIncentives.holdReason} IS NOT NULL AND TRIM(${dealIncentives.holdReason}) <> '')`),
+      db.select({ id: dealIncentives.id, communityId: dealIncentives.communityId, holdReason: dealIncentives.holdReason, createdAt: dealIncentives.createdAt }).from(dealIncentives).where(eq(dealIncentives.held, true)),
+      db.select({ count: sql<number>`COUNT(*)` }).from(dealEmailLogs).where(and(eq(dealEmailLogs.deliveryStatus, "failed"), gte(dealEmailLogs.createdAt, emailFailureCutoff))),
+      db.select({ jobName: dealJobRuns.jobName }).from(dealJobRuns).where(and(eq(dealJobRuns.status, "failed"), gte(dealJobRuns.startedAt, jobFailureCutoff))),
     ]);
     const number = (value: unknown) => Number(value ?? 0);
     const importAgeHours = ageHours(latestImport[0]?.completedAt, now);
     const communityAges = communities.map((community) => ageHours(community.lastSuccessfulSyncAt, now));
-    const staleCommunities = communityAges.filter((age) => age === null || age > BUILDER_DEALS_HEALTH_THRESHOLDS.communityUpdateHours).length;
+    const staleCommunities = communityAges.filter((age) => age === null || age > thresholds.communityUpdateHours).length;
     const finiteCommunityAges = communityAges.filter((age): age is number => age !== null);
+    const lastSyncTimes = communities.map((community) => community.lastSuccessfulSyncAt?.getTime() ?? null).filter((value): value is number => value !== null);
     const photo = photoRows[0];
-    const pending = number(photo?.pending), processing = number(photo?.processing), failed = number(photo?.failed);
+    const pending = number(photo?.pending), processing = number(photo?.processing), failed = number(photo?.failed), awaitingRegion = number(photo?.awaitingRegion);
     const oldestPendingAgeHours = ageHours(photo?.oldestPendingAt, now);
+    const oldestPendingMinutes = ageMinutes(photo?.oldestPendingAt, now);
+    const communityLabel = (communityId: number) => {
+      const community = communities.find((row) => row.id === communityId);
+      return community ? `${community.privateName} (${community.publicLabel})` : `community ${communityId}`;
+    };
+    // A community hold is as old as its last good data; an incentive hold is as
+    // old as the held record, because hold rules run only when it is created.
+    const holdItems: HoldItem[] = [
+      ...communities.filter((community) => holdText(community.holdReason)).map((community): HoldItem => ({ kind: "community", communityId: community.id, label: communityLabel(community.id), reason: holdText(community.holdReason), since: community.lastSuccessfulSyncAt ?? null, ageHours: ageHours(community.lastSuccessfulSyncAt, now) })),
+      ...heldIncentives.map((incentive): HoldItem => ({ kind: "incentive", communityId: incentive.communityId, label: communityLabel(incentive.communityId), reason: holdText(incentive.holdReason) || "Incentive hold awaiting Accept", since: incentive.createdAt, ageHours: ageHours(incentive.createdAt, now) })),
+    ];
+    const heldCommunities = holdItems.filter((item) => item.kind === "community").length;
+    const failingOverAnHour = number(staleJobRows[0]?.count);
+    const failedEmails = number(failedEmailRows[0]?.count);
+    const failedRunNames = Array.from(new Set(failedRunRows.map((row) => row.jobName)));
     return {
       available: true,
       funnel: {
         landed: number(funnelRows[0]?.landed), consented: number(funnelRows[0]?.consented), verificationSends: number(funnelRows[0]?.verificationSends),
-        verified: number(funnelRows[0]?.verified), listingViews: number(funnelRows[0]?.listingViews), requests: number(funnelRows[0]?.requests),
+        verified: number(funnelRows[0]?.verified), listingViews: number(funnelRows[0]?.listingViews), requests: number(funnelRows[0]?.requests), newLeads: number(newLeadRows[0]?.count),
       },
-      trecImport: { completedAt: latestImport[0]?.completedAt ?? null, ageHours: importAgeHours, state: healthState(importAgeHours !== null && importAgeHours <= BUILDER_DEALS_HEALTH_THRESHOLDS.trecImportHours) },
-      sourceUpdates: { activeCommunities: communities.length, staleCommunities, oldestAgeHours: finiteCommunityAges.length ? Math.max(...finiteCommunityAges) : null, state: healthState(staleCommunities === 0) },
-      photos: { pending, processing, failed, oldestPendingAgeHours, state: healthState(failed === 0 && pending + processing < BUILDER_DEALS_HEALTH_THRESHOLDS.pendingPhotoCount && (oldestPendingAgeHours === null || oldestPendingAgeHours <= BUILDER_DEALS_HEALTH_THRESHOLDS.pendingPhotoHours)) },
-      fubFailures: { jobs: number(failedJobRows[0]?.count), leads: number(failedLeadRows[0]?.count), state: healthState(number(failedJobRows[0]?.count) === 0 && number(failedLeadRows[0]?.count) === 0) },
-      holds: { communities: number(heldCommunityRows[0]?.count), incentives: number(heldIncentiveRows[0]?.count), state: healthState(number(heldCommunityRows[0]?.count) === 0 && number(heldIncentiveRows[0]?.count) === 0) },
+      trecImport: { completedAt: latestImport[0]?.completedAt ?? null, ageHours: importAgeHours, state: healthState(importAgeHours !== null && importAgeHours <= thresholds.trecImportHours) },
+      // A held run does not count as on schedule; a dismissed hold clears holdReason and does.
+      sourceUpdates: { activeCommunities: communities.length, staleCommunities, heldCommunities, oldestAgeHours: finiteCommunityAges.length ? Math.max(...finiteCommunityAges) : null, lastSuccessfulSyncAt: lastSyncTimes.length ? new Date(Math.max(...lastSyncTimes)) : null, state: healthState(staleCommunities === 0 && heldCommunities === 0) },
+      photos: { pending, processing, failed, awaitingRegion, oldestPendingAgeHours, oldestPendingMinutes, state: healthState(failed === 0 && awaitingRegion === 0 && (oldestPendingMinutes === null || oldestPendingMinutes <= thresholds.pendingPhotoMinutes)) },
+      fubFailures: { jobs: number(failedJobRows[0]?.count), leads: number(failedLeadRows[0]?.count), failingOverAnHour, state: healthState(failingOverAnHour === 0) },
+      emailFailures: { failed: failedEmails, state: healthState(failedEmails === 0) },
+      jobFailures: { failed: failedRunRows.length, jobs: failedRunNames, state: healthState(failedRunRows.length === 0) },
+      holds: { communities: heldCommunities, incentives: heldIncentives.length, items: holdItems, state: healthState(holdItems.length === 0) },
     };
   } catch {
     return emptyOperationalSnapshot();
   }
 }
 
-/** Reports only configured/missing credential states and threshold states; no secret or balance amount is exposed. */
+const money = (value: number | null, currency: string | null) => value === null ? "unavailable" : `$${value.toFixed(2)}${currency && currency !== "USD" ? ` ${currency}` : ""}`;
+const hoursLabel = (value: number | null) => value === null ? "not available" : `${value}h`;
+
+/** Reports credential presence, the Twilio account state and balance, FUB and email configuration, and every local threshold. */
 export async function builderDealsHealthCheck(now = new Date()) {
+  const thresholds = BUILDER_DEALS_HEALTH_THRESHOLDS;
   const twilioVerify = {
     accountSid: credentialState(process.env.TWILIO_ACCOUNT_SID),
     authToken: credentialState(process.env.TWILIO_AUTH_TOKEN),
@@ -522,46 +590,125 @@ export async function builderDealsHealthCheck(now = new Date()) {
   };
   const fub = { apiKey: credentialState(process.env.FUB_API_KEY) };
   const twilioConfigured = Object.values(twilioVerify).every((value) => value === "configured");
-  const [twilio, fubAvailability, operational] = await Promise.all([
-    twilioConfigured ? inspectTwilioAccount() : Promise.resolve<TwilioInspection>({ account: "not_checked", balance: "not_checked" }),
+  const [twilio, fubAvailability, operational, renderPrune] = await Promise.all([
+    twilioConfigured ? inspectTwilioAccount() : Promise.resolve<TwilioInspection>({ account: "not_checked", accountStatus: null, balance: "not_checked", balanceUsd: null, currency: null }),
     checkFubAvailability(),
     builderDealsOperationalSnapshot(now),
+    // The daily check also deletes cached renders for links expired more than a day ago (HIDE THE SAUCE step 7).
+    pruneDealPhotoRenders().catch((error) => { console.warn("[builder-deals] render prune failed", error); return null; }),
   ]);
+  const resend = resendConfiguration();
+  const attention: string[] = [];
+  if (!twilioConfigured) attention.push("Twilio Verify credentials are missing (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN or TWILIO_VERIFY_SERVICE_SID), so no code can be sent.");
+  else {
+    if (twilio.account === "unavailable") attention.push("Twilio credentials did not work: the account lookup failed.");
+    else if (twilio.account === "inactive") attention.push(`Twilio account status is ${twilio.accountStatus ?? "unknown"}, not active.`);
+    if (twilio.balance === "low") attention.push(`Twilio balance is ${money(twilio.balanceUsd, twilio.currency)}, under the $${thresholds.twilioMinimumBalanceUsd} minimum.`);
+    else if (twilio.balance === "unavailable") attention.push("Twilio balance could not be read.");
+  }
+  if (fubAvailability === "not_checked") attention.push("FUB_API_KEY is missing, so no lead reaches Follow Up Boss.");
+  else if (fubAvailability === "unavailable") attention.push("Follow Up Boss credentials did not work (the identity request failed).");
+  if (resend.fromMissing) attention.push("RESEND_API_KEY is set but RESEND_FROM_EMAIL is not, so alert emails fall back to the project-owner notification and never reach steven@.");
+  if (!operational.available) attention.push("The database snapshot was unavailable, so the local checks could not run.");
+  else {
+    if (operational.trecImport.state === "attention") attention.push(operational.trecImport.completedAt ? `TREC file is ${hoursLabel(operational.trecImport.ageHours)} old (limit ${thresholds.trecImportHours}h).` : "No TREC import has completed yet.");
+    if (operational.sourceUpdates.staleCommunities > 0) attention.push(`Last builder update is over ${thresholds.communityUpdateHours / 24} days old for ${operational.sourceUpdates.staleCommunities} of ${operational.sourceUpdates.activeCommunities} active communities (oldest ${hoursLabel(operational.sourceUpdates.oldestAgeHours)}).`);
+    if (operational.sourceUpdates.heldCommunities > 0) attention.push(`${operational.sourceUpdates.heldCommunities} community update${operational.sourceUpdates.heldCommunities === 1 ? " is" : "s are"} held, which does not count as on schedule.`);
+    if (operational.photos.state === "attention") attention.push(`Photo queue: ${operational.photos.failed} failed, ${operational.photos.awaitingRegion} awaiting a builder watermark region (Set watermark region in Admin, Builder Deals, Photos), oldest pending ${operational.photos.oldestPendingMinutes ?? 0} minutes (limit ${thresholds.pendingPhotoMinutes}).`);
+    if (operational.fubFailures.state === "attention") attention.push(`${operational.fubFailures.failingOverAnHour} FUB write${operational.fubFailures.failingOverAnHour === 1 ? " has" : "s have"} been failing for over ${thresholds.fubFailureMinutes} minutes.`);
+    if (operational.emailFailures.state === "attention") attention.push(`${operational.emailFailures.failed} alert email${operational.emailFailures.failed === 1 ? "" : "s"} failed to send in the last ${thresholds.emailFailureHours} hours.`);
+    if (operational.jobFailures.state === "attention") attention.push(`${operational.jobFailures.failed} scheduled job run${operational.jobFailures.failed === 1 ? "" : "s"} failed in the last ${thresholds.jobFailureHours} hours: ${operational.jobFailures.jobs.join(", ")}.`);
+    if (operational.holds.incentives > 0) attention.push(`${operational.holds.incentives} incentive hold${operational.holds.incentives === 1 ? "" : "s"} await Accept or Dismiss.`);
+  }
   return {
-    twilioVerify: { ...twilioVerify, account: twilio.account, balance: twilio.balance, state: healthState(twilio.account === "active" && twilio.balance === "available", twilio.account !== "not_checked") },
-    fub: { ...fub, availability: fubAvailability },
+    checkedAt: now,
+    twilioVerify: { ...twilioVerify, account: twilio.account, accountStatus: twilio.accountStatus, balance: twilio.balance, balanceUsd: twilio.balanceUsd, currency: twilio.currency, state: healthState(twilioConfigured && twilio.account === "active" && twilio.balance === "available") },
+    fub: { ...fub, availability: fubAvailability, state: healthState(fubAvailability === "available") },
+    email: { provider: resend.ready ? "resend" as const : "owner_notification_fallback" as const, fromConfigured: Boolean(resend.from), state: healthState(!resend.fromMissing) },
     operational,
+    renderPrune,
+    attention,
+    state: healthState(attention.length === 0),
   };
 }
 
-const stateLabel = (state: HealthState) => state.toUpperCase();
-const numberLabel = (value: number | null) => value === null ? "not available" : `${value}h`;
+export type BuilderDealsHealth = Awaited<ReturnType<typeof builderDealsHealthCheck>>;
 
-/**
- * Formats the scheduled Monday report from the exact health-check values. It
- * intentionally performs no delivery: the caller can store/review its body
- * without sending any real email or alert.
- */
-export async function builderDealsMondayReport(now = new Date()) {
-  const health = await builderDealsHealthCheck(now);
-  const { operational } = health;
-  const body = [
-    "Builder Deals Monday operational report (no message was sent)",
-    "",
-    `1. Twilio Verify: ${stateLabel(health.twilioVerify.state)} — account ${health.twilioVerify.account}; balance ${health.twilioVerify.balance}.`,
-    `2. Follow Up Boss: ${health.fub.availability.toUpperCase()} (${health.fub.apiKey}).`,
-    `3. TREC import freshness: ${stateLabel(operational.trecImport.state)} — ${numberLabel(operational.trecImport.ageHours)} old; limit ${BUILDER_DEALS_HEALTH_THRESHOLDS.trecImportHours}h.`,
-    `4. 7-day funnel: landed ${operational.funnel.landed}; consented ${operational.funnel.consented}; verification sends ${operational.funnel.verificationSends}; verified ${operational.funnel.verified}; listing views ${operational.funnel.listingViews}; tour/question requests ${operational.funnel.requests}.`,
-    `5. Official-source updates: ${stateLabel(operational.sourceUpdates.state)} — ${operational.sourceUpdates.staleCommunities}/${operational.sourceUpdates.activeCommunities} active communities stale; oldest ${numberLabel(operational.sourceUpdates.oldestAgeHours)}; limit ${BUILDER_DEALS_HEALTH_THRESHOLDS.communityUpdateHours}h.`,
-    `6. Photo queue: ${stateLabel(operational.photos.state)} — pending ${operational.photos.pending}, processing ${operational.photos.processing}, failed ${operational.photos.failed}; oldest queued ${numberLabel(operational.photos.oldestPendingAgeHours)}.`,
-    `7. CRM and holds: FUB jobs failed ${operational.fubFailures.jobs}, leads failed ${operational.fubFailures.leads}, community holds ${operational.holds.communities}, incentive holds ${operational.holds.incentives}.`,
-    "",
-    "This report is generated for protected admin review only. No email or alert was sent.",
-  ].join("\n");
-  return { ok: true as const, subject: "Builder Deals Monday operational report", body, health };
+/** "Both the failure email and the Monday email list every community currently in a hold and how old the hold is." */
+export function holdLines(items: HoldItem[]) {
+  if (!items.length) return ["Holds: none."];
+  return ["Holds:", ...items.map((item) => `- ${item.kind === "community" ? "Community update hold" : "Incentive hold"}, ${item.label}: ${item.reason || "no reason recorded"} (hold age ${item.ageHours === null ? "unknown" : `${item.ageHours}h`}${item.since ? `, since ${formatChicagoDateTime(item.since)}` : ""})`)];
 }
 
-/** Sends an owner-facing maintenance alert through the established notification service. */
-export async function createDealsAlert(title: string, body: string): Promise<boolean> {
-  return notifyOwner({ title, content: body });
+/**
+ * The 7:00 AM job: silent when every check passes; when any check needs
+ * attention it emails the alert recipients the failing checks and every hold
+ * with its age. Returns ok:false when that email could not be delivered so the
+ * scheduled run is recorded as failed and shows up in tomorrow's check.
+ */
+export async function runBuilderDealsHealthJob(now = new Date()) {
+  const health = await builderDealsHealthCheck(now);
+  if (!health.attention.length) return { ok: true as const, state: health.state, attention: health.attention, emailed: false, health };
+  const settings = await getDealSettings();
+  const sent = await sendBuilderDealsEmail({
+    category: "health",
+    recipients: settings.alertRecipients,
+    subject: `Builder Deals health check: ${health.attention.length} item${health.attention.length === 1 ? "" : "s"} need attention`,
+    content: [
+      `Builder Deals daily health check at ${formatChicagoDateTime(now)} found ${health.attention.length} item${health.attention.length === 1 ? "" : "s"} that need attention:`,
+      ...health.attention.map((item) => `- ${item}`),
+      "",
+      ...holdLines(health.operational.holds.items),
+      "",
+      "Review Admin, Builder Deals (login required).",
+    ].join("\n"),
+  });
+  return { ok: sent.ok, state: health.state, attention: health.attention, emailed: sent.ok, emailError: sent.error, health };
+}
+
+async function lastHealthJobRun() {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    return (await db.select({ status: dealJobRuns.status, chicagoDay: dealJobRuns.chicagoDay, completedAt: dealJobRuns.completedAt, startedAt: dealJobRuns.startedAt }).from(dealJobRuns).where(eq(dealJobRuns.jobName, HEALTH_JOB_NAME)).orderBy(desc(dealJobRuns.startedAt)).limit(1))[0] ?? null;
+  } catch { return null; }
+}
+
+/**
+ * Formats the Monday "System OK" body from the exact health-check values. It
+ * performs no delivery itself so admin can preview it; the scheduled job sends
+ * it through sendBuilderDealsMondayReport.
+ */
+export async function builderDealsMondayReport(now = new Date()) {
+  const [health, lastRun] = await Promise.all([builderDealsHealthCheck(now), lastHealthJobRun()]);
+  const { operational } = health;
+  const attentionCount = health.attention.length;
+  const body = [
+    `Builder Deals System OK report for ${formatChicagoDateTime(now)}.`,
+    "",
+    `Last health check result: ${attentionCount === 0 ? "OK, every check passed" : `ATTENTION, ${attentionCount} item${attentionCount === 1 ? "" : "s"}`} (run at ${formatChicagoDateTime(health.checkedAt)}).`,
+    ...health.attention.map((item) => `- ${item}`),
+    `Last scheduled 7:00 AM check: ${lastRun ? `${lastRun.status} on ${lastRun.chicagoDay}${lastRun.completedAt ? ` at ${formatChicagoDateTime(lastRun.completedAt)}` : ""}` : "none recorded yet"}.`,
+    `Last builder update: ${operational.sourceUpdates.lastSuccessfulSyncAt ? `${formatChicagoDateTime(operational.sourceUpdates.lastSuccessfulSyncAt)} (${hoursLabel(ageHours(operational.sourceUpdates.lastSuccessfulSyncAt, now))} ago)` : "never"}; ${operational.sourceUpdates.staleCommunities} of ${operational.sourceUpdates.activeCommunities} active communities stale (limit ${BUILDER_DEALS_HEALTH_THRESHOLDS.communityUpdateHours}h).`,
+    `Twilio: account ${health.twilioVerify.accountStatus ?? health.twilioVerify.account}; balance ${money(health.twilioVerify.balanceUsd, health.twilioVerify.currency)} (alert under $${BUILDER_DEALS_HEALTH_THRESHOLDS.twilioMinimumBalanceUsd}).`,
+    `Follow Up Boss: ${health.fub.availability} (${health.fub.apiKey}). Email transport: ${health.email.provider}.`,
+    `Last 7 days: ${operational.funnel.verified} verifications, ${operational.funnel.newLeads} new leads, ${operational.funnel.verificationSends} code sends, ${operational.funnel.landed} landings, ${operational.funnel.listingViews} list views, ${operational.funnel.requests} tour or question requests.`,
+    `TREC file: ${operational.trecImport.completedAt ? `${hoursLabel(operational.trecImport.ageHours)} old` : "no import yet"} (limit ${BUILDER_DEALS_HEALTH_THRESHOLDS.trecImportHours}h).`,
+    `Photo queue: pending ${operational.photos.pending}, processing ${operational.photos.processing}, failed ${operational.photos.failed}; oldest queued ${operational.photos.oldestPendingMinutes === null ? "none" : `${operational.photos.oldestPendingMinutes} min`}.`,
+    `FUB writes failing over an hour: ${operational.fubFailures.failingOverAnHour} (failed jobs ${operational.fubFailures.jobs}, leads marked failed ${operational.fubFailures.leads}). Email send failures in 24h: ${operational.emailFailures.failed}. Scheduled job failures in 24h: ${operational.jobFailures.failed}${operational.jobFailures.jobs.length ? ` (${operational.jobFailures.jobs.join(", ")})` : ""}.`,
+    "",
+    ...holdLines(operational.holds.items),
+    "",
+    "If this email ever stops arriving on Monday, the cron or the email transport is down.",
+  ].join("\n");
+  const subject = attentionCount === 0 ? "Builder Deals System OK: all checks passed" : `Builder Deals System OK: ${attentionCount} item${attentionCount === 1 ? "" : "s"} need attention`;
+  return { ok: true as const, subject, body, health };
+}
+
+/** The Monday 7:05 AM job: the System OK email goes out unconditionally. */
+export async function sendBuilderDealsMondayReport(now = new Date()) {
+  const report = await builderDealsMondayReport(now);
+  const settings = await getDealSettings();
+  const sent = await sendBuilderDealsEmail({ category: "weekly", recipients: settings.alertRecipients, subject: report.subject, content: report.body });
+  return { ok: sent.ok, subject: report.subject, emailed: sent.ok, emailError: sent.error, attention: report.health.attention };
 }

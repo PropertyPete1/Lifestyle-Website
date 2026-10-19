@@ -1,0 +1,126 @@
+import { useEffect, useReducer, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowRight, Copy, PhoneCall, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { trpc } from "@/lib/trpc";
+import { GATE_COPY, codeStepAlert, gateReducer, gateStepAlert, initialGateState, isGateStatusMessage, readGateParams, stripTransientGateParams, type GateParams, type GatePending, type GateState, type GateStep } from "@/lib/dealsGate";
+import { InstagramHelp, formatPhoneInput } from "./shared";
+
+/** deals.state as the sheet needs it; undefined while the query is still loading. */
+export type GateSheetState = {
+  pending: GatePending | null;
+  commentKeyword?: string | null;
+  textLine?: string | null;
+  blockedMessage?: string | null;
+  consentText?: string | null;
+  googleEnabled?: boolean;
+} | undefined;
+
+export type GateSheetViewProps = {
+  gate: GateState;
+  state: GateSheetState;
+  phone: string;
+  code: string;
+  choice: "buyer" | "has_agent" | null;
+  starting?: boolean;
+  resending?: boolean;
+  onPhone: (value: string) => void;
+  onCode: (value: string) => void;
+  onChoice: (value: "buyer" | "has_agent") => void;
+  onFocusPhone?: () => void;
+  onContinue: () => void;
+  onConfirmAgent: () => void;
+  onGo: (step: GateStep) => void;
+  onResend: (channel: "sms" | "call") => void;
+  onChangeNumber: () => void;
+  onCopyLink: () => void;
+  onClose: () => void;
+};
+
+/**
+ * The sheet itself, free of data hooks so every step can be rendered and
+ * asserted without a browser. Server copy is rendered verbatim.
+ */
+export function GateSheetView({ gate, state, phone, code, choice, starting, resending, onPhone, onCode, onChoice, onFocusPhone, onContinue, onConfirmAgent, onGo, onResend, onChangeNumber, onCopyLink, onClose }: GateSheetViewProps) {
+  const { step } = gate;
+  const displayPhone = gate.pendingDisplayPhone ?? state?.pending?.displayPhone ?? formatPhoneInput(phone);
+  const gateAlert = step === "gate" ? gateStepAlert(gate, state) : null;
+  const codeAlert = step === "code" ? codeStepAlert(gate) : null;
+  // Server refusals and wrong codes are alerts; progress notes read as a status in the brand colour.
+  const notice = (message: string) => isGateStatusMessage(message)
+    ? <p role="status" className="mt-4 text-sm text-gold">{message}</p>
+    : <p role="alert" className="mt-4 text-sm text-destructive">{message}</p>;
+  return <AnimatePresence><motion.div className="fixed inset-0 z-[90] flex items-end bg-black/70 backdrop-blur-sm sm:items-center sm:justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><motion.section id="unlock" role="dialog" aria-modal="true" aria-labelledby="deals-gate-title" className="relative w-full min-w-0 min-h-[min(620px,92dvh)] max-h-[92dvh] overflow-x-hidden overflow-y-auto border-t border-gold/40 bg-[#07070a] px-5 pb-7 pt-6 shadow-2xl sm:max-w-lg sm:border sm:px-8" initial={{ y: 36 }} animate={{ y: 0 }} exit={{ y: 36 }} transition={{ duration: 0.22 }}>
+    <button type="button" aria-label="Close gate" onClick={onClose} className="absolute right-3 top-3 p-2 text-muted-foreground hover:text-gold"><X className="h-4 w-4" /></button>
+    {step === "cookie-blocked" && <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">Your browser is blocking cookies. Open this link in Safari or Chrome</h2><p className="mt-4 text-sm text-muted-foreground">Your personal list needs a private browser cookie to protect access.</p><Button onClick={onCopyLink} className="mt-6 w-full bg-gold py-6 text-primary-foreground"><Copy className="mr-2 h-4 w-4" />Copy link</Button>{gate.message && notice(gate.message)}</>}
+    {step === "expired" && <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-4xl">This link expired.</h2><p className="mt-3 text-sm text-muted-foreground">Get a fresh personal link for the latest available homes.</p><Button onClick={() => onGo("gate")} className="mt-6 w-full bg-gold py-6 text-primary-foreground">Get a new link now <ArrowRight className="ml-2 h-4 w-4" /></Button><InstagramHelp state={state} /></>}
+    {step === "blocked" && <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">Buyer access only</h2><p role="alert" className="mt-4 text-sm leading-relaxed text-muted-foreground">{gate.message || state?.blockedMessage || "This page is for buyers who are not working with an agent yet."}</p><InstagramHelp state={state} /></>}
+    {step === "confirm-agent" && <><p className="eyebrow text-gold">One quick confirmation</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">Just to confirm: you are a licensed agent, or already working with one?</h2><div className="mt-6 grid gap-3"><Button onClick={onConfirmAgent} disabled={starting} className="bg-gold py-6 text-primary-foreground">Yes, that's right</Button><Button variant="outline" onClick={() => onGo("gate")} className="py-6">No, go back</Button></div></>}
+    {step === "code" && <><p className="eyebrow text-gold">One more step</p>
+      {gate.cannotReceive
+        ? <><h2 id="deals-gate-title" className="mt-2 text-3xl">Let's call you instead.</h2><p role="alert" data-deals-cannot-receive="true" className="mt-3 text-sm leading-relaxed text-foreground">{gate.message}</p><Button type="button" onClick={() => onResend("call")} disabled={resending} className="mt-5 w-full bg-gold py-6 text-primary-foreground"><PhoneCall className="mr-2 h-4 w-4" />{resending ? "Calling…" : "Call me with the code instead"}</Button><p className="mt-3 text-xs text-muted-foreground">We call {displayPhone} and read the 6-digit code to you. Enter it below.</p></>
+        : <><h2 id="deals-gate-title" className="mt-2 text-3xl">Check your messages.</h2><p className="mt-3 text-sm text-muted-foreground">We sent a code to {displayPhone}. Enter it below to unlock your personal list.</p></>}
+      <form action="/deals/verify" method="post"><Label htmlFor="deals-code" className="mt-6 block text-xs uppercase tracking-widest">6-digit code</Label><Input id="deals-code" name="code" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={code} onChange={(event) => onCode(event.target.value.replace(/\D/g, "").slice(0, 6))} className="mt-2 h-14 text-center text-2xl tracking-[0.45em]" /><Button type="submit" disabled={code.length !== 6} className="mt-4 w-full bg-gold py-6 text-primary-foreground">Unlock my list</Button></form>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs"><button type="button" onClick={() => onResend("sms")} disabled={resending} className="text-gold underline underline-offset-4">Didn't get it? Resend</button>{!gate.cannotReceive && <button type="button" onClick={() => onResend("call")} disabled={resending} className="text-gold underline underline-offset-4">Call me with the code instead</button>}</div>
+      <button type="button" onClick={onChangeNumber} className="mt-5 text-xs text-muted-foreground underline underline-offset-4">Wrong number? Change it</button>
+      {codeAlert && notice(codeAlert)}</>}
+    {step === "gate" && <><p className="eyebrow text-gold">Private buyer access</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Unlock the full list.</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">Phone verification protects these hand-picked deals for buyers who have not chosen an agent.</p>{state?.googleEnabled && <Button variant="outline" onClick={() => window.location.assign("/deals/auth/google")} className="mt-5 w-full py-6">Continue with Google</Button>}<Label htmlFor="deals-phone" className="mt-6 block text-xs uppercase tracking-widest">Mobile phone</Label><Input id="deals-phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="(210) 555-0123" value={phone} onChange={(event) => onPhone(formatPhoneInput(event.target.value))} onFocus={onFocusPhone} className="mt-2 h-14 text-lg" /><p className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Are you a realtor, or working with one?</p><div className="mt-3 grid grid-cols-2 gap-3"><button type="button" onClick={() => onChoice("buyer")} className={`min-h-14 border px-3 text-sm transition-colors ${choice === "buyer" ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>No, just me</button><button type="button" onClick={() => onChoice("has_agent")} className={`min-h-14 border px-3 text-sm transition-colors ${choice === "has_agent" ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>Yes</button></div><Button disabled={!choice || phone.replace(/\D/g, "").length < 10 || starting} onClick={onContinue} className="mt-5 w-full bg-gold py-6 text-primary-foreground">{starting ? "Sending…" : "Continue"} <ArrowRight className="ml-2 h-4 w-4" /></Button>{gateAlert && notice(gateAlert)}<p className="mt-5 text-xs leading-relaxed text-foreground">{state?.consentText}</p></>}
+  </motion.section></motion.div></AnimatePresence>;
+}
+
+/** Data wiring for the sheet: deals.state, the gate mutations and the one-time URL flags. */
+export function GateSheet({ state, onClose }: { state: GateSheetState; onClose: () => void }) {
+  const [params] = useState<GateParams>(() => readGateParams(window.location.search));
+  const [gate, dispatch] = useReducer(gateReducer, undefined, () => initialGateState(params, state));
+  const [phone, setPhone] = useState("");
+  const [choice, setChoice] = useState<"buyer" | "has_agent" | null>(null);
+  const [code, setCode] = useState("");
+  const focusSent = useRef(false);
+  const utils = trpc.useUtils();
+  const focused = trpc.deals.gateFocused.useMutation();
+  const start = trpc.deals.start.useMutation({
+    onSuccess: (result) => {
+      dispatch({ type: "start_result", result });
+      // cannot_receive keeps the pending row server-side; refetch so the masked
+      // number and the resume-at-code behaviour come from the server record.
+      if (!result.ok && result.kind === "cannot_receive") void utils.deals.state.invalidate();
+    },
+    onError: () => dispatch({ type: "start_failed" }),
+  });
+  const resend = trpc.deals.resend.useMutation({
+    onSuccess: (result, variables) => dispatch({ type: "resend_result", channel: variables.channel ?? "sms", result }),
+    onError: () => dispatch({ type: "resend_failed" }),
+  });
+  const change = trpc.deals.changeNumber.useMutation({
+    onSuccess: () => { dispatch({ type: "changed_number", pending: state?.pending }); setCode(""); void utils.deals.state.invalidate(); },
+  });
+  // One-time outcome flags must not survive Instagram's reload loop: a stale
+  // ?codeError or ?expired would otherwise re-announce itself on every reload.
+  useEffect(() => {
+    const stripped = stripTransientGateParams(window.location.href);
+    if (stripped !== `${window.location.pathname}${window.location.search}${window.location.hash}`) window.history.replaceState(window.history.state, "", stripped);
+  }, []);
+  const pendingKey = state?.pending ? `${state.pending.expiresAt}|${state.pending.displayPhone}` : state === undefined ? "loading" : "none";
+  useEffect(() => { dispatch({ type: "state_changed", state }); }, [pendingKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const copyLink = async () => {
+    const text = window.location.href;
+    try { await navigator.clipboard.writeText(text); dispatch({ type: "status", message: GATE_COPY.linkCopied }); }
+    catch { window.prompt("Copy this link:", text); }
+  };
+  const continueGate = () => {
+    if (choice === "has_agent") { dispatch({ type: "go", step: "confirm-agent" }); return; }
+    if (choice) start.mutate({ phone, choice, src: params.src, ig: params.ig });
+  };
+  const focusPhone = () => {
+    if (focusSent.current) return;
+    focusSent.current = true;
+    focused.mutate({ src: params.src });
+  };
+  return <GateSheetView gate={gate} state={state} phone={phone} code={code} choice={choice} starting={start.isPending} resending={resend.isPending}
+    onPhone={setPhone} onCode={setCode} onChoice={setChoice} onFocusPhone={focusPhone} onContinue={continueGate}
+    onConfirmAgent={() => start.mutate({ phone, choice: "has_agent", src: params.src, ig: params.ig })}
+    onGo={(step) => { dispatch({ type: "go", step }); if (step === "gate") setCode(""); }}
+    onResend={(channel) => resend.mutate({ channel })} onChangeNumber={() => change.mutate()} onCopyLink={() => { void copyLink(); }} onClose={onClose} />;
+}

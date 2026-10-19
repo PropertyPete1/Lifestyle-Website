@@ -285,7 +285,14 @@ export const dealCommunities = mysqlTable(
     watermarkRegion: varchar("watermark_region", { length: 40 }).default("bottom"),
     lastSuccessfulSyncAt: timestamp("last_successful_sync_at"),
     lastAttemptAt: timestamp("last_attempt_at"),
+    /** Admin summary of both hold kinds below; never the only record of a hold. */
     holdReason: text("hold_reason"),
+    /** Load-failure / missing-container hold ("dismissed:<reason>" after Dismiss hold). */
+    catalogHoldReason: text("catalog_hold_reason"),
+    catalogHoldSeenAt: timestamp("catalog_hold_seen_at"),
+    /** Incentive hold reasons awaiting "Accept this update"; separate from catalog holds. */
+    incentiveHoldReason: text("incentive_hold_reason"),
+    incentiveHoldSeenAt: timestamp("incentive_hold_seen_at"),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
@@ -309,6 +316,9 @@ export const dealIncentives = mysqlTable(
     repaymentTerms: varchar("repayment_terms", { length: 120 }),
     contractBy: timestamp("contract_by"),
     closeBy: timestamp("close_by"),
+    /** Sticky admin-entered dates: a scrape never clears or overwrites them for this text. */
+    contractByManual: boolean("contract_by_manual").default(false).notNull(),
+    closeByManual: boolean("close_by_manual").default(false).notNull(),
     confirmedAt: timestamp("confirmed_at").defaultNow().notNull(),
     expiresAt: timestamp("expires_at"),
     active: boolean("active").default(true).notNull(),

@@ -47,29 +47,23 @@ export function registerDealsRoutes(app: Express) {
     if (!completed.ok) return res.redirect(302, completed.kind === "expired" ? "/deals?expired=1" : completed.kind === "blocked" ? "/deals?gate=1&blocked=1" : `/deals?codeError=${encodeURIComponent(completed.kind)}`);
     const settings = await getDealSettings();
     const isTest = completed.isTest;
-    // Alert creation precedes asynchronous delivery, so the first-unlock signal
-    // survives a process restart and never holds up the buyer's access redirect.
-    try {
-    if (completed.firstUnlock && (!isTest || settings.testModeFullPipeline)) {
-      const { getDb } = await import("./db");
-      const { dealLeads } = await import("../drizzle/schema");
-      const { eq } = await import("drizzle-orm");
-      const db = await getDb();
-      const lead = db ? (await db.select().from(dealLeads).where(eq(dealLeads.id, completed.leadId)).limit(1))[0] : null;
-      if (lead) {
-        const { queueFirstUnlockAlert, queueProfileFlagAlert } = await import("./dealsAlerts");
-        await queueFirstUnlockAlert(lead);
-        const flags = (() => { try { const parsed: unknown = JSON.parse(lead.flags); return (Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray((parsed as { flags?: unknown }).flags) ? (parsed as { flags: unknown[] }).flags : []).filter((flag): flag is string => typeof flag === "string" && flag.startsWith("Possible Agent - ")); } catch { return []; } })();
-        await queueProfileFlagAlert(lead, flags);
-      }
-    }
     // Access is never held hostage by CRM availability. A durable job re-reads
     // the lead before every attempt, so a later block/team change suppresses it.
-    if (!completed.isTeam && (!isTest || settings.testModeFullPipeline)) {
-      const { enqueueDealsFubJob, runPendingDealsFubJobs } = await import("./dealsFubJobs");
-      await enqueueDealsFubJob(completed.leadId, completed.firstUnlock ? "first_unlock" : "reverify", completed.reverifiedActive ? "re-verified on a second device" : "returned for a new link");
-      void runPendingDealsFubJobs(1).catch(console.error);
-    }
+    // The single unlock alert is queued by the job runner once the first_unlock
+    // job resolves (so it carries the FUB link, assignment and opt-out marker);
+    // team members create no FUB lead and no alert, and a double-submitted
+    // verify (duplicate receipt) must not add a spurious "second device" note.
+    try {
+      if (!completed.isTeam && !completed.duplicate && (!isTest || settings.testModeFullPipeline)) {
+        const { enqueueDealsFubJob, runPendingDealsFubJobs } = await import("./dealsFubJobs");
+        await enqueueDealsFubJob(completed.leadId, completed.firstUnlock ? "first_unlock" : "reverify", {
+          reason: completed.reverifiedActive ? "re-verified on a second device" : "returned for a new link",
+          // FUB was unreachable at verification: the runner re-runs the realtor
+          // check with the background timeout before any FUB write.
+          deferredCheck: completed.fubCheckDeferred,
+        });
+        void runPendingDealsFubJobs(1).catch(console.error);
+      }
     } catch { console.error("[deals] verification side-effect enqueue failed"); }
     // The browser redirects through an opaque, device-bound, one-time token;
     // that exchange sets the HTTP-only session and immediately removes it from
@@ -85,6 +79,11 @@ export function registerDealsRoutes(app: Express) {
     const { isLiveDealSession } = await import("./dealsService");
     if (!(await isLiveDealSession(req))) return res.redirect(302, "/deals?gate=1");
     next();
+  }));
+  // Static area map for a community: session-checked, marker-free, no-store (AREA MAP). The param may be "12" or "12.png".
+  app.get("/deals/mine/maps/:communityId", safe(async (req, res) => {
+    const { dealsMapImageHandler } = await import("./dealsMap");
+    await dealsMapImageHandler(req, res);
   }));
   app.get("/deals/mine/img/:photoId", safe(async (req, res) => {
     const { isLiveDealSession } = await import("./dealsService");

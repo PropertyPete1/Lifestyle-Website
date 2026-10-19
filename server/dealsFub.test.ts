@@ -1,12 +1,49 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./_core/notification", () => ({ notifyOwner: vi.fn() }));
-import { builderDealsLeadMarker, createBuilderDealsRequestNote, formatChicagoDateTime, peterUserId, unionFubContactValues, unionFubTags } from "./dealsFub";
+import {
+  appendBuilderDealsActivity,
+  builderDealsLeadMarker,
+  createBuilderDealsRequestNote,
+  detectPriorOptOut,
+  formatChicagoDateTime,
+  fubNameIsPlaceholder,
+  fubPersonLink,
+  isBuilderDealsSystemNote,
+  peterUserId,
+  resetPeterUserCache,
+  sendBuilderDealsLeadToFub,
+  stripBuilderDealsTestTag,
+  tagBuilderDealsScreeningContact,
+  unionFubContactValues,
+  unionFubTags,
+  updateBuilderDealsProfileInFub,
+} from "./dealsFub";
+import { jsonResponse } from "./dealsFubFakeDb.test-support";
 import { notifyOwner } from "./_core/notification";
 
 const savedKey = process.env.FUB_API_KEY;
 const savedForgeUrl = process.env.BUILT_IN_FORGE_API_URL;
 const savedForgeKey = process.env.BUILT_IN_FORGE_API_KEY;
 
+type FubCall = { url: string; method: string; body: Record<string, unknown> | null };
+/** Routes mocked FUB requests by method + path and records every call for assertions. */
+function mockFub(handler: (call: FubCall) => Response | Promise<Response>) {
+  const calls: FubCall[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const call: FubCall = { url: String(input), method: init?.method ?? "GET", body: typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : null };
+    calls.push(call);
+    return handler(call);
+  });
+  return calls;
+}
+const path = (call: FubCall) => call.url.replace("https://api.followupboss.com/v1", "");
+const lead = { id: 31, phone: "+12105550123", email: null, name: null, instagramHandle: "pete_buys", sourceCode: "sl1", consentText: "I agree. Reply STOP to opt out.", consentAt: new Date("2026-10-18T15:00:00.000Z"), consentIp: "10.0.0.1", flags: [] as string[], timeline: null, isTest: false };
+const peterUsers = { users: [{ id: 456, email: "peter@lifestyledesignrealty.com" }] };
+
+beforeEach(() => {
+  process.env.FUB_API_KEY = "test-key";
+  resetPeterUserCache();
+});
 afterEach(() => {
   if (savedKey === undefined) delete process.env.FUB_API_KEY; else process.env.FUB_API_KEY = savedKey;
   if (savedForgeUrl === undefined) delete process.env.BUILT_IN_FORGE_API_URL; else process.env.BUILT_IN_FORGE_API_URL = savedForgeUrl;
@@ -31,43 +68,256 @@ describe("Builder Deals FUB contact preservation", () => {
   it("formats owner-facing request times in America/Chicago rather than UTC ISO", () => {
     expect(formatChicagoDateTime(new Date("2026-07-01T18:30:00.000Z"))).toContain("1:30 PM CDT");
   });
+
+  it("links alerts to the FUB web app person page", () => {
+    expect(fubPersonLink("9001")).toBe("https://app.followupboss.com/2/people/view/9001");
+  });
+});
+
+describe("Builder Deals first unlock through the FUB events endpoint", () => {
+  it("treats the 201 person body as the new contact and repairs the assignment to Peter with one PUT", async () => {
+    const calls = mockFub((call) => {
+      if (path(call).startsWith("/people?")) return jsonResponse({ people: [] });
+      if (path(call).startsWith("/users?")) return jsonResponse(peterUsers);
+      if (path(call) === "/events" && call.method === "POST") return jsonResponse({ id: 9001, firstName: "@pete_buys", phones: [{ value: "+12105550123", type: "mobile" }], tags: ["IG Builder Deals", "Lead Flow Tag"], assignedUserId: 12 }, 201);
+      if (path(call) === "/people/9001" && call.method === "PUT") return jsonResponse({});
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+
+    const result = await sendBuilderDealsLeadToFub(lead);
+    expect(result).toMatchObject({ ok: true, personId: "9001", records: [{ kind: "person", fubId: "9001", createdByUs: true }] });
+    expect(result.ok && result.records.some((record) => record.kind === "event")).toBe(false);
+    const puts = calls.filter((call) => call.method === "PUT");
+    expect(puts).toHaveLength(1);
+    expect(path(puts[0]!)).toBe("/people/9001");
+    // The lead-flow auto-assignment on the brand-new person is overridden; the lead-flow tag survives.
+    expect(String(puts[0]!.body?.assignedUserId)).toBe("456");
+    expect(puts[0]!.body?.tags).toEqual(expect.arrayContaining(["IG Builder Deals", "Lead Flow Tag"]));
+    expect(puts[0]!.body?.phones).toEqual([{ value: "+12105550123", type: "mobile" }]);
+    const event = calls.find((call) => path(call) === "/events")!;
+    expect(event.body?.source).toBe("IG Builder Deals");
+    expect((event.body?.person as Record<string, unknown>).firstName).toBe("@pete_buys");
+    expect(String((event.body?.person as Record<string, unknown>).assignedUserId)).toBe("456");
+  });
+
+  it("records a 200 answer for a contact we did not find as pre-existing, never as created by us", async () => {
+    mockFub((call) => {
+      if (path(call).startsWith("/people?")) return jsonResponse({ people: [] });
+      if (path(call).startsWith("/users?")) return jsonResponse(peterUsers);
+      if (path(call) === "/events") return jsonResponse({ id: 77, assignedUserId: 456 }, 200);
+      if (path(call) === "/people/77" && call.method === "PUT") return jsonResponse({});
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    const result = await sendBuilderDealsLeadToFub(lead);
+    expect(result).toMatchObject({ ok: true, personId: "77", records: [{ kind: "person", fubId: "77", createdByUs: false }] });
+  });
+
+  it("leaves an existing contact's other-agent assignment alone, keeps its tags, and reports it for the alert", async () => {
+    const existing = { id: 77, firstName: "Maria", lastName: "Lopez", assignedUserId: 999, assignedTo: "Jane Agent", tags: ["Past Client"], phones: [{ value: "(210) 555-0123", type: "mobile", isPrimary: 1 }], emails: [] };
+    const calls = mockFub((call) => {
+      if (path(call).startsWith("/people?")) return jsonResponse({ people: [existing] });
+      if (path(call).startsWith("/users?")) return jsonResponse(peterUsers);
+      if (path(call).startsWith("/notes?")) return jsonResponse({ notes: [{ id: 1, body: "Spoke on the phone, wants to see homes." }] });
+      if (path(call).startsWith("/events?")) return jsonResponse({ events: [] });
+      if (path(call) === "/events" && call.method === "POST") return jsonResponse(existing, 200);
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    const result = await sendBuilderDealsLeadToFub({ ...lead, timeline: "3-6 months" });
+    expect(result).toMatchObject({ ok: true, personId: "77", records: [{ kind: "person", fubId: "77", createdByUs: false }], screening: { alreadyAssignedTo: "Jane Agent", previouslyOptedOut: false } });
+    expect(calls.filter((call) => call.method === "PUT")).toHaveLength(0);
+    const person = calls.find((call) => path(call) === "/events")!.body?.person as Record<string, unknown>;
+    expect(person.assignedUserId).toBeUndefined();
+    expect(person.firstName).toBeUndefined();
+    expect(person.tags).toEqual(expect.arrayContaining(["Past Client", "IG Builder Deals", "Intent - Warm"]));
+    expect(person.phones).toEqual([{ value: "(210) 555-0123", type: "mobile", isPrimary: 1 }]);
+  });
+
+  it("flags a contact that opted out in FUB before, from FUB's own fields and from notes this system did not write", async () => {
+    const existing = { id: 78, assignedUserId: 456, phones: [{ value: "+12105550123", status: "Opted Out" }], tags: [] };
+    mockFub((call) => {
+      if (path(call).startsWith("/people?")) return jsonResponse({ people: [existing] });
+      if (path(call).startsWith("/users?")) return jsonResponse(peterUsers);
+      if (path(call).startsWith("/notes?")) return jsonResponse({ notes: [] });
+      if (path(call).startsWith("/events?")) return jsonResponse({ events: [] });
+      if (path(call) === "/events" && call.method === "POST") return jsonResponse(existing, 200);
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    const result = await sendBuilderDealsLeadToFub(lead);
+    expect(result).toMatchObject({ ok: true, screening: { alreadyAssignedTo: null, previouslyOptedOut: true } });
+  });
+
+  it("treats FUB's 204 (lead flow ignored the event) as a terminal failure with no retry and no PUT", async () => {
+    const calls = mockFub((call) => {
+      if (path(call).startsWith("/people?")) return jsonResponse({ people: [] });
+      if (path(call).startsWith("/users?")) return jsonResponse(peterUsers);
+      if (path(call) === "/events") return jsonResponse(null, 204);
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    const result = await sendBuilderDealsLeadToFub(lead);
+    expect(result).toMatchObject({ ok: false, terminal: true });
+    expect(result.ok ? "" : result.error).toContain("204");
+    expect(calls.filter((call) => call.method === "PUT")).toHaveLength(0);
+  });
+
+  it("skips the event when the person already carries this lead's first-unlock marker", async () => {
+    const existing = { id: 79, assignedUserId: 456, tags: ["IG Builder Deals"] };
+    const calls = mockFub((call) => {
+      if (path(call).startsWith("/people?")) return jsonResponse({ people: [existing] });
+      if (path(call).startsWith("/users?")) return jsonResponse(peterUsers);
+      if (path(call).startsWith("/notes?")) return jsonResponse({ notes: [] });
+      if (path(call).startsWith("/events?")) return jsonResponse({ events: [{ id: 5, message: `Builder Deals ${builderDealsLeadMarker(lead.id)}:first_unlock\nFirst Builder Deals unlock.` }] });
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    await expect(sendBuilderDealsLeadToFub(lead)).resolves.toMatchObject({ ok: true, personId: "79", records: [{ kind: "person", fubId: "79", createdByUs: false }] });
+    expect(calls.some((call) => call.method === "POST")).toBe(false);
+  });
+});
+
+describe("Builder Deals prior opt-out detection", () => {
+  it("reads only FUB's own fields and non-system notes, never the consent text this system writes", () => {
+    expect(detectPriorOptOut({ id: 1, phones: [{ value: "+12105550123", status: "Valid" }] }, [])).toBe(false);
+    expect(detectPriorOptOut({ id: 1, phones: [{ value: "+12105550123", status: "Unsubscribed" }] }, [])).toBe(true);
+    expect(detectPriorOptOut({ id: 1, optOut: true }, [])).toBe(true);
+    expect(detectPriorOptOut({ id: 1, doNotContact: "yes" }, [])).toBe(true);
+    expect(detectPriorOptOut({ id: 1, optOut: false }, [{ id: 2, body: "She texted STOP last spring, do not text." }])).toBe(true);
+    expect(detectPriorOptOut({ id: 1 }, [{ id: 3, body: `Builder Deals ${builderDealsLeadMarker(4)}:first_unlock\nConsent text: Reply STOP to opt out.` }])).toBe(false);
+    expect(detectPriorOptOut({ id: 1 }, [{ id: 4, subject: "Builder Deals access", body: "returned for a new link. Reply STOP to opt out." }])).toBe(false);
+    expect(detectPriorOptOut({ id: 1 }, [{ id: 5, body: "Wants to stop by the model home Saturday." }])).toBe(false);
+    expect(isBuilderDealsSystemNote({ body: "Builder Deals screening: Agent - FUB Match; match phone." })).toBe(true);
+    expect(isBuilderDealsSystemNote({ body: "Called, left voicemail." })).toBe(false);
+  });
+});
+
+describe("Builder Deals profile update PUT", () => {
+  const profileLead = { ...lead, fubPersonId: "5", name: "Pete Buyer", timeline: "0-3 months", flags: ["Possible Agent - Handle"] };
+
+  it("replaces only a placeholder name and unions the Intent and flag tags onto the existing tags", async () => {
+    const calls = mockFub((call) => {
+      if (path(call) === "/people/5" && call.method === "GET") return jsonResponse({ id: 5, firstName: "@pete_buys", lastName: "", tags: ["Past Client"], phones: [{ value: "+12105550123" }] });
+      if (path(call) === "/people/5" && call.method === "PUT") return jsonResponse({});
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    await expect(updateBuilderDealsProfileInFub(profileLead)).resolves.toMatchObject({ ok: true, personId: "5", records: [{ kind: "person", fubId: "5", createdByUs: false }] });
+    const put = calls.find((call) => call.method === "PUT")!;
+    expect(put.body).toMatchObject({ firstName: "Pete", lastName: "Buyer", mergeTags: true });
+    expect(put.body?.tags).toEqual(expect.arrayContaining(["Past Client", "IG Builder Deals", "Intent - Hot", "Possible Agent - Handle"]));
+  });
+
+  it("never overwrites a real name on an existing contact", async () => {
+    const calls = mockFub((call) => {
+      if (path(call) === "/people/5" && call.method === "GET") return jsonResponse({ id: 5, firstName: "Maria", lastName: "Lopez", tags: [] });
+      if (path(call) === "/people/5" && call.method === "PUT") return jsonResponse({});
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    await updateBuilderDealsProfileInFub(profileLead);
+    const put = calls.find((call) => call.method === "PUT")!;
+    expect(put.body?.firstName).toBeUndefined();
+    expect(put.body?.lastName).toBeUndefined();
+    expect(put.body?.tags).toEqual(expect.arrayContaining(["Intent - Hot"]));
+  });
+
+  it("recognizes both placeholder shapes", () => {
+    expect(fubNameIsPlaceholder({ firstName: "@pete_buys", lastName: "" }, { phone: "+12105550123", instagramHandle: "pete_buys" })).toBe(true);
+    expect(fubNameIsPlaceholder({ firstName: "pete_buys" }, { phone: "+12105550123", instagramHandle: "pete_buys" })).toBe(true);
+    expect(fubNameIsPlaceholder({ firstName: "IG Lead", lastName: "0123" }, { phone: "+12105550123", instagramHandle: null })).toBe(true);
+    expect(fubNameIsPlaceholder({ name: "" }, { phone: "+12105550123", instagramHandle: null })).toBe(true);
+    expect(fubNameIsPlaceholder({ firstName: "Maria", lastName: "Lopez" }, { phone: "+12105550123", instagramHandle: "pete_buys" })).toBe(false);
+  });
+});
+
+describe("Builder Deals screening and cleanup tag writes", () => {
+  it("searches by email only for an email-domain match and keeps every existing tag in the PUT", async () => {
+    const calls = mockFub((call) => {
+      if (path(call).startsWith("/people?email=")) return jsonResponse({ people: [{ id: 42, tags: ["Buyer", "Needs Agent"] }] });
+      if (path(call) === "/people/42" && call.method === "GET") return jsonResponse({ id: 42, tags: ["Buyer", "Needs Agent"] });
+      if (path(call) === "/people/42" && call.method === "PUT") return jsonResponse({});
+      if (path(call) === "/notes" && call.method === "POST") return jsonResponse({ id: 500 });
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    await expect(tagBuilderDealsScreeningContact({ phone: "+12105550123", email: "agent@kw.com", tag: "Possible Agent - Email Domain", matchOn: "email" })).resolves.toEqual({ ok: true, personId: "42" });
+    expect(calls.some((call) => path(call).includes("phone="))).toBe(false);
+    const put = calls.find((call) => call.method === "PUT")!;
+    expect(put.body?.tags).toEqual(["Buyer", "Needs Agent", "Possible Agent - Email Domain"]);
+    expect((calls.find((call) => path(call) === "/notes")!.body?.body as string).startsWith("Builder Deals screening")).toBe(true);
+  });
+
+  it("strips only the TEST tag from a found contact", async () => {
+    const calls = mockFub((call) => {
+      if (path(call) === "/people/42" && call.method === "GET") return jsonResponse({ id: 42, tags: ["Buyer", "TEST", "IG Builder Deals"] });
+      if (path(call) === "/people/42" && call.method === "PUT") return jsonResponse({});
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    await expect(stripBuilderDealsTestTag("42")).resolves.toEqual({ ok: true });
+    expect(calls.find((call) => call.method === "PUT")!.body).toEqual({ tags: ["Buyer", "IG Builder Deals"], mergeTags: false });
+  });
 });
 
 describe("Builder Deals daily request notes", () => {
-  const lead = { id: 11, fubPersonId: "81", phoneE164: "+12105550123", email: "buyer@example.test" };
+  const requestLead = { id: 11, fubPersonId: "81", phoneE164: "+12105550123", email: "buyer@example.test" };
   const firstRequest = { id: 41, requestType: "tour" as const, preferredAt: new Date("2026-10-18T18:30:00.000Z"), chicagoDay: "2026-10-18", fubTaskId: null, fubNoteSentAt: null };
   const secondRequest = { ...firstRequest, id: 42, requestType: "ask" as const };
 
   it("creates a daily note once, then appends the next same-day request instead of posting another note", async () => {
-    process.env.FUB_API_KEY = "test-key";
-    const dayMarker = `${builderDealsLeadMarker(lead.id)}:request-day:${firstRequest.chicagoDay}`;
-    const firstBody = `${dayMarker}\n${builderDealsLeadMarker(lead.id)}-R${firstRequest.id}\nTour: 1 Private Street`;
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-      const path = String(url);
-      if (path.includes("/notes?")) return new Response(JSON.stringify({ notes: fetchMock.mock.calls.filter(([value]) => String(value).includes("/notes?")).length > 1 ? [{ id: 700, body: firstBody }] : [] }), { status: 200 });
-      if (path.endsWith("/notes/700")) return new Response(JSON.stringify({ id: 700, body: firstBody }), { status: 200 });
-      if (path.endsWith("/notes") && init?.method === "POST") return new Response(JSON.stringify({ id: 700 }), { status: 200 });
-      if (path.endsWith("/notes/700") && init?.method === "PUT") return new Response("{}", { status: 200 });
-      throw new Error(`unexpected FUB request: ${path}`);
+    const dayMarker = `${builderDealsLeadMarker(requestLead.id)}:request-day:${firstRequest.chicagoDay}`;
+    const firstBody = `${dayMarker}\n${builderDealsLeadMarker(requestLead.id)}-R${firstRequest.id}\nTour: 1 Private Street`;
+    let posted = false;
+    const calls = mockFub((call) => {
+      if (path(call).startsWith("/notes?")) return jsonResponse({ notes: posted ? [{ id: 700, body: firstBody }] : [] });
+      if (path(call) === "/notes/700" && call.method === "GET") return jsonResponse({ id: 700, body: firstBody });
+      if (path(call) === "/notes" && call.method === "POST") { posted = true; return jsonResponse({ id: 700 }); }
+      if (path(call) === "/notes/700" && call.method === "PUT") return jsonResponse({});
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
     });
 
-    await expect(createBuilderDealsRequestNote({ lead, request: firstRequest, privateDescription: "1 Private Street" })).resolves.toMatchObject({ ok: true, records: expect.arrayContaining([expect.objectContaining({ kind: "note", fubId: "700" })]) });
-    await expect(createBuilderDealsRequestNote({ lead, request: secondRequest, privateDescription: "2 Private Street" })).resolves.toMatchObject({ ok: true, records: expect.arrayContaining([expect.objectContaining({ kind: "note", fubId: "700" })]) });
+    await expect(createBuilderDealsRequestNote({ lead: requestLead, request: firstRequest, privateDescription: "1 Private Street" })).resolves.toMatchObject({ ok: true, records: expect.arrayContaining([expect.objectContaining({ kind: "note", fubId: "700" })]) });
+    await expect(createBuilderDealsRequestNote({ lead: requestLead, request: secondRequest, privateDescription: "2 Private Street" })).resolves.toMatchObject({ ok: true, records: expect.arrayContaining([expect.objectContaining({ kind: "note", fubId: "700" })]) });
 
-    const postCalls = fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/notes") && init?.method === "POST");
-    const putCalls = fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith("/notes/700") && init?.method === "PUT");
+    const postCalls = calls.filter((call) => path(call) === "/notes" && call.method === "POST");
+    const putCalls = calls.filter((call) => path(call) === "/notes/700" && call.method === "PUT");
     expect(postCalls).toHaveLength(1);
     expect(putCalls).toHaveLength(1);
-    expect(JSON.parse(String(putCalls[0]?.[1]?.body)).body).toContain(`${builderDealsLeadMarker(lead.id)}-R${secondRequest.id}`);
+    expect(putCalls[0]!.body?.body).toContain(`${builderDealsLeadMarker(requestLead.id)}-R${secondRequest.id}`);
+  });
+
+  it("pages through a chatty contact's notes before deciding the day note is missing", async () => {
+    const dayMarker = `${builderDealsLeadMarker(requestLead.id)}:request-day:${firstRequest.chicagoDay}`;
+    const firstBody = `${dayMarker}\n${builderDealsLeadMarker(requestLead.id)}-R${firstRequest.id}\nTour: 1 Private Street`;
+    const chatter = Array.from({ length: 100 }, (_, index) => ({ id: index + 1, body: `Call ${index + 1}` }));
+    const calls = mockFub((call) => {
+      if (path(call).startsWith("/notes?")) {
+        const offset = new URL(call.url).searchParams.get("offset");
+        return jsonResponse({ notes: offset === "0" ? chatter : [{ id: 700, body: firstBody }] });
+      }
+      if (path(call) === "/notes/700" && call.method === "GET") return jsonResponse({ id: 700, body: firstBody });
+      if (path(call) === "/notes/700" && call.method === "PUT") return jsonResponse({});
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    await expect(createBuilderDealsRequestNote({ lead: requestLead, request: secondRequest, privateDescription: "2 Private Street" })).resolves.toMatchObject({ ok: true });
+    expect(calls.filter((call) => path(call).startsWith("/notes?")).map((call) => new URL(call.url).searchParams.get("offset"))).toEqual(["0", "100"]);
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(0);
+    expect(calls.filter((call) => call.method === "PUT")).toHaveLength(1);
+  });
+
+  it("writes one activity note per lead per Chicago day and records its id", async () => {
+    const marker = `${builderDealsLeadMarker(requestLead.id)}:activity:2026-10-18`;
+    let posted = false;
+    const calls = mockFub((call) => {
+      if (path(call).startsWith("/notes?")) return jsonResponse({ notes: posted ? [{ id: 900, body: `${marker}\nViewed 2 communities` }] : [] });
+      if (path(call) === "/notes" && call.method === "POST") { posted = true; return jsonResponse({ id: 900 }); }
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    await expect(appendBuilderDealsActivity(requestLead, "2026-10-18", "Viewed 2 communities")).resolves.toMatchObject({ ok: true, personId: "81", records: expect.arrayContaining([{ kind: "note", fubId: "900", createdByUs: true }]) });
+    await expect(appendBuilderDealsActivity(requestLead, "2026-10-18", "Viewed 2 communities")).resolves.toMatchObject({ ok: true, records: expect.arrayContaining([{ kind: "note", fubId: "900", createdByUs: true }]) });
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    expect(calls.find((call) => call.method === "POST")!.body?.body).toContain(marker);
   });
 });
 
 describe("Builder Deals Peter user lookup", () => {
   it("pages users and matches the exact email client-side instead of trusting an email query", async () => {
-    process.env.FUB_API_KEY = "test-key";
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ users: Array.from({ length: 100 }, (_, i) => ({ id: i + 1, email: `user${i}@example.com` })) }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ users: [{ id: 456, email: "PETER@lifestyledesignrealty.com" }] }), { status: 200 }));
+      .mockResolvedValueOnce(jsonResponse({ users: Array.from({ length: 100 }, (_, i) => ({ id: i + 1, email: `user${i}@example.com` })) }))
+      .mockResolvedValueOnce(jsonResponse({ users: [{ id: 456, email: "PETER@lifestyledesignrealty.com" }] }));
     await expect(peterUserId()).resolves.toBe("456");
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/users?limit=100&offset=0");
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/users?limit=100&offset=100");

@@ -25,6 +25,12 @@ const completeIncentive = `
 `;
 
 const chesmarIncentivesUrl = "https://www.chesmar.com/incentives/";
+/** Site chrome carries the community range and a QMI menu entry; only the h1 stat block and gallery count. */
+function chesmarDetailPage(heading: string, stats: string): string {
+  return `<nav><a href="/quick-move-in/">Quick Move-In Homes</a> From $499,990 · 2,340 to 3,834 Sq. Ft. | 3 - 5 Beds | 2 - 4 Baths</nav>
+    <main><h1>${heading}</h1><p>${stats}</p><div class="plan-gallery slick"><img src="/images/${heading.toLowerCase().replace(/\s+/g, "-")}-1600x1067.jpg" alt="Kitchen"><img src="/images/logo.png"></div></main>
+    <footer>Quick Move-In Homes · From $499,990</footer>`;
+}
 const chesmarIncentiveHtml = `
   <nav>HomeAmerican Mortgage Corporation</nav><h1>Imagine Happier Bonus</h1>
   <p><strong>4.999% (5.737% APR) FHA 30-year, fixed-rate financing on select homes that close by 12/31/26*</strong></p>
@@ -152,15 +158,38 @@ describe("deals adapters", () => {
   it("holds promotional rates when a required disclosure is unavailable", () => {
     const facts = parsePromotionalRate("First year: 4.25% Rate / 6.051% APR on an FHA loan.");
     expect(facts.publishable).toBe(false);
-    expect(facts.holdReasons).toContain("missing_repayment_term");
-    expect(facts.holdReasons).toContain("missing_follow_on_rate");
-    expect(facts.holdReasons).toContain("missing_down_payment");
+    // A promotional headline without repayment wording needs only its follow-on
+    // rate and period; "first year" is a promotional period, not a term.
+    expect(facts.holdReasons).toEqual(["missing_follow_on_rate", "missing_follow_on_period"]);
+    const withTerm = parsePromotionalRate("First year: 4.25% Rate / 6.051% APR; 5.25% for years 2-30 on a 30-year loan.");
+    expect(withTerm.holdReasons).toEqual(["missing_loan_type", "missing_down_payment"]);
     // Dates are only required when the source actually names a contract or closing deadline.
+  });
+
+  it("reads the follow-on rate before 'for years 2' and never takes the down payment or a closing date for it", () => {
+    const facts = parsePromotionalRate("First-year rates as low as 4.25% (6.051% APR); 5.25% (6.051% APR) for years 2-30 on a 30-year fixed FHA loan with 3.5% down.");
+    expect(facts).toMatchObject({ promotionalRatePercent: 4.25, followOnRatePercent: 5.25, followOnPeriod: "years 2-30", downPaymentPercent: 3.5, loanType: "FHA", repaymentTermYears: 30, publishable: true });
+    const forward = parsePromotionalRate("First-year 4.25% (6.051% APR). For years 2-30 the rate is 5.25% on a 30-year FHA loan with 3.5% down payment.");
+    expect(forward.followOnRatePercent).toBe(5.25);
+    const onlyDown = parsePromotionalRate("First-year rates as low as 4.25% (6.051% APR). Years 2-30 on a 30-year FHA loan with 3.5% down payment.");
+    expect(onlyDown.followOnRatePercent).toBeNull();
+    expect(onlyDown.holdReasons).toContain("missing_follow_on_rate");
+    const crossing = parsePromotionalRate("4.999% (5.737% APR) FHA 30-year fixed, 3.5% down. Sign a purchase agreement by October 18 and close by 12/31/26.");
+    expect(crossing.contractDeadline).toBeNull();
+    expect(crossing.closingDeadline).toMatchObject({ isoDate: "2026-12-31" });
+    expect(crossing.holdReasons).toEqual(["missing_contract_deadline"]);
   });
 
   it("uses the shared scrubber and refuses output when a short private term cannot safely be scrubbed", () => {
     expect(toPublicSafeText("Secret Grove offers Hidden Plan.", config)).toBe("this community offers this community.");
     expect(toPublicSafeText("AUX is private", { ...config, scrubList: ["AUX"] })).toBeNull();
+  });
+
+  it("scrubs plan names only in plan fields or in the 'the X' / 'X plan' forms and keeps other words verbatim", () => {
+    const categorized = { ...config, scrubList: [], scrubConfig: { builder: ["M/I Homes"], lender: ["M/I Financial"], community: ["Secret Grove"], plan: ["Magnolia"], street: ["Private Street"], other: [] } };
+    expect(toPublicSafeText("Magnolia trees are planted along the entry. Ask about the Magnolia plan on Private Street with M/I Financial.", categorized))
+      .toBe("Magnolia trees are planted along the entry. Ask about this plan on this street with the builder's lender.");
+    expect(toPublicSafeText("Magnolia", categorized, true)).toBe("this plan");
   });
 
   it("keeps private URLs and names out of Manual public DTOs", async () => {
@@ -192,8 +221,8 @@ describe("deals adapters", () => {
       "https://www.chesmar.com/sitemap.xml": "<sitemapindex><sitemap><loc>https://www.chesmar.com/sitemap5.xml</loc></sitemap><sitemap><loc>https://www.chesmar.com/sitemap6.xml</loc></sitemap></sitemapindex>",
       "https://www.chesmar.com/sitemap5.xml": `<urlset><url><loc>${planUrl}</loc></url></urlset>`,
       "https://www.chesmar.com/sitemap6.xml": `<urlset><url><loc>${homeUrl}</loc></url></urlset>`,
-      [planUrl]: "<h1>Hidden Plan</h1><p>Starting From $410,000 · 4 Beds · 3 Baths · 2,300 Sq. Ft.</p>",
-      [homeUrl]: "<h1>1234 Private Address</h1><p>Quick Move-In · $425,000 · 4 Beds · 3 Baths · 2,320 Sq. Ft.</p>",
+      [planUrl]: chesmarDetailPage("Hidden Plan", "Starting From $410,000 · 4 Beds · 3 Baths · 2,300 Sq. Ft."),
+      [homeUrl]: chesmarDetailPage("1234 Private Address", "Quick Move-In · $425,000 · 4 Beds · 3 Baths · 2,320 Sq. Ft."),
       [chesmarIncentivesUrl]: chesmarIncentiveHtml,
     };
     const fetcher = vi.fn(async (input: string | URL | Request) => {
@@ -369,7 +398,7 @@ describe("deals adapters", () => {
       "https://www.chesmar.com/sitemap.xml": "<sitemapindex><sitemap><loc>https://www.chesmar.com/sitemap5.xml</loc></sitemap><sitemap><loc>https://www.chesmar.com/sitemap6.xml</loc></sitemap></sitemapindex>",
       "https://www.chesmar.com/sitemap5.xml": `<urlset><url><loc>${planUrl}</loc></url></urlset>`,
       "https://www.chesmar.com/sitemap6.xml": "<urlset></urlset>",
-      [planUrl]: "<h1>Hidden Plan</h1><p>Starting From $410,000 · 4 Beds · 3 Baths · 2,300 Sq. Ft.</p>",
+      [planUrl]: chesmarDetailPage("Hidden Plan", "Starting From $410,000 · 4 Beds · 3 Baths · 2,300 Sq. Ft."),
       [chesmarIncentivesUrl]: chesmarIncentiveHtml,
     };
     const fetcher = fixtureFetcher(documents);
@@ -394,7 +423,7 @@ describe("deals adapters", () => {
       "https://www.chesmar.com/sitemap.xml": "<sitemapindex><sitemap><loc>https://www.chesmar.com/sitemap5.xml</loc></sitemap><sitemap><loc>https://www.chesmar.com/sitemap6.xml</loc></sitemap></sitemapindex>",
       "https://www.chesmar.com/sitemap5.xml": `<urlset><url><loc>${planUrl}</loc></url></urlset>`,
       "https://www.chesmar.com/sitemap6.xml": "<urlset></urlset>",
-      [planUrl]: "<h1>Hidden Plan</h1><p>Starting From $410,000 · 4 Beds · 3 Baths · 2,300 Sq. Ft.</p>",
+      [planUrl]: chesmarDetailPage("Hidden Plan", "Starting From $410,000 · 4 Beds · 3 Baths · 2,300 Sq. Ft."),
     };
     if (failure === "container") documents[chesmarIncentivesUrl] = "<h1>Other content</h1>";
     if (failure === "disclosure") documents[chesmarIncentivesUrl] = chesmarIncentiveHtml.replace("3.50% down payment", "down payment required");

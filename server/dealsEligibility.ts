@@ -121,10 +121,9 @@ export async function classifyDealsAccess(input: {
   const email = normalizeEmail(input.email);
   // Test-number policy is deliberately evaluated first. A number can be both
   // a staff phone and a test number; its test switches must still control it.
-  if (input.isTest && input.testSkipChecks) {
-    const testTeam = Boolean(input.testTeamNumbers?.includes(input.phone));
-    return { allowed: true, team: testTeam, flags: testTeam ? ["TEST", "team"] : ["TEST"] };
-  }
+  // A test number flagged "treat as team member" routes through the team branch even when toggle (b) is off.
+  if (input.isTest && input.testTeamNumbers?.includes(input.phone)) return { allowed: true, team: true, flags: ["TEST", "team"] };
+  if (input.isTest && input.testSkipChecks) return { allowed: true, team: false, flags: ["TEST"] };
   const [team] = await db.select().from(dealTeamAllowlist).where(and(
     eq(dealTeamAllowlist.active, true),
     or(eq(dealTeamAllowlist.phoneE164, input.phone), ...(email ? [eq(dealTeamAllowlist.email, email)] : [])),
@@ -149,7 +148,9 @@ export async function classifyDealsAccess(input: {
   }
   const domain = emailDomain(email);
   if (domain && input.brokerageDomains.map((value) => value.toLowerCase()).includes(domain)) {
-    queueScreeningContact({ phone: eligiblePhone, email, tag: "Possible Agent - Email Domain", matchOn: "email" });
+    // An email-domain match is searched in FUB by email only: the typed phone is
+    // unverified and must never tag whichever contact happens to own it.
+    queueScreeningContact({ phone: null, email, tag: "Possible Agent - Email Domain", matchOn: "email" });
     return { allowed: false, team: false, blockedBy: "brokerage_domain", matchOn: "email", flags: ["brokerage_domain"] };
   }
   return { allowed: true, team: false, flags: fubFlags.unavailable ? ["fub_check_deferred"] : [] };

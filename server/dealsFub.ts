@@ -2,28 +2,38 @@ import { fubHeaders } from "./fub";
 import { hashSecret } from "./dealsService";
 
 const FUB_API_URL = "https://api.followupboss.com/v1";
+const FUB_APP_PERSON_URL = "https://app.followupboss.com/2/people/view";
 const BASE_TAG = "IG Builder Deals";
 const PETER_EMAIL = "peter@lifestyledesignrealty.com";
 const FUB_PAGE_SIZE = 100;
 const MAX_FUB_PAGES = 100;
+const FUB_TIMEOUT_MS = 30_000;
 
 type FubValue = { value?: string; email?: string; phone?: string; number?: string; [key: string]: unknown };
-type FubPerson = {
+export type FubPerson = {
   id?: string | number;
+  name?: string;
+  firstName?: string;
+  lastName?: string;
   tags?: Array<string | { name?: string; value?: string }> | string;
   assignedUserId?: string | number;
+  assignedTo?: string;
   emails?: FubValue[];
   phones?: FubValue[];
   [key: string]: unknown;
 };
-type BuilderLead = { id: number; phone: string; email?: string | null; name?: string | null; instagramHandle?: string | null; sourceCode: string; consentText: string; consentAt: Date; consentIp: string | null; flags?: string[]; timeline?: string | null; isTest?: boolean };
+type BuilderLead = { id: number; phone: string; email?: string | null; name?: string | null; instagramHandle?: string | null; sourceCode: string; consentText: string; consentAt: Date; consentIp: string | null; flags?: string[]; timeline?: string | null; isTest?: boolean; fubPersonId?: string | null };
+type FubIdentity = { phone?: string | null; email?: string | null };
 
 export type FubRecordWrite = { kind: "person" | "event" | "note" | "task"; fubId: string; createdByUs: boolean };
+/** Facts about the pre-existing FUB contact that only the unlock alert needs. */
+export type FubUnlockScreening = { alreadyAssignedTo: string | null; previouslyOptedOut: boolean };
 export type FubDeliveryResult =
-  | { ok: true; personId?: string; taskId?: string; records: FubRecordWrite[]; warning?: string }
-  | { ok: false; error: string };
+  | { ok: true; personId?: string; taskId?: string; records: FubRecordWrite[]; warning?: string; screening?: FubUnlockScreening }
+  /** `terminal` marks a failure that a retry can never fix (for example FUB declining the event with 204). */
+  | { ok: false; error: string; terminal?: boolean };
 
-function timeout(ms = 30_000) { return AbortSignal.timeout(ms); }
+function timeout(ms = FUB_TIMEOUT_MS) { return AbortSignal.timeout(ms); }
 function intentTag(timeline?: string | null) {
   if (!timeline) return null;
   if (timeline.startsWith("0-3")) return "Intent - Hot";
@@ -101,6 +111,10 @@ function nationalPhone(phone: string) {
   const digits = phone.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
   return digits.length === 10 ? digits : null;
 }
+/** The FUB web link alert emails may carry; it never includes the personal access URL. */
+export function fubPersonLink(personId: string | number) {
+  return `${FUB_APP_PERSON_URL}/${encodeURIComponent(String(personId))}`;
+}
 
 async function fub(path: string, init: RequestInit = {}) {
   const apiKey = process.env.FUB_API_KEY;
@@ -110,30 +124,46 @@ async function fub(path: string, init: RequestInit = {}) {
   return res;
 }
 
-/** Search both formats because FUB can index a saved number in national form. */
-async function findPerson(lead: Pick<BuilderLead, "phone" | "email">): Promise<FubPerson | null> {
-  const candidates = [lead.phone, nationalPhone(lead.phone), lead.email?.trim().toLowerCase()].filter(Boolean) as string[];
+/** Search both phone formats because FUB can index a saved number in national form; an email-only identity searches by email only. */
+async function findPerson(identity: FubIdentity): Promise<FubPerson | null> {
+  const phone = identity.phone?.trim() || null;
+  const candidates = [phone, phone ? nationalPhone(phone) : null, identity.email?.trim().toLowerCase() || null].filter((value): value is string => Boolean(value));
   const checked = new Set<string>();
   for (const value of candidates) {
     if (checked.has(value)) continue;
     checked.add(value);
-    const url = new URL(`${FUB_API_URL}/people`);
-    if (value.includes("@")) url.searchParams.set("email", value); else url.searchParams.set("phone", value);
-    const res = await fub(`${url.pathname}${url.search}`);
+    // Build only the query here: `fub()` already carries the /v1 base path.
+    const query = new URLSearchParams(value.includes("@") ? { email: value } : { phone: value });
+    const res = await fub(`/people?${query.toString()}`);
     const body = await res.json().catch(() => ({})) as { people?: FubPerson[] };
     if (body.people?.[0]) return body.people[0];
   }
   return null;
 }
 
+/** Exported so an admin cascade can find the contact a pre-verification screening tagged (there is no local lead yet). */
+export async function findBuilderDealsFubPersonId(identity: FubIdentity): Promise<string | null> {
+  try {
+    const person = await findPerson(identity);
+    return person?.id === undefined ? null : String(person.id);
+  } catch { return null; }
+}
+
+async function loadPerson(personId: string): Promise<FubPerson | null> {
+  const response = await fub(`/people/${encodeURIComponent(personId)}`);
+  const person = await response.json().catch(() => ({})) as FubPerson;
+  return person && typeof person === "object" ? person : null;
+}
+
 /** Best-effort screening annotation. It is deliberately independent from buyer
  * gating: FUB being unavailable must not change a completed gate response. */
 export async function tagBuilderDealsScreeningContact(input: { phone: string | null; email: string | null; personId?: string; tag: "Agent - FUB Match" | "Possible Agent - Email Domain"; matchOn?: "phone" | "email" }) {
   try {
-    const personId = input.personId ?? (input.phone ? (await findPerson({ phone: input.phone, email: input.email }))?.id : null);
+    // An email-only match must never tag whoever owns an unverified typed phone.
+    const identity: FubIdentity = input.matchOn === "email" ? { email: input.email } : { phone: input.phone, email: input.email };
+    const personId = input.personId ?? ((identity.phone || identity.email) ? (await findPerson(identity))?.id : null);
     if (!personId) return { ok: false as const, error: "FUB contact unavailable" };
-    const personResponse = await fub(`/people/${encodeURIComponent(String(personId))}`);
-    const person = await personResponse.json().catch(() => ({})) as FubPerson;
+    const person = await loadPerson(String(personId));
     const tags = Array.from(new Set([...fubTags(person), input.tag]));
     await fub(`/people/${encodeURIComponent(String(personId))}`, { method: "PUT", body: JSON.stringify({ tags, mergeTags: false }) });
     const marker = `Builder Deals screening: ${input.tag}; match ${input.matchOn ?? "identity"}.`;
@@ -148,27 +178,70 @@ function textInFubObject(value: unknown): string[] {
   if (value && typeof value === "object") return Object.values(value as Record<string, unknown>).flatMap(textInFubObject);
   return [];
 }
+
+async function listFubCollection(path: string, collection: string, params: Record<string, string>, maxPages = MAX_FUB_PAGES): Promise<unknown[]> {
+  const values: unknown[] = [];
+  for (let page = 0; page < maxPages; page += 1) {
+    const query = new URLSearchParams({ ...params, limit: String(FUB_PAGE_SIZE), offset: String(page * FUB_PAGE_SIZE) });
+    const res = await fub(`${path}?${query.toString()}`);
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    const batch = Array.isArray(body[collection]) ? body[collection] as unknown[] : [];
+    values.push(...batch);
+    if (batch.length < FUB_PAGE_SIZE) break;
+  }
+  return values;
+}
+
+type FubHistory = { notes: unknown[]; events: unknown[]; available: boolean };
 /**
  * A timed-out create may still land remotely. Before any resend, scan the
  * person's system-visible notes/events for our opaque marker and treat it as
  * complete. An unavailable history endpoint deliberately does not claim a
  * match; the durable runner will retry with a lease and backoff.
  */
+async function personHistory(personId: string | number): Promise<FubHistory> {
+  let available = true;
+  const notes = await listFubCollection("/notes", "notes", { personId: String(personId) }).catch(() => { available = false; return [] as unknown[]; });
+  const events = await listFubCollection("/events", "events", { personId: String(personId) }, 1).catch(() => { available = false; return [] as unknown[]; });
+  return { notes, events, available };
+}
+function historyHasMarker(history: FubHistory, marker: string) {
+  return [...history.notes, ...history.events].some((item) => textInFubObject(item).some((text) => text.includes(marker)));
+}
 async function personHasLeadMarker(personId: string | number, marker: string): Promise<boolean> {
-  const queries = [
-    `/notes?${new URLSearchParams({ personId: String(personId), limit: String(FUB_PAGE_SIZE) })}`,
-    `/events?${new URLSearchParams({ personId: String(personId), limit: String(FUB_PAGE_SIZE) })}`,
-  ];
-  for (const path of queries) {
-    try {
-      const res = await fub(path);
-      const body = await res.json().catch(() => ({}));
-      if (textInFubObject(body).some((text) => text.includes(marker))) return true;
-    } catch {
-      // Do not turn a history endpoint variation into a false-positive skip.
+  return historyHasMarker(await personHistory(personId), marker);
+}
+
+/** Every note this system writes starts with "Builder Deals" or carries the opaque lead marker. */
+export function isBuilderDealsSystemNote(note: unknown): boolean {
+  return textInFubObject(note).some((text) => /\bBDL-[a-f0-9]{20}\b/.test(text) || /^Builder Deals\b/.test(text.trim()));
+}
+
+const OPT_OUT_FIELD = /opt[\s_-]?out|opted|unsubscri|do[\s_-]?not[\s_-]?(?:call|text|contact|email)|^dnc$|do_not_disturb/i;
+const OPT_OUT_STATUS = /opt(?:ed)?[\s-]?out|unsubscrib|do not (?:call|text|contact)|\bdnc\b|\bstop\b/i;
+const OPT_OUT_NOTE = /\b(?:opt(?:ed|s)?[\s-]?out|unsubscribed?|do not (?:text|call|contact)|dnc|(?:replied|texted|said|sent|responded|answered)(?:\s+(?:with|back))?\s+["'“]?stop\b|stop\s+(?:reply|request|received))/i;
+function truthy(value: unknown) {
+  return value === true || value === 1 || (typeof value === "string" && /^(true|yes|1)$/i.test(value.trim()));
+}
+/**
+ * Detects a prior opt-out ONLY from FUB's own opt-out / do-not-contact fields on
+ * the person and its phone/email entries, or from notes this system did not
+ * write. The consent text this system writes mentions "Reply STOP", so system
+ * notes are excluded by marker before any text match.
+ */
+export function detectPriorOptOut(person: FubPerson | null | undefined, notes: unknown[] = []): boolean {
+  if (person && typeof person === "object") {
+    const entries: unknown[] = [person, ...(Array.isArray(person.phones) ? person.phones : []), ...(Array.isArray(person.emails) ? person.emails : [])];
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object") continue;
+      for (const [key, value] of Object.entries(entry as Record<string, unknown>)) {
+        if (value && typeof value === "object") continue;
+        if (OPT_OUT_FIELD.test(key) && truthy(value)) return true;
+        if (/status$/i.test(key) && typeof value === "string" && OPT_OUT_STATUS.test(value)) return true;
+      }
     }
   }
-  return false;
+  return notes.some((note) => !isBuilderDealsSystemNote(note) && textInFubObject(note).some((text) => OPT_OUT_NOTE.test(text)));
 }
 
 type CachedPeter = { id: string | null; expiresAt: number };
@@ -196,6 +269,27 @@ export async function peterUserId() {
   cachedPeter = { id: null, expiresAt: Date.now() + 60_000 };
   return null;
 }
+/** Test seam: the Peter lookup is cached for five minutes. */
+export function resetPeterUserCache() { cachedPeter = null; }
+
+async function fubUserName(userId: string): Promise<string | null> {
+  try {
+    const res = await fub(`/users/${encodeURIComponent(userId)}`);
+    const user = await res.json().catch(() => ({})) as Record<string, unknown>;
+    return stringValue(user.name) ?? ([stringValue(user.firstName), stringValue(user.lastName)].filter(Boolean).join(" ") || null);
+  } catch { return null; }
+}
+
+/** "already assigned to" and "previously opted out" come only from the pre-existing contact, never from anything we wrote. */
+async function unlockScreening(existing: FubPerson | null, notes: unknown[], peterId: string | null): Promise<FubUnlockScreening> {
+  if (!existing) return { alreadyAssignedTo: null, previouslyOptedOut: false };
+  const assignedUserId = stringValue(existing.assignedUserId);
+  let alreadyAssignedTo: string | null = null;
+  if (assignedUserId && assignedUserId !== peterId) {
+    alreadyAssignedTo = stringValue(existing.assignedTo) ?? await fubUserName(assignedUserId) ?? `FUB user ${assignedUserId}`;
+  }
+  return { alreadyAssignedTo, previouslyOptedOut: detectPriorOptOut(existing, notes) };
+}
 
 function leadNote(lead: BuilderLead, action: string, operation: "first_unlock" | "reverify", occurrenceId?: string) {
   return [
@@ -215,18 +309,36 @@ function nameForNewPerson(lead: BuilderLead) {
   }
   return { firstName: "IG Lead", lastName: lead.phone.replace(/\D/g, "").slice(-4) };
 }
-function personBody(lead: BuilderLead, existing: FubPerson | null, assignedUserId?: string | null) {
+/** True when the FUB contact still carries the placeholder this system would have created (or no name at all). */
+export function fubNameIsPlaceholder(person: Pick<FubPerson, "name" | "firstName" | "lastName">, lead: Pick<BuilderLead, "phone" | "instagramHandle">) {
+  const normalize = (value: unknown) => (stringValue(value) ?? "").toLowerCase().replace(/^@/, "");
+  let first = normalize(person.firstName);
+  let last = normalize(person.lastName);
+  if (!first && !last) {
+    const [head, ...rest] = (stringValue(person.name) ?? "").split(/\s+/);
+    first = normalize(head);
+    last = normalize(rest.join(" "));
+  }
+  if (!first && !last) return true;
+  const placeholder = nameForNewPerson({ ...lead, name: null } as BuilderLead);
+  return first === normalize(placeholder.firstName) && last === normalize(placeholder.lastName ?? "");
+}
+type PersonBodyOptions = { assignedUserId?: string | null; forceAssignment?: boolean; includeName?: boolean };
+function personBody(lead: BuilderLead, existing: FubPerson | null, options: PersonBodyOptions = {}) {
   const contact = unionFubContactValues(existing, lead);
+  const assign = options.forceAssignment || !existing?.assignedUserId ? stringValue(options.assignedUserId) : null;
   return {
-    ...(existing?.id ? {} : nameForNewPerson(lead)),
+    ...((options.includeName ?? !existing?.id) ? nameForNewPerson(lead) : {}),
     phones: contact.phones,
     emails: contact.emails.length ? contact.emails : undefined,
     tags: unionFubTags(existing, lead),
-    assignedUserId: existing?.assignedUserId ?? assignedUserId ?? undefined,
+    // An existing assignment is left alone unless the caller repairs a new or
+    // unassigned person; omitting the field never changes FUB's value.
+    ...(assign ? { assignedUserId: /^\d+$/.test(assign) ? Number(assign) : assign } : {}),
   };
 }
-async function putPersonUnion(personId: string, existing: FubPerson | null, lead: BuilderLead, assignedUserId?: string | null) {
-  const person = personBody(lead, existing, assignedUserId);
+async function putPersonUnion(personId: string, existing: FubPerson | null, lead: BuilderLead, options: PersonBodyOptions = {}) {
+  const person = personBody(lead, existing, options);
   await fub(`/people/${encodeURIComponent(personId)}`, { method: "PUT", body: JSON.stringify({ ...person, mergeTags: true }) });
 }
 async function postFubNote(personId: string, subject: string, body: string): Promise<{ ok: true; id?: string } | { ok: false; error: string }> {
@@ -240,36 +352,46 @@ async function postFubNote(personId: string, subject: string, body: string): Pro
   }
 }
 
-/** A first verified unlock gets one marker-protected FUB event/action-plan trigger. */
+/**
+ * A first verified unlock gets one marker-protected FUB event/action-plan trigger.
+ * FUB's POST /v1/events answers with the PERSON (201 = created, 200 = matched an
+ * existing person, 204 = the lead flow ignored/archived the event); it returns
+ * no event id, so no event record is written.
+ */
 export async function sendBuilderDealsLeadToFub(lead: BuilderLead): Promise<FubDeliveryResult> {
   try {
     const existing = await findPerson(lead);
-    if (existing?.id && await personHasLeadMarker(existing.id, builderDealsOperationMarker(lead.id, "first_unlock"))) {
-      return { ok: true, personId: String(existing.id), records: [{ kind: "person", fubId: String(existing.id), createdByUs: false }] };
-    }
     const peterId = await peterUserId();
+    const history: FubHistory = existing?.id ? await personHistory(existing.id) : { notes: [], events: [], available: true };
+    const screening = await unlockScreening(existing, history.notes, peterId);
+    if (existing?.id && historyHasMarker(history, builderDealsOperationMarker(lead.id, "first_unlock"))) {
+      return { ok: true, personId: String(existing.id), records: [{ kind: "person", fubId: String(existing.id), createdByUs: false }], screening };
+    }
     if (!existing?.assignedUserId && !peterId) return { ok: false, error: "Peter FUB user not found" };
     const body = {
       source: "IG Builder Deals", system: "Lifestyle Design Realty Website", type: "General Inquiry",
       message: leadNote(lead, "First Builder Deals unlock.", "first_unlock"),
-      person: personBody(lead, existing, peterId),
+      person: personBody(lead, existing, { assignedUserId: peterId }),
     };
     const res = await fub("/events", { method: "POST", body: JSON.stringify(body) });
-    const data = await res.json().catch(() => ({})) as { id?: string | number; personId?: string | number; person?: FubPerson; event?: { id?: string | number } };
-    const personId = data.person?.id ?? data.personId ?? existing?.id;
-    if (!personId) return { ok: false, error: "FUB event did not return a contact" };
-    const eventId = data.event?.id ?? data.id;
-    const records: FubRecordWrite[] = [
-      { kind: "person", fubId: String(personId), createdByUs: !existing?.id },
-      ...(eventId === undefined ? [] : [{ kind: "event" as const, fubId: String(eventId), createdByUs: true }]),
-    ];
+    if (res.status === 204) {
+      return { ok: false, terminal: true, error: "FUB did not accept the lead event (HTTP 204): the IG Builder Deals lead flow is set to ignore or archive these leads" };
+    }
+    const data = await res.json().catch(() => ({})) as FubPerson & { personId?: string | number; person?: FubPerson };
+    const returned: FubPerson | null = data.person ?? (data.id !== undefined ? data : null);
+    const personId = data.person?.id ?? data.personId ?? data.id ?? existing?.id;
+    if (personId === undefined || personId === null || String(personId).trim() === "") return { ok: false, error: "FUB event did not return a contact" };
+    // 201 is FUB's "new person" answer. A 200 means FUB matched a person we did
+    // not find; that contact pre-existed and must never be deleted by cleanup.
+    const createdByUs = res.status === 201 || (res.status !== 200 && !existing?.id);
+    const records: FubRecordWrite[] = [{ kind: "person", fubId: String(personId), createdByUs }];
     // Assignment repair is best-effort after the irreversible event. A repair
     // failure must never retry the event or trigger a second action plan.
-    if (peterId && !existing?.assignedUserId) {
-      try { await putPersonUnion(String(personId), data.person ?? existing, lead, peterId); }
-      catch { return { ok: true, personId: String(personId), records, warning: "FUB assignment repair failed" }; }
+    if (peterId && (!existing?.id || !existing.assignedUserId)) {
+      try { await putPersonUnion(String(personId), existing ?? returned, lead, { assignedUserId: peterId, forceAssignment: true }); }
+      catch { return { ok: true, personId: String(personId), records, warning: "FUB assignment repair failed", screening }; }
     }
-    return { ok: true, personId: String(personId), records };
+    return { ok: true, personId: String(personId), records, screening };
   } catch { return { ok: false, error: "FUB delivery failed" }; }
 }
 
@@ -292,6 +414,24 @@ export async function updateBuilderDealsLeadInFub(lead: BuilderLead, reason: "re
   } catch { return { ok: false, error: "FUB update failed" }; }
 }
 
+/**
+ * The name prompt and timeline answer reach FUB through one union PUT: the
+ * Intent tag, any newly stored Possible Agent flags, and the real name only
+ * while the contact still carries the placeholder this system created.
+ */
+export async function updateBuilderDealsProfileInFub(lead: BuilderLead): Promise<FubDeliveryResult> {
+  try {
+    let person: FubPerson | null = null;
+    if (lead.fubPersonId) person = await loadPerson(lead.fubPersonId).catch(() => null);
+    if (!person?.id) person = await findPerson(lead);
+    if (!person?.id) return { ok: false, error: "FUB contact unavailable" };
+    const personId = String(person.id);
+    const includeName = Boolean(lead.name?.trim()) && fubNameIsPlaceholder(person, lead);
+    await putPersonUnion(personId, person, lead, { includeName });
+    return { ok: true, personId, records: [{ kind: "person", fubId: personId, createdByUs: false }] };
+  } catch { return { ok: false, error: "FUB profile update failed" }; }
+}
+
 export function formatChicagoDateTime(value: Date) {
   return new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Chicago", weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
@@ -308,6 +448,7 @@ async function taskPersonId(lead: RequestLead) {
 }
 function requestMarker(leadId: number, requestId: number) { return `${builderDealsLeadMarker(leadId)}-R${requestId}`; }
 function requestDayMarker(leadId: number, chicagoDay: string) { return `${builderDealsLeadMarker(leadId)}:request-day:${chicagoDay}`; }
+function activityDayMarker(leadId: number, chicagoDay: string) { return `${builderDealsLeadMarker(leadId)}:activity:${chicagoDay}`; }
 function requestLine(request: TourRequest, privateDescription: string) {
   return `${request.requestType === "tour" ? "Tour" : "Question"}: ${privateDescription}\nPreferred: ${formatChicagoDateTime(request.preferredAt)}`;
 }
@@ -354,11 +495,10 @@ function fubNoteBody(value: unknown): string {
   const note = record.note && typeof record.note === "object" ? record.note as Record<string, unknown> : record;
   return stringValue(note.body ?? record.body) ?? "";
 }
-async function findBuilderDealsRequestNote(personId: string, dayMarker: string) {
-  const response = await fub(`/notes?${new URLSearchParams({ personId, limit: String(FUB_PAGE_SIZE) })}`);
-  const body = await response.json().catch(() => ({})) as { notes?: unknown[] };
-  const notes = Array.isArray(body.notes) ? body.notes : [];
-  const matching = notes.find((note) => textInFubObject(note).some((text) => text.includes(dayMarker)));
+/** Pages through every note of the person: a chatty contact must not get a second day note. */
+async function findBuilderDealsMarkedNote(personId: string, marker: string) {
+  const notes = await listFubCollection("/notes", "notes", { personId });
+  const matching = notes.find((note) => textInFubObject(note).some((text) => text.includes(marker)));
   return matching === undefined ? null : { id: fubNoteId(matching) };
 }
 
@@ -368,7 +508,7 @@ export async function createBuilderDealsRequestNote(input: { lead: RequestLead; 
     const personId = await taskPersonId(input.lead);
     if (!personId) return { ok: false, error: "FUB contact unavailable" };
     const dayMarker = requestDayMarker(input.lead.id, input.request.chicagoDay);
-    const existing = await findBuilderDealsRequestNote(personId, dayMarker);
+    const existing = await findBuilderDealsMarkedNote(personId, dayMarker);
     if (existing?.id) return appendBuilderDealsRequestNote({ ...input, noteId: existing.id });
     if (existing) return { ok: false, error: "FUB per-day note id unavailable" };
     const marker = requestMarker(input.lead.id, input.request.id);
@@ -396,13 +536,21 @@ export async function appendBuilderDealsRequestNote(input: { lead: RequestLead; 
   } catch { return { ok: false, error: "FUB request note append failed" }; }
 }
 
-export async function appendBuilderDealsActivity(lead: { id: number; fubPersonId: string | null; phoneE164: string; email: string | null }, detail: string) {
+/** The ONE activity note per lead per Chicago day; a day marker makes the nightly job idempotent. */
+export async function appendBuilderDealsActivity(lead: RequestLead, chicagoDay: string, detail: string): Promise<FubDeliveryResult> {
   try {
-    const personId = lead.fubPersonId ?? (await findPerson({ phone: lead.phoneE164, email: lead.email }))?.id;
-    if (!personId) return { ok: false as const, error: "FUB contact unavailable" };
-    const note = await postFubNote(String(personId), "Builder Deals activity", `${builderDealsLeadMarker(lead.id)}\n${detail}`);
-    return note.ok ? { ok: true as const, noteId: note.id } : { ok: false as const, error: note.error };
-  } catch { return { ok: false as const, error: "FUB activity delivery failed" }; }
+    const personId = await taskPersonId(lead);
+    if (!personId) return { ok: false, error: "FUB contact unavailable" };
+    const dayMarker = activityDayMarker(lead.id, chicagoDay);
+    const existing = await findBuilderDealsMarkedNote(personId, dayMarker);
+    if (existing) {
+      return { ok: true, personId, records: [{ kind: "person", fubId: personId, createdByUs: false }, ...(existing.id ? [{ kind: "note" as const, fubId: existing.id, createdByUs: true }] : [])] };
+    }
+    const note = await postFubNote(personId, "Builder Deals activity", `${dayMarker}\n${detail}`);
+    return note.ok
+      ? { ok: true, personId, records: [{ kind: "person", fubId: personId, createdByUs: false }, ...(note.id ? [{ kind: "note" as const, fubId: note.id, createdByUs: true }] : [])] }
+      : { ok: false, error: note.error };
+  } catch { return { ok: false, error: "FUB activity delivery failed" }; }
 }
 
 /** Deletes only an object that is explicitly recorded as created by this system. */
@@ -421,14 +569,9 @@ export async function cleanupBuilderDealsFubRecord(kind: "person" | "event" | "n
 /** A found existing contact is retained; only the Builder Deals TEST tag is removed. */
 export async function stripBuilderDealsTestTag(personId: string) {
   try {
-    const response = await fub(`/people/${encodeURIComponent(personId)}`);
-    const person = await response.json().catch(() => ({})) as FubPerson;
+    const person = await loadPerson(personId);
     const tags = fubTags(person).filter((tag) => tag.toUpperCase() !== "TEST");
     await fub(`/people/${encodeURIComponent(personId)}`, { method: "PUT", body: JSON.stringify({ tags, mergeTags: false }) });
     return { ok: true as const };
   } catch { return { ok: false as const, error: "FUB TEST-tag cleanup failed" }; }
-}
-
-export function builderDealsRelayedNote(input: { sourceCode: string; instagramHandle?: string | null }) {
-  return ["Builder Deals access verified.", `Source: ${input.sourceCode}`, input.instagramHandle ? `Instagram: @${input.instagramHandle}` : undefined].filter(Boolean).join("\n");
 }

@@ -1,16 +1,18 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { isAdminEmail } from "../shared/site";
-import { DEALS_CONSENT_TEXT, hasPrivateTerm, maskPhone, normalizeUsPhone, normalizedText, scrubPrivateNames, sanitizeInstagramHandle, sanitizeSourceCode } from "../shared/deals";
+import { DEALS_CONSENT_TEXT, hasPrivateTerm, maskPhone, normalizeUsPhone, parseDealScrubConfig, sanitizeInstagramHandle, sanitizeSourceCode } from "../shared/deals";
 import { ENV } from "./_core/env";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { getDb } from "./db";
-import { dealFubRecords, dealSettings, dealTrecFakeRows, dealAccessTokens, dealAlerts, dealBlocklist, dealCommunities, dealCommunityViews, dealDoNotAutoImport, dealEmailLogs, dealEvents, dealFubJobs, dealHomes, dealIncentives, dealKnownAgents, dealLeads, dealPhotos, dealTeamAllowlist, dealTourRequests, dealTrecImports, dealTrecLicenses, dealTrecVerifications } from "../drizzle/schema";
-import { checkTwilioVerify, sendTwilioVerify } from "./dealsVerification";
-import { and, desc, eq, gte, inArray, isNull, like, ne, or, sql } from "drizzle-orm";
+import { dealFubRecords, dealAccessTokens, dealAlerts, dealBlocklist, dealCommunities, dealCommunityViews, dealDoNotAutoImport, dealEmailLogs, dealEvents, dealFubJobs, dealHomes, dealIncentives, dealKnownAgents, dealLeads, dealPhotos, dealTeamAllowlist, dealTourRequests, dealTrecImports } from "../drizzle/schema";
+import { sendTwilioVerify } from "./dealsVerification";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import { OFFICIAL_BUILDER_HOSTS, officialHostFor } from "./dealsAdapters";
+import { type DealsAdminError, acceptIncentiveHold, dismissCatalogHold, dismissIncentiveHold, listCommunityDiagnostics, refreshCommunityGeography, refreshCommunityInBackground, saveIncentiveForCommunity, storedScrubListForCommunity, testCommunitySource } from "./dealsSyncAdmin";
+import { type PhotoAdminError, getBuilderPhotoSettingsForAdmin, getDealPhotoPreview, listBuilderPhotoSamples, reprocessBuilderPhotos, saveBuilderPhotoSettings, uploadManualHomePhoto } from "./dealsPhotosAdmin";
 import {
   chicagoDayStart,
-  chicagoEndOfDay,
   hashSecret,
   randomOpaqueToken,
   currentPending,
@@ -24,6 +26,7 @@ import {
   publicDealsCatalog,
   recordGateFocus,
   recordTwilioVerifyFailure,
+  recordTwilioVerifyOutcome,
   removePending,
   reserveGateSubmit,
   reserveVerificationAttempt,
@@ -56,31 +59,50 @@ export function normalizeAdminDealIdentity(input: AdminIdentity): AdminIdentity 
   return identity;
 }
 
+/**
+ * Official communities must point at the adapter's exact www host over plain
+ * HTTPS; a Manual community may use any HTTPS page except a host an adapter
+ * would fetch (a Manual row must never masquerade as an official source).
+ */
 export function validateAdminCommunityUrl(builder: string, raw: string) {
-  const url = new URL(raw);
-  const hosts = builder === "Chesmar" ? ["chesmar.com", "www.chesmar.com"] : builder === "M/I Homes" ? ["mihomes.com", "www.mihomes.com"] : [];
-  if (url.protocol !== "https:" || url.username || url.password || url.port || (builder !== "Manual" && !hosts.includes(url.hostname.toLowerCase()))) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "Use the selected builder’s official HTTPS community URL." });
+  let url: URL;
+  try { url = new URL(raw); } catch { throw new TRPCError({ code: "BAD_REQUEST", message: "Enter a complete HTTPS community URL." }); }
+  const host = officialHostFor(builder);
+  const hostname = url.hostname.toLowerCase();
+  const fetchedHosts = Object.values(OFFICIAL_BUILDER_HOSTS);
+  const wrongHost = host ? hostname !== host : fetchedHosts.includes(hostname) || fetchedHosts.some((value) => hostname === value.replace(/^www\./, ""));
+  if (url.protocol !== "https:" || url.username || url.password || url.port || wrongHost) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: host ? `Use the selected builder's official HTTPS community URL on https://${host}/.` : "Manual communities need an HTTPS page that is not an adapter's official builder host." });
   }
   return url.toString();
 }
 
-export function adminIncentiveRequiredFields(input: { publicText: string; headlineRate?: string | null; apr?: string | null; followOnRate?: string | null; followOnPeriod?: string | null; loanType?: string | null; downPayment?: string | null; repaymentTerms?: string | null; contractBy?: Date | null; closeBy?: Date | null }) {
-  const missing: string[] = [];
-  const rateMentioned = Boolean(input.headlineRate) || /\d+(?:\.\d+)?%.*(?:rate|APR)|(?:rate|APR).*\d+(?:\.\d+)?%/i.test(input.publicText);
-  if (rateMentioned && !input.apr?.trim()) missing.push("apr");
-  if (rateMentioned && /buydown|first[- ]year|year\s*1|introductory/i.test(input.publicText)) {
-    if (!input.followOnRate?.trim()) missing.push("followOnRate");
-    if (!input.followOnPeriod?.trim()) missing.push("followOnPeriod");
+const PHOTO_ADMIN_TRPC_CODES: Record<PhotoAdminError["code"], TRPCError["code"]> = {
+  home_not_found: "NOT_FOUND", photo_not_found: "NOT_FOUND",
+  invalid_region: "BAD_REQUEST", invalid_keywords: "BAD_REQUEST", invalid_upload: "BAD_REQUEST", upload_too_large: "BAD_REQUEST", builder_required: "BAD_REQUEST",
+  database_unavailable: "INTERNAL_SERVER_ERROR", storage_unavailable: "INTERNAL_SERVER_ERROR", no_stored_image: "INTERNAL_SERVER_ERROR",
+};
+const DEALS_ADMIN_TRPC_CODES = new Set<string>(["BAD_REQUEST", "NOT_FOUND", "CONFLICT", "PRECONDITION_FAILED", "INTERNAL_SERVER_ERROR"]);
+
+/** DealsAdminError carries a tRPC code; PhotoAdminError codes map one-to-one onto tRPC codes. Matched on the `code` shape (the two code sets are disjoint). */
+export function adminErrorToTrpc(error: unknown): TRPCError {
+  if (error instanceof TRPCError) return error;
+  const code = error instanceof Error ? (error as { code?: unknown }).code : undefined;
+  const message = error instanceof Error && error.message ? error.message : "The admin operation failed.";
+  if (typeof code === "string") {
+    if (code in PHOTO_ADMIN_TRPC_CODES) return new TRPCError({ code: PHOTO_ADMIN_TRPC_CODES[code as PhotoAdminError["code"]], message });
+    if (DEALS_ADMIN_TRPC_CODES.has(code)) return new TRPCError({ code: code as DealsAdminError["code"], message });
   }
-  if (rateMentioned && /\d+[- ]year|\d+\s+(?:monthly\s+)?payments?|down\s+payment/i.test(input.publicText)) {
-    if (!input.loanType?.trim()) missing.push("loanType");
-    if (!input.repaymentTerms?.trim()) missing.push("repaymentTerms");
-  }
-  if (/\d+(?:\.\d+)?%\s+(?:minimum\s+)?down/i.test(input.publicText) && !input.downPayment?.trim()) missing.push("downPayment");
-  if (/contract(?:s|ing)?\s+(?:by|through|before)|purchase\s+agreements?.*(?:by|between)/i.test(input.publicText) && !input.contractBy) missing.push("contractBy");
-  if (/clos(?:e|ing)\s+(?:by|before|on)/i.test(input.publicText) && !input.closeBy) missing.push("closeBy");
-  return missing;
+  return new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
+}
+
+async function adminCall<T>(work: () => Promise<T>): Promise<T> {
+  try { return await work(); } catch (error) { throw adminErrorToTrpc(error); }
+}
+
+/** Requeue kicks never block or fail the admin response. */
+function kickPhotoQueue(limit: number) {
+  void import("./dealsPhotos").then(({ processPendingDealPhotos }) => processPendingDealPhotos(limit)).catch(() => undefined);
 }
 
 function adminIdentityWhere(table: typeof dealBlocklist | typeof dealKnownAgents | typeof dealTeamAllowlist, identity: AdminIdentity) {
@@ -139,11 +161,17 @@ async function adminCleanupFubClassification(identity: AdminIdentity, personIds:
   return { state: "complete" as const, cleaned };
 }
 
+const scrubTerm = z.string().trim().min(1).max(190);
+/** A flat list (legacy, lands in "other") or one list per category. */
+const scrubListInput = z.union([
+  z.array(scrubTerm).max(500),
+  z.object({ builder: z.array(scrubTerm).max(100), lender: z.array(scrubTerm).max(100), community: z.array(scrubTerm).max(100), plan: z.array(scrubTerm).max(200), street: z.array(scrubTerm).max(200), other: z.array(scrubTerm).max(200) }).partial(),
+]);
 const communityInput = z.object({
   id: z.number().int().positive().optional(), builder: z.enum(["Chesmar", "M/I Homes", "Manual"]), privateName: z.string().trim().min(2).max(190),
   sourceUrl: z.string().url(), publicLabel: z.string().trim().min(2).max(190), areaLabel: z.string().trim().min(2).max(120),
   privateAddress: z.string().trim().max(255).default(""), salesPhone: z.string().max(60).nullable().optional(), reelUrl: z.string().url().nullable().optional(),
-  reelCode: z.string().trim().regex(/^[a-z0-9_-]{1,40}$/), scrubList: z.array(z.string().trim().min(1).max(190)).min(1).max(500),
+  reelCode: z.string().trim().regex(/^[a-z0-9_-]{1,40}$/), scrubList: scrubListInput.optional(),
 });
 const manualHomeInput = z.object({
   id: z.number().int().positive().optional(), communityId: z.number().int().positive(), sourceUrl: z.string().url().optional(),
@@ -152,19 +180,22 @@ const manualHomeInput = z.object({
   sqft: z.number().int().min(0).max(2_147_483_647).optional(), price: z.number().int().min(0).max(2_147_483_647).optional(),
   moveInDate: z.string().max(100).optional(), lotSize: z.string().max(100).optional(),
 });
-const incentiveInput = z.object({
-  id: z.number().int().positive().optional(), communityId: z.number().int().positive(), publicText: z.string().trim().min(2).max(20_000), manual: z.boolean(),
-  contractBy: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), closeBy: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+const adminDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const incentiveFields = {
   headlineRate: z.string().max(80).nullable().optional(), followOnRate: z.string().max(80).nullable().optional(), followOnPeriod: z.string().max(100).nullable().optional(),
   apr: z.string().max(80).nullable().optional(), loanType: z.string().max(80).nullable().optional(), downPayment: z.string().max(80).nullable().optional(), repaymentTerms: z.string().max(120).nullable().optional(),
+};
+const incentiveInput = z.object({
+  id: z.number().int().positive().optional(), communityId: z.number().int().positive(), publicText: z.string().trim().min(2).max(20_000), manual: z.boolean(),
+  contractBy: adminDay.nullable().optional(), closeBy: adminDay.nullable().optional(),
+  ...incentiveFields,
 });
-function adminDate(value: string | null | undefined) {
-  if (!value) return null;
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) throw new TRPCError({ code: "BAD_REQUEST", message: "Enter a valid calendar date." });
-  return chicagoEndOfDay(year, month, day);
-}
+/** "Accept this update": every field the hold reasons require, plus the "no contract deadline in the text" tick. */
+const acceptHoldInput = z.object({
+  id: z.number().int().positive(), contractBy: adminDay.nullable().optional(), closeBy: adminDay.nullable().optional(), noContractDeadline: z.boolean().optional(),
+  publicText: z.string().trim().max(20_000).nullable().optional(), ...incentiveFields,
+});
+const photoRegionInput = z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() });
 
 const gateInput = z.object({
   phone: z.string().trim().min(1).max(60),
@@ -205,7 +236,7 @@ export const dealsRouter = router({
       const settings = await getDealSettings();
       if (result.kind === "has_agent" || result.kind === "blocked") return { ok: false as const, kind: "blocked", message: safeBlockedMessage(settings) };
       if (result.kind === "cookie_blocked") return { ok: false as const, kind: "cookie_blocked", message: `Your browser is blocking cookies. Open this link in Safari or Chrome. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
-      if (result.kind === "outside_us") return { ok: false as const, kind: "outside_us", message: `Outside the US? Text ${settings.commentKeyword} to ${settings.textLine}.` };
+      if (result.kind === "outside_us") return { ok: false as const, kind: "outside_us", message: `US mobile numbers only for now. Outside the US? Text ${settings.commentKeyword} to ${settings.textLine} and we'll help you directly.` };
       if (result.kind === "rate_limited") return { ok: false as const, kind: "rate_limited", message: `We're getting a lot of traffic, so please try again in a bit. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
       return { ok: false as const, kind: "invalid_phone", message: "Enter a valid mobile number." };
     }
@@ -221,8 +252,17 @@ export const dealsRouter = router({
     const sent = await sendTwilioVerify(result.phone, "sms");
     if (!sent.ok) {
       if (sent.reason === "twilio") await recordTwilioVerifyFailure({ sourceCode: result.sourceCode, deviceHash: result.deviceHash, ip: result.ip });
+      if (sent.reason === "cannot_receive") {
+        // A landline or STOP refusal is a terminal outcome, not an account error. The
+        // pending row is KEPT so the code step can offer "Call me" (voice) and
+        // "Wrong number? Change it"; removing it would strand the visitor on the gate.
+        await recordTwilioVerifyOutcome({ sourceCode: result.sourceCode, deviceHash: result.deviceHash, ip: result.ip, phone: result.phone, outcome: "rejected" });
+        return { ok: false as const, kind: "cannot_receive" as const, message: "That number can't receive texts. Try a mobile number or tap Call me.", displayPhone: result.displayPhone };
+      }
       await removePending(ctx.req, ctx.res);
-      return { ok: false as const, kind: sent.reason, message: sent.reason === "cannot_receive" ? "That number can't receive texts. Try a mobile number or tap Call me." : "We couldn't send a code right now. Please try again." };
+      // Twilio 60203 (max send attempts for this number) is a limit, not an account error.
+      if (sent.reason === "rate_limited") return { ok: false as const, kind: "rate_limited" as const, message: `We're getting a lot of traffic, so please try again in a bit. Or text ${result.settings.commentKeyword} to ${result.settings.textLine}.` };
+      return { ok: false as const, kind: sent.reason, message: "We couldn't send a code right now. Please try again." };
     }
     await logDealEvent({ kind: "twilio_verify_success", sourceCode: result.sourceCode, deviceHash: result.deviceHash, ip: result.ip, phone: result.phone });
     return { ok: true as const, status: "code_sent", displayPhone: result.displayPhone, test: false };
@@ -241,8 +281,13 @@ export const dealsRouter = router({
     if (isTest && settings.skipTwilioForTestNumbers) return { ok: true as const, test: true };
     const sent = await sendTwilioVerify(pending.phoneE164, input.channel);
     if (!sent.ok && sent.reason === "twilio") await recordTwilioVerifyFailure({ sourceCode: pending.sourceCode, deviceHash: pending.deviceHash, ip: pending.clientIp });
+    // The pending row stays either way: "Call me" (voice) is the recovery path for a number that cannot receive texts.
+    if (!sent.ok && sent.reason === "cannot_receive") await recordTwilioVerifyOutcome({ sourceCode: pending.sourceCode, deviceHash: pending.deviceHash, ip: pending.clientIp, phone: pending.phoneE164, outcome: "rejected" });
     if (sent.ok) await logDealEvent({ kind: "twilio_verify_success", sourceCode: pending.sourceCode, deviceHash: pending.deviceHash, ip: pending.clientIp, phone: pending.phoneE164 });
-    return sent.ok ? { ok: true as const, test: false } : { ok: false as const, kind: sent.reason, message: "We couldn't send a code right now. Please try again." };
+    if (sent.ok) return { ok: true as const, test: false };
+    if (sent.reason === "cannot_receive") return { ok: false as const, kind: "cannot_receive" as const, message: "That number can't receive texts. Try a mobile number or tap Call me." };
+    if (sent.reason === "rate_limited") return { ok: false as const, kind: "rate_limited" as const, message: `We're getting a lot of traffic, so please try again in a bit. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
+    return { ok: false as const, kind: sent.reason, message: "We couldn't send a code right now. Please try again." };
   }),
   gateFocused: publicProcedure.input(z.object({ src: z.string().max(120).optional() })).mutation(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);
@@ -295,18 +340,16 @@ export const dealsRouter = router({
     if (!connection) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
     const settings = await getDealSettings();
     const { profileRealtorFlags } = await import("./dealsEligibility");
-    const profileFlags = await profileRealtorFlags({ name: input.name ?? session.lead.name, instagramHandle: session.lead.instagramHandle, handleKeywords: settings.handleKeywords, trecCounties: settings.trecCounties });
+    // Team previews save name/timeline only: no flags, no FUB write, no alert (A20).
+    const profileFlags = session.lead.status === "team" ? [] : await profileRealtorFlags({ name: input.name ?? session.lead.name, instagramHandle: session.lead.instagramHandle, handleKeywords: settings.handleKeywords, trecCounties: settings.trecCounties });
     const storedFlags = (() => { try { const value = JSON.parse(session.lead.flags); return Array.isArray(value) ? value : value.flags ?? []; } catch { return []; } })();
     const newProfileFlags = profileFlags.filter((flag) => !storedFlags.includes(flag));
-    const nextLead = { ...session.lead, name: input.name ?? session.lead.name, timeline: input.timeline ?? session.lead.timeline };
-    await connection.update(dealLeads).set({ name: nextLead.name, timeline: nextLead.timeline, flags: JSON.stringify(Array.from(new Set([...storedFlags, ...profileFlags]))) }).where(eq(dealLeads.id, session.leadId));
-    // Flags are review signals, not silent access revocations. Queue an alert
-    // only for a newly discovered signal; test flows stay quiet unless staff
-    // deliberately enable the existing full-pipeline test setting.
-    if (newProfileFlags.length && (!settings.testNumbers.includes(session.lead.phoneE164) || settings.testModeFullPipeline)) {
-      const { queueProfileFlagAlert } = await import("./dealsAlerts");
-      await queueProfileFlagAlert(nextLead, newProfileFlags);
-    }
+    const nextLead = { ...session.lead, name: input.name ?? session.lead.name, timeline: input.timeline ?? session.lead.timeline, flags: JSON.stringify(Array.from(new Set([...storedFlags, ...profileFlags]))) };
+    await connection.update(dealLeads).set({ name: nextLead.name, timeline: nextLead.timeline, flags: nextLead.flags }).where(eq(dealLeads.id, session.leadId));
+    // One FUB profile_update job (name only while the FUB name is the placeholder, Intent tag, new flag tags) and
+    // the single permitted follow-up flag alert; test numbers stay quiet unless full pipeline is on.
+    const { handleDealsProfileUpdate } = await import("./dealsFubJobs");
+    await handleDealsProfileUpdate({ lead: nextLead, newFlags: newProfileFlags });
     return { ok: true as const };
   }),
   admin: router({
@@ -320,7 +363,7 @@ export const dealsRouter = router({
       ]);
       const [homes, photos, agents, team, tours, imports, fubJobs, doNotAutoImport, alerts, emailLogs, incentives] = await Promise.all([
         db.select().from(dealHomes).orderBy(desc(dealHomes.createdAt)).limit(500),
-        db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId, sourceUrl: dealPhotos.sourceUrl, processingState: dealPhotos.processingState, automaticHidden: dealPhotos.automaticHidden, adminHidden: dealPhotos.adminHidden, bottomCrop: dealPhotos.bottomCrop }).from(dealPhotos).orderBy(desc(dealPhotos.createdAt)).limit(200),
+        db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId, sourceUrl: dealPhotos.sourceUrl, processingState: dealPhotos.processingState, automaticHidden: dealPhotos.automaticHidden, adminHidden: dealPhotos.adminHidden, bottomCrop: dealPhotos.bottomCrop, lastProcessingError: dealPhotos.lastProcessingError, processedVersion: dealPhotos.processedVersion, ocrMatches: dealPhotos.ocrMatches, sortOrder: dealPhotos.sortOrder, processedAt: dealPhotos.processedAt }).from(dealPhotos).orderBy(desc(dealPhotos.createdAt)).limit(200),
         db.select().from(dealKnownAgents).orderBy(desc(dealKnownAgents.createdAt)).limit(100),
         db.select().from(dealTeamAllowlist).orderBy(desc(dealTeamAllowlist.createdAt)).limit(100),
         db.select().from(dealTourRequests).orderBy(desc(dealTourRequests.createdAt)).limit(100),
@@ -378,16 +421,22 @@ export const dealsRouter = router({
       const { id, scrubList, salesPhone, ...data } = input;
       validateAdminCommunityUrl(data.builder, data.sourceUrl);
       const phone = salesPhone?.trim() ? normalizeAdminDealIdentity({ phoneE164: salesPhone }).phoneE164 : null;
-      const privateTerms = Array.from(new Set([data.builder, data.privateName, ...scrubList].filter((value) => value !== "Manual")));
-      if (hasPrivateTerm(data.publicLabel, privateTerms) || hasPrivateTerm(data.areaLabel, privateTerms)) throw new TRPCError({ code: "BAD_REQUEST", message: "Public labels must not contain private builder/community names." });
-      const patch = { ...data, salesPhone: phone, scrubList: JSON.stringify(privateTerms) };
+      const existing = id ? (await db.select({ id: dealCommunities.id, scrubList: dealCommunities.scrubList }).from(dealCommunities).where(eq(dealCommunities.id, id)).limit(1))[0] : undefined;
+      if (id && !existing) throw new TRPCError({ code: "NOT_FOUND" });
+      // Categorised private names: the builder/lender aliases and the community name are always present,
+      // admin terms are merged per category and a stored list is never shortened by an edit.
+      const storedScrubList = storedScrubListForCommunity({ builder: data.builder, privateName: data.privateName, scrubList, existing: existing?.scrubList ?? null });
+      const scrubConfig = parseDealScrubConfig(JSON.parse(storedScrubList));
+      if (hasPrivateTerm(data.publicLabel, scrubConfig) || hasPrivateTerm(data.areaLabel, scrubConfig)) throw new TRPCError({ code: "BAD_REQUEST", message: "Public labels must not contain private builder, lender, community, plan, or street names." });
+      const patch = { ...data, salesPhone: phone, scrubList: storedScrubList };
       const duplicate = (await db.select({ id: dealCommunities.id }).from(dealCommunities).where(eq(dealCommunities.reelCode, data.reelCode)).limit(1))[0];
       if (duplicate && duplicate.id !== id) throw new TRPCError({ code: "CONFLICT", message: "This reel code is already in use." });
-      if (id) {
-        if (!(await db.select({ id: dealCommunities.id }).from(dealCommunities).where(eq(dealCommunities.id, id)).limit(1))[0]) throw new TRPCError({ code: "NOT_FOUND" });
-        await db.update(dealCommunities).set(patch).where(eq(dealCommunities.id, id));
-      } else await db.insert(dealCommunities).values(patch);
-      return { ok: true as const };
+      let savedId = id ?? 0;
+      if (id) await db.update(dealCommunities).set(patch).where(eq(dealCommunities.id, id));
+      else savedId = Number((await db.insert(dealCommunities).values(patch) as unknown as [{ insertId?: number }])[0]?.insertId ?? 0);
+      // ZIP centroid + drive-time chips for the area map; a geocoder failure never fails the save.
+      if (savedId) void refreshCommunityGeography(savedId).catch(() => null);
+      return { ok: true as const, id: savedId, scrubList: scrubConfig };
     }),
     removeCommunity: adminProcedure.input(z.object({ id: z.number().int().positive(), confirm: z.literal(true) })).mutation(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -395,44 +444,21 @@ export const dealsRouter = router({
       await db.update(dealCommunities).set({ active: false, paused: true }).where(eq(dealCommunities.id, input.id));
       return { ok: true as const, archived: true as const };
     }),
-    saveIncentive: adminProcedure.input(incentiveInput).mutation(async ({ input }) => {
-      const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const community = (await db.select().from(dealCommunities).where(eq(dealCommunities.id, input.communityId)).limit(1))[0]; if (!community) throw new TRPCError({ code: "NOT_FOUND" });
-      const { id, contractBy, closeBy, ...data } = input;
-      if (id && !(await db.select({ id: dealIncentives.id }).from(dealIncentives).where(and(eq(dealIncentives.id, id), eq(dealIncentives.communityId, input.communityId))).limit(1))[0]) throw new TRPCError({ code: "NOT_FOUND" });
-      const terms = JSON.parse(community.scrubList) as string[];
-      const publicText = scrubPrivateNames(data.publicText, [...terms, community.builder, community.privateName]);
-      if (hasPrivateTerm(publicText, terms)) throw new TRPCError({ code: "BAD_REQUEST", message: "Private names remain in incentive text." });
-      const dates = { contractBy: adminDate(contractBy), closeBy: adminDate(closeBy) };
-      const required = adminIncentiveRequiredFields({ ...data, publicText, ...dates });
-      if (required.length) throw new TRPCError({ code: "BAD_REQUEST", message: `Required before publication: ${required.join(", ")}` });
-      const expiresAt = dates.contractBy && dates.closeBy ? new Date(Math.min(dates.contractBy.getTime(), dates.closeBy.getTime())) : dates.contractBy ?? dates.closeBy;
-      await db.transaction(async (tx) => {
-        await tx.update(dealIncentives).set({ active: false }).where(eq(dealIncentives.communityId, input.communityId));
-        const values = { ...data, publicText, normalizedText: normalizedText(publicText), ...dates, expiresAt, confirmedAt: new Date(), active: true, held: false, holdReason: null };
-        if (id) await tx.update(dealIncentives).set(values).where(eq(dealIncentives.id, id)); else await tx.insert(dealIncentives).values(values);
-        await tx.update(dealCommunities).set({ catalogUpdatedAt: new Date() }).where(eq(dealCommunities.id, input.communityId));
-      });
-      return { ok: true as const };
-    }),
-    acceptHold: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
-      const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const incentive = (await db.select().from(dealIncentives).where(eq(dealIncentives.id, input.id)).limit(1))[0]; if (!incentive || !incentive.held) throw new TRPCError({ code: "NOT_FOUND" });
-      const community = (await db.select().from(dealCommunities).where(eq(dealCommunities.id, incentive.communityId)).limit(1))[0];
-      const required = adminIncentiveRequiredFields(incentive);
-      if (required.length || !community || hasPrivateTerm(incentive.publicText, JSON.parse(community.scrubList) as string[])) throw new TRPCError({ code: "BAD_REQUEST", message: `Edit and complete this incentive before accepting: ${required.join(", ") || "private text"}` });
-      await db.transaction(async (tx) => {
-        await tx.update(dealIncentives).set({ active: false }).where(eq(dealIncentives.communityId, incentive.communityId));
-        await tx.update(dealIncentives).set({ active: true, held: false, holdReason: null, confirmedAt: new Date() }).where(eq(dealIncentives.id, incentive.id));
-        await tx.update(dealCommunities).set({ catalogUpdatedAt: new Date() }).where(eq(dealCommunities.id, incentive.communityId));
-      });
-      return { ok: true as const };
-    }),
-    dismissHold: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
-      const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      await db.update(dealIncentives).set({ active: false, held: false, holdReason: null }).where(eq(dealIncentives.id, input.id));
-      return { ok: true as const };
-    }),
+    /** Manual incentive save: categorised scrubbing, required-field check, publish now; saving re-confirms and dates are sticky. */
+    saveIncentive: adminProcedure.input(incentiveInput).mutation(({ input }) => adminCall(() => saveIncentiveForCommunity(input))),
+    /** "Accept this update" for an incentive hold; refused until every field the hold reasons require is filled. */
+    acceptHold: adminProcedure.input(acceptHoldInput).mutation(({ input }) => adminCall(() => acceptIncentiveHold(input))),
+    /** Dismiss an incentive hold: the held text stays off until the scraped text changes. */
+    dismissHold: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => adminCall(() => dismissIncentiveHold(input.id))),
+    /** Dismiss a load-failure / missing-container hold: keep the last good data, no repeat email until the parse result changes. */
+    dismissCatalogHold: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => adminCall(() => dismissCatalogHold(input.id))),
+    /** Per-community holds with ages, held incentives with their missing fields, counts, area map and the last "Refresh now" run. */
+    communityDiagnostics: adminProcedure.query(() => adminCall(() => listCommunityDiagnostics())),
+    /** Builder choices for the add-community form. Served only to admins so no builder name ever ships in the public bundle. */
+    builders: adminProcedure.query(() => [
+      ...(Object.keys(OFFICIAL_BUILDER_HOSTS) as Array<keyof typeof OFFICIAL_BUILDER_HOSTS>).map((id) => ({ id, label: id, host: OFFICIAL_BUILDER_HOSTS[id], manual: false as const })),
+      { id: "Manual" as const, label: "Manual (maintained by hand, no auto-update)", host: null, manual: true as const },
+    ]),
     removeKnownAgent: adminProcedure.input(z.object({ id: z.number().int().positive(), confirm: z.literal(true) })).mutation(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const row = (await db.select().from(dealKnownAgents).where(eq(dealKnownAgents.id, input.id)).limit(1))[0]; if (!row) throw new TRPCError({ code: "NOT_FOUND" });
@@ -456,21 +482,39 @@ export const dealsRouter = router({
       const revoked = await revokeOrphanedTeamPreviewLinks(db);
       return { ok: true as const, revoked, nextStep: "fresh_verification_required", mirrorWarning: member.source === "fub" ? "Active FUB users return on the next mirror; deactivate them in FUB to remove permanently." : null };
     }),
-    photoPreview: adminProcedure.input(z.object({ id: z.number().int().positive() })).query(async ({ input, ctx }) => {
+    /** Admin-only thumbnail (data URL, never an object URL): the processed master when it exists, else the stored original. */
+    photoPreview: adminProcedure.input(z.object({ id: z.number().int().positive(), maxEdge: z.number().int().min(64).max(720).optional(), prefer: z.enum(["master", "original"]).optional() })).query(async ({ input, ctx }) => {
       ctx.res.setHeader("Cache-Control", "no-store, private");
-      const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const photo = (await db.select({ original: dealPhotos.originalStorageKey, processed: dealPhotos.processedStorageKey }).from(dealPhotos).where(eq(dealPhotos.id, input.id)).limit(1))[0];
-      const key = photo?.processed ?? photo?.original; if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "No stored preview is available yet." });
-      try {
-        const { storageReadPrivate } = await import("./storage"); const { default: sharp } = await import("sharp");
-        const { data } = await storageReadPrivate(key);
-        const thumbnail = await sharp(data, { limitInputPixels: 50_000_000 }).rotate().resize({ width: 360, height: 240, fit: "inside", withoutEnlargement: true }).webp({ quality: 70 }).toBuffer();
-        return { dataUrl: `data:image/webp;base64,${thumbnail.toString("base64")}` };
-      } catch { throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "The protected thumbnail could not be loaded." }); }
+      const preview = await adminCall(() => getDealPhotoPreview(input));
+      if (!preview) throw new TRPCError({ code: "NOT_FOUND", message: "No stored preview is available yet." });
+      return preview;
     }),
     reprocessPhoto: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
-      const { requeueDealPhoto } = await import("./dealsPhotos"); await requeueDealPhoto(input.id); return { ok: true as const, queued: true as const };
+      const { requeueDealPhoto } = await import("./dealsPhotos"); await requeueDealPhoto(input.id); kickPhotoQueue(5); return { ok: true as const, queued: true as const };
     }),
+    /** Per-builder watermark settings (toggle, percent region, keyword list) with photo queue counts; reading seeds defaults. */
+    builderPhotoSettings: adminProcedure.input(z.object({ builder: z.string().optional() }).optional()).query(({ input }) => adminCall(() => getBuilderPhotoSettingsForAdmin(input?.builder))),
+    /** Saving a changed toggle/region/keyword list requeues every photo of that builder (steps 3 to 6 re-run from the stored originals). */
+    saveBuilderPhotoSettings: adminProcedure.input(z.object({ builder: z.string().min(1), enabled: z.boolean(), region: photoRegionInput.nullable(), keywords: z.array(z.string()).optional(), reviewedSampleIds: z.array(z.number().int().positive()).optional() })).mutation(({ input }) => adminCall(() => saveBuilderPhotoSettings(input))),
+    /** "Save and reprocess" when nothing changed: requeue the builder's photos anyway. */
+    reprocessBuilderPhotos: adminProcedure.input(z.object({ builder: z.string().min(1) })).mutation(async ({ input }) => {
+      const requeued = await adminCall(() => reprocessBuilderPhotos(input.builder));
+      if (requeued > 0) kickPhotoQueue(20);
+      return { ok: true as const, requeued };
+    }),
+    /** Up to 5 stored originals (data URLs) so the admin can pick the watermark region on real frames. */
+    builderPhotoSamples: adminProcedure.input(z.object({ builder: z.string().min(1) })).query(async ({ input, ctx }) => {
+      ctx.res.setHeader("Cache-Control", "no-store, private");
+      return adminCall(() => listBuilderPhotoSamples(input.builder));
+    }),
+    /** Admin photo upload for a manual home: base64 (raw or data URL), at most 8 MB of image bytes, enters the pipeline at step 1. */
+    uploadHomePhoto: adminProcedure.input(z.object({ homeId: z.number().int().positive(), base64: z.string().min(1).max(26_000_000), contentType: z.string() })).mutation(({ input }) => adminCall(async () => {
+      const payload = input.base64.trim();
+      const encoded = (payload.startsWith("data:") ? payload.slice(payload.indexOf(",") + 1) : payload).replace(/\s+/g, "");
+      const approximateBytes = Math.floor(encoded.length * 3 / 4) - (encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0);
+      if (approximateBytes > 8 * 1024 * 1024) throw new TRPCError({ code: "BAD_REQUEST", message: "Photos must be 8 MB or smaller." });
+      return uploadManualHomePhoto(input);
+    })),
     removeManualHome: adminProcedure.input(z.object({ id: z.number().int().positive(), confirm: z.literal(true) })).mutation(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const home = (await db.select().from(dealHomes).where(and(eq(dealHomes.id, input.id), eq(dealHomes.origin, "manual"))).limit(1))[0]; if (!home) throw new TRPCError({ code: "NOT_FOUND" });
@@ -482,36 +526,14 @@ export const dealsRouter = router({
     health: adminProcedure.query(async () => (await import("./dealsMaintenance")).builderDealsHealthCheck()),
     mondayReport: adminProcedure.query(async () => (await import("./dealsMaintenance")).builderDealsMondayReport()),
     addTrecFakeRow: adminProcedure.input(z.object({ fullName: z.string().trim().min(3).max(190), confirm: z.literal(true) })).mutation(async ({ input }) => (await import("./dealsTrec")).addTrecFakeRow(input.fullName)),
-    refreshCommunity: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async () => {
-      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Per-community background refresh requires a scoped sync worker. No global scrape was started." });
-    }),
-    /** An operator diagnostic restricted to the preconfigured official URL. */
-    testCommunitySource: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable." });
-      const community = (await db.select().from(dealCommunities).where(eq(dealCommunities.id, input.id)).limit(1))[0];
-      if (!community) throw new TRPCError({ code: "NOT_FOUND", message: "Community not found." });
-      const url = validateAdminCommunityUrl(community.builder, community.sourceUrl);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 20_000);
-      try {
-        const response = await fetch(url, {
-          method: "GET",
-          redirect: "manual",
-          signal: controller.signal,
-          headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "LifestyleDesignRealty Builder Deals health check/1.0" },
-        });
-        const bytes = (await response.arrayBuffer()).byteLength;
-        return { host: new URL(url).hostname, status: response.status, bytes, redirected: response.status >= 300 && response.status < 400 };
-      } catch (error) {
-        return { host: new URL(url).hostname, status: 0, bytes: 0, redirected: false, error: error instanceof Error ? error.name : "fetch_failed" };
-      } finally {
-        clearTimeout(timer);
-      }
-    }),
+    /** "Refresh now": one background adapter run for this community, recorded in deal_job_runs; refused while a run is in flight. */
+    refreshCommunity: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => adminCall(() => refreshCommunityInBackground(input.id))),
+    /** An operator diagnostic restricted to the preconfigured official URL (exact official host, 64 KB cap, redirects reported, never followed). */
+    testCommunitySource: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => adminCall(() => testCommunitySource(input.id))),
     runFubRetry: adminProcedure.mutation(async () => (await import("./dealsFubJobs")).runPendingDealsFubJobs()),
     saveSettings: adminProcedure.input(z.object({
       allowCanada: z.boolean().optional(), commentKeyword: z.string().min(1).max(30).optional(), textLine: z.string().min(1).max(40).optional(), expiryHours: z.number().int().min(1).max(168).optional(), hasAgentBlockDays: z.number().int().min(1).max(400).optional(), incentiveLapseDays: z.number().int().min(1).max(90).optional(), dailyVerificationCap: z.number().int().min(1).max(10000).optional(), phoneLimitPerHour: z.number().int().min(1).max(50).optional(), ipLimitPerHour: z.number().int().min(1).max(1000).optional(), testPhoneLimitPerHour: z.number().int().min(1).max(100).optional(), skipTwilioForTestNumbers: z.boolean().optional(), testNumbersSkipChecks: z.boolean().optional(), testModeFullPipeline: z.boolean().optional(), testNumbers: z.array(z.string()).max(20).optional(), testTeamNumbers: z.array(z.string()).max(20).optional(), activeReelCodes: z.array(z.string()).max(50).optional(), brokerageDomains: z.array(z.string().min(3)).max(100).optional(), fubRealtorTags: z.array(z.string()).max(100).optional(), fubRealtorSources: z.array(z.string()).max(100).optional(), handleKeywords: z.array(z.string()).max(100).optional(), trecCounties: z.array(z.string()).max(100).optional(), alertRecipients: z.array(z.string().email()).min(1).max(20).optional(), alertMode: z.enum(["immediate", "hourly_digest"]).optional(),
+      syncEmailRecipients: z.array(z.string().email()).min(1).max(20).optional(), driveDestinations: z.array(z.string().trim().min(2).max(80)).min(1).max(8).optional(),
     })).mutation(async ({ input }) => {
       const { saveDealSettings } = await import("./dealsService");
       return saveDealSettings(input);
@@ -565,6 +587,8 @@ export const dealsRouter = router({
         }
       });
       const personIds = [...agents, ...leads].flatMap((row) => row.fubPersonId ? [row.fubPersonId] : []);
+      // A pre-verification FUB-match block has no local lead/person id; find the tagged contact by the unblocked value.
+      if (!personIds.length && (identity.phoneE164 || identity.email)) { const { findBuilderDealsFubPersonId } = await import("./dealsFub"); const found = await findBuilderDealsFubPersonId({ phone: identity.phoneE164, email: identity.email }); if (found) personIds.push(found); }
       const fubCleanup = await adminCleanupFubClassification(identity, personIds).catch(() => ({ state: "failed" as const }));
       return { ok: true as const, nextStep: "fresh_verification_required", fubCleanup };
     }),
@@ -621,8 +645,33 @@ export const dealsRouter = router({
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { id, ...patch } = input;
       await db.update(dealPhotos).set(patch).where(eq(dealPhotos.id, id));
-      if (input.bottomCrop !== undefined || input.adminHidden === false) { const { requeueDealPhoto } = await import("./dealsPhotos"); await requeueDealPhoto(id); }
+      if (input.bottomCrop !== undefined || input.adminHidden === false) { const { requeueDealPhoto } = await import("./dealsPhotos"); await requeueDealPhoto(id); kickPhotoQueue(5); }
       return { ok: true as const, queued: input.bottomCrop !== undefined || input.adminHidden === false };
+    }),
+    /** FUB users the nightly mirror imported with no phone on file; without a number they fall through to the realtor checks. */
+    teamNeedsPhone: adminProcedure.query(async () => {
+      const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [rows, covered] = await Promise.all([
+        db.select({ id: dealTeamAllowlist.id, name: dealTeamAllowlist.name, email: dealTeamAllowlist.email, fubUserId: dealTeamAllowlist.fubUserId, createdAt: dealTeamAllowlist.createdAt }).from(dealTeamAllowlist).where(and(eq(dealTeamAllowlist.source, "fub"), eq(dealTeamAllowlist.active, true), isNull(dealTeamAllowlist.phoneE164))).orderBy(dealTeamAllowlist.name).limit(200),
+        // A hand-entered number is a manual row carrying the FUB user id, so the mirror never clears it and the user leaves this list.
+        db.select({ fubUserId: dealTeamAllowlist.fubUserId }).from(dealTeamAllowlist).where(and(eq(dealTeamAllowlist.source, "manual"), eq(dealTeamAllowlist.active, true), isNotNull(dealTeamAllowlist.phoneE164), isNotNull(dealTeamAllowlist.fubUserId))),
+      ]);
+      const coveredIds = new Set(covered.flatMap((row) => row.fubUserId ? [row.fubUserId] : []));
+      return rows.filter((row) => !row.fubUserId || !coveredIds.has(row.fubUserId));
+    }),
+    /** Inline "enter their number": a manual row (never touched by the mirror) with the same cascade as any team add. */
+    addTeamPhone: adminProcedure.input(z.object({ id: z.number().int().positive(), phoneE164: z.string().min(1).max(60) })).mutation(async ({ input }) => {
+      const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const member = (await db.select().from(dealTeamAllowlist).where(eq(dealTeamAllowlist.id, input.id)).limit(1))[0]; if (!member) throw new TRPCError({ code: "NOT_FOUND" });
+      const identity = normalizeAdminDealIdentity({ phoneE164: input.phoneE164 });
+      await db.transaction(async (tx) => {
+        const existing = (await tx.select({ id: dealTeamAllowlist.id }).from(dealTeamAllowlist).where(eq(dealTeamAllowlist.phoneE164, identity.phoneE164!)).limit(1))[0];
+        if (existing) await tx.update(dealTeamAllowlist).set({ active: true, fubUserId: member.fubUserId ?? null }).where(eq(dealTeamAllowlist.id, existing.id));
+        else await tx.insert(dealTeamAllowlist).values({ name: member.name, phoneE164: identity.phoneE164, email: null, fubUserId: member.fubUserId, source: "manual" });
+        await adminClearAgentClassification(tx as unknown as AdminDb, identity);
+        const { makeMatchingLeadsTeam } = await import("./dealsEligibility"); await makeMatchingLeadsTeam(tx as unknown as AdminDb, identity);
+      });
+      return { ok: true as const };
     }),
   }),
 });

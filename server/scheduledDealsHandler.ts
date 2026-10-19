@@ -5,8 +5,9 @@ import { sdk } from "./_core/sdk";
 import { getDb } from "./db";
 import { refreshOfficialDealsIfDue, revalidateDealIncentives } from "./dealsSync";
 import { importTrecLicenses } from "./dealsTrec";
-import { builderDealsHealthCheck, builderDealsMondayReport, cleanupDealsTestRecords, syncKnownAgentsFromFub, syncTeamAllowlistFromFub } from "./dealsMaintenance";
-import { runPendingDealsFubJobs } from "./dealsFubJobs";
+import { cleanupDealsTestRecords, runBuilderDealsHealthJob, sendBuilderDealsMondayReport, syncKnownAgentsFromFub, syncTeamAllowlistFromFub } from "./dealsMaintenance";
+import { enqueueDailyActivityNote, runPendingDealsFubJobs } from "./dealsFubJobs";
+import { processPendingDealPhotos, pruneDealPhotoRenders } from "./dealsPhotos";
 
 import { chicagoClock, chicagoDay } from "./dealsService";
 /** Pure Chicago wall-clock predicate used by the DST candidate cron callbacks. */
@@ -46,15 +47,20 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
     if (job === "team") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-team-sync", syncTeamAllowlistFromFub) });
     if (job === "agents") return res.json({ ok: true, result: await whenDue(dueAt(1, 45), "builder-deals-known-agent-sync", syncKnownAgentsFromFub) });
     if (job === "fub") return res.json({ ok: true, result: await runPendingDealsFubJobs() });
+    // Every 10 minutes: due pending photos and abandoned processing leases. Not a
+    // once-per-day job, so it is not recorded in deal_job_runs.
+    if (job === "photos") return res.json({ ok: true, result: await processPendingDealPhotos(10) });
+    // 1:30 AM Chicago: one FUB activity note per lead for the previous day's views and tour requests.
+    if (job === "activity") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-activity-note", () => enqueueDailyActivityNote()) });
     if (job === "alerts") {
       const { dispatchPendingDealAlerts } = await import("./dealsAlerts");
       return res.json({ ok: true, result: await dispatchPendingDealAlerts() });
     }
-    // B9 evidence-only runs: once() persists the values for protected review,
-    // but neither branch sends an email, owner notification, or alert.
-    if (job === "health") return res.json({ ok: true, result: await whenDue(dueAt(7, 0), "builder-deals-health", builderDealsHealthCheck) });
-    if (job === "weekly") return res.json({ ok: true, result: await whenDue(dueAt(7, 5, "Mon"), "builder-deals-weekly-report", builderDealsMondayReport) });
-    if (job === "maintenance") return res.json({ ok: true, result: await whenDue(dueAt(7, 30, "Mon"), "builder-deals-maintenance", async () => ({ testRecords: await cleanupDealsTestRecords(), fubRetries: await runPendingDealsFubJobs(), cachedRenderCleanup: "requires storage-delete capability; no deletion attempted" })) });
+    // 7:00 AM Chicago: the health check emails the alert recipients only when a check needs attention;
+    // 7:05 AM Monday: the System OK report is sent unconditionally (its absence is the alarm).
+    if (job === "health") return res.json({ ok: true, result: await whenDue(dueAt(7, 0), "builder-deals-health", runBuilderDealsHealthJob) });
+    if (job === "weekly") return res.json({ ok: true, result: await whenDue(dueAt(7, 5, "Mon"), "builder-deals-weekly-report", sendBuilderDealsMondayReport) });
+    if (job === "maintenance") return res.json({ ok: true, result: await whenDue(dueAt(7, 30, "Mon"), "builder-deals-maintenance", async () => ({ testRecords: await cleanupDealsTestRecords(), fubRetries: await runPendingDealsFubJobs(), cachedRenderCleanup: await pruneDealPhotoRenders() })) });
     return res.status(400).json({ error: "unknown_job" });
   } catch (error) { return res.status(500).json({ error: error instanceof Error ? error.message : "deals-job-failed" }); }
 }

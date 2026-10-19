@@ -1,0 +1,176 @@
+/**
+ * Gate sheet state machine. Pure, so the step transitions and the copy the
+ * visitor sees for every server outcome can be tested without a browser.
+ *
+ * Server copy (blocked, outside US, rate limited, cannot receive) is rendered
+ * verbatim; this module only owns the wording for client-side situations.
+ */
+export type GateStep = "gate" | "confirm-agent" | "code" | "blocked" | "expired" | "cookie-blocked";
+
+export type GateParams = {
+  src?: string;
+  ig?: string;
+  expired: boolean;
+  error: boolean;
+  cookieBlocked: boolean;
+  blocked: boolean;
+  codeError: string | null;
+  google: string | null;
+};
+
+/** Pending verification as deals.state reports it; the display phone is already masked by the server. */
+export type GatePending = { displayPhone: string; expiresAt: string };
+export type GateDealsState = { pending: GatePending | null } | undefined;
+
+export type GateStartResult =
+  | { ok: true; displayPhone: string }
+  | { ok: false; kind: string; message: string; displayPhone?: string | null };
+export type GateResendResult = { ok: true } | { ok: false; kind: string; message: string };
+
+export type GateState = {
+  step: GateStep;
+  /** Copy shown as the current alert or status. Server messages land here untouched. */
+  message: string | null;
+  /** The ?codeError value from the verify redirect; cleared on any user-driven step change. */
+  codeError: string | null;
+  /** Twilio reported the number cannot receive texts: Call me is the next step. */
+  cannotReceive: boolean;
+  /** Masked phone returned by deals.start; falls back to deals.state's pending copy. */
+  pendingDisplayPhone: string | null;
+  /** A pending row the visitor dismissed with "Wrong number? Change it"; a stale refetch must not bounce them back. */
+  dismissedPending: string | null;
+  /** The visitor arrived from an expired link; the gate explains why it asks for the number again. */
+  expiredLink: boolean;
+};
+
+export type GateAction =
+  | { type: "state_changed"; state: GateDealsState }
+  | { type: "go"; step: GateStep }
+  | { type: "start_result"; result: GateStartResult }
+  | { type: "start_failed" }
+  | { type: "resend_result"; channel: "sms" | "call"; result: GateResendResult }
+  | { type: "resend_failed" }
+  | { type: "changed_number"; pending: GatePending | null | undefined }
+  | { type: "status"; message: string };
+
+export const GATE_COPY = {
+  tooManyWrongCodes: "Too many wrong codes, start again",
+  linkExpired: "This link expired, enter your number to get a new one",
+  somethingWrong: "Something went wrong, try again",
+  codeMismatch: "That code didn't match. Please try again.",
+  startFailed: "We couldn't start verification. Please try again.",
+  resendFailed: "We couldn't send a code right now. Please try again.",
+  freshCode: "A fresh code is on its way.",
+  calling: "We're calling you now. Enter the code you hear below.",
+  googleFailed: "Google sign-in didn't work here. Enter your mobile number instead.",
+  linkCopied: "Link copied. Open it in Safari or Chrome.",
+} as const;
+
+/** Progress notes rather than errors: rendered as a status in the brand colour, not as an alert. */
+const STATUS_COPY: ReadonlySet<string> = new Set<string>([GATE_COPY.freshCode, GATE_COPY.calling, GATE_COPY.linkCopied, GATE_COPY.linkExpired]);
+export function isGateStatusMessage(message: string | null): boolean {
+  return message !== null && STATUS_COPY.has(message);
+}
+
+/** Query flags the server uses to hand the sheet a one-time outcome. Never src or ig. */
+export const TRANSIENT_GATE_PARAMS = ["codeError", "expired", "error", "blocked", "gate", "cookieBlocked", "google"] as const;
+
+export function readGateParams(search: string): GateParams {
+  const params = new URLSearchParams(search);
+  const codeError = params.get("codeError");
+  return {
+    src: params.get("src") ?? undefined,
+    ig: params.get("ig") ?? undefined,
+    expired: params.get("expired") === "1",
+    error: params.get("error") === "1",
+    cookieBlocked: params.get("cookieBlocked") === "1",
+    blocked: params.get("blocked") === "1",
+    codeError: codeError && codeError.trim() ? codeError.trim().slice(0, 40) : null,
+    google: params.get("google"),
+  };
+}
+
+/** The same URL without the one-time outcome flags; src and ig survive a reload. */
+export function stripTransientGateParams(href: string): string {
+  const url = new URL(href, "http://localhost");
+  for (const key of TRANSIENT_GATE_PARAMS) url.searchParams.delete(key);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+export function initialGateState(params: GateParams, state: GateDealsState): GateState {
+  const step: GateStep = params.cookieBlocked ? "cookie-blocked" : params.expired ? "expired" : params.blocked ? "blocked" : state?.pending ? "code" : "gate";
+  return {
+    step,
+    message: params.error ? GATE_COPY.somethingWrong : params.google === "failed" ? GATE_COPY.googleFailed : null,
+    codeError: params.codeError,
+    cannotReceive: false,
+    pendingDisplayPhone: state?.pending?.displayPhone ?? null,
+    dismissedPending: null,
+    expiredLink: params.expired,
+  };
+}
+
+export function gateReducer(gate: GateState, action: GateAction): GateState {
+  switch (action.type) {
+    case "state_changed": {
+      const pending = action.state?.pending;
+      if (!pending || pending.expiresAt === gate.dismissedPending) return gate;
+      if (gate.step !== "gate" && gate.step !== "code") return gate;
+      // The server-side pending record wins over a reload: resume at the code
+      // step without burning a second code. codeError survives so the wrong-code
+      // explanation is still shown on the code step.
+      return { ...gate, step: "code", pendingDisplayPhone: gate.pendingDisplayPhone ?? pending.displayPhone };
+    }
+    case "go": {
+      const fromExpired = gate.step === "expired" && action.step === "gate";
+      return { ...gate, step: action.step, codeError: null, cannotReceive: false, message: fromExpired && gate.expiredLink ? GATE_COPY.linkExpired : null };
+    }
+    case "start_result": {
+      const { result } = action;
+      if (result.ok) return { ...gate, step: "code", message: null, codeError: null, cannotReceive: false, pendingDisplayPhone: result.displayPhone, dismissedPending: null };
+      if (result.kind === "cookie_blocked") return { ...gate, step: "cookie-blocked", message: result.message, codeError: null, cannotReceive: false };
+      if (result.kind === "blocked") return { ...gate, step: "blocked", message: result.message, codeError: null, cannotReceive: false };
+      if (result.kind === "cannot_receive") {
+        // The pending row is kept server-side, so the visitor lands on the code
+        // step where "Call me" (the voice channel) is the obvious next step.
+        return { ...gate, step: "code", message: result.message, codeError: null, cannotReceive: true, pendingDisplayPhone: result.displayPhone ?? gate.pendingDisplayPhone, dismissedPending: null };
+      }
+      return { ...gate, step: "gate", message: result.message, codeError: null, cannotReceive: false };
+    }
+    case "start_failed":
+      return { ...gate, step: gate.step === "confirm-agent" ? "gate" : gate.step, message: GATE_COPY.startFailed, codeError: null };
+    case "resend_result": {
+      const { result } = action;
+      if (result.ok) return { ...gate, message: action.channel === "call" ? GATE_COPY.calling : GATE_COPY.freshCode, cannotReceive: false, codeError: null };
+      if (result.kind === "expired") return { ...gate, step: "gate", message: result.message, codeError: null, cannotReceive: false, pendingDisplayPhone: null };
+      return { ...gate, message: result.message, codeError: null, cannotReceive: result.kind === "cannot_receive" || gate.cannotReceive };
+    }
+    case "resend_failed":
+      return { ...gate, message: GATE_COPY.resendFailed, codeError: null };
+    case "changed_number":
+      return { ...gate, step: "gate", message: null, codeError: null, cannotReceive: false, pendingDisplayPhone: null, dismissedPending: action.pending?.expiresAt ?? gate.dismissedPending };
+    case "status":
+      return { ...gate, message: action.message };
+    default:
+      return gate;
+  }
+}
+
+/**
+ * Alert for the phone step. A wrong-code redirect lands on the gate only after
+ * deals.state has resolved without a pending record (the fifth wrong code), so
+ * nothing flashes while the state query is still loading.
+ */
+export function gateStepAlert(gate: GateState, state: GateDealsState): string | null {
+  if (gate.message) return gate.message;
+  if (gate.codeError && state !== undefined && !state.pending) return GATE_COPY.tooManyWrongCodes;
+  return null;
+}
+
+/** Alert for the code step; the cannot-receive message is rendered by the step itself. */
+export function codeStepAlert(gate: GateState): string | null {
+  if (gate.cannotReceive) return null;
+  if (gate.message) return gate.message;
+  if (gate.codeError) return GATE_COPY.codeMismatch;
+  return null;
+}

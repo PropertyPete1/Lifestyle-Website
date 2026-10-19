@@ -1,24 +1,90 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { chromium, type Page } from "playwright";
-import { assertMobileGeometry, browserExecutable, configuredBaseUrl, demoOtp, demoPhone, installDemoFixtures } from "./deals-browser-fixtures.mts";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { PHONE_VIEWPORT, PHOTOS_ON_REQUEST, Transcript, assertMobileGeometry, blockThirdParties, browserExecutable, configuredBaseUrl, demoOtp, demoPhone, installDemoFixtures, liveCredentials, redactPhoneDigitsForCapture, unlockThroughLiveGate } from "./deals-browser-fixtures.mts";
+
+/**
+ * Mobile screenshots for the handover (spec: landing with the gate open, SMS
+ * code step, gated page, name prompt, expired page, blocked page) plus the
+ * To Be Built card, the area map, one home gallery frame and, when
+ * DEALS_E2E_ADMIN_COOKIE is set, one admin tab frame.
+ *
+ * Every capture is the real 375 x 812 viewport, never a full-page image, so an
+ * overflowing layout cannot hide behind a stretched screenshot. Phone digits
+ * are masked in the DOM before each capture (the files are committed). Fixture
+ * mode draws synthetic data; live mode (DEALS_TEST_OTP + DEALS_E2E_TEST_PHONE)
+ * uses the deployment's real gate and catalog.
+ */
 
 const base = configuredBaseUrl();
+const credentials = liveCredentials();
 const out = path.resolve(process.env.DEALS_CAPTURE_OUT_DIR || "docs/preview");
 await fs.mkdir(out, { recursive: true });
-const browser = await chromium.launch({ executablePath: browserExecutable(), headless: true, args: ["--no-sandbox"] });
-const captures: Array<{ file: string; viewport: number; scrollWidth: number; width: number; height: number; synthetic: true }> = [];
-async function capture(page: Page, filename: string) {
-  const geometry = await assertMobileGeometry(page, filename);
-  await page.screenshot({ path: path.join(out, filename), fullPage: false, animations: "disabled" });
-  const metadata = await sharp(path.join(out, filename)).metadata();
-  if (metadata.width !== 375 || metadata.height !== 812) throw new Error(`Invalid viewport capture: ${filename}`);
-  captures.push({ file: filename, viewport: geometry.viewport, scrollWidth: geometry.scrollWidth, width: metadata.width, height: metadata.height, synthetic: true });
+const transcript = new Transcript(credentials ? "deals-capture live" : "deals-capture fixture");
+type Capture = { file: string; viewport: typeof PHONE_VIEWPORT; scrollWidth: number; width: number; height: number; redactions: string[]; note?: string };
+const captures: Capture[] = [];
+const skipped: Array<{ file: string; reason: string }> = [];
+
+async function settle(page: Page) {
+  // Images in view must have finished loading; the frame itself is what gets reviewed.
+  await page.evaluate(() => Promise.all(Array.from(document.images).filter((image) => image.loading !== "lazy" || image.getBoundingClientRect().top < window.innerHeight * 1.5).map((image) => image.complete ? Promise.resolve() : new Promise((resolve) => { image.addEventListener("load", resolve, { once: true }); image.addEventListener("error", resolve, { once: true }); }))));
+  await page.waitForTimeout(250);
 }
-try {
-  const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
-  await installDemoFixtures(context);
+
+async function capture(page: Page, filename: string, note?: string) {
+  const redactions = await redactPhoneDigitsForCapture(page);
+  await settle(page);
+  const geometry = await assertMobileGeometry(page, filename);
+  const target = path.join(out, filename);
+  await page.screenshot({ path: target, fullPage: false, animations: "disabled" });
+  const metadata = await sharp(target).metadata();
+  if (metadata.width !== PHONE_VIEWPORT.width || metadata.height !== PHONE_VIEWPORT.height) throw new Error(`Invalid viewport capture: ${filename} is ${metadata.width}x${metadata.height}`);
+  captures.push({ file: filename, viewport: PHONE_VIEWPORT, scrollWidth: geometry.scrollWidth, width: metadata.width, height: metadata.height, redactions, ...(note ? { note } : {}) });
+  transcript.step(`capture ${filename}`, "ok", `${metadata.width}x${metadata.height}${redactions.length ? `, redacted: ${redactions.join(", ")}` : ""}`);
+}
+
+async function newContext(browser: Browser, fixtures: boolean): Promise<BrowserContext> {
+  const context = await browser.newContext({ viewport: PHONE_VIEWPORT, deviceScaleFactor: 1 });
+  if (fixtures) await installDemoFixtures(context);
+  else await blockThirdParties(context);
+  return context;
+}
+
+async function captureGatedStates(page: Page) {
+  await page.getByText("Add your name so we know who to text.").waitFor();
+  await capture(page, "builder-deals-name-prompt-375.png");
+  await page.getByRole("button", { name: "Dismiss name prompt" }).click();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await capture(page, "builder-deals-gated-catalog-375.png");
+  const gallery = page.locator("img[src^='/deals/mine/img/']").first();
+  if (await gallery.count()) {
+    await gallery.scrollIntoViewIfNeeded();
+    await gallery.evaluate((image: HTMLImageElement) => image.complete ? undefined : new Promise((resolve) => { image.addEventListener("load", resolve, { once: true }); image.addEventListener("error", resolve, { once: true }); }));
+    await page.evaluate(() => window.scrollBy(0, -72));
+    await capture(page, "builder-deals-home-gallery-375.png", "one gallery frame with the per-lead watermark burned into the image bytes");
+  } else {
+    skipped.push({ file: "builder-deals-home-gallery-375.png", reason: "the catalog served no processed photos to this session" });
+    transcript.step("capture builder-deals-home-gallery-375.png", "skipped", "no photos served");
+  }
+  const toBeBuilt = page.getByText("To Be Built", { exact: true }).first();
+  if (await toBeBuilt.count()) {
+    await toBeBuilt.scrollIntoViewIfNeeded();
+    await page.evaluate(() => window.scrollBy(0, -40));
+    await capture(page, "builder-deals-to-be-built-375.png", `To Be Built card; a photo-less card reads "${PHOTOS_ON_REQUEST}"`);
+  } else {
+    skipped.push({ file: "builder-deals-to-be-built-375.png", reason: "every active community currently has quick move-in homes, so no To Be Built card is shown" });
+    transcript.step("capture builder-deals-to-be-built-375.png", "skipped", "no To Be Built card in this catalog");
+  }
+  const map = page.locator("[aria-label='Approximate area map']").first();
+  await map.scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollBy(0, -24));
+  await capture(page, "builder-deals-area-map-375.png", "static ZIP-centroid map with the shaded circle and drive-time chips, or the fail-closed fallback");
+}
+
+async function fixtureCaptures(browser: Browser) {
+  const context = await newContext(browser, true);
   const page = await context.newPage();
   await page.goto(new URL("/deals?src=fixture", base).toString());
   await page.locator("#deals-phone").waitFor();
@@ -31,27 +97,84 @@ try {
   await page.locator("#deals-code").fill(demoOtp);
   await Promise.all([page.waitForURL(/\/deals\/mine/), page.getByRole("button", { name: "Unlock my list", exact: true }).click()]);
   await page.getByText("Private buyer list", { exact: true }).waitFor();
-  await capture(page, "builder-deals-name-prompt-375.png");
-  await page.getByRole("button", { name: "Dismiss name prompt" }).click();
-  await capture(page, "builder-deals-gated-catalog-375.png");
-  await page.locator("article img").first().scrollIntoViewIfNeeded();
-  await capture(page, "builder-deals-home-gallery-375.png");
-  await page.getByText("Photos on request — ask us for the latest gallery.", { exact: true }).scrollIntoViewIfNeeded();
-  await capture(page, "builder-deals-to-be-built-375.png");
-  await page.locator("[aria-label='Approximate area map']").first().scrollIntoViewIfNeeded();
-  await capture(page, "builder-deals-area-map-375.png");
-  for (const [query, visible, filename] of [["expired=1", "This link expired.", "builder-deals-expired-375.png"], ["blocked=1", "Buyer access only", "builder-deals-blocked-375.png"]]) {
-    const fresh = await browser.newContext({ viewport: { width: 375, height: 812 } });
-    await installDemoFixtures(fresh);
-    const freshPage = await fresh.newPage();
-    await freshPage.goto(new URL(`/deals?${query}`, base).toString());
-    await freshPage.getByText(visible, { exact: true }).waitFor();
-    if (query === "blocked=1") await freshPage.getByText(/Made a mistake\?/).waitFor();
-    await capture(freshPage, filename);
+  await captureGatedStates(page);
+  await context.close();
+}
+
+async function liveCaptures(browser: Browser, otp: string, phone: string) {
+  const context = await newContext(browser, false);
+  const page = await context.newPage();
+  // The real gate is walked once; the landing and code-step frames are taken on the way.
+  await unlockThroughLiveGate(page, base, { otp, phone }, transcript, {
+    reloadAtCodeStep: false,
+    onLanding: (current) => capture(current, "builder-deals-landing-gate-375.png"),
+    onCodeStep: (current) => capture(current, "builder-deals-code-step-375.png", "the typed number is masked in the committed frame"),
+  });
+  await captureGatedStates(page);
+  await context.close();
+}
+
+async function outcomePages(browser: Browser) {
+  for (const [query, visible, filename] of [["expired=1", "This link expired.", "builder-deals-expired-375.png"], ["gate=1&blocked=1", "Buyer access only", "builder-deals-blocked-375.png"]] as const) {
+    const fresh = await newContext(browser, !credentials);
+    const page = await fresh.newPage();
+    await page.goto(new URL(`/deals?${query}`, base).toString());
+    await page.getByText(visible, { exact: true }).waitFor();
+    if (query.includes("blocked")) await page.getByText(/Made a mistake\?/).waitFor();
+    await capture(page, filename);
     await fresh.close();
   }
-  await fs.writeFile(path.join(out, "capture-manifest.json"), JSON.stringify({ mode: "synthetic-ui-only", note: "No real buyer data, real builder photo, live map, runtime OTP, or database mutations. Map/photo fixtures are illustrative, not live processing evidence.", captures }, null, 2) + "\n");
-  console.log(`Captured ${captures.length} synthetic states, each exactly 375×812. No full-page captures; no private data or cleanup required.`);
+}
+
+async function adminCapture(browser: Browser) {
+  const cookie = process.env.DEALS_E2E_ADMIN_COOKIE?.trim();
+  if (!cookie) {
+    skipped.push({ file: "builder-deals-admin-tab-375.png", reason: "DEALS_E2E_ADMIN_COOKIE not set" });
+    transcript.step("capture builder-deals-admin-tab-375.png", "skipped", "DEALS_E2E_ADMIN_COOKIE not set");
+    return;
+  }
+  const separator = cookie.indexOf("=");
+  if (separator < 1) throw new Error("DEALS_E2E_ADMIN_COOKIE must be name=value");
+  const context = await browser.newContext({ viewport: PHONE_VIEWPORT, deviceScaleFactor: 1 });
+  await blockThirdParties(context);
+  await context.addCookies([{ name: cookie.slice(0, separator), value: cookie.slice(separator + 1), url: base.origin, httpOnly: true, secure: base.protocol === "https:", sameSite: "Lax" }]);
+  const page = await context.newPage();
+  await page.goto(new URL("/admin/deals", base).toString(), { waitUntil: "domcontentloaded" });
+  await page.getByText(/Builder Deals/i).first().waitFor({ timeout: 30_000 });
+  await capture(page, "builder-deals-admin-tab-375.png", "admin Builder Deals tab at phone width, signed in with the provided cookie");
+  await context.close();
+}
+
+function gitCommit(): string | null {
+  try { return execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim(); } catch { return null; }
+}
+
+const browser = await chromium.launch({ executablePath: browserExecutable(), headless: true, args: ["--no-sandbox"] });
+try {
+  if (credentials) await liveCaptures(browser, credentials.otp, credentials.phone);
+  else await fixtureCaptures(browser);
+  await outcomePages(browser);
+  await adminCapture(browser);
+  const manifest = {
+    mode: credentials ? "live-deployment" : "synthetic-ui-only",
+    capturedAt: new Date().toISOString(),
+    commit: gitCommit(),
+    target: credentials ? base.origin : "fixture routes on the configured frontend host",
+    viewport: PHONE_VIEWPORT,
+    fullPage: false,
+    note: credentials
+      ? "Real gate, real session cookies and the deployment's catalog; the tester's phone digits are masked in the DOM before each frame. No admin, FUB or settings writes."
+      : "No real buyer data, real builder photo, live map, runtime OTP, or database mutations. Map/photo fixtures are illustrative, not live processing evidence.",
+    captures,
+    skipped,
+  };
+  await fs.writeFile(path.join(out, "capture-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  transcript.print();
+  console.log(`Captured ${captures.length} frames at exactly ${PHONE_VIEWPORT.width}x${PHONE_VIEWPORT.height} into ${out}${skipped.length ? `; skipped: ${skipped.map((entry) => entry.file).join(", ")}` : ""}.`);
+} catch (error) {
+  transcript.print();
+  console.error(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 1;
 } finally {
   await browser.close();
 }

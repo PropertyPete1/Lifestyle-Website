@@ -109,11 +109,53 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
   return { key, url: `/manus-storage/${key}` };
 }
 
-// Forge exposes only PUT and signed GET for this project. Builder Deals uses
-// deterministic overwrite keys and prunes database render rows instead of
-// pretending a destructive object API exists.
-export const storageDeleteCapability = false;
-export async function storageDelete(_relKey: string): Promise<false> { return false; }
+let storageDeleteUnsupportedUntil = 0;
+
+/**
+ * Best-effort object deletion through the same presign pattern as storagePut
+ * (`v1/storage/presign/delete` followed by a direct DELETE). Builder Deals
+ * keeps deterministic overwrite keys so nothing depends on this succeeding;
+ * any failure is logged and reported as false, never thrown. A backend that
+ * answers "no such endpoint" is remembered briefly so a prune batch does not
+ * repeat the probe for every key.
+ */
+export async function storageDelete(relKey: string): Promise<boolean> {
+  try {
+    if (Date.now() < storageDeleteUnsupportedUntil) return false;
+    const { forgeUrl, forgeKey } = getForgeConfig();
+    const key = normalizeStorageKey(relKey);
+    const presignUrl = new URL("v1/storage/presign/delete", forgeUrl + "/");
+    presignUrl.searchParams.set("path", key);
+    const presignResp = await fetch(presignUrl, {
+      headers: { Authorization: `Bearer ${forgeKey}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (presignResp.status === 404 || presignResp.status === 405 || presignResp.status === 501) {
+      storageDeleteUnsupportedUntil = Date.now() + (presignResp.status === 404 ? 15 : 360) * 60_000;
+      console.warn(`[storage] delete presign unavailable (${presignResp.status}); object deletion skipped`);
+      return false;
+    }
+    if (!presignResp.ok) {
+      console.warn(`[storage] delete presign failed (${presignResp.status})`);
+      return false;
+    }
+    const { url } = (await presignResp.json()) as { url?: string };
+    if (!url || !isSafeStorageObjectUrl(url)) {
+      console.warn("[storage] delete presign returned an unsafe URL; object deletion skipped");
+      return false;
+    }
+    const deleteResp = await fetch(url, { method: "DELETE", redirect: "error", signal: AbortSignal.timeout(20_000) });
+    if (!deleteResp.ok && deleteResp.status !== 404) {
+      console.warn(`[storage] object delete failed (${deleteResp.status})`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.warn(`[storage] object delete failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    return false;
+  }
+}
 
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const { forgeUrl, forgeKey } = getForgeConfig();

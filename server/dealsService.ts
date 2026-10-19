@@ -26,12 +26,15 @@ import {
   isInAppBrowser,
   maskPhone,
   normalizeUsPhone,
+  parseDealScrubConfig,
   sanitizeInstagramHandle,
   sanitizeSourceCode,
   scrubPrivateNames,
+  selectDealCatalogHomes,
+  type DealScrubConfig,
 } from "../shared/deals";
 import { getDb } from "./db";
-import { notifyOwner } from "./_core/notification";
+import { sendBuilderDealsEmail } from "./dealsEmail";
 import { checkTwilioVerify } from "./dealsVerification";
 
 export type DealSettings = {
@@ -59,6 +62,10 @@ export type DealSettings = {
   /** Resend recipient list; used by owner-notification fallback only as context. */
   alertRecipients: string[];
   alertMode: "immediate" | "hourly_digest";
+  /** Builder refresh summaries, holds and incentive expiry/lapse notices. */
+  syncEmailRecipients: string[];
+  /** Drive-time chip destinations measured from each community's ZIP centroid. */
+  driveDestinations: string[];
 };
 
 const DEFAULT_SETTINGS: DealSettings = {
@@ -85,7 +92,14 @@ const DEFAULT_SETTINGS: DealSettings = {
   trecCounties: ["Bexar", "Comal", "Guadalupe", "Wilson", "Medina", "Kendall", "Atascosa", "Bandera", "Travis", "Williamson", "Hays", "Bastrop", "Caldwell"],
   alertRecipients: ["peter@lifestyledesignrealty.com", "steven@lifestyledesignrealty.com"],
   alertMode: "immediate",
+  syncEmailRecipients: ["peter@lifestyledesignrealty.com"],
+  driveDestinations: ["downtown San Antonio", "Randolph AFB", "Lackland AFB", "The Pearl"],
 };
+
+/** Operational owner alerts go through the one Builder Deals email transport (owner notification is its fallback). */
+function sendOperationalAlert(settings: DealSettings, category: string, subject: string, content: string) {
+  void sendBuilderDealsEmail({ category, recipients: settings.alertRecipients, subject, content }).catch(console.error);
+}
 
 const SETTINGS_KEY = "builder_deals";
 const PENDING_MINUTES = 10;
@@ -331,7 +345,7 @@ export async function reserveVerificationAttempt(input: {
     const prior = (await db.select({ id: dealEvents.id }).from(dealEvents).where(and(eq(dealEvents.kind, "cap_refused_alert"), gt(dealEvents.createdAt, dayStart))).limit(1))[0];
     if (!prior) {
       await logDealEvent({ kind: "cap_refused_alert", sourceCode: input.sourceCode, deviceHash: input.deviceHash, ip: input.ip });
-      void notifyOwner({ title: "Builder Deals verification cap reached", content: `The Builder Deals daily Verify cap (${settings.dailyVerificationCap}) refused a code request. Review or raise the cap in Admin → Builder Deals: /admin/deals.` }).catch(console.error);
+      sendOperationalAlert(settings, "deals_verify_cap", "Builder Deals verification cap reached", `The Builder Deals daily Verify cap (${settings.dailyVerificationCap}) refused a code request. Review or raise the cap in Admin, Builder Deals: /admin/deals.`);
     }
     return { ok: false, kind: "daily_cap" };
   }
@@ -340,12 +354,13 @@ export async function reserveVerificationAttempt(input: {
     phone: input.phone, detail: `channel:${input.channel};${input.isTest ? "TEST" : "live"}`,
   });
   const nextCount = dailyCount + 1;
-  if (nextCount === Math.min(300, settings.dailyVerificationCap)) {
-    // `deal_job_runs` has a (job, Chicago day) unique key. Claiming it first
-    // makes a simultaneous 300th request produce exactly one owner alert.
+  // Concurrent reads can skip the exact 300th count, so the threshold is a
+  // floor. `deal_job_runs` has a (job, Chicago day) unique key: claiming it
+  // first makes the alert fire exactly once per day however many requests cross it.
+  if (nextCount >= Math.min(300, settings.dailyVerificationCap)) {
     try {
       await db.insert(dealJobRuns).values({ jobName: "builder-deals-verify-threshold", chicagoDay: chicagoDay(), status: "running" });
-      void notifyOwner({ title: "Builder Deals Verify threshold reached", content: `Builder Deals reached ${nextCount} verification sends today. Review safety settings or raise the cap in Admin → Builder Deals: /admin/deals.` }).finally(() => db.update(dealJobRuns).set({ status: "ok", completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, "builder-deals-verify-threshold"), eq(dealJobRuns.chicagoDay, chicagoDay())))).catch(console.error);
+      void sendBuilderDealsEmail({ category: "deals_verify_threshold", recipients: settings.alertRecipients, subject: "Builder Deals Verify threshold reached", content: `Builder Deals reached ${nextCount} verification sends today. Review safety settings or raise the cap in Admin, Builder Deals: /admin/deals.` }).finally(() => db.update(dealJobRuns).set({ status: "ok", completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, "builder-deals-verify-threshold"), eq(dealJobRuns.chicagoDay, chicagoDay())))).catch(console.error);
     } catch { /* an already-claimed daily threshold alert is intentionally silent */ }
   }
   return { ok: true, dailyCount: nextCount };
@@ -384,7 +399,8 @@ export async function recordTwilioVerifyFailure(input: { sourceCode: string; dev
   const alertSent = (await db.select({ id: dealEvents.id }).from(dealEvents).where(and(eq(dealEvents.kind, "twilio_alert"), gt(dealEvents.createdAt, new Date(Date.now() - 6 * 60 * 60_000)))).limit(1))[0];
   if (!alertSent && (consecutive || (sends >= 10 && errors / sends > 0.2))) {
     await logDealEvent({ kind: "twilio_alert", sourceCode: input.sourceCode, deviceHash: input.deviceHash, ip: input.ip, detail: `sends:${sends};errors:${errors}` });
-    void notifyOwner({ title: "Builder Deals Twilio Verify alert", content: `Verify API/account errors need attention. Last hour: ${errors} API errors across ${sends} attempts. Review Admin → Builder Deals: /admin/deals.` }).catch(console.error);
+    const settings = await getDealSettings();
+    sendOperationalAlert(settings, "deals_twilio_alert", "Builder Deals Twilio Verify alert", `Verify API/account errors need attention. Last hour: ${errors} API errors across ${sends} attempts. Review Admin, Builder Deals: /admin/deals.`);
   }
 }
 
@@ -425,18 +441,49 @@ export async function blockDealAccess(input: { phone?: string | null; email?: st
   });
 }
 
+/** Private per-community scrub categories; a legacy flat list lands in "other". */
+function communityScrubConfig(community: Pick<typeof dealCommunities.$inferSelect, "builder" | "privateName" | "scrubList">): DealScrubConfig {
+  let parsed: unknown = null;
+  try { parsed = JSON.parse(community.scrubList); } catch { parsed = null; }
+  const config = parseDealScrubConfig(parsed);
+  if (community.builder !== "Manual" && !config.builder.some((term) => term.toLowerCase() === community.builder.toLowerCase())) config.builder.push(community.builder);
+  if (!config.community.some((term) => term.toLowerCase() === community.privateName.toLowerCase())) config.community.push(community.privateName);
+  return config;
+}
+
+/**
+ * The currently displayable incentive: active, not held, not past its date and,
+ * when it has no dates, re-confirmed within the lapse window. Evaluated at
+ * render time so a rate never stays up past its date between scheduled jobs.
+ */
+function liveIncentiveWhere(communityId: number, now: Date, lapseDays: number) {
+  const lapseCutoff = new Date(now.getTime() - lapseDays * 24 * 60 * 60_000);
+  return and(
+    eq(dealIncentives.communityId, communityId),
+    eq(dealIncentives.active, true),
+    eq(dealIncentives.held, false),
+    or(and(isNull(dealIncentives.expiresAt), gt(dealIncentives.confirmedAt, lapseCutoff)), gt(dealIncentives.expiresAt, now)),
+  );
+}
+
+/** Buyer-facing payloads are refused outright when a private name survives scrubbing. */
+function assertNoPrivateResidue(payload: unknown, config: DealScrubConfig, surface: string) {
+  if (!publicNoPrivateNames(payload, config)) throw new Error(`Private builder data would reach the ${surface} catalog`);
+}
+
 export async function publicDealsCatalog() {
   const db = await getDb();
   if (!db) return [];
   const now = new Date();
+  const settings = await getDealSettings();
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
   const result = [] as Array<{ label: string; area: string; fromPrice: number | null; reelUrl: string | null; homesAvailable: number; incentive: ReturnType<typeof publicIncentive> | null; updatedAt: string | null }>;
   for (const community of communities) {
     const [homes, incentives] = await Promise.all([
       db.select({ n: sql<number>`count(*)` }).from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.status, "available"), eq(dealHomes.kind, "quick_move_in"))),
-      db.select().from(dealIncentives).where(and(eq(dealIncentives.communityId, community.id), eq(dealIncentives.active, true), eq(dealIncentives.held, false), or(isNull(dealIncentives.expiresAt), gt(dealIncentives.expiresAt, now)))).orderBy(desc(dealIncentives.confirmedAt)).limit(1),
+      db.select().from(dealIncentives).where(liveIncentiveWhere(community.id, now, settings.incentiveLapseDays)).orderBy(desc(dealIncentives.confirmedAt)).limit(1),
     ]);
-    result.push({
+    const entry = {
       label: community.publicLabel,
       area: community.areaLabel,
       fromPrice: community.fromPrice,
@@ -444,7 +491,9 @@ export async function publicDealsCatalog() {
       homesAvailable: Number(homes[0]?.n ?? 0),
       incentive: incentives[0] ? publicIncentive(incentives[0]) : null,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
-    });
+    };
+    assertNoPrivateResidue(entry, communityScrubConfig(community), "public");
+    result.push(entry);
   }
   return result;
 }
@@ -476,16 +525,20 @@ export async function gatedDealsCatalog(leadId: number) {
   if (!db) return [];
   const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, leadId)).limit(1))[0];
   if (!lead || !["verified", "team"].includes(lead.status) || lead.expiresAt <= new Date()) return [];
+  const now = new Date();
+  const settings = await getDealSettings();
+  const { communityAreaMap } = await import("./dealsMap");
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
   const data = [] as unknown[];
   for (const community of communities) {
-    const scrubNames = JSON.parse(community.scrubList) as string[];
+    const scrubNames = communityScrubConfig(community);
     const [incentiveRows, homeRows] = await Promise.all([
-      db.select().from(dealIncentives).where(and(eq(dealIncentives.communityId, community.id), eq(dealIncentives.active, true), eq(dealIncentives.held, false), or(isNull(dealIncentives.expiresAt), gt(dealIncentives.expiresAt, new Date())))).orderBy(desc(dealIncentives.confirmedAt)).limit(1),
+      db.select().from(dealIncentives).where(liveIncentiveWhere(community.id, now, settings.incentiveLapseDays)).orderBy(desc(dealIncentives.confirmedAt)).limit(1),
       db.select().from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
     ]);
     const homes = [] as Array<Record<string, unknown>>;
-    for (const home of homeRows) {
+    // Quick move-ins win; To Be Built cards appear only when there are none.
+    for (const home of selectDealCatalogHomes(homeRows)) {
       const photos = await db.select({ id: dealPhotos.id }).from(dealPhotos).where(and(eq(dealPhotos.homeId, home.id), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder));
       homes.push({
         // Opaque, deterministic card handle for React only. It is not a
@@ -506,19 +559,23 @@ export async function gatedDealsCatalog(leadId: number) {
         photosOnRequest: photos.length === 0,
       });
     }
-    data.push({
+    const entry = {
       label: scrubPrivateNames(community.publicLabel, scrubNames),
       area: scrubPrivateNames(community.areaLabel, scrubNames),
       schoolDistrict: scrubPrivateNames(community.schoolDistrict ?? "", scrubNames),
       lotSizes: scrubPrivateNames(community.lotSizes ?? "", scrubNames),
       amenities: (JSON.parse(community.amenities ?? "[]") as string[]).map((v) => scrubPrivateNames(v, scrubNames)),
       driveTimes: (JSON.parse(community.driveTimeChips ?? "[]") as string[]).map((v) => scrubPrivateNames(v, scrubNames)),
+      // Only the ZIP centroid and radius; never the community's own coordinates.
+      areaMap: communityAreaMap(community),
       fromPrice: community.fromPrice,
       reelUrl: community.reelUrl,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       incentive: incentiveRows[0] ? publicIncentive(incentiveRows[0]) : null,
       homes,
-    });
+    };
+    assertNoPrivateResidue(entry, scrubNames, "gated");
+    data.push(entry);
   }
   return data;
 }
@@ -723,16 +780,20 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   let old = (await db.select().from(dealLeads).where(eq(dealLeads.phoneE164, pending.phoneE164)).limit(1))[0];
   let reverifiedActive = Boolean(old && old.expiresAt > new Date());
   let expiresAt = old && old.expiresAt > new Date() ? old.expiresAt : new Date(Date.now() + settings.expiryHours * 60 * 60_000);
-  const flags = Array.from(new Set([...(identity.flags ?? []).filter((flag) => flag !== "fub_check_deferred"), ...eligibility.flags]));
+  // "fub_check_deferred" is an operational marker for the deferred re-check,
+  // never a persisted lead flag; it is carried to the caller separately.
+  const fubCheckDeferred = eligibility.flags.includes("fub_check_deferred") || (identity.flags ?? []).includes("fub_check_deferred");
+  const flags = Array.from(new Set([...(identity.flags ?? []), ...eligibility.flags])).filter((flag) => flag !== "fub_check_deferred");
+  // A forwarded DM handle belongs to its first verified phone. Do not expose
+  // that identity in another person’s private watermark or list, whether the
+  // returning lead is new or has no handle of their own yet.
+  const handleOwner = pending.instagramHandle ? (await db.select({ id: dealLeads.id }).from(dealLeads).where(and(eq(dealLeads.instagramHandle, pending.instagramHandle), sql`${dealLeads.phoneE164} <> ${pending.phoneE164}`)).limit(1))[0] : null;
+  const instagramHandle = handleOwner ? null : pending.instagramHandle;
   let leadId: number;
   if (old) {
-    await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? pending.instagramHandle, email: old.email ?? identity.google?.email ?? null, name: old.name ?? identity.google?.name ?? null, flags: JSON.stringify(flags) }).where(eq(dealLeads.id, old.id));
+    await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? instagramHandle, email: old.email ?? identity.google?.email ?? null, name: old.name ?? identity.google?.name ?? null, flags: JSON.stringify(flags) }).where(eq(dealLeads.id, old.id));
     leadId = old.id;
   } else {
-    // A forwarded DM handle belongs to its first verified phone. Do not expose
-    // that identity in another person’s private watermark or list.
-    const handleOwner = pending.instagramHandle ? (await db.select({ id: dealLeads.id }).from(dealLeads).where(and(eq(dealLeads.instagramHandle, pending.instagramHandle), sql`${dealLeads.phoneE164} <> ${pending.phoneE164}`)).limit(1))[0] : null;
-    const instagramHandle = handleOwner ? null : pending.instagramHandle;
     try {
       const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle, email: identity.google?.email ?? null, name: identity.google?.name ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentAt: pending.consentAt, consentIp: pending.clientIp, deviceHash, expiresAt, status: eligibility.team ? "team" : "verified", flags: JSON.stringify(flags) });
       leadId = Number((result as unknown as [{ insertId: number }])[0].insertId);
@@ -752,7 +813,6 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
     }
   }
   await db.insert(dealAccessTokens).values({ leadId, tokenHash: hashSecret(token), deviceHash, expiresAt, kind: "exchange" });
-  const fubCheckDeferred = flags.includes("fub_check_deferred");
   await db.update(dealPendingVerifications).set({ flags: JSON.stringify({ ...identity, completed: { codeHash: hashSecret(input.code), leadId, expiresAt: expiresAt.toISOString(), isTeam: eligibility.team, isTest, fubCheckDeferred } satisfies VerificationReceipt }) }).where(eq(dealPendingVerifications.id, pending.id));
   clearDealCookie(input.res, DEALS_COOKIE.pending);
   await db.insert(dealEvents).values({ leadId, kind: eligibility.team ? "team" : "verified", sourceCode: pending.sourceCode, deviceHash, ipPrefix: clientIpKey(pending.clientIp), phoneE164: pending.phoneE164, detail: input.verifiedBy });
@@ -775,7 +835,8 @@ export function dealsCsp(res: Response) {
 export function isDealsCrawler(req: Request) { return req.method === "HEAD" || isCrawler(req.headers["user-agent"]); }
 export function showGoogleDealsButton(req: Request) { return !isInAppBrowser(req.headers["user-agent"]) && Boolean((process.env.GOOGLE_OAUTH_CLIENT_ID ?? process.env.GOOGLE_DEALS_CLIENT_ID) && (process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? process.env.GOOGLE_DEALS_CLIENT_SECRET)); }
 
-export function publicNoPrivateNames(payload: unknown, privateTerms: string[]): boolean {
+/** Bare plan words outside plan fields are not residue (see hasPrivateTerm). */
+export function publicNoPrivateNames(payload: unknown, privateTerms: readonly string[] | DealScrubConfig): boolean {
   return !hasPrivateTerm(JSON.stringify(payload), privateTerms);
 }
 

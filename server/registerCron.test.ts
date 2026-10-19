@@ -10,6 +10,7 @@ import { createHeartbeatJob, listHeartbeatJobs, updateHeartbeatJob } from "./_co
 import {
   DEALS_CRON_PATH,
   DEALS_JOB_DEFINITIONS,
+  dealsJobNeedsReconcile,
   ensureDealsCron,
   ensureStatsSyncCron,
   STATS_CRON_EXPRESSION,
@@ -92,17 +93,18 @@ describe("Builder Deals cron registration", () => {
     ]));
   });
 
-  it("leaves existing Builder Deals jobs untouched and creates only the missing definitions", async () => {
+  it("leaves an identical existing Builder Deals job untouched and creates only the missing definitions", async () => {
     const existing = DEALS_JOB_DEFINITIONS[0];
     listMock.mockResolvedValue({
       total: 1,
       actorUserId: "owner",
-      jobs: [{ name: existing.name, taskUid: "existing", callbackPayload: JSON.stringify(existing.payload) } as never],
+      jobs: [{ name: existing.name, taskUid: "existing", cronExpression: existing.cron, callbackPath: existing.path, callbackPayload: JSON.stringify(existing.payload) } as never],
     });
     createMock.mockResolvedValue({ taskUid: "task-deals" });
 
     await ensureDealsCron();
 
+    expect(updateMock).not.toHaveBeenCalled();
     expect(createMock).toHaveBeenCalledTimes(DEALS_JOB_DEFINITIONS.length - 1);
     expect(createMock.mock.calls.map(([job]) => job.name)).not.toContain(existing.name);
     expect(createMock.mock.calls.map(([job]) => job.name)).toEqual(DEALS_JOB_DEFINITIONS.slice(1).map((job) => job.name));
@@ -110,12 +112,36 @@ describe("Builder Deals cron registration", () => {
 
   it("repairs a previously registered job whose callback payload was omitted", async () => {
     const existing = DEALS_JOB_DEFINITIONS[0];
-    listMock.mockResolvedValue({ total: 1, actorUserId: "owner", jobs: [{ name: existing.name, taskUid: "legacy-job", callbackPayload: "{}" } as never] });
+    listMock.mockResolvedValue({ total: 1, actorUserId: "owner", jobs: [{ name: existing.name, taskUid: "legacy-job", cronExpression: existing.cron, callbackPath: existing.path, callbackPayload: "{}" } as never] });
     createMock.mockResolvedValue({ taskUid: "task-deals" });
     updateMock.mockResolvedValue({});
 
     await ensureDealsCron();
 
     expect(updateMock).toHaveBeenCalledWith("legacy-job", expect.objectContaining({ payload: existing.payload }), "");
+  });
+
+  it.each([
+    ["cron expression", (job: (typeof DEALS_JOB_DEFINITIONS)[number]) => ({ cronExpression: "0 45 0,23 * * *", callbackPath: job.path, callbackPayload: JSON.stringify(job.payload) })],
+    ["callback path", (job: (typeof DEALS_JOB_DEFINITIONS)[number]) => ({ cronExpression: job.cron, callbackPath: "/api/scheduled/legacy", callbackPayload: JSON.stringify(job.payload) })],
+  ])("reconciles a registered catalog job whose %s differs so the Chicago window can be reached", async (_, stale) => {
+    const catalog = DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "catalog")!;
+    listMock.mockResolvedValue({ total: 1, actorUserId: "owner", jobs: [{ name: catalog.name, taskUid: "stale-catalog", ...stale(catalog) } as never] });
+    createMock.mockResolvedValue({ taskUid: "task-deals" });
+    updateMock.mockResolvedValue({});
+
+    await ensureDealsCron();
+
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledWith("stale-catalog", { cron: catalog.cron, path: catalog.path, method: "POST", payload: catalog.payload, description: catalog.description }, "");
+    expect(createMock.mock.calls.map(([job]) => job.name)).not.toContain(catalog.name);
+  });
+
+  it("defines the photo queue every 10 minutes and the 1:30 AM Chicago activity-note candidates", () => {
+    expect(DEALS_JOB_DEFINITIONS).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "builder-deals-photo-queue", cron: "0 */10 * * * *", payload: { job: "photos" } }),
+      expect.objectContaining({ name: "builder-deals-activity-note", cron: "0 30 6,7 * * *", payload: { job: "activity" } }),
+    ]));
+    expect(dealsJobNeedsReconcile({ cronExpression: " 0 0 11,12 * * * ", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"catalog"}' }, DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "catalog")!)).toBe(false);
   });
 });

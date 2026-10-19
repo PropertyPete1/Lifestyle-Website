@@ -1,4 +1,24 @@
-export async function sendTwilioVerify(phone: string, channel: "sms" | "call") {
+/**
+ * Twilio Verify error codes that mean the destination itself cannot take a text:
+ * 60205 (SMS not supported by landline), 60410 (destination blocked after
+ * opting out / fraud), 21610 (recipient replied STOP). The visitor is offered the
+ * voice channel. 60203 (max send attempts reached for this verification) is a
+ * per-number send cap, not a delivery problem: it gets the rate-limit copy and
+ * never counts as a Twilio API error.
+ */
+const CANNOT_RECEIVE_CODES = [60205, 60410, 21610];
+const RATE_LIMITED_CODES = [60203];
+
+export type TwilioSendFailure = "unavailable" | "cannot_receive" | "rate_limited" | "twilio";
+
+export function classifyTwilioSendError(code: unknown): Exclude<TwilioSendFailure, "unavailable"> {
+  const numeric = Number(code);
+  if (CANNOT_RECEIVE_CODES.includes(numeric)) return "cannot_receive";
+  if (RATE_LIMITED_CODES.includes(numeric)) return "rate_limited";
+  return "twilio";
+}
+
+export async function sendTwilioVerify(phone: string, channel: "sms" | "call"): Promise<{ ok: true } | { ok: false; reason: TwilioSendFailure }> {
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
   const service = process.env.TWILIO_VERIFY_SERVICE_SID;
@@ -13,8 +33,7 @@ export async function sendTwilioVerify(phone: string, channel: "sms" | "call") {
     });
     if (!res.ok) {
       const payload = await res.json().catch(() => ({})) as { code?: number };
-      const cannotReceive = [60203, 60205, 60410, 21610].includes(Number(payload.code));
-      return { ok: false as const, reason: cannotReceive ? "cannot_receive" as const : "twilio" as const };
+      return { ok: false as const, reason: classifyTwilioSendError(payload.code) };
     }
     return { ok: true as const };
   } catch { return { ok: false as const, reason: "twilio" as const }; }

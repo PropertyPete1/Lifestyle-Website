@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
-import { and, asc, eq, lte, lt, or, sql } from "drizzle-orm";
-import { dealFubJobs, dealFubRecords, dealHomes, dealLeads, dealTourRequests } from "../drizzle/schema";
+import { and, asc, eq, gte, inArray, lte, lt, or, sql } from "drizzle-orm";
+import { dealCommunities, dealCommunityViews, dealEvents, dealFubJobs, dealFubRecords, dealHomes, dealLeads, dealTourRequests } from "../drizzle/schema";
 import { getDb } from "./db";
 import {
+  appendBuilderDealsActivity,
   appendBuilderDealsRequestNote,
   appendBuilderDealsTourTask,
   createBuilderDealsRequestNote,
@@ -11,24 +12,36 @@ import {
   sendBuilderDealsLeadToFub,
   type FubDeliveryResult,
   updateBuilderDealsLeadInFub,
+  updateBuilderDealsProfileInFub,
 } from "./dealsFub";
 import { sendBuilderDealsEmail } from "./dealsEmail";
-import { getDealSettings } from "./dealsService";
+import { blockVerifiedDealsIdentity, chicagoDay, chicagoDayStart, getDealSettings } from "./dealsService";
 
 export type FubOperation =
   | "first_unlock"
   | "reverify"
+  | "profile_update"
+  | `activity:${string}`
   | `request_task:${string}`
   | `request_note:${string}`
   | `request_email:${number}`;
 
-type LeadJobMetadata = { reason?: "re-verified on a second device" | "returned for a new link"; occurrenceId?: string };
+type LeadJobMetadata = { reason?: "re-verified on a second device" | "returned for a new link"; occurrenceId?: string; deferredCheck?: boolean };
 type RequestJobMetadata = { requestId: number; chicagoDay?: string };
-type JobMetadata = LeadJobMetadata | RequestJobMetadata;
+type ActivityJobMetadata = { chicagoDay?: string };
+type JobMetadata = LeadJobMetadata | RequestJobMetadata | ActivityJobMetadata;
+type LeadRow = typeof dealLeads.$inferSelect;
 
-const LEASE_MS = 5 * 60_000;
+/** Up to six 30-second FUB calls can run inside one job; a shorter lease could be reclaimed mid-flight. */
+export const LEASE_MS = 15 * 60_000;
 const BASE_RETRY_MS = 30_000;
 const MAX_RETRY_MS = 60 * 60_000;
+/** The deferred realtor re-check is a background write and may wait the full background timeout. */
+const DEFERRED_CHECK_TIMEOUT_MS = 30_000;
+/** After this many failed FUB attempts (about seven minutes of backoff) the unlock alert goes out without FUB details. */
+export const UNLOCK_ALERT_MAX_WAIT_ATTEMPTS = 4;
+
+const LEAD_SYNC_OPERATIONS = new Set<string>(["first_unlock", "reverify", "profile_update"]);
 
 function retryAt(attempts: number) {
   return new Date(Date.now() + Math.min(MAX_RETRY_MS, BASE_RETRY_MS * 2 ** Math.min(attempts, 6)));
@@ -42,6 +55,26 @@ function parseMetadata(value: string): JobMetadata {
 function requestIdFromOperation(operation: string): number | null {
   const value = Number(operation.split(":")[1]);
   return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+/** Both stored flag shapes: a bare array or `{ flags: [...] }`. */
+export function parseLeadFlags(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    const flags = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray((parsed as { flags?: unknown }).flags) ? (parsed as { flags: unknown[] }).flags : [];
+    return flags.filter((flag): flag is string => typeof flag === "string");
+  } catch { return []; }
+}
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+/** UTC bounds of one America/Chicago calendar day, correct across both DST offsets. */
+export function chicagoDayRange(day: string) {
+  const start = chicagoDayStart(new Date(`${day}T12:00:00.000Z`));
+  const end = chicagoDayStart(new Date(start.getTime() + 36 * 60 * 60_000));
+  return { start, end };
+}
+/** The Chicago day that ended at the most recent Chicago midnight. */
+export function previousChicagoDay(now = new Date()) {
+  return chicagoDay(new Date(chicagoDayStart(now).getTime() - 1));
 }
 
 /**
@@ -85,6 +118,72 @@ export async function enqueueDealsRequestJobs(leadId: number, requestId: number,
     enqueueDealsFubJob(leadId, `request_note:${chicagoDay}`, metadata),
     enqueueDealsFubJob(leadId, `request_email:${requestId}`, metadata),
   ]);
+}
+
+/** The name prompt / timeline answer: one union PUT per lead, re-run whenever the profile changes again. */
+export async function enqueueDealsProfileUpdate(leadId: number) {
+  await enqueueDealsFubJob(leadId, "profile_update", { occurrenceId: new Date().toISOString() });
+}
+
+/**
+ * The router's updateProfile side effects: the FUB profile_update job and the
+ * single permitted follow-up flag alert. Team sessions and test numbers outside
+ * full-pipeline mode write nothing and alert nobody.
+ */
+export async function handleDealsProfileUpdate(input: { lead: LeadRow; newFlags: readonly string[] }) {
+  const settings = await getDealSettings();
+  const isTest = settings.testNumbers.includes(input.lead.phoneE164);
+  if (input.lead.status === "team" || input.lead.status === "blocked" || (isTest && !settings.testModeFullPipeline)) return { queued: false as const, alerted: false as const };
+  await enqueueDealsProfileUpdate(input.lead.id);
+  let alerted = false;
+  if (input.newFlags.length) {
+    const { queueProfileFlagAlert } = await import("./dealsAlerts");
+    alerted = (await queueProfileFlagAlert(input.lead, input.newFlags)).queued;
+  }
+  void runPendingDealsFubJobs(1).catch((error) => console.error("[deals] profile outbox run failed", error));
+  return { queued: true as const, alerted };
+}
+
+/**
+ * Batches one Chicago day of community views and tour requests into one
+ * `activity:{day}` outbox row per lead. Scheduled nightly after the day closes;
+ * the job itself writes the single FUB activity note.
+ */
+export async function enqueueDealsActivityJobs(day = previousChicagoDay()) {
+  if (!DAY_PATTERN.test(day)) throw new Error("Invalid Chicago day");
+  const db = await getDb();
+  if (!db) return { ok: false as const, chicagoDay: day, queued: 0, skipped: 0, reason: "database_unavailable" as const };
+  const { start, end } = chicagoDayRange(day);
+  const settings = await getDealSettings();
+  const [viewRows, requestRows] = await Promise.all([
+    db.select({ leadId: dealCommunityViews.leadId, viewedAt: dealCommunityViews.viewedAt }).from(dealCommunityViews).where(and(gte(dealCommunityViews.viewedAt, start), lt(dealCommunityViews.viewedAt, end))),
+    db.select({ leadId: dealTourRequests.leadId }).from(dealTourRequests).where(eq(dealTourRequests.chicagoDay, day)),
+  ]);
+  const leadIds = Array.from(new Set([...viewRows.filter((row) => chicagoDay(row.viewedAt) === day).map((row) => row.leadId), ...requestRows.map((row) => row.leadId)]));
+  if (!leadIds.length) return { ok: true as const, chicagoDay: day, queued: 0, skipped: 0 };
+  const leads = await db.select({ id: dealLeads.id, status: dealLeads.status, phoneE164: dealLeads.phoneE164 }).from(dealLeads).where(inArray(dealLeads.id, leadIds));
+  let queued = 0;
+  let skipped = 0;
+  for (const lead of leads) {
+    const isTest = settings.testNumbers.includes(lead.phoneE164);
+    // Team previews and blocked leads create no FUB writes; test numbers only in full-pipeline mode.
+    if (lead.status === "team" || lead.status === "blocked" || (isTest && !settings.testModeFullPipeline)) { skipped += 1; continue; }
+    await enqueueDealsFubJob(lead.id, `activity:${day}`, { chicagoDay: day });
+    queued += 1;
+  }
+  return { ok: true as const, chicagoDay: day, queued, skipped };
+}
+
+/**
+ * Scheduled-handler entry point (1:30 AM Chicago): queue the previous Chicago
+ * day's activity rows, then drain the outbox so the notes land right away. A
+ * row that FUB rejects stays in the outbox for the hourly retry.
+ */
+export async function enqueueDailyActivityNote(day?: string) {
+  const queued = await enqueueDealsActivityJobs(day);
+  if (!queued.ok) return queued;
+  const run = queued.queued > 0 ? await runPendingDealsFubJobs(Math.max(25, queued.queued)) : null;
+  return { ...queued, run };
 }
 
 async function recordFubDelivery(leadId: number, result: Extract<FubDeliveryResult, { ok: true }>) {
@@ -230,34 +329,143 @@ async function executeRequestEmail(job: typeof dealFubJobs.$inferSelect): Promis
     category: "tour_request",
     recipients: settings.alertRecipients,
     subject: loaded.request.requestType === "tour" ? "Builder Deals tour request" : "Builder Deals question",
-    content: `Builder Deals lead ${loaded.lead.id} requested ${loaded.privateDescription}.\nPreferred: ${formatChicagoDateTime(loaded.request.preferredAt)}\nReview the protected request in Admin → Builder Deals.`,
+    content: `Builder Deals lead ${loaded.lead.id} requested ${loaded.privateDescription}.\nPreferred: ${formatChicagoDateTime(loaded.request.preferredAt)}\nReview the protected request in Admin, Builder Deals.`,
   });
   if (!sent.ok) return { ok: false, error: sent.error ?? "Builder Deals email was not accepted" };
   await db.update(dealTourRequests).set({ emailSentAt: new Date() }).where(eq(dealTourRequests.id, loaded.request.id));
   return { ok: true, records: [] };
 }
 
-async function executeLeasedJob(job: typeof dealFubJobs.$inferSelect): Promise<FubDeliveryResult> {
-  if (job.operation === "first_unlock" || job.operation === "reverify") {
-    const db = await getDb();
-    if (!db) return { ok: false, error: "Database unavailable" };
-    const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, job.leadId)).limit(1))[0];
-    if (!lead || lead.status === "blocked" || lead.status === "team") return { ok: true, records: [] };
-    const flags = (() => { try { const parsed = JSON.parse(lead.flags); return Array.isArray(parsed) ? parsed : parsed.flags ?? []; } catch { return []; } })();
-    // The test marker follows test-number membership, not an optional screening
-    // flag. The value is captured only in the job runner and never browser-side.
-    const { getDealSettings } = await import("./dealsService");
-    const settings = await getDealSettings();
-    const payload = { id: lead.id, phone: lead.phoneE164, email: lead.email, name: lead.name, instagramHandle: lead.instagramHandle, sourceCode: lead.sourceCode, consentText: lead.consentText, consentAt: lead.consentAt, consentIp: lead.consentIp, flags, timeline: lead.timeline, isTest: settings.testNumbers.includes(lead.phoneE164) };
-    const metadata = parseMetadata(job.payload) as LeadJobMetadata;
-    return job.operation === "first_unlock"
-      ? sendBuilderDealsLeadToFub(payload)
-      : updateBuilderDealsLeadInFub(payload, metadata.reason ?? "returned for a new link", metadata.occurrenceId);
+type DeferredCheckOutcome = "clear" | "blocked" | "team" | "unavailable";
+/**
+ * FUB was down when this lead verified, so the realtor match never ran. Re-run
+ * the full classification with the background timeout before any FUB write: a
+ * match writes the verified-phone blocklist rows and kills the live link.
+ */
+async function runDeferredRealtorCheck(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, lead: LeadRow, settings: Awaited<ReturnType<typeof getDealSettings>>): Promise<DeferredCheckOutcome> {
+  const { classifyDealsAccess } = await import("./dealsEligibility");
+  const eligibility = await classifyDealsAccess({
+    phone: lead.phoneE164, email: lead.email, deviceHash: lead.deviceHash,
+    isTest: settings.testNumbers.includes(lead.phoneE164), testSkipChecks: settings.testNumbersSkipChecks, testTeamNumbers: settings.testTeamNumbers,
+    brokerageDomains: settings.brokerageDomains, fubRealtorTags: settings.fubRealtorTags, fubRealtorSources: settings.fubRealtorSources,
+    fubTimeoutMs: DEFERRED_CHECK_TIMEOUT_MS,
+  });
+  if (eligibility.flags.includes("database_unavailable") || eligibility.flags.includes("fub_check_deferred")) return "unavailable";
+  if (!eligibility.allowed) {
+    const reason = eligibility.blockedBy ?? "post_verification";
+    await blockVerifiedDealsIdentity({ phone: lead.phoneE164, email: lead.email, deviceHash: lead.deviceHash, reason }, db);
+    await db.update(dealLeads).set({ status: "blocked", revokedAt: new Date() }).where(eq(dealLeads.id, lead.id));
+    await db.insert(dealEvents).values({ leadId: lead.id, kind: "blocked", sourceCode: lead.sourceCode, deviceHash: lead.deviceHash, phoneE164: lead.phoneE164, detail: `${reason}:deferred_check` });
+    return "blocked";
   }
+  return eligibility.team ? "team" : "clear";
+}
+
+async function executeLeadJob(job: typeof dealFubJobs.$inferSelect): Promise<FubDeliveryResult> {
+  const db = await getDb();
+  if (!db) return { ok: false, error: "Database unavailable" };
+  const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, job.leadId)).limit(1))[0];
+  if (!lead || lead.status === "blocked" || lead.status === "team") return { ok: true, records: [] };
+  let flags = parseLeadFlags(lead.flags);
+  const settings = await getDealSettings();
+  const metadata = parseMetadata(job.payload) as LeadJobMetadata;
+  if (metadata.deferredCheck || flags.includes("fub_check_deferred")) {
+    const outcome = await runDeferredRealtorCheck(db, lead, settings);
+    if (outcome === "unavailable") return { ok: false, error: "FUB check deferred: FUB is still unavailable" };
+    if (outcome === "blocked" || outcome === "team") return { ok: true, records: [] };
+    flags = flags.filter((flag) => flag !== "fub_check_deferred");
+    await db.update(dealLeads).set({ flags: JSON.stringify(flags) }).where(eq(dealLeads.id, lead.id));
+  }
+  // The test marker follows test-number membership, not an optional screening
+  // flag. The value is captured only in the job runner and never browser-side.
+  const payload = { id: lead.id, phone: lead.phoneE164, email: lead.email, name: lead.name, instagramHandle: lead.instagramHandle, sourceCode: lead.sourceCode, consentText: lead.consentText, consentAt: lead.consentAt, consentIp: lead.consentIp, flags, timeline: lead.timeline, isTest: settings.testNumbers.includes(lead.phoneE164), fubPersonId: lead.fubPersonId };
+  if (job.operation === "first_unlock") return sendBuilderDealsLeadToFub(payload);
+  if (job.operation === "profile_update") return updateBuilderDealsProfileInFub(payload);
+  return updateBuilderDealsLeadInFub(payload, metadata.reason ?? "returned for a new link", metadata.occurrenceId);
+}
+
+async function executeActivityJob(job: typeof dealFubJobs.$inferSelect): Promise<FubDeliveryResult> {
+  const db = await getDb();
+  if (!db) return { ok: false, error: "Database unavailable" };
+  const metadata = parseMetadata(job.payload) as ActivityJobMetadata;
+  const day = metadata.chicagoDay ?? job.operation.split(":")[1] ?? "";
+  if (!DAY_PATTERN.test(day)) return { ok: false, error: "Builder Deals activity day is invalid", terminal: true };
+  const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, job.leadId)).limit(1))[0];
+  if (!lead || lead.status === "blocked" || lead.status === "team") return { ok: true, records: [] };
+  const { start, end } = chicagoDayRange(day);
+  const [viewRows, requests] = await Promise.all([
+    db.select().from(dealCommunityViews).where(and(eq(dealCommunityViews.leadId, lead.id), gte(dealCommunityViews.viewedAt, start), lt(dealCommunityViews.viewedAt, end))).orderBy(asc(dealCommunityViews.viewedAt)),
+    db.select().from(dealTourRequests).where(and(eq(dealTourRequests.leadId, lead.id), eq(dealTourRequests.chicagoDay, day))),
+  ]);
+  const views = viewRows.filter((row) => chicagoDay(row.viewedAt) === day);
+  if (!views.length && !requests.length) return { ok: true, records: [] };
+  const communityIds = Array.from(new Set(views.map((view) => view.communityId)));
+  const communities = communityIds.length ? await db.select({ id: dealCommunities.id, privateName: dealCommunities.privateName, publicLabel: dealCommunities.publicLabel }).from(dealCommunities).where(inArray(dealCommunities.id, communityIds)) : [];
+  const lines = [`Builder Deals activity for ${day} (America/Chicago).`];
+  if (views.length) {
+    lines.push(`Viewed the list ${views.length} time${views.length === 1 ? "" : "s"} across ${communityIds.length} communit${communityIds.length === 1 ? "y" : "ies"}:`);
+    for (const communityId of communityIds) {
+      const community = communities.find((row) => row.id === communityId);
+      const own = views.filter((view) => view.communityId === communityId);
+      const first = own[0]!.viewedAt;
+      const last = own[own.length - 1]!.viewedAt;
+      lines.push(`- ${community ? `${community.privateName} (shown as ${community.publicLabel})` : `community ${communityId}`}: ${own.length} visit${own.length === 1 ? "" : "s"}, ${formatChicagoDateTime(first)}${own.length > 1 ? ` to ${formatChicagoDateTime(last)}` : ""}`);
+    }
+  }
+  if (requests.length) lines.push(`Tour and question requests: ${requests.length} (homes and preferred times are in the day's Builder Deals request note and task).`);
+  return appendBuilderDealsActivity({ id: lead.id, fubPersonId: lead.fubPersonId, phoneE164: lead.phoneE164, email: lead.email }, day, lines.join("\n"));
+}
+
+async function executeLeasedJob(job: typeof dealFubJobs.$inferSelect): Promise<FubDeliveryResult> {
+  if (LEAD_SYNC_OPERATIONS.has(job.operation)) return executeLeadJob(job);
+  if (job.operation.startsWith("activity:")) return executeActivityJob(job);
   if (job.operation.startsWith("request_task:")) return executeRequestTask(job);
   if (job.operation.startsWith("request_note:")) return executeRequestNote(job);
   if (job.operation.startsWith("request_email:")) return executeRequestEmail(job);
-  return { ok: false, error: "Unknown Builder Deals FUB job operation" };
+  return { ok: false, error: "Unknown Builder Deals FUB job operation", terminal: true };
+}
+
+/**
+ * The single unlock alert is queued only once the first_unlock job has resolved
+ * (delivered, terminally failed, or stalled past the wait limit), so it can carry
+ * the FUB person link, the prior assignment and the opt-out marker. Team and
+ * blocked leads never alert. Returns true when a new alert row was queued.
+ */
+async function queueUnlockAlertIfDue(job: typeof dealFubJobs.$inferSelect, result: FubDeliveryResult, attempts: number): Promise<boolean> {
+  const delivered = result.ok && result.records.length > 0;
+  const stalled = !result.ok && (Boolean(result.terminal) || attempts >= UNLOCK_ALERT_MAX_WAIT_ATTEMPTS);
+  if (!delivered && !stalled) return false;
+  const db = await getDb();
+  if (!db) return false;
+  const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, job.leadId)).limit(1))[0];
+  if (!lead || lead.status === "blocked" || lead.status === "team") return false;
+  const { queueFirstUnlockAlert } = await import("./dealsAlerts");
+  const queued = await queueFirstUnlockAlert(lead, {
+    flags: parseLeadFlags(lead.flags).filter((flag) => flag.startsWith("Possible Agent - ")),
+    fubPersonId: result.ok ? result.personId ?? lead.fubPersonId : lead.fubPersonId,
+    alreadyAssignedTo: result.ok ? result.screening?.alreadyAssignedTo ?? null : null,
+    previouslyOptedOut: result.ok ? Boolean(result.screening?.previouslyOptedOut) : false,
+    fubIssue: result.ok ? null : result.error,
+  });
+  return queued.queued;
+}
+
+async function notifyTerminalFubFailure(job: typeof dealFubJobs.$inferSelect, error: string) {
+  try {
+    const settings = await getDealSettings();
+    await sendBuilderDealsEmail({
+      category: "fub_failure",
+      recipients: settings.alertRecipients,
+      subject: "Builder Deals FUB write needs attention",
+      content: [
+        `A Builder Deals FUB write for lead ${job.leadId} (${job.operation}) failed permanently and will not retry on its own.`,
+        `Reason: ${error}`,
+        "Fix the cause in Follow Up Boss, then use Retry on the job in Admin, Builder Deals.",
+      ].join("\n"),
+    });
+  } catch (notifyError) {
+    console.error("[deals fub] terminal failure alert failed", notifyError);
+  }
 }
 
 /**
@@ -285,6 +493,9 @@ export async function runPendingDealsFubJobs(limit = 25) {
     const leaseToken = job.leaseToken;
     if (!leaseToken) continue;
     leased += 1;
+    // Only the unlock/reverify rows own the lead's fubStatus badge; a profile
+    // update waiting on an unsynced contact must not flip it to failed.
+    const leadSync = job.operation === "first_unlock" || job.operation === "reverify";
     try {
       // An enqueue can update the only per-operation outbox row while this
       // worker holds it. Re-read after claiming so the newest reason wins.
@@ -300,19 +511,31 @@ export async function runPendingDealsFubJobs(limit = 25) {
         await db.update(dealFubJobs).set({ status: "pending", nextAttemptAt: new Date(), leaseToken: null, leasedAt: null }).where(and(eq(dealFubJobs.id, job.id), eq(dealFubJobs.leaseToken, leaseToken)));
         continue;
       }
+      const attempts = job.attempts + 1;
+      // The alert row is durable and keyed per lead, so it is queued before the
+      // job row completes: a crash here re-runs a marker-protected job, never
+      // a second alert.
+      const alertQueued = job.operation === "first_unlock" ? await queueUnlockAlertIfDue(job, result, attempts) : false;
       if (result.ok) {
         await recordFubDelivery(job.leadId, result);
-        await db.update(dealFubJobs).set({ status: "synced", completedAt: new Date(), attempts: job.attempts + 1, leaseToken: null, leasedAt: null, lastError: result.warning ?? null })
+        await db.update(dealFubJobs).set({ status: "synced", completedAt: new Date(), attempts, leaseToken: null, leasedAt: null, lastError: result.warning ?? null })
           .where(and(eq(dealFubJobs.id, job.id), eq(dealFubJobs.status, "leased"), eq(dealFubJobs.leaseToken, leaseToken)));
-        if (job.operation === "first_unlock" || job.operation === "reverify") {
+        if (leadSync && result.records.length > 0) {
           await db.update(dealLeads).set({ fubStatus: "synced", fubPersonId: result.personId ?? undefined }).where(eq(dealLeads.id, job.leadId));
+        } else if (job.operation === "profile_update" && result.personId) {
+          await db.update(dealLeads).set({ fubPersonId: result.personId }).where(eq(dealLeads.id, job.leadId));
         }
         if (result.records.length === 0) skipped += 1; else sent += 1;
       } else {
-        const attempts = job.attempts + 1;
-        await db.update(dealFubJobs).set({ status: "failed", attempts, lastError: result.error, nextAttemptAt: retryAt(attempts), leaseToken: null, leasedAt: null })
+        const terminal = Boolean(result.terminal);
+        // A terminal failure keeps its row visible for the admin Retry button but
+        // is never picked up automatically (a NULL nextAttemptAt is never due).
+        await db.update(dealFubJobs).set({ status: "failed", attempts, lastError: result.error, nextAttemptAt: terminal ? null : retryAt(attempts), leaseToken: null, leasedAt: null })
           .where(and(eq(dealFubJobs.id, job.id), eq(dealFubJobs.status, "leased"), eq(dealFubJobs.leaseToken, leaseToken)));
-        if (job.operation === "first_unlock" || job.operation === "reverify") await db.update(dealLeads).set({ fubStatus: "failed" }).where(eq(dealLeads.id, job.leadId));
+        if (leadSync) await db.update(dealLeads).set({ fubStatus: "failed" }).where(eq(dealLeads.id, job.leadId));
+        // The unlock alert already carries a first_unlock failure; every other
+        // terminal failure gets its own owner alert.
+        if (terminal && !alertQueued) await notifyTerminalFubFailure(job, result.error);
         failed += 1;
       }
     } catch (error) {

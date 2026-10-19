@@ -204,9 +204,15 @@ export interface DealAdapter {
 
 const CHESMAR_HOST = "www.chesmar.com";
 const MI_HOST = "www.mihomes.com";
+/** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST };
+export function officialHostFor(builder: string): string | null {
+  return builder === "Chesmar" ? CHESMAR_HOST : builder === "M/I Homes" ? MI_HOST : null;
+}
 const CHESMAR_SITEMAP_INDEX = "https://www.chesmar.com/sitemap.xml";
 const DEFAULT_DETAIL_LIMIT = 24;
-const MAX_DETAIL_LIMIT = 48;
+/** Safety cap only: a community whose plan and home pages exceed it is held, never truncated. */
+export const MAX_DETAIL_LIMIT = 60;
 const FETCH_TIMEOUT_MS = 20_000;
 const CHESMAR_INCENTIVES_URL = "https://www.chesmar.com/incentives/";
 const MI_INVENTORY_PATH = "/sitecore/api/ssc/MIHomes-Project-Website-Api-Controllers/PlansQmi/";
@@ -452,7 +458,10 @@ function numberMatch(text: string, pattern: RegExp, group = 1): number | null {
 function findContractDeadline(text: string): DeadlineFact | null {
   const between = new RegExp(`\\b(?:purchase\\s+agreements?|contracts?|contract\\s+sales?)\\b[^.]{0,160}?(?:between\\s+|written\\s+|from\\s+)(${DEADLINE_DATE})\\s*,?\\s*(?:and|to|through|-)\\s+(${DEADLINE_DATE})`, "i").exec(text);
   if (between) return deadlineFromMatch(between[2]);
-  const ending = new RegExp(`(?:purchase\\s+agreements?|contract(?:s|\\s+signing)?|offer)[^.]{0,90}?\\b(?:by|through|until)\\s+(${DEADLINE_DATE})`, "i").exec(text);
+  // The span between the contract words and the date must not run into the
+  // closing clause, or "contract by October 18 and close by 12/31/26" would
+  // take the closing date as the contract deadline.
+  const ending = new RegExp(`(?:purchase\\s+agreements?|contract(?:s|\\s+signing)?|\\bsign(?:ed|ing)?\\b|offer)(?:(?!\\bclos)[^.]){0,90}?\\b(?:by|through|until)\\s+(${DEADLINE_DATE})`, "i").exec(text);
   return ending ? deadlineFromMatch(ending[1]) : null;
 }
 
@@ -486,8 +495,11 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const promotionalRatePercent = headline;
   const promotionalPeriod = firstMatch(text, /\b(first[- ]year|year\s*1)\b/i) ?? firstMatch(text, /\b(for\s+year\s*\d+)\b/i);
   const followOnPeriod = firstMatch(text, /\b(years?\s*2\s*(?:-|to|through)\s*\d+|after\s+(?:the\s+)?first\s+year)\b/i);
-  const followOnRatePercent = rateNear(text, /(?:years?\s*2\s*(?:-|to|through)\s*\d+|after\s+(?:the\s+)?first\s+year)[\s\S]{0,80}?(\d+(?:\.\d+)?)%/i) ??
-    rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:interest\s+rate\s*)?for\s+years?\s*2/i);
+  // "5.25% (6.051% APR) for years 2-30" names its rate before the period, so
+  // that trailing form is tried first. The forward look after the period stops
+  // at down-payment or APR wording so "3.5% down" is never read as a rate.
+  const followOnRatePercent = rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:\([^)]{0,40}\)\s*)?(?:interest\s+rate\s*)?for\s+years?\s*2\b/i) ??
+    rateNear(text, /(?:years?\s*2\s*(?:-|to|through)\s*\d+|after\s+(?:the\s+)?first\s+year)(?:(?!\b(?:down|payments?|APR)\b)[\s\S]){0,80}?(\d+(?:\.\d+)?)%(?!\s*(?:minimum\s+)?down\b)/i);
   const aprPercent = rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:annual\s+percentage\s+rate|apr)\b/i) ??
     rateNear(text, /\b(?:APR|ANNUAL\s+PERCENTAGE\s+RATE)\s*(?::|=|is)?\s*(\d+(?:\.\d+)?)%/i);
   const repaymentTermYears = numberMatch(text, /\b(\d{1,2})(?:[- ]year|\s*yr)\b/i);
@@ -495,8 +507,11 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const downPaymentPercent = numberMatch(text, /(\d+(?:\.\d+)?)%\s+(?:minimum\s+)?down(?:\s+payment)?\b/i) ?? (/\bno\s+down\s+payment\b/i.test(text) ? 0 : null);
   const contractDeadline = findContractDeadline(text);
   const closingDeadline = findClosingDeadline(text);
-  const triggersTerms = /\b(?:payments?|down|\d+[- ]year|years?|months?|repayment|term)\b/i.test(text);
-  const namesContractDeadline = /\b(?:contracts?|purchase\s+agreements?|contract\s+sales?)\b[^.]{0,100}\b(?:by|through|until|between|from|written)\b/i.test(text);
+  // Repayment disclosures are required only when the text itself states terms:
+  // an N-year or N yr term, payments, or a down payment. "first-year" alone is a
+  // promotional period, not a repayment term.
+  const triggersTerms = /\b(?:\d+[- ]year|\d+\s*yr|payments?|down\s+payment)\b/i.test(text);
+  const namesContractDeadline = /\b(?:contracts?|purchase\s+agreements?|contract\s+sales?|sign(?:ed|ing)?)\b[^.]{0,100}\b(?:by|through|until|between|from|written)\b/i.test(text);
   const namesClosingDeadline = /\b(?:clos(?:e|ing))\b[^.]{0,35}\b(?:by|before|than|through)\b/i.test(text);
   const holdReasons: DealHoldReason[] = [];
   if (rateKind !== "none") {
@@ -715,31 +730,170 @@ function extractStatus(text: string): string | null {
   return match ? normalizeWhitespace(match[1]) : null;
 }
 
-function chesmarGallery(sourceUrl: string, html: string): PrivateGalleryImage[] {
-  const result = new Map<string, PrivateGalleryImage>();
-  const srcPattern = /<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = srcPattern.exec(html)) !== null) {
-    const url = absoluteUrl(match[1], new URL(sourceUrl));
-    if (!url || !["www.chesmar.com", "chesmar.com", "images.ctfassets.net", "cdn.sanity.io"].includes(url.hostname.toLowerCase())) continue;
-    if (/logo|icon|avatar|thumbnail/i.test(url.pathname)) continue;
-    result.set(url.toString(), { sourceUrl: url.toString(), caption: null, width: null, height: null, srcSet: null });
-  }
-  return Array.from(result.values()).slice(0, 12);
+const CHESMAR_IMAGE_HOSTS = ["www.chesmar.com", "chesmar.com", "images.ctfassets.net", "cdn.sanity.io"];
+const GALLERY_CONTAINER_PATTERN = /(?:^|[\s_-])(?:gallery|galleries|slider|slides|carousel|swiper|slick|photos|lightbox|slideshow|fotorama|glide|splide|flickity|owl)(?:$|[\s_-])/i;
+const MIN_GALLERY_IMAGE_WIDTH = 600;
+const EXCLUDED_CHROME_TAGS = new Set(["nav", "footer", "header", "script", "style", "noscript", "template"]);
+
+function insideChrome(element: HtmlElement, chrome: readonly HtmlElement[]): boolean {
+  return chrome.some((region) => region !== element && element.contentStart >= region.contentStart && element.contentEnd <= region.contentEnd);
 }
 
-function parsePrivateProperty(sourceUrl: string, html: string): PrivatePlanOrHome {
-  const text = htmlToText(html);
+/** Largest candidate from a srcset, or null when the attribute has no usable entry. */
+function largestSrcSetEntry(srcset: string | undefined, base: URL): { url: URL; width: number | null } | null {
+  if (!srcset) return null;
+  let best: { url: URL; width: number | null } | null = null;
+  for (const entry of srcset.split(",")) {
+    const [raw, descriptor] = entry.trim().split(/\s+/, 2);
+    if (!raw) continue;
+    const url = absoluteUrl(raw, base);
+    if (!url) continue;
+    const width = descriptor && /^\d+w$/i.test(descriptor) ? Number.parseInt(descriptor, 10) : null;
+    if (!best || (width ?? 0) > (best.width ?? 0)) best = { url, width };
+  }
+  return best;
+}
+
+function imageWidthHint(image: HtmlElement, url: URL): number | null {
+  const attribute = schemaNumber(image.attributes.width);
+  if (attribute !== null) return attribute;
+  const fromPath = /[-_](\d{3,4})x\d{2,4}(?:[.-]|$)/.exec(url.pathname);
+  if (fromPath) return Number(fromPath[1]);
+  const query = url.searchParams.get("w") ?? url.searchParams.get("width");
+  return query && /^\d+$/.test(query) ? Number(query) : null;
+}
+
+/**
+ * Chesmar photos come only from a gallery/slider container, never from page
+ * chrome, plan drawings or brand graphics scattered across the page. Null means
+ * the expected container is missing (a layout change), which holds the catalog.
+ */
+function chesmarGallery(sourceUrl: string, html: string): PrivateGalleryImage[] | null {
+  const root = parseHtmlElements(html);
+  if (!root) return null;
+  const elements = descendants(root);
+  const chrome = elements.filter((element) => EXCLUDED_CHROME_TAGS.has(element.tag));
+  const marker = (element: HtmlElement) => `${element.attributes.class ?? ""} ${element.attributes.id ?? ""} ${element.attributes["data-gallery"] ?? ""}`;
+  const containers = elements.filter((element) => GALLERY_CONTAINER_PATTERN.test(marker(element)) && !insideChrome(element, chrome));
+  if (!containers.length) return null;
+  const base = new URL(sourceUrl);
+  const result = new Map<string, PrivateGalleryImage>();
+  for (const container of containers) {
+    for (const image of descendants(container).filter((element) => element.tag === "img" || element.tag === "source")) {
+      const fromSet = largestSrcSetEntry(image.attributes.srcset ?? image.attributes["data-srcset"], base);
+      const single = [image.attributes["data-src"], image.attributes["data-lazy"], image.attributes["data-original"], image.attributes.src]
+        .find((value) => value && !/^data:/i.test(value));
+      const url = fromSet?.url ?? (single ? absoluteUrl(single, base) : null);
+      if (!url || url.protocol !== "https:" || !CHESMAR_IMAGE_HOSTS.includes(url.hostname.toLowerCase())) continue;
+      if (/logo|icon|avatar|thumbnail|thumb|placeholder|spinner|sprite|\.svg$/i.test(url.pathname)) continue;
+      const width = fromSet?.width ?? imageWidthHint(image, url);
+      if (width !== null && width < MIN_GALLERY_IMAGE_WIDTH) continue;
+      if (result.has(url.toString())) continue;
+      result.set(url.toString(), { sourceUrl: url.toString(), caption: image.attributes.alt || null, width, height: schemaNumber(image.attributes.height), srcSet: image.attributes.srcset ?? null });
+      if (result.size >= 12) return Array.from(result.values());
+    }
+  }
+  return Array.from(result.values());
+}
+
+const FACT_PATTERNS = [
+  /\b\d+(?:\.\d+)?\s*(?:beds?|bedrooms?)\b/i,
+  /\b\d+(?:\.\d+)?\s*(?:baths?|bathrooms?)\b/i,
+  /\b[\d,]+\s*(?:sq\.?\s*(?:ft|feet)|square\s+feet)\b/i,
+];
+const RANGE_FACT_PATTERN = /\b[\d,]+\s*(?:-|–|to)\s*[\d,]+\s*(?:beds?|bedrooms?|baths?|bathrooms?|sq\.?\s*(?:ft|feet)|square\s+feet)\b/i;
+
+/**
+ * The home facts of a detail page live in the compact stat block that follows
+ * its h1. Site navigation that carries the community range ("From $499,990",
+ * "3 - 5 Beds") or a "Quick Move-In Homes" menu entry is never consulted.
+ */
+export function detailStatBlock(html: string): { block: string; region: string; near: string } | null {
+  const root = parseHtmlElements(html);
+  if (!root) return null;
+  const elements = descendants(root);
+  const h1 = elements.find((element) => element.tag === "h1");
+  if (!h1) return null;
+  const chrome = elements.filter((element) => EXCLUDED_CHROME_TAGS.has(element.tag));
+  const parent = elements.find((element) => element.children.includes(h1));
+  // A compact heading section may list the stats just before the h1 itself.
+  const headingSection = parent && !insideChrome(parent, chrome) && elementText(parent, html).length <= 1500 ? parent : null;
+  let block: HtmlElement | null = null;
+  for (const element of elements) {
+    const afterHeading = element.contentStart >= h1.contentEnd;
+    const inHeadingSection = headingSection !== null && element !== headingSection && element.contentStart >= headingSection.contentStart && element.contentEnd <= headingSection.contentEnd && !(element.contentStart <= h1.contentStart && element.contentEnd >= h1.contentEnd);
+    if ((!afterHeading && !inHeadingSection) || EXCLUDED_CHROME_TAGS.has(element.tag) || insideChrome(element, chrome)) continue;
+    const text = elementText(element, html);
+    if (!text || text.length > 500 || RANGE_FACT_PATTERN.test(text)) continue;
+    if (FACT_PATTERNS.filter((pattern) => pattern.test(text)).length >= 2) { block = element; break; }
+  }
+  if (!block) return null;
+  const blockText = elementText(block, html);
+  const regionText = htmlToText(html.slice(Math.min(h1.contentEnd, block.contentStart), Math.max(block.contentEnd, h1.contentEnd)));
+  const nearText = parent ? elementText(parent, html) : htmlToText(html.slice(h1.contentStart, h1.contentEnd));
+  return {
+    block: blockText,
+    region: regionText.length <= 800 ? regionText : blockText,
+    near: nearText.length <= 300 ? nearText : htmlToText(html.slice(h1.contentStart, h1.contentEnd)),
+  };
+}
+
+/** Null when the page has no h1 stat block or no gallery container; the caller holds. */
+function parsePrivateProperty(sourceUrl: string, html: string): PrivatePlanOrHome | null {
+  const stats = detailStatBlock(html);
+  if (!stats) return null;
+  const gallery = chesmarGallery(sourceUrl, html);
+  if (gallery === null) return null;
   return {
     sourceUrl,
     privateName: extractFirstHeading(html),
-    status: extractStatus(text),
-    price: extractPrice(text),
-    bedrooms: extractBedrooms(text),
-    bathrooms: extractBathrooms(text),
-    squareFeet: extractSquareFeet(text),
-    gallery: chesmarGallery(sourceUrl, html),
+    status: extractStatus(stats.block) ?? extractStatus(stats.region) ?? extractStatus(stats.near),
+    price: extractPrice(stats.block) ?? extractPrice(stats.region),
+    bedrooms: extractBedrooms(stats.block),
+    bathrooms: extractBathrooms(stats.block),
+    squareFeet: extractSquareFeet(stats.block),
+    gallery,
   };
+}
+
+/**
+ * First-party community facts read only from the official community page.
+ * Absent facts stay null/empty; nothing is guessed or carried over from a nav.
+ */
+export function parseCommunityFacts(html: string): NonNullable<PrivateDealSnapshot["communityFacts"]> {
+  const text = htmlToText(html);
+  const range = /\$\s*(\d{3},\d{3}(?:,\d{3})?)\s*(?:-|–|to)\s*\$\s*(\d{3},\d{3}(?:,\d{3})?)/i.exec(text);
+  const from = /(?:priced\s+from|starting\s+(?:from|at)|from|as\s+low\s+as)\s*:?\s*\$\s*(\d{3},\d{3}(?:,\d{3})?)/i.exec(text);
+  const fromPrice = numericValue(range?.[1] ?? from?.[1] ?? "");
+  const district = /\b((?:[A-Z][A-Za-z.'-]+\s+){1,4}(?:ISD|CISD|Independent\s+School\s+District|School\s+District))\b/.exec(text);
+  const lots = /\b((?:half|quarter|third|one|two)[- ]acre\+?(?:\s+(?:home)?sites|\s+lots)?|\d+(?:\.\d+)?\s*(?:-|–|to)\s*\d+(?:\.\d+)?[- ]acre\+?(?:\s+(?:home)?sites|\s+lots)?|\d+(?:\.\d+)?\+?[- ]acre(?:\s+(?:home)?sites|\s+lots)|\d{2,3}(?:'|\s*-?\s*(?:ft|foot|feet))(?:\s+wide)?\s+(?:home)?sites)\b/i.exec(text);
+  return {
+    fromPrice: fromPrice !== null && Number.isInteger(fromPrice) && fromPrice >= 50_000 ? fromPrice : null,
+    schoolDistrict: district ? normalizeWhitespace(district[1]) : null,
+    lotSizes: lots ? normalizeWhitespace(lots[1]) : null,
+    amenities: parseAmenityList(html),
+  };
+}
+
+function parseAmenityList(html: string): string[] {
+  const root = parseHtmlElements(html);
+  if (!root) return [];
+  const elements = descendants(root);
+  const chrome = elements.filter((element) => EXCLUDED_CHROME_TAGS.has(element.tag));
+  const items = (container: HtmlElement) => descendants(container)
+    .filter((element) => element.tag === "li")
+    .map((element) => elementText(element, html))
+    .filter((value) => value.length >= 3 && value.length <= 60 && !/\$|\bbeds?\b|\bbaths?\b|sq\.?\s*ft/i.test(value));
+  const section = elements.find((element) => /amenit/i.test(`${element.attributes.class ?? ""} ${element.attributes.id ?? ""}`) && !insideChrome(element, chrome));
+  const fromSection = section ? items(section) : [];
+  if (fromSection.length) return Array.from(new Set(fromSection)).slice(0, 20);
+  const heading = elements.find((element) => /^h[2-5]$/.test(element.tag) && /\bamenities\b/i.test(elementText(element, html)) && !insideChrome(element, chrome));
+  if (!heading) return [];
+  const parent = elements.find((element) => element.children.includes(heading));
+  if (!parent) return [];
+  const following = parent.children.slice(parent.children.indexOf(heading) + 1);
+  const list = following.find((element) => descendants(element).some((child) => child.tag === "li") || element.tag === "ul" || element.tag === "ol");
+  return list ? Array.from(new Set(items(list))).slice(0, 20) : [];
 }
 
 function parseSitemapUrls(xml: string): string[] | null {
@@ -796,10 +950,7 @@ export function categorizedPrivateTerms(config: Pick<CommunitySourceConfig, "bui
   }
   return parseDealScrubConfig(result);
 }
-function privateTerms(config: CommunitySourceConfig, discovered: readonly string[] = []): string[] {
-  return Array.from(new Set([...dealScrubTerms(categorizedPrivateTerms(config)), ...discovered]));
-}
-function remainingPrivateTerm(text: string, terms: readonly string[]): boolean { return hasPrivateTerm(text, terms); }
+function remainingPrivateTerm(text: string, terms: readonly string[] | DealScrubConfig, planField = false): boolean { return hasPrivateTerm(text, terms, { planField }); }
 /** Scrub checked text only; never publish markup, outbound source links or private residue. */
 export function toPublicSafeText(
   input: string,
@@ -812,7 +963,9 @@ export function toPublicSafeText(
   categories.other.push(...extraPrivateTerms.filter((term) => !known.has(term)));
   const scrubbed = scrubPrivateNames(htmlToText(input), categories, { planField });
   if (!scrubbed || /\b(?:https?:\/\/|www\.)\S+/i.test(scrubbed)) return null;
-  return remainingPrivateTerm(scrubbed, dealScrubTerms(categories)) ? null : scrubbed;
+  // Residue is judged per category: a bare plan word such as "Magnolia trees"
+  // outside a plan field is verbatim text, not a private name.
+  return remainingPrivateTerm(scrubbed, categories, planField) ? null : scrubbed;
 }
 
 function publicProperty(value: PrivatePlanOrHome, config: CommunitySourceConfig, terms: readonly string[]): { record: PublicPlanOrHome | null; held: boolean } {
@@ -909,42 +1062,49 @@ function isChesmarHome(url: URL, community: URL): boolean {
   return parts.length >= 2 && /^\d{5,}(?:-\d+)?$/i.test(parts[parts.length - 1] ?? "");
 }
 
+/**
+ * Approved plan pages and home pages must parse or the catalog is held. Probe
+ * mode (no whitelist could be built) fetches the community's child pages and
+ * silently skips any page that is not an official floor-plan page, instead of
+ * letting a site-map or virtual-tour page hold the whole catalog.
+ */
 async function fetchDiscoveredProperties(
   urls: readonly string[],
   kind: "plan" | "home",
   fetcher: HtmlFetcher,
   privateSnapshot: PrivateDealSnapshot,
   expectedHost: string,
-  approvedPlanSlugs: ReadonlySet<string> = new Set(),
-): Promise<DealHoldReason[]> {
+  mode: "approved" | "probe" = "approved",
+): Promise<{ holds: DealHoldReason[]; skipped: number }> {
   const results = await mapWithConcurrency(urls, 4, async (url) => {
     const page = await getDocument(url, fetcher, "text/html,application/xhtml+xml", expectedHost);
     if (!page.ok) {
       const hold: DealHoldReason = page.redirectedOffOfficialHost ? "unsupported_official_host" : "detail_fetch_failed";
-      return { hold, property: null };
+      return { hold, property: null, skipped: false };
     }
-    if (kind === "plan" && !approvedPlanSlugs.has(new URL(url).pathname.split("/").filter(Boolean).at(-1)!.toLowerCase()) && !/<a\b[^>]*\btitle=["']FloorPlan["']/i.test(page.text)) return { hold: "expected_detail_container_not_found" as const, property: null };
-    if (!containsExpectedDetailContainer(page.text)) return { hold: "expected_detail_container_not_found" as const, property: null };
-    const property = parsePrivateProperty(url, page.text);
+    if (kind === "plan" && mode === "probe" && !/<a\b[^>]*\btitle=["']FloorPlan["']/i.test(page.text)) return { hold: null, property: null, skipped: true };
+    const property = containsExpectedDetailContainer(page.text) ? parsePrivateProperty(url, page.text) : null;
     // A plan or home record must contain at least one first-party property
     // fact; an arbitrary branded detail page is not a successful discovery.
-    if (property.price === null && property.bedrooms === null && property.bathrooms === null && property.squareFeet === null) {
-      return { hold: "expected_detail_container_not_found" as const, property: null };
+    if (!property || (property.price === null && property.bedrooms === null && property.bathrooms === null && property.squareFeet === null)) {
+      return mode === "probe" ? { hold: null, property: null, skipped: true } : { hold: "expected_detail_container_not_found" as const, property: null, skipped: false };
     }
-    return { hold: null, property };
+    return { hold: null, property, skipped: false };
   });
   const holds: DealHoldReason[] = [];
+  let skipped = 0;
   for (const result of results) {
     if (result.hold) {
       holds.push(result.hold);
       continue;
     }
+    if (result.skipped) skipped += 1;
     if (!result.property) continue;
     privateSnapshot.pages.push(sourcePage(kind, result.property.sourceUrl, result.property.privateName));
     if (kind === "plan") privateSnapshot.plans.push(result.property);
     else privateSnapshot.homes.push(result.property);
   }
-  return holds;
+  return { holds, skipped };
 }
 
 function chesmarFhaIncentiveText(html: string): string | null {
@@ -1035,11 +1195,14 @@ class ChesmarAdapter implements DealAdapter {
       return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     }
 
+    privateSnapshot.communityFacts = parseCommunityFacts(page.text);
+
     const sitemap = await chesmarSitemapCandidates(fetcher, privateSnapshot);
     if (sitemap.holds.length) return failedResult(config, fetchedAt, privateSnapshot, sitemap.holds);
     const candidates = sitemap.urls;
-    // Plan links must be whitelisted by official floor-plan breadcrumbs, reviewed slugs,
-    // or explicit plan links inside the community's floorplans container.
+    // Plan pages are whitelisted by reviewed slugs, explicit plan links inside the
+    // community's floorplans container, and the parent slug of every home URL.
+    // Other single-segment children (site-map, virtual-tour, ...) are not fetched.
     const approved = new Set((config.planSlugs ?? []).map((slug) => slug.toLowerCase()));
     const tree = parseHtmlElements(page.text);
     const planContainer = tree ? descendants(tree).find((item) => item.attributes.id === "floorplans") : null;
@@ -1049,21 +1212,31 @@ class ChesmarAdapter implements DealAdapter {
     for (const raw of candidates) { const link = asUrl(raw); if (link && isChesmarHome(link, community)) approved.add(link.pathname.split("/").filter(Boolean).at(-2)!.toLowerCase()); }
     const planUrls: string[] = [];
     const homeUrls: string[] = [];
+    const slugOf = (url: URL) => url.pathname.split("/").filter(Boolean).at(-1)!.toLowerCase();
     for (const raw of candidates) {
       const url = asUrl(raw);
       if (!url || !sameOfficialHost(url, CHESMAR_HOST)) continue;
-      if (isChesmarPlan(url, community) && !/^(?:gallery|map|location|overview|photos|models|incentives|contact)$/i.test(url.pathname.split("/").filter(Boolean).at(-1)!)) planUrls.push(url.toString());
+      if (isChesmarPlan(url, community) && !/^(?:gallery|map|location|overview|photos|models|incentives|contact|site-?map|virtual-?tours?|videos?|directions|amenities|schools?|news|blog|events?)$/i.test(slugOf(url))) planUrls.push(url.toString());
       else if (isChesmarHome(url, community)) homeUrls.push(url.toString());
     }
-    const distinctPlanUrls = Array.from(new Set(planUrls));
+    const mode: "approved" | "probe" = approved.size ? "approved" : "probe";
+    // An approved slug missing from a lagging sitemap is still fetched at its official path.
+    const planBase = new URL(normalizePathname(community.pathname), community.origin).toString();
+    const planByPath = new Map<string, string>();
+    for (const url of mode === "approved" ? [...planUrls.filter((url) => approved.has(slugOf(new URL(url)))), ...Array.from(approved, (slug) => `${planBase}${slug}/`)] : planUrls) {
+      const path = normalizePathname(new URL(url).pathname);
+      if (!planByPath.has(path)) planByPath.set(path, url);
+    }
+    const distinctPlanUrls = Array.from(planByPath.values());
     const distinctHomeUrls = Array.from(new Set(homeUrls));
     if (!distinctPlanUrls.length && !distinctHomeUrls.length) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (distinctPlanUrls.length + distinctHomeUrls.length > detailLimit(config)) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
-    const detailHolds = [
-      ...(await fetchDiscoveredProperties(distinctPlanUrls, "plan", fetcher, privateSnapshot, CHESMAR_HOST, approved)),
-      ...(await fetchDiscoveredProperties(distinctHomeUrls, "home", fetcher, privateSnapshot, CHESMAR_HOST)),
-    ];
+    const planResults = await fetchDiscoveredProperties(distinctPlanUrls, "plan", fetcher, privateSnapshot, CHESMAR_HOST, mode);
+    const homeResults = await fetchDiscoveredProperties(distinctHomeUrls, "home", fetcher, privateSnapshot, CHESMAR_HOST, "approved");
+    const detailHolds = [...planResults.holds, ...homeResults.holds];
     if (detailHolds.length > 0) return failedResult(config, fetchedAt, privateSnapshot, detailHolds);
+    // Zero parsed plans means the plan pages no longer look like plan pages.
+    if (!privateSnapshot.plans.length) return failedResult(config, fetchedAt, privateSnapshot, [mode === "approved" ? "expected_detail_container_not_found" : "expected_community_container_not_found"]);
 
     // Ignore stale configured /campaigns/... URLs: only this official page has the current window.
     const incentiveHolds = await fetchOfficialIncentive(new URL(CHESMAR_INCENTIVES_URL), fetcher, privateSnapshot, CHESMAR_HOST, true);
@@ -1311,6 +1484,7 @@ class MiHomesAdapter implements DealAdapter {
       return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     }
 
+    privateSnapshot.communityFacts = parseCommunityFacts(communityPage.text);
     const discovered = discoverMiCommunityUrls(communityPage.text, community);
     const guid = miCommunityGuid(communityPage.text);
     if (!guid) return failedResult(config, fetchedAt, privateSnapshot, ["missing_community_guid"]);

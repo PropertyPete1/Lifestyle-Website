@@ -86,6 +86,10 @@ describe("gated catalog stays inside a 375 px phone viewport (A19)", () => {
       expect(tag).toMatch(/class="[^"]*\bmax-w-full\b/);
     }
     expect(html).toMatch(/<main[^>]*class="[^"]*\boverflow-x-clip\b/);
+    // Several photos: a "1 / n" count, and arrows that stay readable over a bright exterior.
+    expect(html).toContain('data-deals-photo-count="true"');
+    expect(html).toMatch(/data-deals-photo-count="true"[^>]*>1(?:<!-- -->)? \/ (?:<!-- -->)?\d+</);
+    expect(html).toMatch(/<button[^>]*bg-black\/60[^>]*aria-label="Next home photo"|<button[^>]*aria-label="Next home photo"[^>]*bg-black\/60/);
   });
 
   it("shows the exact photos-on-request copy for a home without a usable photo (D11)", () => {

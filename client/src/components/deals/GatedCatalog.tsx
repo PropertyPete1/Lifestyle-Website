@@ -1,9 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "wouter";
 import { Clock3, ExternalLink, Heart, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
 import { identityPatternStyle } from "@/lib/dealsIdentityPattern";
 import { PROFILE_NAME_MAX, PROFILE_TIMELINES, profileInput, type ProfileInput } from "@/lib/dealsMine";
 import { AreaMap } from "./AreaMap";
@@ -61,9 +61,30 @@ export const PHOTOS_ON_REQUEST = "Photos on request";
 const CLOSE_BUTTON = "float-right -mr-2 -mt-2 flex h-11 w-11 items-center justify-center text-muted-foreground hover:text-gold";
 
 /** Listing photos are per-lead renders behind the session cookie; the markup never carries a storage URL. */
+/** Arrows stay readable on bright exteriors and dark interiors alike, with a near-44 px tap target. */
+const GALLERY_ARROW = "z-10 size-10 border-white/30 bg-black/60 text-white shadow-md hover:bg-black/75 hover:text-white dark:border-white/30 dark:bg-black/60 dark:hover:bg-black/75";
+
 export function ProtectedGallery({ photos }: { photos?: string[] }) {
+  const [api, setApi] = useState<CarouselApi>();
+  const [current, setCurrent] = useState(0);
+  useEffect(() => {
+    if (!api) return;
+    const onSelect = () => setCurrent(api.selectedScrollSnap());
+    onSelect();
+    api.on("select", onSelect);
+    api.on("reInit", onSelect);
+    return () => { api.off("select", onSelect); api.off("reInit", onSelect); };
+  }, [api]);
   if (!photos?.length) return <div className="mt-4 flex aspect-[4/3] w-full min-w-0 max-w-full items-center justify-center border border-border bg-secondary px-4 text-center text-xs text-muted-foreground">{PHOTOS_ON_REQUEST}</div>;
-  return <Carousel className="mt-4 w-full min-w-0 max-w-full overflow-hidden" opts={{ loop: photos.length > 1 }}><CarouselContent className="ml-0 min-w-0">{photos.map((src, index) => <CarouselItem key={src} className="min-w-0 basis-full pl-0"><img src={src} alt={`Home photo ${index + 1}`} loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} className="block aspect-[4/3] w-full min-w-0 max-w-full select-none object-cover [-webkit-touch-callout:none]" /></CarouselItem>)}</CarouselContent>{photos.length > 1 && <><CarouselPrevious aria-label="Previous home photo" className="left-2 z-10 bg-background/90" /><CarouselNext aria-label="Next home photo" className="right-2 z-10 bg-background/90" /></>}</Carousel>;
+  const many = photos.length > 1;
+  return <Carousel setApi={setApi} className="relative mt-4 w-full min-w-0 max-w-full overflow-hidden" opts={{ loop: many }}>
+    <CarouselContent className="ml-0 min-w-0">{photos.map((src, index) => <CarouselItem key={src} className="min-w-0 basis-full pl-0"><img src={src} alt={`Home photo ${index + 1} of ${photos.length}`} loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} className="block aspect-[4/3] w-full min-w-0 max-w-full select-none object-cover [-webkit-touch-callout:none]" /></CarouselItem>)}</CarouselContent>
+    {many && <>
+      <CarouselPrevious aria-label="Previous home photo" className={`left-2 ${GALLERY_ARROW}`} />
+      <CarouselNext aria-label="Next home photo" className={`right-2 ${GALLERY_ARROW}`} />
+      <p data-deals-photo-count="true" className="pointer-events-none absolute bottom-2 right-2 z-10 bg-black/60 px-2 py-1 text-[11px] font-medium tracking-wider text-white">{current + 1} / {photos.length}</p>
+    </>}
+  </Carousel>;
 }
 
 function NamePrompt({ onSave, saving, error, onDismiss }: { onSave?: (input: ProfileInput) => void; saving?: boolean; error?: string | null; onDismiss: () => void }) {

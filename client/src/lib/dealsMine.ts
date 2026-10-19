@@ -27,6 +27,8 @@ export const MINE_COPY = {
   profileInvalid: "Use at least 2 characters for your name.",
   profileFailed: "We couldn't save that. Please try again.",
   requestSent: "Request sent. We'll confirm the details by text.",
+  homeSaved: "Saved. We'll keep an eye on this one with you.",
+  saveFailed: "We couldn't save that home. Please try again.",
 } as const;
 
 /** Readable copy for a failed updateProfile; raw validation output never reaches the visitor. */

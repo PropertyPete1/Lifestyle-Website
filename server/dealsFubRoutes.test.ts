@@ -145,4 +145,18 @@ describe("Builder Deals expiry redirect contract", () => {
     // No static handler is registered in this harness, so Express answers 404 after the check passes.
     expect(response.status).toBe(404);
   });
+
+  it("guards the agent tools: no session goes to the gate or the expired page, a buyer to their list, the team through", async () => {
+    const fresh = await fetch(`${baseUrl}/deals/team`, { redirect: "manual" });
+    expect(fresh.headers.get("location")).toBe("/deals?gate=1");
+    const dead = await fetch(`${baseUrl}/deals/team`, { redirect: "manual", headers: { cookie: `${DEALS_COOKIE.session}=stale` } });
+    expect(dead.headers.get("location")).toBe("/deals?expired=1");
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 31, lead: { status: "verified" }, deviceHash: "d" });
+    const buyer = await fetch(`${baseUrl}/deals/team`, { redirect: "manual", headers: { cookie: `${DEALS_COOKIE.session}=live` } });
+    expect(buyer.status).toBe(302);
+    expect(buyer.headers.get("location")).toBe("/deals/mine");
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 9, lead: { status: "team" }, deviceHash: "d" });
+    const team = await fetch(`${baseUrl}/deals/team`, { redirect: "manual", headers: { cookie: `${DEALS_COOKIE.session}=live` } });
+    expect(team.status).toBe(404);
+  });
 });

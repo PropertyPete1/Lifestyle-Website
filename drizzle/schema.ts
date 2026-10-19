@@ -415,10 +415,44 @@ export const dealLeads = mysqlTable(
     revokedAt: timestamp("revoked_at"),
     fubPersonId: varchar("fub_person_id", { length: 80 }),
     fubStatus: mysqlEnum("fub_status", ["pending", "synced", "failed"]).default("pending").notNull(),
+    /** Set when the buyer verified through an LDR agent's client link: the team row that owns this client. */
+    agentTeamId: int("agent_team_id"),
+    clientLinkId: int("client_link_id"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
   },
-  (t) => [index("idx_deal_leads_expiry").on(t.expiresAt), index("idx_deal_leads_fub").on(t.fubStatus)]
+  (t) => [index("idx_deal_leads_expiry").on(t.expiresAt), index("idx_deal_leads_fub").on(t.fubStatus), index("idx_deal_leads_agent").on(t.agentTeamId)]
+);
+
+/**
+ * An LDR agent's share link for one client. The token only attributes the
+ * buyer who verifies through it to the agent and unlocks the full-detail view;
+ * the buyer still verifies their own phone, so the token is kept in clear for
+ * the agent to copy again.
+ */
+export const dealClientLinks = mysqlTable(
+  "deal_client_links",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    token: varchar("token", { length: 64 }).notNull().unique(),
+    /** The active team row (FUB user mirror or manual) of the agent who created the link. */
+    agentTeamId: int("agent_team_id").notNull(),
+    /** The agent's own team session that created the link. */
+    agentLeadId: int("agent_lead_id").notNull(),
+    clientName: varchar("client_name", { length: 190 }).notNull(),
+    clientPhoneE164: varchar("client_phone_e164", { length: 20 }),
+    note: varchar("note", { length: 500 }),
+    /** The buyer lead that verified through this link, once there is one. */
+    leadId: int("lead_id"),
+    verifiedAt: timestamp("verified_at"),
+    openedAt: timestamp("opened_at"),
+    openCount: int("open_count").default(0).notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    revokedAt: timestamp("revoked_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  (t) => [index("idx_deal_client_links_agent").on(t.agentTeamId, t.createdAt), index("idx_deal_client_links_lead").on(t.leadId)]
 );
 
 export const dealPendingVerifications = mysqlTable(
@@ -542,11 +576,16 @@ export const dealKnownAgents = mysqlTable("deal_known_agents", {
 export const dealDoNotAutoImport = mysqlTable("deal_do_not_auto_import", { id: int("id").autoincrement().primaryKey(), value: varchar("value", { length: 320 }).notNull().unique(), kind: mysqlEnum("kind", ["phone", "email"]).notNull(), createdAt: timestamp("created_at").defaultNow().notNull() });
 export const dealTeamAllowlist = mysqlTable("deal_team_allowlist", { id: int("id").autoincrement().primaryKey(), name: varchar("name", { length: 190 }), phoneE164: varchar("phone_e164", { length: 20 }), email: varchar("email", { length: 320 }), fubUserId: varchar("fub_user_id", { length: 80 }), fubIdentityKey: varchar("fub_identity_key", { length: 420 }), source: mysqlEnum("source", ["fub", "manual", "test"]).notNull(), active: boolean("active").default(true).notNull(), createdAt: timestamp("created_at").defaultNow().notNull() }, (t) => [index("idx_deal_team_phone").on(t.phoneE164), index("idx_deal_team_email").on(t.email), uniqueIndex("idx_deal_team_fub_identity").on(t.fubIdentityKey)]);
 
-/** Idempotent same-lead Chicago-day requests and durable CRM-side-effect work. */
+/**
+ * Idempotent same-lead Chicago-day requests and durable CRM-side-effect work.
+ * A "save" is the buyer's favourite mark on a home: it shares the task/note/
+ * email machinery, and `removed_at` records an unsave without losing the
+ * notification that already went out.
+ */
 export const dealTourRequests = mysqlTable("deal_tour_requests", {
-  id: int("id").autoincrement().primaryKey(), leadId: int("lead_id").notNull(), homeId: int("home_id").notNull(), requestType: mysqlEnum("request_type", ["tour", "ask"]).notNull(),
-  preferredAt: timestamp("preferred_at").notNull(), chicagoDay: varchar("chicago_day", { length: 10 }).notNull(), fubTaskId: varchar("fub_task_id", { length: 80 }), fubNoteId: varchar("fub_note_id", { length: 80 }), fubNoteSentAt: timestamp("fub_note_sent_at"), emailSentAt: timestamp("email_sent_at"), createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (t) => [uniqueIndex("idx_deal_tour_lead_home_day").on(t.leadId, t.homeId, t.chicagoDay), index("idx_deal_tour_lead_day").on(t.leadId, t.chicagoDay)]);
+  id: int("id").autoincrement().primaryKey(), leadId: int("lead_id").notNull(), homeId: int("home_id").notNull(), requestType: mysqlEnum("request_type", ["tour", "ask", "save"]).notNull(),
+  preferredAt: timestamp("preferred_at").notNull(), chicagoDay: varchar("chicago_day", { length: 10 }).notNull(), fubTaskId: varchar("fub_task_id", { length: 80 }), fubNoteId: varchar("fub_note_id", { length: 80 }), fubNoteSentAt: timestamp("fub_note_sent_at"), emailSentAt: timestamp("email_sent_at"), removedAt: timestamp("removed_at"), createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [uniqueIndex("idx_deal_tour_lead_home_day_type").on(t.leadId, t.homeId, t.chicagoDay, t.requestType), index("idx_deal_tour_lead_day").on(t.leadId, t.chicagoDay)]);
 /** Every FUB object this system touched, including found contacts, for safe cleanup and auditability. */
 export const dealFubRecords = mysqlTable("deal_fub_records", {
   id: int("id").autoincrement().primaryKey(),

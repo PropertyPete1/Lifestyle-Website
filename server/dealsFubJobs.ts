@@ -10,6 +10,7 @@ import {
   createBuilderDealsTourTask,
   formatChicagoDateTime,
   sendBuilderDealsLeadToFub,
+  type FubAgentRef,
   type FubDeliveryResult,
   updateBuilderDealsLeadInFub,
   updateBuilderDealsProfileInFub,
@@ -241,7 +242,19 @@ async function loadRequestJob(job: typeof dealFubJobs.$inferSelect) {
   // A quiet test lead (full pipeline off) creates no FUB task, no note and no email; the row is skipped, not failed.
   const testMode = await requestTestMode(lead.phoneE164);
   if (testMode.quiet) return null;
-  return { request, lead: { ...lead, isTest: testMode.isTest }, home, privateDescription: `${home.privateAddress ?? "Requested home"}${home.privatePlanName ? ` (${home.privatePlanName})` : ""}` };
+  return { request, lead: { ...lead, isTest: testMode.isTest, agent: await leadAgent(lead) }, home, privateDescription: requestDescription(home) };
+}
+
+/** The agent who sent this buyer, for FUB ownership and the notification copy; null for reel leads. */
+async function leadAgent(lead: Pick<LeadRow, "agentTeamId">): Promise<FubAgentRef | null> {
+  if (!lead.agentTeamId) return null;
+  const { agentForTeamId } = await import("./dealsClientLinks");
+  const agent = await agentForTeamId(lead.agentTeamId);
+  return agent ? { name: agent.name, fubUserId: agent.fubUserId, email: agent.email } : null;
+}
+
+function requestDescription(home: Pick<typeof dealHomes.$inferSelect, "privateAddress" | "privatePlanName" | "price">) {
+  return `${home.privateAddress ?? "Requested home"}${home.privatePlanName ? ` (${home.privatePlanName})` : ""}${home.price ? `, $${home.price.toLocaleString("en-US")}` : ""}`;
 }
 
 type LoadedRequestJob = NonNullable<Awaited<ReturnType<typeof loadRequestJob>>>;
@@ -257,7 +270,7 @@ async function loadDayRequestJobs(loaded: LoadedRequestJob) {
   if (homes.some((home) => !home)) return null;
   return requests.map((request, index) => {
     const home = homes[index]!;
-    return { request, privateDescription: `${home.privateAddress ?? "Requested home"}${home.privatePlanName ? ` (${home.privatePlanName})` : ""}` };
+    return { request, privateDescription: requestDescription(home) };
   });
 }
 function combinedDelivery(results: Array<Extract<FubDeliveryResult, { ok: true }>>, taskId?: string): Extract<FubDeliveryResult, { ok: true }> {
@@ -336,14 +349,19 @@ async function executeRequestEmail(job: typeof dealFubJobs.$inferSelect): Promis
   if (!loaded || loaded.request.emailSentAt) return { ok: true, records: [] };
   const settings = await getDealSettings();
   const testTag = loaded.lead.isTest ? "TEST: " : "";
+  const agent = loaded.lead.agent;
+  const who = agent ? `${agent.name}'s client ${loaded.lead.name?.trim() || `lead ${loaded.lead.id}`}` : `Builder Deals lead ${loaded.lead.id}`;
+  const subjects = { tour: "Builder Deals tour request", ask: "Builder Deals question", save: "Builder Deals: a buyer saved a home" } as const;
   const sent = await sendBuilderDealsEmail({
-    category: "tour_request",
-    recipients: settings.alertRecipients,
-    subject: `${testTag}${loaded.request.requestType === "tour" ? "Builder Deals tour request" : "Builder Deals question"}`,
+    category: loaded.request.requestType === "save" ? "home_saved" : "tour_request",
+    // The buyer's own agent is told alongside the owners; a reel lead has no agent to add.
+    recipients: Array.from(new Set([...settings.alertRecipients, ...(agent?.email ? [agent.email] : [])])),
+    subject: `${testTag}${agent ? `${agent.name}'s client: ` : ""}${subjects[loaded.request.requestType]}`,
     content: [
       loaded.lead.isTest ? "TEST RECORD (full-pipeline test mode): eligible for Builder Deals cleanup." : null,
-      `Builder Deals lead ${loaded.lead.id} requested ${loaded.privateDescription}.`,
-      `Preferred: ${formatChicagoDateTime(loaded.request.preferredAt)}`,
+      loaded.request.requestType === "save" ? `${who} saved ${loaded.privateDescription}.` : `${who} requested ${loaded.privateDescription}.`,
+      loaded.request.requestType === "save" ? `Saved at: ${formatChicagoDateTime(loaded.request.preferredAt)}` : `Preferred: ${formatChicagoDateTime(loaded.request.preferredAt)}`,
+      agent ? `Sent through ${agent.name}'s client link; the FUB contact and task are assigned to ${agent.name}.` : null,
       "Review the protected request in Admin, Builder Deals.",
     ].filter(Boolean).join("\n"),
   });
@@ -394,7 +412,7 @@ async function executeLeadJob(job: typeof dealFubJobs.$inferSelect): Promise<Fub
   }
   // The test marker follows test-number membership, not an optional screening
   // flag. The value is captured only in the job runner and never browser-side.
-  const payload = { id: lead.id, phone: lead.phoneE164, email: lead.email, name: lead.name, instagramHandle: lead.instagramHandle, sourceCode: lead.sourceCode, consentText: lead.consentText, consentAt: lead.consentAt, consentIp: lead.consentIp, flags, timeline: lead.timeline, isTest: settings.testNumbers.includes(lead.phoneE164), fubPersonId: lead.fubPersonId };
+  const payload = { id: lead.id, phone: lead.phoneE164, email: lead.email, name: lead.name, instagramHandle: lead.instagramHandle, sourceCode: lead.sourceCode, consentText: lead.consentText, consentAt: lead.consentAt, consentIp: lead.consentIp, flags, timeline: lead.timeline, isTest: settings.testNumbers.includes(lead.phoneE164), fubPersonId: lead.fubPersonId, agent: await leadAgent(lead) };
   if (job.operation === "first_unlock") return sendBuilderDealsLeadToFub(payload);
   if (job.operation === "profile_update") return updateBuilderDealsProfileInFub(payload);
   return updateBuilderDealsLeadInFub(payload, metadata.reason ?? "returned for a new link", metadata.occurrenceId);
@@ -415,6 +433,8 @@ async function executeActivityJob(job: typeof dealFubJobs.$inferSelect): Promise
   ]);
   const views = viewRows.filter((row) => chicagoDay(row.viewedAt) === day);
   if (!views.length && !requests.length) return { ok: true, records: [] };
+  const saves = requests.filter((request) => request.requestType === "save");
+  const asks = requests.filter((request) => request.requestType !== "save");
   const communityIds = Array.from(new Set(views.map((view) => view.communityId)));
   const communities = communityIds.length ? await db.select({ id: dealCommunities.id, privateName: dealCommunities.privateName, publicLabel: dealCommunities.publicLabel }).from(dealCommunities).where(inArray(dealCommunities.id, communityIds)) : [];
   const lines = [`Builder Deals activity for ${day} (America/Chicago).`];
@@ -428,7 +448,8 @@ async function executeActivityJob(job: typeof dealFubJobs.$inferSelect): Promise
       lines.push(`- ${community ? `${community.privateName} (shown as ${community.publicLabel})` : `community ${communityId}`}: ${own.length} visit${own.length === 1 ? "" : "s"}, ${formatChicagoDateTime(first)}${own.length > 1 ? ` to ${formatChicagoDateTime(last)}` : ""}`);
     }
   }
-  if (requests.length) lines.push(`Tour and question requests: ${requests.length} (homes and preferred times are in the day's Builder Deals request note and task).`);
+  if (asks.length) lines.push(`Tour and question requests: ${asks.length} (homes and preferred times are in the day's Builder Deals request note and task).`);
+  if (saves.length) lines.push(`Homes saved: ${saves.length} (listed in the day's Builder Deals request note).`);
   return appendBuilderDealsActivity({ id: lead.id, fubPersonId: lead.fubPersonId, phoneE164: lead.phoneE164, email: lead.email }, day, lines.join("\n"));
 }
 

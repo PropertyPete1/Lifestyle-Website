@@ -14,6 +14,7 @@ import {
   dealPendingVerifications,
   dealPhotos,
   dealSettings,
+  dealTourRequests,
 } from "../drizzle/schema";
 import {
   DEALS_BLOCKED_SUFFIX,
@@ -67,6 +68,10 @@ export type DealSettings = {
   syncEmailRecipients: string[];
   /** Drive-time chip destinations measured from each community's ZIP centroid. */
   driveDestinations: string[];
+  /** Access length for a buyer who verified through an LDR agent's client link (reel leads use expiryHours). */
+  clientLinkExpiryHours: number;
+  /** How long an agent's client link can still be opened and verified through. */
+  clientLinkDays: number;
 };
 
 const DEFAULT_SETTINGS: DealSettings = {
@@ -95,6 +100,8 @@ const DEFAULT_SETTINGS: DealSettings = {
   alertMode: "immediate",
   syncEmailRecipients: ["peter@lifestyledesignrealty.com"],
   driveDestinations: ["downtown San Antonio", "Randolph AFB", "Lackland AFB", "The Pearl"],
+  clientLinkExpiryHours: 24 * 7,
+  clientLinkDays: 30,
 };
 
 /** Operational owner alerts go through the one Builder Deals email transport (owner notification is its fallback). */
@@ -416,7 +423,10 @@ export async function recordDealsLanding(input: { sourceCode: string; deviceHash
   if (!recent) await logDealEvent({ kind: "landed", ...input });
 }
 
-export async function getActiveBlock(input: { phone?: string; email?: string; deviceHash?: string }) {
+/** The reason written when a visitor answers "Yes" to the agent question; an LDR agent's own client is exempt from it. */
+export const HAS_AGENT_BLOCK_REASON = "Confirmed working with an agent";
+
+export async function getActiveBlock(input: { phone?: string; email?: string; deviceHash?: string; ignoreHasAgent?: boolean }) {
   const db = await getDb();
   if (!db) return undefined;
   const matches = [
@@ -426,7 +436,8 @@ export async function getActiveBlock(input: { phone?: string; email?: string; de
   ].filter(Boolean) as any[];
   if (!matches.length) return undefined;
   const now = new Date();
-  return (await db.select().from(dealBlocklist).where(and(or(...matches), or(isNull(dealBlocklist.expiresAt), gt(dealBlocklist.expiresAt, now)))).limit(1))[0];
+  const rows = await db.select().from(dealBlocklist).where(and(or(...matches), or(isNull(dealBlocklist.expiresAt), gt(dealBlocklist.expiresAt, now)))).limit(input.ignoreHasAgent ? 20 : 1);
+  return input.ignoreHasAgent ? rows.find((row) => row.reason !== HAS_AGENT_BLOCK_REASON) : rows[0];
 }
 
 export async function blockDealAccess(input: { phone?: string | null; email?: string | null; deviceHash?: string | null; searchPhone?: string | null; reason: string; expiresAt?: Date | null }) {
@@ -559,11 +570,28 @@ function publicIncentive(row: typeof dealIncentives.$inferSelect) {
   };
 }
 
-export async function gatedDealsCatalog(leadId: number) {
+/**
+ * Which list a session gets. The gated list is the reel buyer's: private names
+ * scrubbed and residue dropped. The full list is for the team and for buyers an
+ * LDR agent sent through a client link: the builder, community, address and
+ * plan are shown (names stay off the page markup only through the gate itself),
+ * and the builder's own page link is added for the team alone.
+ */
+export type DealsCatalogView = { view: "gated" } | { view: "full"; builderPages: boolean };
+
+/** Team sessions and agent-sent buyers see the full list; everyone else the scrubbed one. */
+export function catalogViewForLead(lead: Pick<typeof dealLeads.$inferSelect, "status" | "agentTeamId">): DealsCatalogView {
+  if (lead.status === "team") return { view: "full", builderPages: true };
+  if (lead.agentTeamId) return { view: "full", builderPages: false };
+  return { view: "gated" };
+}
+
+export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView = { view: "gated" }) {
   const db = await getDb();
   if (!db) return [];
   const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, leadId)).limit(1))[0];
   if (!lead || !["verified", "team"].includes(lead.status) || lead.expiresAt <= new Date()) return [];
+  const full = view.view === "full";
   const now = new Date();
   const settings = await getDealSettings();
   const { communityAreaMap } = await import("./dealsMap");
@@ -571,6 +599,7 @@ export async function gatedDealsCatalog(leadId: number) {
   const data = [] as unknown[];
   for (const community of communities) {
     const scrubNames = communityScrubConfig(community);
+    const scrub = (value: string) => full ? value : scrubPrivateNames(value, scrubNames);
     const [incentiveRows, homeRows] = await Promise.all([
       db.select().from(dealIncentives).where(liveIncentiveWhere(community.id, now, settings.incentiveLapseDays)).orderBy(desc(dealIncentives.confirmedAt)).limit(1),
       db.select().from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
@@ -596,15 +625,16 @@ export async function gatedDealsCatalog(leadId: number) {
         photos: photos.map((photo) => `/deals/mine/img/${photo.id}`),
         photoCount: photos.length,
         photosOnRequest: photos.length === 0,
+        ...(full ? { details: { address: home.privateAddress, planName: home.privatePlanName, builderPage: view.builderPages && /^https?:\/\//i.test(home.sourceUrl) ? home.sourceUrl : null } } : {}),
       });
     }
     const entry = {
-      label: scrubPrivateNames(community.publicLabel, scrubNames),
-      area: scrubPrivateNames(community.areaLabel, scrubNames),
-      schoolDistrict: scrubPrivateNames(community.schoolDistrict ?? "", scrubNames),
-      lotSizes: scrubPrivateNames(community.lotSizes ?? "", scrubNames),
-      amenities: (JSON.parse(community.amenities ?? "[]") as string[]).map((v) => scrubPrivateNames(v, scrubNames)),
-      driveTimes: (JSON.parse(community.driveTimeChips ?? "[]") as string[]).map((v) => scrubPrivateNames(v, scrubNames)),
+      label: scrub(community.publicLabel),
+      area: scrub(community.areaLabel),
+      schoolDistrict: scrub(community.schoolDistrict ?? ""),
+      lotSizes: scrub(community.lotSizes ?? ""),
+      amenities: (JSON.parse(community.amenities ?? "[]") as string[]).map(scrub),
+      driveTimes: (JSON.parse(community.driveTimeChips ?? "[]") as string[]).map(scrub),
       // Only the ZIP centroid and radius; never the community's own coordinates.
       areaMap: communityAreaMap(community),
       fromPrice: community.fromPrice,
@@ -612,11 +642,22 @@ export async function gatedDealsCatalog(leadId: number) {
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       incentive: incentiveRows[0] ? publicIncentive(incentiveRows[0]) : null,
       homes,
+      ...(full ? { details: { builderName: community.builder === "Manual" ? null : community.builder, communityName: community.privateName, address: community.privateAddress || null, salesLine: community.salesPhone, builderPage: view.builderPages && /^https?:\/\//i.test(community.sourceUrl) ? community.sourceUrl : null } } : {}),
     };
-    if (await dropPrivateResidue(community.id, entry, scrubNames, "gated")) continue;
+    if (!full && await dropPrivateResidue(community.id, entry, scrubNames, "gated")) continue;
     data.push(entry);
   }
   return data;
+}
+
+/** Opaque card handles of the homes this lead currently has saved. */
+export async function savedDealCards(leadId: number): Promise<string[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const saves = await db.select({ homeId: dealTourRequests.homeId }).from(dealTourRequests).where(and(eq(dealTourRequests.leadId, leadId), eq(dealTourRequests.requestType, "save"), isNull(dealTourRequests.removedAt)));
+  if (!saves.length) return [];
+  const homes = await db.select({ sourceKey: dealHomes.sourceKey }).from(dealHomes).where(inArray(dealHomes.id, Array.from(new Set(saves.map((save) => save.homeId)))));
+  return homes.map((home) => hashSecret(`deals-card:${home.sourceKey}`).slice(0, 20));
 }
 
 export async function isLiveDealSession(req: Request): Promise<{ leadId: number; lead: typeof dealLeads.$inferSelect; deviceHash: string } | null> {
@@ -640,7 +681,8 @@ export async function issueAccessToken(leadId: number, deviceHash: string, expir
   return token;
 }
 
-export async function exchangeAccessToken(req: Request, res: Response, rawToken: string): Promise<"ok" | "needs_gate" | "expired" | "cookie_blocked"> {
+/** "ok_team" is a live team session: the redirect goes to the agent tools instead of the buyer list. */
+export async function exchangeAccessToken(req: Request, res: Response, rawToken: string): Promise<"ok" | "ok_team" | "needs_gate" | "expired" | "cookie_blocked"> {
   const cookieState = ensureDealsCookies(req, res);
   if (!cookieState.hasProbe) return "cookie_blocked";
   const deviceHash = cookieState.deviceHash;
@@ -649,24 +691,34 @@ export async function exchangeAccessToken(req: Request, res: Response, rawToken:
   const token = (await db.select().from(dealAccessTokens).where(and(eq(dealAccessTokens.kind, "exchange"), eq(dealAccessTokens.tokenHash, hashSecret(rawToken)))).limit(1))[0];
   if (!token || token.revokedAt || token.expiresAt <= new Date()) return "expired";
   if (token.deviceHash !== deviceHash) return "needs_gate";
-  if (token.consumedAt) return (await isLiveDealSession(req)) ? "ok" : "expired";
+  if (token.consumedAt) {
+    const live = await isLiveDealSession(req);
+    return live ? (live.lead.status === "team" ? "ok_team" : "ok") : "expired";
+  }
   const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, token.leadId)).limit(1))[0];
   if (!lead || lead.expiresAt <= new Date() || !["verified", "team"].includes(lead.status)) return "expired";
   const session = randomOpaqueToken(32);
   await db.insert(dealAccessTokens).values({ leadId: lead.id, tokenHash: hashSecret(session), deviceHash, expiresAt: lead.expiresAt, kind: "session" });
   if (!token.consumedAt) await db.update(dealAccessTokens).set({ consumedAt: new Date() }).where(eq(dealAccessTokens.id, token.id));
   setDealCookie(res, DEALS_COOKIE.session, session, Math.max(60, Math.floor((lead.expiresAt.getTime() - Date.now()) / 1000)));
-  return "ok";
+  return lead.status === "team" ? "ok_team" : "ok";
 }
 
-export async function createPendingVerification(input: { req: Request; res: Response; rawPhone: string; choice: "buyer" | "has_agent"; source?: string | null; ig?: string | null }) {
+/** Buyers an LDR agent sent carry this source; it is never one of the reel codes. */
+export const AGENT_CLIENT_SOURCE = "agent";
+
+export async function createPendingVerification(input: { req: Request; res: Response; rawPhone: string; choice: "buyer" | "has_agent"; source?: string | null; ig?: string | null; clientLinkToken?: string | null }) {
   const settings = await getDealSettings();
   const normalized = normalizeUsPhone(input.rawPhone, { allowCanada: settings.allowCanada });
   if (!normalized.ok) return { ok: false as const, kind: normalized.reason === "outside_us" ? "outside_us" : "invalid_phone" };
   const { deviceHash, hasProbe } = ensureDealsCookies(input.req, input.res);
   if (!hasProbe) return { ok: false as const, kind: "cookie_blocked" };
   const ip = realClientIp(input.req);
-  const sourceCode = currentDealSource(input.source, settings);
+  // An agent's client link wins over any reel code on the same URL; an expired
+  // or revoked link simply falls back to the ordinary gate.
+  const { resolveClientLink } = await import("./dealsClientLinks");
+  const clientLink = input.clientLinkToken ? await resolveClientLink(input.clientLinkToken) : null;
+  const sourceCode = clientLink ? AGENT_CLIENT_SOURCE : currentDealSource(input.source, settings);
   const ig = sanitizeInstagramHandle(input.ig);
   const google = getGoogleDealsIdentity(input.req);
   const isTest = settings.testNumbers.includes(normalized.e164);
@@ -675,12 +727,12 @@ export async function createPendingVerification(input: { req: Request; res: Resp
     phone: normalized.e164, email: google?.email, deviceHash, isTest,
     testSkipChecks: settings.testNumbersSkipChecks, testTeamNumbers: settings.testTeamNumbers,
     brokerageDomains: settings.brokerageDomains, fubRealtorTags: settings.fubRealtorTags,
-    fubRealtorSources: settings.fubRealtorSources, choice: input.choice,
+    fubRealtorSources: settings.fubRealtorSources, choice: clientLink ? "buyer" : input.choice, clientLink: Boolean(clientLink),
   });
   // Staff/test previews must not create an accidental "has agent" device
   // block merely because they test the visible confirmation choice.
   if (input.choice === "has_agent" && !eligibility.team) {
-    await blockDealAccess({ searchPhone: normalized.e164, deviceHash, reason: "Confirmed working with an agent", expiresAt: new Date(Date.now() + (isTest ? 10 * 60_000 : settings.hasAgentBlockDays * 86400_000)) });
+    await blockDealAccess({ searchPhone: normalized.e164, deviceHash, reason: HAS_AGENT_BLOCK_REASON, expiresAt: new Date(Date.now() + (isTest ? 10 * 60_000 : settings.hasAgentBlockDays * 86400_000)) });
     await logDealEvent({ kind: "has_agent", sourceCode, deviceHash, ip, phone: normalized.e164 });
     return { ok: false as const, kind: "has_agent" };
   }
@@ -706,13 +758,15 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   const db = await getDb();
   if (!db) return { ok: false as const, kind: "unavailable" };
   const opaque = randomOpaqueToken(24);
+  // A team member who opens a client link is still the team member: the link is not attached.
+  const clientLinkRef = clientLink && !eligibility.team ? { clientLinkId: clientLink.link.id, agentTeamId: clientLink.agent.teamId } : {};
   await db.insert(dealPendingVerifications).values({
     opaqueIdHash: hashSecret(opaque), phoneE164: normalized.e164, choice: "buyer", sourceCode, instagramHandle: ig,
-    deviceHash, clientIp: ip, consentAt: new Date(), flags: JSON.stringify({ google, flags: [...eligibility.flags, ...profileFlags], team: eligibility.team }), expiresAt: new Date(Date.now() + PENDING_MINUTES * 60_000),
+    deviceHash, clientIp: ip, consentAt: new Date(), flags: JSON.stringify({ google, flags: [...eligibility.flags, ...profileFlags], team: eligibility.team, ...clientLinkRef }), expiresAt: new Date(Date.now() + PENDING_MINUTES * 60_000),
   });
   await logDealEvent({ kind: "consent", sourceCode, deviceHash, ip, phone: normalized.e164, detail: DEALS_CONSENT_TEXT });
   setDealCookie(input.res, DEALS_COOKIE.pending, opaque, PENDING_MINUTES * 60);
-  return { ok: true as const, pendingId: opaque, phone: normalized.e164, displayPhone: normalized.display, isTest, settings, sourceCode, deviceHash, ip };
+  return { ok: true as const, pendingId: opaque, phone: normalized.e164, displayPhone: normalized.display, isTest, settings, sourceCode, deviceHash, ip, clientLink: Boolean(clientLink) };
 }
 
 async function lookupPending(req: Request) {
@@ -774,7 +828,8 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   if (!pending || !deviceHash) return { ok: false as const, kind: "expired" };
   const settings = await getDealSettings();
   const isTest = settings.testNumbers.includes(pending.phoneE164);
-  const identity = JSON.parse(pending.flags || "{}") as { google?: GoogleDealsIdentity; flags?: string[]; team?: boolean; completed?: VerificationReceipt };
+  const identity = JSON.parse(pending.flags || "{}") as { google?: GoogleDealsIdentity; flags?: string[]; team?: boolean; completed?: VerificationReceipt; clientLinkId?: number; agentTeamId?: number };
+  const clientLink = Number.isSafeInteger(identity.clientLinkId) && Number.isSafeInteger(identity.agentTeamId) ? { linkId: identity.clientLinkId as number, agentTeamId: identity.agentTeamId as number } : null;
   const cookies = parseCookie(input.req.headers.cookie || "");
   // Both cookie values are high-entropy, HTTP-only, device-bound secrets. This
   // stable value lets a concurrent response redirect to the very same link.
@@ -807,7 +862,7 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
     phone: pending.phoneE164, email: identity.google?.email, deviceHash,
     isTest, testSkipChecks: settings.testNumbersSkipChecks, testTeamNumbers: settings.testTeamNumbers,
     brokerageDomains: settings.brokerageDomains, fubRealtorTags: settings.fubRealtorTags,
-    fubRealtorSources: settings.fubRealtorSources,
+    fubRealtorSources: settings.fubRealtorSources, clientLink: Boolean(clientLink),
   });
   if (!eligibility.allowed) {
     await blockVerifiedDealsIdentity({ phone: pending.phoneE164, email: identity.google?.email, deviceHash, reason: eligibility.blockedBy ?? "post_verification" }, db);
@@ -816,9 +871,15 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
     await db.insert(dealEvents).values({ kind: "blocked", sourceCode: pending.sourceCode, deviceHash, ipPrefix: clientIpKey(pending.clientIp), phoneE164: pending.phoneE164, detail: eligibility.blockedBy ?? "post_verification" });
     return { ok: false as const, kind: "blocked" };
   }
+  // The link belongs to a buyer: a team member stays a team member even when they open one.
+  const attachLink = clientLink && !eligibility.team ? clientLink : null;
+  const accessHours = attachLink ? settings.clientLinkExpiryHours : settings.expiryHours;
   let old = (await db.select().from(dealLeads).where(eq(dealLeads.phoneE164, pending.phoneE164)).limit(1))[0];
   let reverifiedActive = Boolean(old && old.expiresAt > new Date());
-  let expiresAt = old && old.expiresAt > new Date() ? old.expiresAt : new Date(Date.now() + settings.expiryHours * 60 * 60_000);
+  // An agent's client keeps the longer access window even when a shorter reel link is still live.
+  const freshExpiry = new Date(Date.now() + accessHours * 60 * 60_000);
+  let expiresAt = old && old.expiresAt > new Date() ? (attachLink && old.expiresAt < freshExpiry ? freshExpiry : old.expiresAt) : freshExpiry;
+  const agentFields = attachLink ? { agentTeamId: attachLink.agentTeamId, clientLinkId: attachLink.linkId } : {};
   // "fub_check_deferred" is an operational marker for the deferred re-check,
   // never a persisted lead flag; it is carried to the caller separately.
   const fubCheckDeferred = eligibility.flags.includes("fub_check_deferred") || (identity.flags ?? []).includes("fub_check_deferred");
@@ -830,11 +891,11 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   const instagramHandle = handleOwner ? null : pending.instagramHandle;
   let leadId: number;
   if (old) {
-    await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? instagramHandle, email: old.email ?? identity.google?.email ?? null, name: old.name ?? identity.google?.name ?? null, flags: JSON.stringify(flags) }).where(eq(dealLeads.id, old.id));
+    await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? instagramHandle, email: old.email ?? identity.google?.email ?? null, name: old.name ?? identity.google?.name ?? null, flags: JSON.stringify(flags), ...agentFields }).where(eq(dealLeads.id, old.id));
     leadId = old.id;
   } else {
     try {
-      const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle, email: identity.google?.email ?? null, name: identity.google?.name ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentAt: pending.consentAt, consentIp: pending.clientIp, deviceHash, expiresAt, status: eligibility.team ? "team" : "verified", flags: JSON.stringify(flags) });
+      const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle, email: identity.google?.email ?? null, name: identity.google?.name ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentAt: pending.consentAt, consentIp: pending.clientIp, deviceHash, expiresAt, status: eligibility.team ? "team" : "verified", flags: JSON.stringify(flags), ...agentFields });
       leadId = Number((result as unknown as [{ insertId: number }])[0].insertId);
     } catch (error) {
       // Two verify submissions can legitimately race. The unique normalized
@@ -846,15 +907,19 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
       if (!raced) throw error;
       old = raced;
       reverifiedActive = raced.expiresAt > new Date();
-      expiresAt = reverifiedActive ? raced.expiresAt : expiresAt;
-      await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, flags: JSON.stringify(flags) }).where(eq(dealLeads.id, raced.id));
+      expiresAt = reverifiedActive ? (attachLink && raced.expiresAt < freshExpiry ? freshExpiry : raced.expiresAt) : expiresAt;
+      await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, flags: JSON.stringify(flags), ...agentFields }).where(eq(dealLeads.id, raced.id));
       leadId = raced.id;
     }
+  }
+  if (attachLink) {
+    const { attachLeadToClientLink } = await import("./dealsClientLinks");
+    await attachLeadToClientLink(db, attachLink.linkId, leadId);
   }
   await db.insert(dealAccessTokens).values({ leadId, tokenHash: hashSecret(token), deviceHash, expiresAt, kind: "exchange" });
   await db.update(dealPendingVerifications).set({ flags: JSON.stringify({ ...identity, completed: { codeHash: hashSecret(input.code), leadId, expiresAt: expiresAt.toISOString(), isTeam: eligibility.team, isTest, fubCheckDeferred } satisfies VerificationReceipt }) }).where(eq(dealPendingVerifications.id, pending.id));
   clearDealCookie(input.res, DEALS_COOKIE.pending);
-  await db.insert(dealEvents).values({ leadId, kind: eligibility.team ? "team" : "verified", sourceCode: pending.sourceCode, deviceHash, ipPrefix: clientIpKey(pending.clientIp), phoneE164: pending.phoneE164, detail: input.verifiedBy });
+  await db.insert(dealEvents).values({ leadId, kind: eligibility.team ? "team" : "verified", sourceCode: pending.sourceCode, deviceHash, ipPrefix: clientIpKey(pending.clientIp), phoneE164: pending.phoneE164, detail: attachLink ? `${input.verifiedBy};client_link:${attachLink.linkId}` : input.verifiedBy });
   return { ok: true as const, token, leadId, expiresAt, firstUnlock: !old, reverifiedActive, isTeam: eligibility.team, isTest, fubCheckDeferred, duplicate: false };
 }
 
@@ -884,5 +949,5 @@ export function safeBlockedMessage(settings: DealSettings) {
 }
 
 export function leadPresentation(lead: typeof dealLeads.$inferSelect) {
-  return { display: displayForLead(lead), expiresAt: lead.expiresAt.toISOString(), name: lead.name, timeline: lead.timeline, teamPreview: lead.status === "team" };
+  return { display: displayForLead(lead), expiresAt: lead.expiresAt.toISOString(), name: lead.name, timeline: lead.timeline, teamPreview: lead.status === "team", agentClient: Boolean(lead.agentTeamId) };
 }

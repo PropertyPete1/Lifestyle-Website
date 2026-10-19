@@ -106,13 +106,17 @@ describe("gated catalog stays inside a 375 px phone viewport (A19)", () => {
     expect(html).toContain("Add your name so we know who to text.");
   });
 
-  it("replaces the buyer buttons with a non-clickable Team preview label for team sessions", () => {
+  it("replaces the buyer buttons with a non-clickable Team view label for team sessions and links the agent tools", () => {
     const team = render({ lead: { teamPreview: true, name: "Peter" } });
     expect(team).not.toContain("Tour this home with us");
     expect(team).not.toContain("Ask about this one");
-    expect(team.match(/>Team preview</g)?.length).toBe(3);
-    expect(team).toContain("Private buyer list · Team preview");
+    // Three card labels plus the page eyebrow.
+    expect(team.match(/>Team view</g)?.length).toBe(4);
+    expect(team).toContain(">Team view</p><h1");
+    expect(team).toContain('href="/deals/team"');
     expect(team).not.toContain("Add your name so we know who to text.");
+    // A team member who has not given a name is never asked for one either.
+    expect(render({ lead: { teamPreview: true, name: null } })).not.toContain("Add your name so we know who to text.");
   });
 });
 

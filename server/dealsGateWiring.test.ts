@@ -39,6 +39,12 @@ vi.mock("@/lib/trpc", () => ({
       publicCatalog: { useQuery: () => mocks.publicCatalog() },
       updateProfile: { useMutation: (options: Record<string, unknown>) => { mocks.updateProfile.options = options; return mocks.updateProfileResult; } },
       requestHome: { useMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }) },
+      saveHome: { useMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }) },
+      team: {
+        workspace: { useQuery: () => ({ data: undefined, isLoading: true, isError: false, error: null }) },
+        createClientLink: { useMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null, data: undefined }) },
+        revokeClientLink: { useMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }) },
+      },
       start: { useMutation: mocks.useMutation(mocks.start) },
       resend: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
       changeNumber: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },

@@ -101,6 +101,30 @@ describe("Builder Deals first unlock through the FUB events endpoint", () => {
     expect(String((event.body?.person as Record<string, unknown>).assignedUserId)).toBe("456");
   });
 
+  it("assigns an agent's client to that agent's FUB user, tags them Agent Client and names the agent in the event note", async () => {
+    const calls = mockFub((call) => {
+      if (path(call).startsWith("/people?")) return jsonResponse({ people: [] });
+      if (path(call).startsWith("/users?")) return jsonResponse(peterUsers);
+      if (path(call) === "/events" && call.method === "POST") return jsonResponse({ id: 9002, firstName: "Maria", phones: [{ value: "+12105550123" }], tags: ["IG Builder Deals"] }, 201);
+      if (path(call) === "/people/9002" && call.method === "PUT") return jsonResponse({});
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    const result = await sendBuilderDealsLeadToFub({ ...lead, name: "Maria Lopez", sourceCode: "agent", agent: { name: "Tiffany Agent", fubUserId: "77", email: "tiffany@example.com" } });
+    expect(result).toMatchObject({ ok: true, personId: "9002" });
+    const event = calls.find((call) => path(call) === "/events")!;
+    const person = event.body?.person as Record<string, unknown>;
+    expect(String(person.assignedUserId)).toBe("77");
+    expect(person.tags).toEqual(expect.arrayContaining(["IG Builder Deals", "Agent Client"]));
+    expect(String(event.body?.message)).toContain("LDR agent: Tiffany Agent (sent through their client link)");
+    expect(String(event.body?.message)).toContain("First Builder Deals unlock through an agent's client link.");
+    const put = calls.find((call) => call.method === "PUT")!;
+    expect(String(put.body?.assignedUserId)).toBe("77");
+    // An agent row without a FUB user falls back to Peter.
+    calls.length = 0;
+    await sendBuilderDealsLeadToFub({ ...lead, agent: { name: "Manual Agent", fubUserId: null, email: null } });
+    expect(String((calls.find((call) => path(call) === "/events")!.body?.person as Record<string, unknown>).assignedUserId)).toBe("456");
+  });
+
   it("records a 200 answer for a contact we did not find as pre-existing, never as created by us", async () => {
     mockFub((call) => {
       if (path(call).startsWith("/people?")) return jsonResponse({ people: [] });
@@ -321,6 +345,22 @@ describe("Builder Deals daily request notes", () => {
     expect(String(note.body?.body)).toContain("TEST RECORD - eligible for Builder Deals cleanup");
     expect(String(note.body?.body)).toContain(`${builderDealsLeadMarker(requestLead.id)}:request-day:${firstRequest.chicagoDay}`);
     expect(isBuilderDealsSystemNote({ body: note.body?.body })).toBe(true);
+  });
+
+  it("gives an agent's client's tasks to the agent, and files a saved home as a Follow Up task", async () => {
+    const calls = mockFub((call) => {
+      if (path(call).startsWith("/users?")) return jsonResponse(peterUsers);
+      if (path(call) === "/tasks" && call.method === "POST") return jsonResponse({ id: 501 });
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    const agentLead = { ...requestLead, agent: { name: "Tiffany Agent", fubUserId: "77", email: "tiffany@example.com" } };
+    const save = { ...firstRequest, id: 43, requestType: "save" as const };
+    await expect(createBuilderDealsTourTask({ lead: agentLead, request: save, privateDescription: "118 Fixture Lakes Blvd (Brandon), $489,990" })).resolves.toMatchObject({ ok: true, taskId: "501" });
+    await expect(createBuilderDealsTourTask({ lead: agentLead, request: firstRequest, privateDescription: "1 Private Street" })).resolves.toMatchObject({ ok: true, taskId: "501" });
+    const [saveTask, tourTask] = calls.filter((call) => path(call) === "/tasks" && call.method === "POST");
+    expect(saveTask!.body).toMatchObject({ name: "Builder Deals saved home: 118 Fixture Lakes Blvd (Brandon), $489,990", assignedUserId: 77, type: "Follow Up" });
+    expect(String(saveTask!.body?.description)).toContain("Saved: 118 Fixture Lakes Blvd (Brandon), $489,990");
+    expect(tourTask!.body).toMatchObject({ name: "Builder Deals tour: 1 Private Street", assignedUserId: 77, type: "Appointment" });
   });
 
   it("writes one activity note per lead per Chicago day and records its id", async () => {

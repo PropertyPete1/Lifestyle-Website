@@ -10,6 +10,8 @@ export type GateStep = "gate" | "confirm-agent" | "code" | "blocked" | "expired"
 export type GateParams = {
   src?: string;
   ig?: string;
+  /** An LDR agent's client link token (?c=); it survives reloads like src and ig. */
+  c?: string;
   expired: boolean;
   error: boolean;
   cookieBlocked: boolean;
@@ -105,12 +107,21 @@ export function boundInstagramHandle(value: string | null | undefined): string |
   return value.trim().replace(/^@+/, "").replace(/[^A-Za-z0-9._]/g, "").slice(0, INSTAGRAM_HANDLE_MAX) || undefined;
 }
 
+/** The client link token exactly as the server validates it: 20 to 64 URL-safe characters, else nothing. */
+export const CLIENT_LINK_TOKEN_MAX = 64;
+export function boundClientLinkToken(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  const token = value.trim();
+  return /^[A-Za-z0-9_-]{20,64}$/.test(token) ? token : undefined;
+}
+
 export function readGateParams(search: string): GateParams {
   const params = new URLSearchParams(search);
   const codeError = params.get("codeError");
   return {
     src: boundSourceCode(params.get("src")),
     ig: boundInstagramHandle(params.get("ig")),
+    c: boundClientLinkToken(params.get("c")),
     expired: params.get("expired") === "1",
     error: params.get("error") === "1",
     cookieBlocked: params.get("cookieBlocked") === "1",
@@ -120,7 +131,7 @@ export function readGateParams(search: string): GateParams {
   };
 }
 
-/** The same URL without the one-time outcome flags; src and ig survive a reload. */
+/** The same URL without the one-time outcome flags; src, ig and c survive a reload. */
 export function stripTransientGateParams(href: string): string {
   const url = new URL(href, "http://localhost");
   for (const key of TRANSIENT_GATE_PARAMS) url.searchParams.delete(key);

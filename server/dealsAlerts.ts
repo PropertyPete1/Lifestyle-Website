@@ -7,7 +7,9 @@ import { getDealSettings } from "./dealsService";
 
 export type DealAlertKind = "first_unlock" | "profile_flag";
 type AlertRow = typeof dealAlerts.$inferSelect;
-type AlertLead = Pick<typeof dealLeads.$inferSelect, "id" | "name" | "phoneE164" | "email" | "instagramHandle" | "sourceCode" | "timeline">;
+type AlertLead = Pick<typeof dealLeads.$inferSelect, "id" | "name" | "phoneE164" | "email" | "instagramHandle" | "sourceCode" | "timeline"> & { agentTeamId?: number | null };
+/** The agent who sent the buyer; they receive the buyer's alerts alongside the owners. */
+type AlertAgent = { name: string; email: string | null };
 
 const STALE_SEND_MS = 15 * 60_000;
 const DEFAULT_SITE_ORIGIN = "https://lifestyledesignrealty.com";
@@ -56,11 +58,12 @@ async function queueDealAlert(input: {
   kind: DealAlertKind;
   subject: string;
   content: string;
+  extraRecipients?: readonly string[];
 }) {
   const db = await getDb();
   if (!db) return { queued: false, reason: "database_unavailable" as const };
   const settings = await getDealSettings();
-  const recipients = validRecipients(settings.alertRecipients);
+  const recipients = validRecipients([...settings.alertRecipients, ...(input.extraRecipients ?? [])]);
   const deliveryMode = settings.alertMode;
   const scheduledFor = deliveryMode === "immediate" ? new Date() : nextHour();
   const result = await db.insert(dealAlerts).values({
@@ -103,13 +106,15 @@ export type FirstUnlockAlertDetails = {
  */
 export async function queueFirstUnlockAlert(lead: AlertLead, details: FirstUnlockAlertDetails = {}) {
   const flags = Array.from(new Set((details.flags ?? []).map((flag) => flag.trim()).filter(Boolean)));
+  const agent = await alertAgent(lead);
   return queueDealAlert({
     dedupeKey: `first_unlock:${lead.id}`,
     lead,
     kind: "first_unlock",
-    subject: "Builder Deals: new buyer unlocked the list",
+    subject: agent ? `Builder Deals: ${agent.name}'s client unlocked the list` : "Builder Deals: new buyer unlocked the list",
+    extraRecipients: agent?.email ? [agent.email] : [],
     content: [
-      "A buyer unlocked Builder Deals for the first time.",
+      agent ? `${agent.name}'s client unlocked Builder Deals through their client link. The FUB contact is assigned to ${agent.name}.` : "A buyer unlocked Builder Deals for the first time.",
       ...(details.previouslyOptedOut ? ["", "Previously opted out, do not text manually."] : []),
       "",
       ...privateLeadLines(lead),
@@ -122,6 +127,13 @@ export async function queueFirstUnlockAlert(lead: AlertLead, details: FirstUnloc
       `Block and kill link (opens admin, login required, confirm button): ${adminLeadLink(lead.id)}`,
     ].join("\n"),
   });
+}
+
+async function alertAgent(lead: AlertLead): Promise<AlertAgent | null> {
+  if (!lead.agentTeamId) return null;
+  const { agentForTeamId } = await import("./dealsClientLinks");
+  const agent = await agentForTeamId(lead.agentTeamId);
+  return agent ? { name: agent.name, email: agent.email } : null;
 }
 
 /** Queue one alert only when a newly discovered profile screening flag exists (the name prompt answered later). */

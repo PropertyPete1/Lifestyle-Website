@@ -9,6 +9,7 @@ import { ManualHomesSection } from "@/components/builder-deals/ManualHomesSectio
 import { LeadsSection } from "@/components/builder-deals/LeadsSection";
 import { FunnelSection } from "@/components/builder-deals/FunnelSection";
 import { TeamSection } from "@/components/builder-deals/TeamSection";
+import { ClientLinksSection } from "@/components/builder-deals/ClientLinksSection";
 import { BlocklistSection, KnownAgentsSection } from "@/components/builder-deals/ScreeningSections";
 import { SettingsSection } from "@/components/builder-deals/SettingsSection";
 import { TrecSection } from "@/components/builder-deals/TrecSection";
@@ -127,6 +128,7 @@ function BuilderDealsAdminContent() {
       <LeadsSection overview={overview} />
       <FunnelSection activeReelCodes={settings?.activeReelCodes ?? []} />
       <TeamSection settings={settings} />
+      <ClientLinksSection overview={overview} />
       <KnownAgentsSection overview={overview} />
       <BlocklistSection overview={overview} />
       {settingsQuery.isLoading && <section className="border border-border bg-card p-5 text-sm text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin text-gold" /> Loading Builder Deals settings...</section>}

@@ -22,8 +22,11 @@ export type FubPerson = {
   phones?: FubValue[];
   [key: string]: unknown;
 };
-type BuilderLead = { id: number; phone: string; email?: string | null; name?: string | null; instagramHandle?: string | null; sourceCode: string; consentText: string; consentAt: Date; consentIp: string | null; flags?: string[]; timeline?: string | null; isTest?: boolean; fubPersonId?: string | null };
+/** The LDR agent who sent a buyer their client link; FUB objects for that buyer belong to this user, not Peter. */
+export type FubAgentRef = { name: string; fubUserId: string | null; email: string | null };
+type BuilderLead = { id: number; phone: string; email?: string | null; name?: string | null; instagramHandle?: string | null; sourceCode: string; consentText: string; consentAt: Date; consentIp: string | null; flags?: string[]; timeline?: string | null; isTest?: boolean; fubPersonId?: string | null; agent?: FubAgentRef | null };
 type FubIdentity = { phone?: string | null; email?: string | null };
+const AGENT_CLIENT_TAG = "Agent Client";
 
 export type FubRecordWrite = { kind: "person" | "event" | "note" | "task"; fubId: string; createdByUs: boolean };
 /** Facts about the pre-existing FUB contact that only the unlock alert needs. */
@@ -41,7 +44,7 @@ function intentTag(timeline?: string | null) {
   return "Intent - Cold";
 }
 function tagsFor(lead: BuilderLead) {
-  return Array.from(new Set([BASE_TAG, ...(lead.flags ?? []).filter((flag) => flag === "Possible Agent - TREC Name Match" || flag === "Possible Agent - Handle"), intentTag(lead.timeline), lead.isTest ? "TEST" : null].filter(Boolean) as string[]));
+  return Array.from(new Set([BASE_TAG, ...(lead.flags ?? []).filter((flag) => flag === "Possible Agent - TREC Name Match" || flag === "Possible Agent - Handle"), intentTag(lead.timeline), lead.agent ? AGENT_CLIENT_TAG : null, lead.isTest ? "TEST" : null].filter(Boolean) as string[]));
 }
 function stringValue(value: unknown): string | null {
   return typeof value === "string" || typeof value === "number" ? String(value).trim() || null : null;
@@ -294,6 +297,7 @@ async function unlockScreening(existing: FubPerson | null, notes: unknown[], pet
 function leadNote(lead: BuilderLead, action: string, operation: "first_unlock" | "reverify", occurrenceId?: string) {
   return [
     `Builder Deals ${builderDealsOperationMarker(lead.id, operation, occurrenceId)}`, action, `Source: ${lead.sourceCode}`,
+    lead.agent ? `LDR agent: ${lead.agent.name} (sent through their client link)` : undefined,
     lead.instagramHandle ? `Instagram: @${lead.instagramHandle}` : undefined,
     lead.isTest ? "TEST RECORD - eligible for Builder Deals cleanup" : undefined,
     `TCPA consent captured: ${lead.consentAt.toISOString()}`,
@@ -358,20 +362,28 @@ async function postFubNote(personId: string, subject: string, body: string): Pro
  * existing person, 204 = the lead flow ignored/archived the event); it returns
  * no event id, so no event record is written.
  */
+/** The FUB user a new or unassigned Builder Deals contact belongs to: the sending agent when there is one, else Peter. */
+async function assigneeFor(lead: Pick<BuilderLead, "agent">) {
+  const agentId = lead.agent?.fubUserId?.trim();
+  return agentId ? agentId : peterUserId();
+}
+
 export async function sendBuilderDealsLeadToFub(lead: BuilderLead): Promise<FubDeliveryResult> {
   try {
     const existing = await findPerson(lead);
     const peterId = await peterUserId();
+    const assigneeId = await assigneeFor(lead);
     const history: FubHistory = existing?.id ? await personHistory(existing.id) : { notes: [], events: [], available: true };
-    const screening = await unlockScreening(existing, history.notes, peterId);
+    // "Already assigned" is measured against the user who should own this contact.
+    const screening = await unlockScreening(existing, history.notes, assigneeId ?? peterId);
     if (existing?.id && historyHasMarker(history, builderDealsOperationMarker(lead.id, "first_unlock"))) {
       return { ok: true, personId: String(existing.id), records: [{ kind: "person", fubId: String(existing.id), createdByUs: false }], screening };
     }
-    if (!existing?.assignedUserId && !peterId) return { ok: false, error: "Peter FUB user not found" };
+    if (!existing?.assignedUserId && !assigneeId) return { ok: false, error: "Peter FUB user not found" };
     const body = {
       source: "IG Builder Deals", system: "Lifestyle Design Realty Website", type: "General Inquiry",
-      message: leadNote(lead, "First Builder Deals unlock.", "first_unlock"),
-      person: personBody(lead, existing, { assignedUserId: peterId }),
+      message: leadNote(lead, lead.agent ? "First Builder Deals unlock through an agent's client link." : "First Builder Deals unlock.", "first_unlock"),
+      person: personBody(lead, existing, { assignedUserId: assigneeId }),
     };
     const res = await fub("/events", { method: "POST", body: JSON.stringify(body) });
     if (res.status === 204) {
@@ -387,8 +399,8 @@ export async function sendBuilderDealsLeadToFub(lead: BuilderLead): Promise<FubD
     const records: FubRecordWrite[] = [{ kind: "person", fubId: String(personId), createdByUs }];
     // Assignment repair is best-effort after the irreversible event. A repair
     // failure must never retry the event or trigger a second action plan.
-    if (peterId && (!existing?.id || !existing.assignedUserId)) {
-      try { await putPersonUnion(String(personId), existing ?? returned, lead, { assignedUserId: peterId, forceAssignment: true }); }
+    if (assigneeId && (!existing?.id || !existing.assignedUserId)) {
+      try { await putPersonUnion(String(personId), existing ?? returned, lead, { assignedUserId: assigneeId, forceAssignment: true }); }
       catch { return { ok: true, personId: String(personId), records, warning: "FUB assignment repair failed", screening }; }
     }
     return { ok: true, personId: String(personId), records, screening };
@@ -438,8 +450,10 @@ export function formatChicagoDateTime(value: Date) {
   }).format(value);
 }
 
-type RequestLead = { id: number; fubPersonId: string | null; phoneE164: string; email: string | null; name?: string | null; instagramHandle?: string | null; sourceCode?: string; consentText?: string; consentAt?: Date; consentIp?: string | null; isTest?: boolean };
-type TourRequest = { id: number; requestType: "tour" | "ask"; preferredAt: Date; chicagoDay: string; fubTaskId: string | null; fubNoteSentAt: Date | null };
+type RequestLead = { id: number; fubPersonId: string | null; phoneE164: string; email: string | null; name?: string | null; instagramHandle?: string | null; sourceCode?: string; consentText?: string; consentAt?: Date; consentIp?: string | null; isTest?: boolean; agent?: FubAgentRef | null };
+export type DealsRequestType = "tour" | "ask" | "save";
+type TourRequest = { id: number; requestType: DealsRequestType; preferredAt: Date; chicagoDay: string; fubTaskId: string | null; fubNoteSentAt: Date | null };
+const REQUEST_LABEL: Record<DealsRequestType, string> = { tour: "Tour", ask: "Question", save: "Saved" };
 /** Toggle (c): everything a full-pipeline test lead creates in FUB is marked TEST so cleanup and the team can tell it apart. */
 const TEST_RECORD_LINE = "TEST RECORD - eligible for Builder Deals cleanup";
 function testPrefix(lead: Pick<RequestLead, "isTest">) { return lead.isTest ? "TEST " : ""; }
@@ -454,17 +468,20 @@ function requestMarker(leadId: number, requestId: number) { return `${builderDea
 function requestDayMarker(leadId: number, chicagoDay: string) { return `${builderDealsLeadMarker(leadId)}:request-day:${chicagoDay}`; }
 function activityDayMarker(leadId: number, chicagoDay: string) { return `${builderDealsLeadMarker(leadId)}:activity:${chicagoDay}`; }
 function requestLine(request: TourRequest, privateDescription: string) {
-  return `${request.requestType === "tour" ? "Tour" : "Question"}: ${privateDescription}\nPreferred: ${formatChicagoDateTime(request.preferredAt)}`;
+  if (request.requestType === "save") return `Saved: ${privateDescription}\nSaved at: ${formatChicagoDateTime(request.preferredAt)}`;
+  return `${REQUEST_LABEL[request.requestType]}: ${privateDescription}\nPreferred: ${formatChicagoDateTime(request.preferredAt)}`;
 }
 
-/** Create one FUB task for a Chicago-day request group. */
+/** Create one FUB task for a Chicago-day request group; it belongs to the buyer's agent when they have one. */
 export async function createBuilderDealsTourTask(input: { lead: RequestLead; request: TourRequest; privateDescription: string }): Promise<FubDeliveryResult> {
   try {
     const personId = await taskPersonId(input.lead);
-    const assignedUserId = await peterUserId();
+    const assignedUserId = await assigneeFor(input.lead);
     if (!personId || !assignedUserId) return { ok: false, error: "FUB contact or Peter assignment unavailable" };
     const description = [requestMarker(input.lead.id, input.request.id), ...testLines(input.lead), requestLine(input.request, input.privateDescription)].join("\n");
-    const response = await fub("/tasks", { method: "POST", body: JSON.stringify({ personId: Number(personId), assignedUserId: Number(assignedUserId), name: `${testPrefix(input.lead)}Builder Deals ${input.request.requestType}: ${input.privateDescription}`, description, type: "Appointment", dueDateTime: input.request.preferredAt.toISOString() }) });
+    const save = input.request.requestType === "save";
+    const name = `${testPrefix(input.lead)}Builder Deals ${save ? "saved home" : input.request.requestType}: ${input.privateDescription}`;
+    const response = await fub("/tasks", { method: "POST", body: JSON.stringify({ personId: Number(personId), assignedUserId: Number(assignedUserId), name, description, type: save ? "Follow Up" : "Appointment", dueDateTime: input.request.preferredAt.toISOString() }) });
     const task = await response.json().catch(() => ({})) as { id?: string | number; task?: { id?: string | number } };
     const taskId = task.task?.id ?? task.id;
     if (!taskId) return { ok: false, error: "FUB task did not return an id" };

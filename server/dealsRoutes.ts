@@ -35,7 +35,9 @@ export function registerDealsRoutes(app: Express) {
       return;
     }
     const result = await exchangeAccessToken(req, res, token);
+    // Team members land on their agent tools; buyers on their list.
     if (result === "ok") res.redirect(302, "/deals/mine");
+    else if (result === "ok_team") res.redirect(302, "/deals/team");
     else if (result === "needs_gate") res.redirect(302, "/deals?gate=1");
     else if (result === "cookie_blocked") res.redirect(302, "/deals?cookieBlocked=1");
     else res.redirect(302, "/deals?expired=1");
@@ -86,6 +88,17 @@ export function registerDealsRoutes(app: Express) {
       const hadSession = Boolean(parseCookie(req.headers.cookie || "")[DEALS_COOKIE.session]);
       return res.redirect(302, hadSession ? "/deals?expired=1" : "/deals?gate=1");
     }
+    next();
+  }));
+  // Agent tools: the same session rules as /deals/mine, and a buyer session is sent to its own list.
+  app.get("/deals/team", safe(async (req, res, next) => {
+    const { isLiveDealSession } = await import("./dealsService");
+    const session = await isLiveDealSession(req);
+    if (!session) {
+      const hadSession = Boolean(parseCookie(req.headers.cookie || "")[DEALS_COOKIE.session]);
+      return res.redirect(302, hadSession ? "/deals?expired=1" : "/deals?gate=1");
+    }
+    if (session.lead.status !== "team") return res.redirect(302, "/deals/mine");
     next();
   }));
   // Static area map for a community: session-checked, marker-free, no-store (AREA MAP). The param may be "12" or "12.png".

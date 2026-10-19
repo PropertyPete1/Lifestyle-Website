@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dealAccessTokens, dealBlocklist, dealCommunities, dealDoNotAutoImport, dealKnownAgents, dealLeads, dealTeamAllowlist } from "../drizzle/schema";
+import { dealAccessTokens, dealBlocklist, dealClientLinks, dealCommunities, dealDoNotAutoImport, dealHomes, dealKnownAgents, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 import type { TrpcContext } from "./_core/context";
 
@@ -65,7 +65,8 @@ vi.mock("./dealsService", async (importOriginal) => ({
   dealsPublicHeaders: () => undefined,
 }));
 vi.mock("./dealsVerification", () => ({ sendTwilioVerify: (...args: unknown[]) => mocks.sendTwilioVerify(...args), checkTwilioVerify: vi.fn() }));
-vi.mock("./dealsFubJobs", () => ({ handleDealsProfileUpdate: (...args: unknown[]) => mocks.handleDealsProfileUpdate(...args) }));
+vi.mock("./dealsFubJobs", () => ({ handleDealsProfileUpdate: (...args: unknown[]) => mocks.handleDealsProfileUpdate(...args), enqueueDealsRequestJobs: vi.fn(async () => undefined), runPendingDealsFubJobs: vi.fn(async () => ({ sent: 0, failed: 0, skipped: 0, leased: 0 })), requestTestMode: vi.fn(async () => ({ isTest: false, quiet: false })) }));
+vi.mock("./dealsMap", async (importOriginal) => ({ ...(await importOriginal<typeof import("./dealsMap")>()), communityAreaMap: () => null }));
 vi.mock("./dealsEligibility", () => ({
   profileRealtorFlags: (...args: unknown[]) => mocks.profileRealtorFlags(...args),
   makeMatchingLeadsTeam: (...args: unknown[]) => mocks.makeMatchingLeadsTeam(...args),
@@ -128,6 +129,7 @@ const settings = {
   phoneLimitPerHour: 3, ipLimitPerHour: 100, testPhoneLimitPerHour: 10, skipTwilioForTestNumbers: false, testNumbersSkipChecks: true, testModeFullPipeline: false,
   testNumbers: [], testTeamNumbers: [], activeReelCodes: ["sl1", "vg1"], brokerageDomains: [], fubRealtorTags: [], fubRealtorSources: [], handleKeywords: ["realtor", "realty"], trecCounties: ["Bexar"],
   alertRecipients: ["peter@lifestyledesignrealty.com"], alertMode: "immediate" as const, syncEmailRecipients: ["peter@lifestyledesignrealty.com"], driveDestinations: ["downtown San Antonio"],
+  clientLinkExpiryHours: 168, clientLinkDays: 30,
 };
 
 const pendingResult = {
@@ -253,6 +255,102 @@ describe("deals.updateProfile", () => {
     mocks.isLiveDealSession.mockResolvedValue(null);
     await expect(visitor().updateProfile({ name: "Someone" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
+});
+
+describe("agent client links through the router", () => {
+  const TOKEN = "Tok_".repeat(8);
+  const row = (overrides: Partial<typeof dealLeads.$inferSelect> = {}) => ({
+    id: 41, phoneE164: "+12105550123", email: null, name: "Maria Lopez", instagramHandle: null, sourceCode: "agent", timeline: null, status: "verified" as const, flags: "[]",
+    consentText: "x", consentAt: new Date(), consentIp: "203.0.113.9", deviceHash: "d".repeat(64), expiresAt: new Date(Date.now() + 3600_000), revokedAt: null, fubPersonId: null, fubStatus: "pending" as const, agentTeamId: null, clientLinkId: null, createdAt: new Date(), updatedAt: new Date(), ...overrides,
+  });
+  let teamId: number;
+  beforeEach(() => {
+    teamId = db.seed(dealTeamAllowlist, { name: "Tiffany Agent", phoneE164: "+12105550101", email: "tiffany@example.com", fubUserId: "77", source: "fub", active: true });
+    const communityId = db.seed(dealCommunities, { builder: "Chesmar", privateName: "Fixture Lakes", sourceUrl: "https://www.chesmar.com/x/", privateAddress: "100 Fixture Blvd", publicLabel: "Southeast San Antonio | Lots", areaLabel: "Southeast San Antonio", amenities: "[]", reelCode: "sl1", scrubList: "{}", active: true, paused: false, manualMode: false });
+    db.seed(dealHomes, { communityId, sourceKey: "home-1", sourceUrl: "https://www.chesmar.com/x/plan/1/", privateAddress: "118 Fixture Blvd", privatePlanName: "Brandon", kind: "quick_move_in", status: "available", origin: "official", price: 489_990 });
+    db.seed(dealClientLinks, { token: TOKEN, agentTeamId: teamId, agentLeadId: 9, clientName: "Maria Lopez", expiresAt: new Date(Date.now() + 86_400_000) });
+    mocks.isLiveDealSession.mockResolvedValue(null);
+    mocks.currentPending.mockResolvedValue(null);
+  });
+
+  it("names the agent on the landing state for a live link, counts the open, and says nothing for a dead one", async () => {
+    const state = await visitor().state({ c: TOKEN });
+    expect(state.clientLink).toEqual({ agentName: "Tiffany Agent", clientFirstName: "Maria" });
+    expect(db.rows(dealClientLinks)[0]).toMatchObject({ openCount: 1 });
+    expect((await visitor().state({ c: "nope" })).clientLink).toBeNull();
+    expect((await visitor().state()).clientLink).toBeNull();
+    db.rows(dealClientLinks)[0].revokedAt = new Date();
+    expect((await visitor().state({ c: TOKEN })).clientLink).toBeNull();
+  });
+
+  it("passes the token into the pending verification on start", async () => {
+    mocks.sendTwilioVerify.mockResolvedValue({ ok: true });
+    await visitor().start({ phone: "(210) 555-0123", choice: "buyer", c: TOKEN });
+    expect(mocks.createPendingVerification).toHaveBeenCalledWith(expect.objectContaining({ clientLinkToken: TOKEN }));
+  });
+
+  it("serves the full list with the agent's name to the agent's client, and the scrubbed list to a reel buyer", async () => {
+    const client = row({ agentTeamId: teamId, clientLinkId: 1 });
+    db.seed(dealLeads, client);
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 41, lead: client, deviceHash: client.deviceHash });
+    const mine = await visitor().mine();
+    expect(mine.fullDetails).toBe(true);
+    expect(mine.agent).toEqual({ name: "Tiffany Agent", phone: "(210) 555-0101" });
+    expect(mine.lead.agentClient).toBe(true);
+    expect(JSON.stringify(mine.communities)).toContain("Fixture Lakes");
+    expect(JSON.stringify(mine.communities)).not.toContain("chesmar.com");
+
+    const buyer = row({ id: 42, phoneE164: "+12105550124", sourceCode: "sl1" });
+    db.seed(dealLeads, buyer);
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 42, lead: buyer, deviceHash: buyer.deviceHash });
+    const reel = await visitor().mine();
+    expect(reel.fullDetails).toBe(false);
+    expect(reel.agent).toBeNull();
+    expect(JSON.stringify(reel.communities)).not.toContain("Fixture Lakes");
+    expect(reel.saved).toEqual([]);
+  });
+
+  it("saves and unsaves a home for a live session and reports the saved cards on mine", async () => {
+    const client = row({ agentTeamId: teamId });
+    db.seed(dealLeads, client);
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 41, lead: client, deviceHash: client.deviceHash });
+    const card = (await visitor().mine()).communities[0]!.homes[0]!.card as string;
+    await expect(visitor().saveHome({ card, saved: true })).resolves.toEqual({ ok: true, saved: true, notified: true });
+    expect((await visitor().mine()).saved).toEqual([card]);
+    expect(db.rows(dealTourRequests)).toHaveLength(1);
+    await expect(visitor().saveHome({ card, saved: false })).resolves.toEqual({ ok: true, saved: false, notified: false });
+    await expect(visitor().saveHome({ card: "0".repeat(20), saved: true })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    mocks.isLiveDealSession.mockResolvedValue(null);
+    await expect(visitor().saveHome({ card, saved: true })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("gives the team their workspace and link controls, and refuses buyers", async () => {
+    const agent = row({ id: 9, phoneE164: "+12105550101", status: "team", sourceCode: "other" });
+    db.seed(dealLeads, agent);
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 9, lead: agent, deviceHash: agent.deviceHash });
+    const workspace = await visitor().team.workspace();
+    expect(workspace.agent).toEqual({ name: "Tiffany Agent", email: "tiffany@example.com", fubLinked: true });
+    expect(workspace.clients.map((client) => client.clientName)).toEqual(["Maria Lopez"]);
+    const created = await visitor().team.createClientLink({ clientName: "Sam Reyes", clientPhone: "(210) 555-0303" });
+    expect(created.path).toMatch(/^\/deals\?c=[A-Za-z0-9_-]{20,64}$/);
+    expect((await visitor().team.workspace()).clients.map((client) => client.clientName)).toEqual(["Sam Reyes", "Maria Lopez"]);
+    await expect(visitor().team.createClientLink({ clientName: "Bad Phone", clientPhone: "12" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(visitor().team.revokeClientLink({ id: created.id })).resolves.toEqual({ ok: true });
+    await expect(visitor().team.revokeClientLink({ id: 999 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    // The team member's own list is the full one with builder pages.
+    const mine = await visitor().mine();
+    expect(mine.fullDetails).toBe(true);
+    expect(JSON.stringify(mine.communities)).toContain("https://www.chesmar.com/x/plan/1/");
+
+    const buyer = row({ id: 42, phoneE164: "+12105550124", sourceCode: "sl1" });
+    db.seed(dealLeads, buyer);
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 42, lead: buyer, deviceHash: buyer.deviceHash });
+    await expect(visitor().team.workspace()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(visitor().team.createClientLink({ clientName: "Nope" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    mocks.isLiveDealSession.mockResolvedValue(null);
+    await expect(visitor().team.workspace()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
 });
 
 describe("admin gating", () => {

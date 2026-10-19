@@ -16,6 +16,8 @@ export type GateSheetState = {
   blockedMessage?: string | null;
   consentText?: string | null;
   googleEnabled?: boolean;
+  /** The visitor opened an LDR agent's client link: the agent question is skipped and the sheet names the agent. */
+  clientLink?: { agentName: string; clientFirstName: string } | null;
 } | undefined;
 
 export type GateSheetViewProps = {
@@ -72,7 +74,17 @@ export function GateSheetView({ gate, state, phone, code, choice, starting, rese
       <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 text-xs"><button type="button" onClick={() => onResend("sms")} disabled={resending} className={`${recoveryLink} text-gold`}>Didn't get it? Resend</button>{!gate.cannotReceive && <button type="button" onClick={() => onResend("call")} disabled={resending} className={`${recoveryLink} text-gold`}>Call me with the code instead</button>}</div>
       <button type="button" onClick={onChangeNumber} className={`${recoveryLink} mt-1 text-xs text-muted-foreground`}>Wrong number? Change it</button>
       {codeAlert && notice(codeAlert)}</>}
-    {step === "gate" && <><p className="eyebrow text-gold">Private buyer access</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Unlock the full list.</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">Phone verification protects these hand-picked deals for buyers who have not chosen an agent.</p>{state?.googleEnabled && <Button variant="outline" onClick={() => window.location.assign("/deals/auth/google")} className="mt-5 w-full py-6">Continue with Google</Button>}<Label htmlFor="deals-phone" className="mt-6 block text-xs uppercase tracking-widest">Mobile phone</Label><Input id="deals-phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="(210) 555-0123" value={phone} onChange={(event) => onPhone(formatPhoneInput(event.target.value))} onFocus={onFocusPhone} className="mt-2 h-14 text-lg" /><p id="deals-agent-question" className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Are you a realtor, or working with one?</p><div role="group" aria-labelledby="deals-agent-question" className="mt-3 grid grid-cols-2 gap-3"><button type="button" aria-pressed={choice === "buyer"} onClick={() => onChoice("buyer")} className={`min-h-14 border px-3 text-sm transition-colors ${choice === "buyer" ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>No, just me</button><button type="button" aria-pressed={choice === "has_agent"} onClick={() => onChoice("has_agent")} className={`min-h-14 border px-3 text-sm transition-colors ${choice === "has_agent" ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>Yes</button></div>{/* Continue waits for deals.state so the consent line below is on screen before anyone can agree to it. */}<Button disabled={!choice || phone.replace(/\D/g, "").length < 10 || starting || state === undefined} onClick={onContinue} className="mt-5 w-full bg-gold py-6 text-primary-foreground">{starting ? "Sending…" : "Continue"} <ArrowRight className="ml-2 h-4 w-4" /></Button>{gateAlert && notice(gateAlert)}<p className="mt-5 text-xs leading-relaxed text-foreground">{state?.consentText}</p></>}
+    {step === "gate" && (() => {
+      const shared = state?.clientLink ?? null;
+      // An agent's client is working with an agent by definition: no question, Continue needs only the phone.
+      const ready = shared ? true : Boolean(choice);
+      return <>{shared
+        ? <><p className="eyebrow text-gold" data-deals-shared-by="true">Shared by {shared.agentName}</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">{shared.clientFirstName ? `${shared.clientFirstName}, your homes are ready.` : "Your homes are ready."}</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{shared.agentName} picked these for you. Verify your mobile number once and the full list opens, with every address, photo and current incentive.</p></>
+        : <><p className="eyebrow text-gold">Private buyer access</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Unlock the full list.</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">Phone verification protects these hand-picked deals for buyers who have not chosen an agent.</p></>}
+      {state?.googleEnabled && !shared && <Button variant="outline" onClick={() => window.location.assign("/deals/auth/google")} className="mt-5 w-full py-6">Continue with Google</Button>}<Label htmlFor="deals-phone" className="mt-6 block text-xs uppercase tracking-widest">Mobile phone</Label><Input id="deals-phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="(210) 555-0123" value={phone} onChange={(event) => onPhone(formatPhoneInput(event.target.value))} onFocus={onFocusPhone} className="mt-2 h-14 text-lg" />
+      {!shared && <><p id="deals-agent-question" className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Are you a realtor, or working with one?</p><div role="group" aria-labelledby="deals-agent-question" className="mt-3 grid grid-cols-2 gap-3"><button type="button" aria-pressed={choice === "buyer"} onClick={() => onChoice("buyer")} className={`min-h-14 border px-3 text-sm transition-colors ${choice === "buyer" ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>No, just me</button><button type="button" aria-pressed={choice === "has_agent"} onClick={() => onChoice("has_agent")} className={`min-h-14 border px-3 text-sm transition-colors ${choice === "has_agent" ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>Yes</button></div></>}
+      {/* Continue waits for deals.state so the consent line below is on screen before anyone can agree to it. */}<Button disabled={!ready || phone.replace(/\D/g, "").length < 10 || starting || state === undefined} onClick={onContinue} className="mt-5 w-full bg-gold py-6 text-primary-foreground">{starting ? "Sending…" : "Continue"} <ArrowRight className="ml-2 h-4 w-4" /></Button>{gateAlert && notice(gateAlert)}<p className="mt-5 text-xs leading-relaxed text-foreground">{state?.consentText}</p></>;
+    })()}
   </motion.section></motion.div></AnimatePresence>;
 }
 
@@ -117,8 +129,10 @@ export function GateSheet({ state, onClose }: { state: GateSheetState; onClose: 
     catch { window.prompt("Copy this link:", text); }
   };
   const continueGate = () => {
+    // A client link answers the agent question for the visitor; the token rides along so the server attributes them.
+    if (state?.clientLink) { start.mutate({ phone, choice: "buyer", src: params.src, ig: params.ig, c: params.c }); return; }
     if (choice === "has_agent") { dispatch({ type: "go", step: "confirm-agent" }); return; }
-    if (choice) start.mutate({ phone, choice, src: params.src, ig: params.ig });
+    if (choice) start.mutate({ phone, choice, src: params.src, ig: params.ig, c: params.c });
   };
   const focusPhone = () => {
     if (focusSent.current) return;
@@ -127,7 +141,7 @@ export function GateSheet({ state, onClose }: { state: GateSheetState; onClose: 
   };
   return <GateSheetView gate={gate} state={state} phone={phone} code={code} choice={choice} starting={start.isPending} resending={resend.isPending}
     onPhone={setPhone} onCode={setCode} onChoice={setChoice} onFocusPhone={focusPhone} onContinue={continueGate}
-    onConfirmAgent={() => start.mutate({ phone, choice: "has_agent", src: params.src, ig: params.ig })}
+    onConfirmAgent={() => start.mutate({ phone, choice: "has_agent", src: params.src, ig: params.ig, c: params.c })}
     onGo={(step) => { dispatch({ type: "go", step }); if (step === "gate") setCode(""); }}
     onResend={(channel) => resend.mutate({ channel })} onChangeNumber={() => change.mutate()} onCopyLink={() => { void copyLink(); }} onClose={onClose} />;
 }

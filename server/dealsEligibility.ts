@@ -111,6 +111,8 @@ export async function classifyDealsAccess(input: {
   testSkipChecks: boolean;
   testTeamNumbers?: string[];
   choice?: "buyer" | "has_agent";
+  /** The visitor arrived through an LDR agent's client link: the agent vouches for them. */
+  clientLink?: boolean;
   brokerageDomains: string[];
   fubRealtorTags: string[];
   fubRealtorSources: string[];
@@ -123,13 +125,21 @@ export async function classifyDealsAccess(input: {
   // a staff phone and a test number; its test switches must still control it.
   // A test number flagged "treat as team member" routes through the team branch even when toggle (b) is off.
   if (input.isTest && input.testTeamNumbers?.includes(input.phone)) return { allowed: true, team: true, flags: ["TEST", "team"] };
-  if (input.isTest && input.testSkipChecks) return { allowed: true, team: false, flags: ["TEST"] };
+  if (input.isTest && input.testSkipChecks) return { allowed: true, team: false, flags: ["TEST", ...(input.clientLink ? ["agent_client"] : [])] };
   const [team] = await db.select().from(dealTeamAllowlist).where(and(
     eq(dealTeamAllowlist.active, true),
     or(eq(dealTeamAllowlist.phoneE164, input.phone), ...(email ? [eq(dealTeamAllowlist.email, email)] : [])),
   )).limit(1);
   if (team) return { allowed: true, team: true, flags: ["team"] };
 
+  if (input.clientLink) {
+    // An agent's own client is working with an agent by definition, so the "has
+    // agent" answer and the realtor screening do not apply; an explicit admin
+    // block (any reason other than the has-agent answer) still does.
+    const block = await getActiveBlock({ phone: input.phone, email: email ?? undefined, deviceHash: input.deviceHash, ignoreHasAgent: true });
+    if (block) return { allowed: false, team: false, blockedBy: "blocklist", matchOn: block.phoneE164 ? "phone" : block.email ? "email" : "device", flags: ["blocked", "agent_client"] };
+    return { allowed: true, team: false, flags: ["agent_client"] };
+  }
   if (input.choice === "has_agent") return { allowed: false, team: false, blockedBy: "has_agent", flags: ["has_agent"] };
   const block = await getActiveBlock({ phone: input.phone, email: email ?? undefined, deviceHash: input.deviceHash });
   if (block) return { allowed: false, team: false, blockedBy: "blocklist", matchOn: block.phoneE164 ? "phone" : block.email ? "email" : "device", flags: ["blocked"] };

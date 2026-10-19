@@ -44,7 +44,7 @@ vi.mock("./dealsAlerts", () => ({
 }));
 vi.mock("./dealsEmail", () => ({ sendBuilderDealsEmail: (...args: unknown[]) => mocks.sendBuilderDealsEmail(...args) }));
 
-import { dealCommunities, dealCommunityViews, dealEvents, dealFubJobs, dealFubRecords, dealHomes, dealLeads, dealTourRequests } from "../drizzle/schema";
+import { dealCommunities, dealCommunityViews, dealEvents, dealFubJobs, dealFubRecords, dealHomes, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
 import { createFakeDealsDb, type FakeDealsDb } from "./dealsFubFakeDb.test-support";
 import {
   LEASE_MS,
@@ -424,5 +424,38 @@ describe("Builder Deals tour and question requests respect toggle (c)", () => {
     const liveEmail = mocks.sendBuilderDealsEmail.mock.calls[1]![0] as { subject: string; content: string };
     expect(liveEmail.subject).toBe("Builder Deals tour request");
     expect(liveEmail.content).not.toContain("TEST");
+  });
+});
+
+describe("Builder Deals requests from an agent's client", () => {
+  const teamRow = { id: 5, name: "Tiffany Agent", phoneE164: "+12105550101", email: "tiffany@example.com", fubUserId: "77", fubIdentityKey: "fub:77:+12105550101", source: "fub" as const, active: true, createdAt: new Date() };
+  const agentClient = { ...lead, flags: "[]", name: "Maria Lopez", sourceCode: "agent", agentTeamId: 5, clientLinkId: 3 };
+
+  it("emails the agent alongside the owners, names the client and the agent, and hands the task to the agent", async () => {
+    const saveRequest = { ...tourRequest, id: 44, requestType: "save" as const };
+    const email = dbWithJob(job({ id: 9, operation: "request_email:44", payload: JSON.stringify({ requestId: 44, chicagoDay: "2026-10-18" }) }), agentClient, [[dealTourRequests, [saveRequest]], [dealHomes, [{ ...requestedHome, price: 489_990 }]], [dealTeamAllowlist, [teamRow]]]);
+    mocks.getDb.mockResolvedValue(email);
+    await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ sent: 0, failed: 0 });
+    const sent = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { category: string; subject: string; content: string; recipients: string[] };
+    expect(sent.category).toBe("home_saved");
+    expect(sent.recipients).toEqual([...settings.alertRecipients, "tiffany@example.com"]);
+    expect(sent.subject).toBe("Tiffany Agent's client: Builder Deals: a buyer saved a home");
+    expect(sent.content).toContain("Tiffany Agent's client Maria Lopez saved 8106 Private Street (Hidden Plan), $489,990.");
+    expect(sent.content).toContain("assigned to Tiffany Agent");
+
+    mocks.createBuilderDealsTourTask.mockResolvedValue({ ok: true, taskId: "T9", records: [{ kind: "task", fubId: "T9", createdByUs: true }] });
+    const task = dbWithJob(job({ id: 10, operation: "request_task:2026-10-18", payload: JSON.stringify({ requestId: 44, chicagoDay: "2026-10-18" }) }), agentClient, [[dealTourRequests, [saveRequest]], [dealHomes, [{ ...requestedHome, price: 489_990 }]], [dealTeamAllowlist, [teamRow]]]);
+    mocks.getDb.mockResolvedValue(task);
+    await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ sent: 1 });
+    expect(mocks.createBuilderDealsTourTask).toHaveBeenCalledWith(expect.objectContaining({ lead: expect.objectContaining({ agent: { name: "Tiffany Agent", fubUserId: "77", email: "tiffany@example.com" } }), privateDescription: "8106 Private Street (Hidden Plan), $489,990" }));
+  });
+
+  it("sends the agent to the first-unlock job so FUB assigns the contact to them", async () => {
+    mocks.classifyDealsAccess.mockResolvedValue({ allowed: true, team: false, flags: ["agent_client"] });
+    mocks.sendBuilderDealsLeadToFub.mockResolvedValue({ ok: true, personId: "9002", records: [{ kind: "person", fubId: "9002", createdByUs: true }] });
+    const db = dbWithJob(job({ payload: JSON.stringify({}) }), agentClient, [[dealTeamAllowlist, [teamRow]]]);
+    mocks.getDb.mockResolvedValue(db);
+    await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ sent: 1 });
+    expect(mocks.sendBuilderDealsLeadToFub).toHaveBeenCalledWith(expect.objectContaining({ id: lead.id, sourceCode: "agent", agent: { name: "Tiffany Agent", fubUserId: "77", email: "tiffany@example.com" } }));
   });
 });

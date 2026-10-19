@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "wouter";
-import { Clock3, X } from "lucide-react";
+import { Clock3, ExternalLink, Heart, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
@@ -13,7 +13,13 @@ import { DealsFooter, Incentive, ReelCard, formatChicagoDate, money, type DealsI
 export { countdownLabel } from "@/lib/dealsMine";
 export type { ProfileInput } from "@/lib/dealsMine";
 
-/** Hand-built server objects only: no builder, community, plan, street, lot or listing identifiers exist on these shapes. */
+/**
+ * Hand-built server objects only: no builder, community, plan, street, lot or
+ * listing identifiers exist on these shapes for a reel buyer. `details` is
+ * present only on the full list the server builds for the team and for buyers
+ * an LDR agent sent through a client link.
+ */
+export type GatedHomeDetails = { address?: string | null; planName?: string | null; builderPage?: string | null };
 export type GatedHome = {
   card: string;
   kind: "quick_move_in" | "to_be_built" | string;
@@ -25,8 +31,10 @@ export type GatedHome = {
   moveInDate?: string | null;
   lotSize?: string | null;
   photos?: string[];
+  details?: GatedHomeDetails | null;
 };
 
+export type GatedCommunityDetails = { builderName?: string | null; communityName?: string | null; address?: string | null; salesLine?: string | null; builderPage?: string | null };
 export type GatedCommunity = {
   label: string;
   area: string;
@@ -40,9 +48,12 @@ export type GatedCommunity = {
   updatedAt?: string | null;
   incentive?: DealsIncentive | null;
   homes: GatedHome[];
+  details?: GatedCommunityDetails | null;
 };
 
-export type GatedLead = { display: string; expiresAt: string; name: string | null; timeline: string | null; teamPreview: boolean };
+export type GatedLead = { display: string; expiresAt: string; name: string | null; timeline: string | null; teamPreview: boolean; agentClient?: boolean };
+/** The agent who shared the list with this buyer, as the page may name them. */
+export type GatedAgent = { name: string; phone: string | null } | null;
 export type HomeRequest = { card: string; requestType: "tour" | "ask" };
 
 export const PHOTOS_ON_REQUEST = "Photos on request";
@@ -64,19 +75,41 @@ function NamePrompt({ onSave, saving, error, onDismiss }: { onSave?: (input: Pro
   return <section aria-label="Add your name" className="mt-8 border border-gold/30 bg-gold/5 p-5"><button type="button" onClick={onDismiss} className={CLOSE_BUTTON} aria-label="Dismiss name prompt"><X className="h-4 w-4" /></button><h2 className="text-2xl">Add your name so we know who to text.</h2><div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3"><Input placeholder="Your name" aria-label="Your name" maxLength={PROFILE_NAME_MAX} value={name} onChange={(event) => setName(event.target.value)} className="min-h-11" /><select aria-label="When are you looking to buy?" value={timeline} onChange={(event) => setTimeline(event.target.value)} className="min-h-11 w-full min-w-0 max-w-full border border-input bg-transparent px-3 text-sm"><option value="">When are you looking?</option>{PROFILE_TIMELINES.map((option) => <option key={option}>{option}</option>)}</select><Button type="button" disabled={saving || !input} onClick={() => { if (input) onSave?.(input); }} className="min-h-11 bg-gold text-primary-foreground">{saving ? "Saving…" : "Save"}</Button></div>{error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}</section>;
 }
 
-function HomeCard({ home, teamPreview, onRequest }: { home: GatedHome; teamPreview: boolean; onRequest?: (request: HomeRequest) => void }) {
+/** The heart on every card. Saving tells the team (and the buyer's agent) once per home; tapping again just unsaves. */
+export function SaveButton({ saved, saving, onToggle }: { saved: boolean; saving?: boolean; onToggle?: () => void }) {
+  return <button type="button" aria-pressed={saved} aria-label={saved ? "Saved. Tap to unsave" : "Save this home"} disabled={saving} onClick={onToggle} data-deals-save={saved ? "saved" : "unsaved"} className={`flex min-h-11 items-center gap-2 border px-3 text-xs uppercase tracking-widest transition-colors ${saved ? "border-gold bg-gold/10 text-gold" : "border-border text-muted-foreground hover:text-gold"}`}><Heart className={`h-4 w-4 ${saved ? "fill-current" : ""}`} />{saved ? "Saved" : "Save"}</button>;
+}
+
+function HomeCard({ home, teamPreview, saved, saving, onRequest, onSave }: { home: GatedHome; teamPreview: boolean; saved: boolean; saving?: boolean; onRequest?: (request: HomeRequest) => void; onSave?: (card: string, saved: boolean) => void }) {
   const toBeBuilt = home.kind === "to_be_built";
   const dropped = Boolean(home.previousPrice && home.price && home.price < home.previousPrice);
+  const details = home.details ?? null;
   return <article className="min-w-0 max-w-full overflow-hidden border border-border bg-card p-5">
     <div className="flex items-start justify-between gap-4"><p className="eyebrow text-gold">{toBeBuilt ? "To Be Built" : "Available now"}</p>{dropped && <span className="bg-gold px-2 py-1 text-[10px] uppercase tracking-widest text-primary-foreground">Price drop</span>}</div>
     <ProtectedGallery photos={home.photos} />
     <h3 className="mt-3 text-3xl">{home.price ? money.format(home.price) : "Ask for current pricing"}</h3>
     {dropped && home.previousPrice && <p className="mt-1 text-sm text-muted-foreground line-through">{money.format(home.previousPrice)}</p>}
+    {details && (details.address || details.planName) && <p className="mt-3 text-sm text-foreground" data-deals-home-details="true">{[details.planName, details.address].filter(Boolean).join(" · ")}</p>}
     <p className="mt-4 text-sm text-muted-foreground">{[home.beds && `${home.beds} beds`, home.baths && `${home.baths} baths`, home.sqft && `${home.sqft.toLocaleString()} sq ft`].filter(Boolean).join(" · ")}</p>
     {home.moveInDate && <p className="mt-2 text-sm text-muted-foreground">Est. move-in: {home.moveInDate}</p>}
     {home.lotSize && <p className="mt-1 text-sm text-muted-foreground">Lot: {home.lotSize}</p>}
-    {teamPreview ? <p className="mt-6 border border-gold/35 px-4 py-3 text-center text-xs uppercase tracking-widest text-gold">Team preview</p> : <Button type="button" onClick={() => onRequest?.({ card: home.card, requestType: toBeBuilt ? "ask" : "tour" })} className="mt-6 w-full bg-gold text-primary-foreground">{toBeBuilt ? "Ask about this one" : "Tour this home with us"}</Button>}
+    {details?.builderPage && <a href={details.builderPage} target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-11 items-center gap-1 text-xs uppercase tracking-widest text-gold underline-offset-4 hover:underline">Builder page <ExternalLink className="h-3.5 w-3.5" /></a>}
+    <div className="mt-6 flex items-stretch gap-3">
+      {onSave && <SaveButton saved={saved} saving={saving} onToggle={() => onSave(home.card, !saved)} />}
+      {teamPreview ? <p className="flex flex-1 items-center justify-center border border-gold/35 px-4 py-3 text-center text-xs uppercase tracking-widest text-gold">Team view</p> : <Button type="button" onClick={() => onRequest?.({ card: home.card, requestType: toBeBuilt ? "ask" : "tour" })} className="min-h-11 flex-1 bg-gold text-primary-foreground">{toBeBuilt ? "Ask about this one" : "Tour this home with us"}</Button>}
+    </div>
   </article>;
+}
+
+/** The community's private identity for the full list; a reel buyer's payload has no such block. */
+function CommunityDetails({ details }: { details?: GatedCommunityDetails | null }) {
+  if (!details || (!details.builderName && !details.communityName && !details.address)) return null;
+  return <div className="mt-3 border border-gold/30 bg-gold/5 p-4 text-sm" data-deals-community-details="true">
+    <p className="text-foreground">{[details.builderName, details.communityName].filter(Boolean).join(" · ")}</p>
+    {details.address && <p className="mt-1 text-muted-foreground">{details.address}</p>}
+    {details.salesLine && <p className="mt-1 text-muted-foreground">Sales office: {details.salesLine}</p>}
+    {details.builderPage && <a href={details.builderPage} target="_blank" rel="noreferrer" className="mt-2 inline-flex min-h-11 items-center gap-1 text-xs uppercase tracking-widest text-gold underline-offset-4 hover:underline">Builder community page <ExternalLink className="h-3.5 w-3.5" /></a>}
+  </div>;
 }
 
 export type GatedCatalogProps = {
@@ -84,6 +117,14 @@ export type GatedCatalogProps = {
   communities: GatedCommunity[];
   /** Fixed clock for server rendering and tests; omitted in the browser so the countdown ticks on its own. */
   now?: number;
+  /** Opaque card handles the buyer has saved. */
+  saved?: string[];
+  savingCard?: string | null;
+  onSave?: (card: string, saved: boolean) => void;
+  /** The agent who shared this list (agent-client sessions only). */
+  agent?: GatedAgent;
+  /** Rendered between the heading and the communities: the team's agent tools. */
+  tools?: ReactNode;
   onRequest?: (request: HomeRequest) => void;
   onSaveProfile?: (input: ProfileInput) => void;
   savingProfile?: boolean;
@@ -99,23 +140,27 @@ export type GatedCatalogProps = {
  * session-cookie query, and the page background repeats the lead's identity as
  * a faint pattern (the same text burned into every photo).
  */
-export function GatedCatalog({ lead, communities, now, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire }: GatedCatalogProps) {
+export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire }: GatedCatalogProps) {
   const [promptDismissed, setPromptDismissed] = useState(false);
   const updatedAt = communities.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
+  const savedSet = new Set(saved ?? []);
+  const eyebrow = lead.teamPreview ? "Team view" : agent ? `Shared by ${agent.name}` : "Private buyer list";
   return <main data-deals-gated="true" style={identityPatternStyle(lead.display)} className="min-h-screen max-w-full overflow-x-clip bg-background">
-    <header className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link><span className="text-xs text-gold"><Clock3 className="mr-1 inline h-3.5 w-3.5" /> <Countdown expiresAt={lead.expiresAt} now={now} onExpire={onExpire} /></span></header>
+    <header className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link><span className="flex items-center gap-4 text-xs text-gold">{lead.teamPreview && <Link href="/deals/team" className="inline-flex min-h-11 items-center underline-offset-4 hover:underline">Agent tools</Link>}<span><Clock3 className="mr-1 inline h-3.5 w-3.5" /> <Countdown expiresAt={lead.expiresAt} now={now} onExpire={onExpire} /></span></span></header>
     <section className="px-5 py-10 sm:px-8"><div className="mx-auto max-w-5xl">
-      <div className="border-b border-border pb-7"><p className="eyebrow text-gold">Private buyer list{lead.teamPreview ? " · Team preview" : ""}</p><h1 className="mt-2 break-words text-4xl sm:text-5xl">Prepared for {lead.display}</h1><p className="mt-3 text-sm text-muted-foreground">Updated {formatChicagoDate(updatedAt)}. Your access expires in <Countdown expiresAt={lead.expiresAt} now={now} />.</p></div>
-      {!promptDismissed && !profileSaved && !lead.name && <NamePrompt onSave={onSaveProfile} saving={savingProfile} error={profileError} onDismiss={() => setPromptDismissed(true)} />}
+      <div className="border-b border-border pb-7"><p className="eyebrow text-gold">{eyebrow}</p><h1 className="mt-2 break-words text-4xl sm:text-5xl">Prepared for {lead.display}</h1><p className="mt-3 text-sm text-muted-foreground">Updated {formatChicagoDate(updatedAt)}. Your access expires in <Countdown expiresAt={lead.expiresAt} now={now} />.</p>{agent && !lead.teamPreview && <p className="mt-3 text-sm text-foreground" data-deals-agent-note="true">{agent.name} picked these for you. Tap Save on any home and {agent.name.split(" ")[0]} hears about it right away.{agent.phone ? ` Questions? Text ${agent.name.split(" ")[0]} at ${agent.phone}.` : ""}</p>}</div>
+      {tools}
+      {!promptDismissed && !profileSaved && !lead.name && !lead.teamPreview && <NamePrompt onSave={onSaveProfile} saving={savingProfile} error={profileError} onDismiss={() => setPromptDismissed(true)} />}
       <div className="mt-10 space-y-12">{communities.map((community, index) => <section key={index} className="border-t border-border pt-8">
         <p className="eyebrow text-gold">{community.area}{community.schoolDistrict ? ` · ${community.schoolDistrict}` : ""}</p>
         <h2 className="mt-2 text-4xl">{community.label}</h2>
+        <CommunityDetails details={community.details} />
         <AreaMap chips={community.driveTimes} map={community.areaMap} />
         {community.lotSizes && <p className="mt-2 text-sm text-muted-foreground">{community.lotSizes}</p>}
         <div className="mt-5"><ReelCard reelUrl={community.reelUrl} label={community.label} /></div>
         <div className="mt-5"><Incentive incentive={community.incentive} /></div>
         {community.amenities && community.amenities.length > 0 && <div className="mt-5 flex flex-wrap gap-2">{community.amenities.map((item) => <span key={item} className="border border-border px-3 py-1.5 text-xs text-muted-foreground">{item}</span>)}</div>}
-        <div className="mt-7 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">{community.homes.map((home) => <HomeCard key={home.card} home={home} teamPreview={lead.teamPreview} onRequest={onRequest} />)}</div>
+        <div className="mt-7 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">{community.homes.map((home) => <HomeCard key={home.card} home={home} teamPreview={lead.teamPreview} saved={savedSet.has(home.card)} saving={savingCard === home.card} onRequest={onRequest} onSave={onSave} />)}</div>
       </section>)}</div>
     </div></section>
     <DealsFooter />

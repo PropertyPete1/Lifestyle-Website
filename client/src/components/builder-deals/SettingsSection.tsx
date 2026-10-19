@@ -10,12 +10,14 @@ import { Field, GOLD_BUTTON, ListField, Metric, Section, SwitchRow, TAP, Warning
 import { ageLabel, displayDate, mergeUntouched, touchedKeys, touchedPatch } from "./helpers";
 import type { Health, Overview, Settings } from "./types";
 
-type NumberKey = "expiryHours" | "hasAgentBlockDays" | "incentiveLapseDays" | "dailyVerificationCap" | "phoneLimitPerHour" | "ipLimitPerHour" | "testPhoneLimitPerHour";
+type NumberKey = "expiryHours" | "clientLinkExpiryHours" | "clientLinkDays" | "hasAgentBlockDays" | "incentiveLapseDays" | "dailyVerificationCap" | "phoneLimitPerHour" | "ipLimitPerHour" | "testPhoneLimitPerHour";
 type ToggleKey = "allowCanada" | "skipTwilioForTestNumbers" | "testNumbersSkipChecks" | "testModeFullPipeline";
 type ListKey = "testNumbers" | "testTeamNumbers" | "activeReelCodes" | "brokerageDomains" | "fubRealtorTags" | "fubRealtorSources" | "handleKeywords" | "trecCounties" | "alertRecipients" | "syncEmailRecipients" | "driveDestinations";
 
 const NUMBER_FIELDS: Array<{ key: NumberKey; label: string; min: number; max: number }> = [
   { key: "expiryHours", label: "Link expiry (hours)", min: 1, max: 168 },
+  { key: "clientLinkExpiryHours", label: "Agent client access (hours)", min: 1, max: 24 * 90 },
+  { key: "clientLinkDays", label: "Agent client link valid (days)", min: 1, max: 365 },
   { key: "hasAgentBlockDays", label: "Has-agent device block (days)", min: 1, max: 400 },
   { key: "incentiveLapseDays", label: "Incentive lapse with no dates (days)", min: 1, max: 90 },
   { key: "dailyVerificationCap", label: "Daily verification cap", min: 1, max: 10000 },

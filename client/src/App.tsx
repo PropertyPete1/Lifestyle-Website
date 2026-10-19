@@ -89,6 +89,7 @@ function Router() {
       {/* Builder Deals owns its own logo-only shell and suppresses global promos. */}
       <Route path={"/deals"} component={Deals} />
       <Route path={"/deals/mine"} component={Deals} />
+      <Route path={"/deals/team"} component={Deals} />
       <Route path={"/admin"} component={Admin} />
       <Route path={"/admin/:tab"} component={Admin} />
       <Route path={"/404"} component={NotFound} />

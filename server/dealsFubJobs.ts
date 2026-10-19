@@ -25,6 +25,7 @@ export type FubOperation =
   | "profile_update"
   | `activity:${string}`
   | `request_task:${string}`
+  | `save_task:${string}`
   | `request_note:${string}`
   | `request_email:${number}`;
 
@@ -111,12 +112,18 @@ export async function enqueueDealsFubJob(
     } });
 }
 
-export async function enqueueDealsRequestJobs(leadId: number, requestId: number, chicagoDay: string) {
+/**
+ * Saves and tour/question requests get separate FUB tasks per lead per day:
+ * a tour is an Appointment the agent must confirm, a save a Follow Up, and a
+ * tour must never be buried inside a "saved home" task (or the reverse).
+ * They share the day's request note.
+ */
+export async function enqueueDealsRequestJobs(leadId: number, requestId: number, chicagoDay: string, kind: "request" | "save" = "request") {
   const metadata: RequestJobMetadata = { requestId, chicagoDay };
   await Promise.all([
     // One durable lead/day row and lease serializes concurrent visitors before
     // either the FUB task or the FUB note can be created.
-    enqueueDealsFubJob(leadId, `request_task:${chicagoDay}`, metadata),
+    enqueueDealsFubJob(leadId, kind === "save" ? `save_task:${chicagoDay}` : `request_task:${chicagoDay}`, metadata),
     enqueueDealsFubJob(leadId, `request_note:${chicagoDay}`, metadata),
     enqueueDealsFubJob(leadId, `request_email:${requestId}`, metadata),
   ]);
@@ -263,12 +270,18 @@ function requestDescription(home: Pick<typeof dealHomes.$inferSelect, "privateAd
 }
 
 type LoadedRequestJob = NonNullable<Awaited<ReturnType<typeof loadRequestJob>>>;
-async function loadDayRequestJobs(loaded: LoadedRequestJob) {
+/** The request types that share one FUB task with this request: saves together, tours and questions together. */
+function taskGroupTypes(requestType: string): Array<"tour" | "ask" | "save"> {
+  return requestType === "save" ? ["save"] : ["tour", "ask"];
+}
+
+async function loadDayRequestJobs(loaded: LoadedRequestJob, types?: Array<"tour" | "ask" | "save">) {
   const db = await getDb();
   if (!db) return null;
-  const requests = await db.select().from(dealTourRequests)
+  const all = await db.select().from(dealTourRequests)
     .where(and(eq(dealTourRequests.leadId, loaded.lead.id), eq(dealTourRequests.chicagoDay, loaded.request.chicagoDay)))
     .orderBy(asc(dealTourRequests.createdAt), asc(dealTourRequests.id));
+  const requests = types ? all.filter((request) => (types as string[]).includes(request.requestType)) : all;
   const homes = await Promise.all(requests.map(async (request) =>
     (await db.select().from(dealHomes).where(eq(dealHomes.id, request.homeId)).limit(1))[0],
   ));
@@ -289,8 +302,10 @@ async function executeRequestTask(job: typeof dealFubJobs.$inferSelect): Promise
   const loaded = await loadRequestJob(job);
   if (!db) return { ok: false, error: "Database unavailable" };
   if (!loaded) return { ok: true, records: [] };
-  const dayRequests = await loadDayRequestJobs(loaded);
+  const group = taskGroupTypes(loaded.request.requestType);
+  const dayRequests = await loadDayRequestJobs(loaded, group);
   if (!dayRequests?.length) return { ok: false, error: "Builder Deals request home unavailable" };
+  const groupWhere = and(eq(dealTourRequests.leadId, loaded.lead.id), eq(dealTourRequests.chicagoDay, loaded.request.chicagoDay), inArray(dealTourRequests.requestType, group));
   const results: Array<Extract<FubDeliveryResult, { ok: true }>> = [];
   let taskId = dayRequests.find(({ request }) => request.fubTaskId)?.request.fubTaskId;
   let createdRequestId: number | null = null;
@@ -302,7 +317,7 @@ async function executeRequestTask(job: typeof dealFubJobs.$inferSelect): Promise
     taskId = created.taskId;
     createdRequestId = first.request.id;
     results.push(created);
-    await db.update(dealTourRequests).set({ fubTaskId: taskId }).where(and(eq(dealTourRequests.leadId, loaded.lead.id), eq(dealTourRequests.chicagoDay, loaded.request.chicagoDay)));
+    await db.update(dealTourRequests).set({ fubTaskId: taskId }).where(groupWhere);
   }
   for (const entry of dayRequests) {
     if (entry.request.id === createdRequestId) continue;
@@ -310,7 +325,7 @@ async function executeRequestTask(job: typeof dealFubJobs.$inferSelect): Promise
     if (!appended.ok) return appended;
     results.push(appended);
   }
-  await db.update(dealTourRequests).set({ fubTaskId: taskId }).where(and(eq(dealTourRequests.leadId, loaded.lead.id), eq(dealTourRequests.chicagoDay, loaded.request.chicagoDay)));
+  await db.update(dealTourRequests).set({ fubTaskId: taskId }).where(groupWhere);
   return combinedDelivery(results, taskId);
 }
 
@@ -477,7 +492,7 @@ async function executeLeasedJob(job: typeof dealFubJobs.$inferSelect): Promise<F
   if (await waitingForDeferredCheck(job)) return { ok: false, error: "waiting for deferred realtor check" };
   if (LEAD_SYNC_OPERATIONS.has(job.operation)) return executeLeadJob(job);
   if (job.operation.startsWith("activity:")) return executeActivityJob(job);
-  if (job.operation.startsWith("request_task:")) return executeRequestTask(job);
+  if (job.operation.startsWith("request_task:") || job.operation.startsWith("save_task:")) return executeRequestTask(job);
   if (job.operation.startsWith("request_note:")) return executeRequestNote(job);
   if (job.operation.startsWith("request_email:")) return executeRequestEmail(job);
   return { ok: false, error: "Unknown Builder Deals FUB job operation", terminal: true };

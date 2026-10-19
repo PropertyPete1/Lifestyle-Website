@@ -89,11 +89,13 @@ export async function setDealsHomeSaved(input: { leadId: number; card: string; s
   }
   const requestId = Number((inserted as unknown as [{ insertId?: number }])[0]?.insertId);
   if (!Number.isSafeInteger(requestId) || requestId < 1) throw new Error("Could not save this home");
+  // A team member's own saves are bookmarks: nobody is notified and nothing is written to FUB.
   const testMode = await requestTestMode(lead.phoneE164);
-  if (!testMode.quiet) {
-    await enqueueDealsRequestJobs(lead.id, requestId, day);
+  const notify = !testMode.quiet && lead.status !== "team";
+  if (notify) {
+    await enqueueDealsRequestJobs(lead.id, requestId, day, "save");
     void runPendingDealsFubJobs(3).catch((error) => console.error("[deals] save outbox run failed", error));
   }
   await logDealEvent({ leadId: lead.id, kind: "home_saved", sourceCode: input.sourceCode, deviceHash: input.deviceHash });
-  return { ok: true as const, saved: true, notified: !testMode.quiet };
+  return { ok: true as const, saved: true, notified: notify };
 }

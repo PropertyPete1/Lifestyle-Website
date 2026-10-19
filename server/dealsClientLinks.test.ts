@@ -234,6 +234,11 @@ describe("saving a home", () => {
     expect(db.rows(dealTourRequests).map((row) => row.requestType)).toEqual(["save", "tour"]);
     expect(await setDealsHomeSaved({ ...input, card: card(planHomeId), saved: true })).toEqual({ ok: true, saved: true, notified: true });
     expect(mocks.enqueueDealsRequestJobs).toHaveBeenCalledTimes(3);
+    expect(mocks.enqueueDealsRequestJobs).toHaveBeenNthCalledWith(1, client.id, expect.any(Number), expect.any(String), "save");
+    // A team member's saves are bookmarks: no task, note or email.
+    const team = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    expect(await setDealsHomeSaved({ ...input, leadId: team.id, saved: true })).toEqual({ ok: true, saved: true, notified: false });
+    expect(mocks.enqueueDealsRequestJobs).toHaveBeenCalledTimes(3);
   });
 });
 

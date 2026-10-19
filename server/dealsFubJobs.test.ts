@@ -462,6 +462,17 @@ describe("Builder Deals requests from an agent's client", () => {
     expect(sent.content).not.toContain("Tiffany");
   });
 
+  it("keeps saves and tours in separate FUB tasks on the same day", async () => {
+    const saveRequest = { ...tourRequest, id: 46, requestType: "save" as const, createdAt: new Date("2026-10-18T14:00:00.000Z") };
+    mocks.createBuilderDealsTourTask.mockResolvedValue({ ok: true, taskId: "S1", records: [{ kind: "task", fubId: "S1", createdByUs: true }] });
+    const saveTask = dbWithJob(job({ id: 12, operation: "save_task:2026-10-18", payload: JSON.stringify({ requestId: 46, chicagoDay: "2026-10-18" }) }), agentClient, [[dealTourRequests, [saveRequest]], [dealHomes, [requestedHome]], [dealTeamAllowlist, [teamRow]], [dealTourRequests, [saveRequest, tourRequest]]]);
+    mocks.getDb.mockResolvedValue(saveTask);
+    await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ sent: 1, failed: 0 });
+    // Only the save is in the save task; the tour is never appended to it.
+    expect(mocks.createBuilderDealsTourTask).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({ id: 46, requestType: "save" }) }));
+    expect(mocks.appendBuilderDealsTourTask).not.toHaveBeenCalled();
+  });
+
   it("sends the agent to the first-unlock job so FUB assigns the contact to them", async () => {
     mocks.classifyDealsAccess.mockResolvedValue({ allowed: true, team: false, flags: ["agent_client"] });
     mocks.sendBuilderDealsLeadToFub.mockResolvedValue({ ok: true, personId: "9002", records: [{ kind: "person", fubId: "9002", createdByUs: true }] });

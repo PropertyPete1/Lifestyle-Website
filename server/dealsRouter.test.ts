@@ -45,6 +45,8 @@ const mocks = vi.hoisted(() => ({
   reprocessBuilderPhotos: vi.fn(),
   builderDealsHealthCheck: vi.fn(),
   builderDealsMondayReport: vi.fn(),
+  enqueueDealsFubJob: vi.fn(async () => undefined),
+  queueClientLinkAttachedAlert: vi.fn(async () => ({ queued: true })),
 }));
 
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
@@ -65,7 +67,8 @@ vi.mock("./dealsService", async (importOriginal) => ({
   dealsPublicHeaders: () => undefined,
 }));
 vi.mock("./dealsVerification", () => ({ sendTwilioVerify: (...args: unknown[]) => mocks.sendTwilioVerify(...args), checkTwilioVerify: vi.fn() }));
-vi.mock("./dealsFubJobs", () => ({ handleDealsProfileUpdate: (...args: unknown[]) => mocks.handleDealsProfileUpdate(...args), enqueueDealsRequestJobs: vi.fn(async () => undefined), runPendingDealsFubJobs: vi.fn(async () => ({ sent: 0, failed: 0, skipped: 0, leased: 0 })), requestTestMode: vi.fn(async () => ({ isTest: false, quiet: false })) }));
+vi.mock("./dealsAlerts", () => ({ queueClientLinkAttachedAlert: (...args: unknown[]) => mocks.queueClientLinkAttachedAlert(...args) }));
+vi.mock("./dealsFubJobs", () => ({ handleDealsProfileUpdate: (...args: unknown[]) => mocks.handleDealsProfileUpdate(...args), enqueueDealsFubJob: (...args: unknown[]) => mocks.enqueueDealsFubJob(...args), enqueueDealsRequestJobs: vi.fn(async () => undefined), runPendingDealsFubJobs: vi.fn(async () => ({ sent: 0, failed: 0, skipped: 0, leased: 0 })), requestTestMode: vi.fn(async () => ({ isTest: false, quiet: false })) }));
 vi.mock("./dealsMap", async (importOriginal) => ({ ...(await importOriginal<typeof import("./dealsMap")>()), communityAreaMap: () => null }));
 vi.mock("./dealsEligibility", () => ({
   profileRealtorFlags: (...args: unknown[]) => mocks.profileRealtorFlags(...args),
@@ -326,12 +329,20 @@ describe("agent client links through the router", () => {
   });
 
   it("attaches a live buyer session to a client link without a second code and extends the session", async () => {
-    const buyer = row({ id: 42, phoneE164: "+12105550124", sourceCode: "sl1" });
+    const { hashSecret } = await import("./dealsService");
+    const buyer = row({ id: 42, phoneE164: "+12105550124", sourceCode: "sl1", deviceHash: hashSecret("device-cookie") });
     db.seed(dealLeads, buyer);
-    db.seed(dealAccessTokens, { leadId: 42, tokenHash: "h", deviceHash: buyer.deviceHash, kind: "session", expiresAt: buyer.expiresAt });
+    db.seed(dealAccessTokens, { leadId: 42, tokenHash: hashSecret("session-cookie"), deviceHash: buyer.deviceHash, kind: "session", expiresAt: buyer.expiresAt });
     mocks.isLiveDealSession.mockResolvedValue({ leadId: 42, lead: buyer, deviceHash: buyer.deviceHash });
-    await expect(visitor().attachClientLink({ c: TOKEN })).resolves.toEqual({ ok: true, attached: true, agentName: "Tiffany Agent" });
+    const ctx = makeCtx(null);
+    (ctx.req as unknown as { headers: Record<string, string> }).headers = { cookie: "ldr_deals_session=session-cookie; ldr_deals_device=device-cookie" };
+    await expect(dealsRouter.createCaller(ctx).attachClientLink({ c: TOKEN })).resolves.toEqual({ ok: true, attached: true, agentName: "Tiffany Agent" });
     expect(db.rows(dealLeads).find((lead) => lead.id === 42)).toMatchObject({ agentTeamId: teamId, clientLinkId: 1 });
+    // One FUB note naming the agent and one alert to the owners and the agent.
+    expect(mocks.enqueueDealsFubJob).toHaveBeenCalledWith(42, "reverify", expect.objectContaining({ reason: "attached to an agent's client link" }));
+    expect(mocks.queueClientLinkAttachedAlert).toHaveBeenCalledWith(expect.objectContaining({ id: 42, agentTeamId: teamId }), { name: "Tiffany Agent", email: "tiffany@example.com" }, 1);
+    // The session row follows the longer window.
+    expect((db.rows(dealAccessTokens)[0].expiresAt as Date).getTime() - Date.now()).toBeGreaterThan(160 * 3600_000);
     expect(db.rows(dealClientLinks)[0]).toMatchObject({ leadId: 42 });
     await expect(visitor().attachClientLink({ c: "x".repeat(32) })).resolves.toEqual({ ok: false, kind: "invalid_link" });
     mocks.isLiveDealSession.mockResolvedValue(null);

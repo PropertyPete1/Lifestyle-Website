@@ -297,3 +297,28 @@ export function browserDataUrlReader(): { readAsDataUrl: (file: File) => Promise
 export function pageCount(total: number, pageSize: number): number {
   return Math.max(1, Math.ceil(total / Math.max(1, pageSize)));
 }
+
+/**
+ * Settings form rules. The form tracks which keys the admin edited since the
+ * last save; a Save sends only those, so it never overwrites a change another
+ * control made meanwhile (the Team section's test-number switches, Raise cap).
+ */
+export function touchedKeys<K extends string>(touched: readonly K[], patch: Record<string, unknown>): K[] {
+  const next = new Set<K>(touched);
+  for (const key of Object.keys(patch)) next.add(key as K);
+  return Array.from(next);
+}
+
+/** Only the edited keys, taken from the draft. */
+export function touchedPatch<T extends object>(draft: T, touched: ReadonlyArray<keyof T>): Partial<T> {
+  const patch: Partial<T> = {};
+  for (const key of touched) patch[key] = draft[key];
+  return patch;
+}
+
+/** The latest server copy, with the admin's edited keys kept from the draft. */
+export function mergeUntouched<T extends object>(server: T, draft: T, touched: ReadonlyArray<keyof T>): T {
+  const merged = { ...server };
+  for (const key of touched) merged[key] = draft[key];
+  return merged;
+}

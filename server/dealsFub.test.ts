@@ -4,6 +4,7 @@ import {
   appendBuilderDealsActivity,
   builderDealsLeadMarker,
   createBuilderDealsRequestNote,
+  createBuilderDealsTourTask,
   detectPriorOptOut,
   formatChicagoDateTime,
   fubNameIsPlaceholder,
@@ -296,6 +297,30 @@ describe("Builder Deals daily request notes", () => {
     expect(calls.filter((call) => path(call).startsWith("/notes?")).map((call) => new URL(call.url).searchParams.get("offset"))).toEqual(["0", "100"]);
     expect(calls.filter((call) => call.method === "POST")).toHaveLength(0);
     expect(calls.filter((call) => call.method === "PUT")).toHaveLength(1);
+  });
+
+  it("marks the task and the daily note of a full-pipeline test lead as TEST, and leaves a live lead's unmarked", async () => {
+    const calls = mockFub((call) => {
+      if (path(call).startsWith("/users?")) return jsonResponse(peterUsers);
+      if (path(call).startsWith("/notes?")) return jsonResponse({ notes: [] });
+      if (path(call) === "/tasks" && call.method === "POST") return jsonResponse({ id: 500 });
+      if (path(call) === "/notes" && call.method === "POST") return jsonResponse({ id: 700 });
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    await expect(createBuilderDealsTourTask({ lead: { ...requestLead, isTest: true }, request: firstRequest, privateDescription: "1 Private Street" })).resolves.toMatchObject({ ok: true, taskId: "500" });
+    await expect(createBuilderDealsRequestNote({ lead: { ...requestLead, isTest: true }, request: firstRequest, privateDescription: "1 Private Street" })).resolves.toMatchObject({ ok: true });
+    await expect(createBuilderDealsTourTask({ lead: requestLead, request: secondRequest, privateDescription: "2 Private Street" })).resolves.toMatchObject({ ok: true, taskId: "500" });
+    const [testTask, liveTask] = calls.filter((call) => path(call) === "/tasks" && call.method === "POST");
+    expect(testTask!.body).toMatchObject({ name: "TEST Builder Deals tour: 1 Private Street", personId: 81, assignedUserId: 456 });
+    expect(String(testTask!.body?.description)).toContain("TEST RECORD - eligible for Builder Deals cleanup");
+    expect(String(testTask!.body?.description)).toContain(`${builderDealsLeadMarker(requestLead.id)}-R${firstRequest.id}`);
+    expect(liveTask!.body).toMatchObject({ name: "Builder Deals ask: 2 Private Street" });
+    expect(String(liveTask!.body?.description)).not.toContain("TEST");
+    const note = calls.find((call) => path(call) === "/notes" && call.method === "POST")!;
+    expect(note.body).toMatchObject({ subject: "TEST Builder Deals request", personId: 81 });
+    expect(String(note.body?.body)).toContain("TEST RECORD - eligible for Builder Deals cleanup");
+    expect(String(note.body?.body)).toContain(`${builderDealsLeadMarker(requestLead.id)}:request-day:${firstRequest.chicagoDay}`);
+    expect(isBuilderDealsSystemNote({ body: note.body?.body })).toBe(true);
   });
 
   it("writes one activity note per lead per Chicago day and records its id", async () => {

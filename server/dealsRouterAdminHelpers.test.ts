@@ -10,6 +10,7 @@ import {
   fubPersonLink,
   funnelTable,
   leadIdFromSearch,
+  mergeUntouched,
   ocrMatchTerms,
   optionalInteger,
   pageCount,
@@ -22,6 +23,8 @@ import {
   scrubListFromDraft,
   sourceHost,
   toList,
+  touchedKeys,
+  touchedPatch,
 } from "@/components/builder-deals/helpers";
 
 /** The admin panel's pure rules, exercised without a DOM: what the controls send and show. */
@@ -119,6 +122,28 @@ describe("admin panel helpers", () => {
     await expect(readPhotoFile(text, reader)).rejects.toThrow("image file");
     const ok = new File([new Uint8Array(10)], "kitchen.jpg", { type: "image/jpeg" });
     await expect(readPhotoFile(ok, reader)).resolves.toEqual({ base64: "data:image/jpeg;base64,/9j/4AAQ", contentType: "image/jpeg" });
+  });
+
+  it("saves only the settings keys the admin edited, so a concurrent switch or cap raise is never overwritten", () => {
+    type S = { commentKeyword: string; textLine: string; dailyVerificationCap: number; testTeamNumbers: string[]; testNumbers: string[] };
+    const server: S = { commentKeyword: "HOME", textLine: "(512) 542-1477", dailyVerificationCap: 200, testTeamNumbers: [], testNumbers: ["+15125550123"] };
+    // The admin edits the keyword, nothing else.
+    let touched = touchedKeys<keyof S>([], { commentKeyword: "DEALS" });
+    const draft: S = { ...server, commentKeyword: "DEALS" };
+    expect(touched).toEqual(["commentKeyword"]);
+    // Meanwhile the Team switch saved testTeamNumbers and Raise cap added 1,000; the refetched copy keeps the edit.
+    const refreshed: S = { ...server, testTeamNumbers: ["+15125550123"], dailyVerificationCap: 1200 };
+    const merged = mergeUntouched(refreshed, draft, touched);
+    expect(merged).toEqual({ ...refreshed, commentKeyword: "DEALS" });
+    // Save sends the edited key only: the stale list and the old cap never travel.
+    expect(touchedPatch(merged, touched)).toEqual({ commentKeyword: "DEALS" });
+    // Editing more keys accumulates without duplicates, and an untouched list is still not sent.
+    touched = touchedKeys(touched, { textLine: "(512) 555-0100", commentKeyword: "DEALS" });
+    expect(touched).toEqual(["commentKeyword", "textLine"]);
+    expect(Object.keys(touchedPatch({ ...merged, textLine: "(512) 555-0100" }, touched)).sort()).toEqual(["commentKeyword", "textLine"]);
+    // With nothing edited the whole server copy is adopted and the patch is empty.
+    expect(mergeUntouched(refreshed, draft, [])).toEqual(refreshed);
+    expect(touchedPatch(merged, [])).toEqual({});
   });
 
   it("parses optional whole-number inputs, flags, hosts, ages and pages", () => {

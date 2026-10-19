@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   DEAL_ADAPTERS,
+  categorizedPrivateTerms,
   loadOfficialDeals,
+  looksLikeStreetAddress,
   normalizeIncentiveText,
   parsePromotionalRate,
   toPublicSafeText,
   type CommunitySourceConfig,
+  type PrivateDealSnapshot,
 } from "./dealsAdapters";
 
 const config: CommunitySourceConfig = {
@@ -190,6 +193,68 @@ describe("deals adapters", () => {
     expect(toPublicSafeText("Magnolia trees are planted along the entry. Ask about the Magnolia plan on Private Street with M/I Financial.", categorized))
       .toBe("Magnolia trees are planted along the entry. Ask about this plan on this street with the builder's lender.");
     expect(toPublicSafeText("Magnolia", categorized, true)).toBe("this plan");
+  });
+
+  it("puts only address-shaped names in the street category and drops admin-excluded false positives", () => {
+    for (const address of ["8106 Onion Patch", "8106 Onion Patch, San Antonio, TX 78263", "9012 Sample Grove", "12A Fixture Street", " 7702 Sample Basket "]) expect(looksLikeStreetAddress(address)).toBe(true);
+    for (const heading of ["New Homes in San Antonio", "Hidden Plan", "123", "", "Lot 12 Block 3", "2026 Fall Savings Event!", null, undefined]) expect(looksLikeStreetAddress(heading)).toBe(false);
+
+    const discovered: PrivateDealSnapshot = {
+      builder: "Chesmar", sourceUrl: "https://www.chesmar.com/texas/example/secret-grove/", privateCommunityName: "Secret Grove", pages: [], incentive: null,
+      plans: [{ sourceUrl: "https://www.chesmar.com/texas/example/secret-grove/magnolia/", privateName: "Magnolia - B", status: null, price: null, bedrooms: null, bathrooms: null, squareFeet: null }],
+      homes: [
+        { sourceUrl: "https://www.chesmar.com/texas/example/secret-grove/magnolia/1/", privateName: "9012 Sample Grove", status: "Quick Move-In", price: null, bedrooms: null, bathrooms: null, squareFeet: null },
+        // A detail page whose h1 is a marketing heading, not an address: verbatim text, never a street term.
+        { sourceUrl: "https://www.chesmar.com/texas/example/secret-grove/magnolia/2/", privateName: "New Homes in San Antonio", status: "Quick Move-In", price: null, bedrooms: null, bathrooms: null, squareFeet: null },
+        { sourceUrl: "https://www.mihomes.com/x/3", privateName: "Fixture A", privateAddress: "8301 Fixture Street, San Antonio, TX 78263", privatePlanName: "Fixture A", status: "Quick Move-In", price: null, bedrooms: null, bathrooms: null, squareFeet: null },
+      ],
+    };
+    const base = { builder: "Chesmar" as const, privateCommunityName: "Secret Grove", scrubList: [] as string[] };
+    const terms = categorizedPrivateTerms(base, discovered);
+    expect(terms.street).toEqual(["9012 Sample Grove", "Sample Grove", "8301 Fixture Street, San Antonio, TX 78263", "Fixture Street"]);
+    expect(terms.plan).toEqual(["Magnolia - B", "Magnolia", "Fixture A"]);
+    expect(JSON.stringify(terms)).not.toContain("New Homes in San Antonio");
+    const excluded = categorizedPrivateTerms({ ...base, excludedTerms: ["sample grove", "Fixture A", "Secret Grove", "Chesmar"] }, discovered);
+    expect(excluded.street).toEqual(["9012 Sample Grove", "8301 Fixture Street, San Antonio, TX 78263", "Fixture Street"]);
+    expect(excluded.plan).toEqual(["Magnolia - B", "Magnolia"]);
+    // Builder and community names can never be excluded.
+    expect(excluded.community).toEqual(["Secret Grove"]);
+    expect(excluded.builder).toEqual(expect.arrayContaining(["Chesmar", "Chesmar Homes"]));
+  });
+
+  it("does not treat a Chesmar home page heading as a street name, and leaves an admin-excluded heading verbatim in the incentive", async () => {
+    const communityUrl = "https://www.chesmar.com/texas/example/secret-grove/";
+    const planUrl = `${communityUrl}hidden-plan/`;
+    const homeUrl = `${planUrl}123456-0001/`;
+    // The heading phrase lands in the FHA headline the adapter reads (the shortest matching strong/p element).
+    const incentiveHtml = chesmarIncentiveHtml.replace("<strong>4.999%", "<strong>New Homes in San Antonio: ask about our fall savings. 4.999%");
+    const documents: Record<string, string> = {
+      [communityUrl]: '<section id="floorplans"><div class="search-results-container">FloorPlans</div></section>',
+      "https://www.chesmar.com/sitemap.xml": "<sitemapindex><sitemap><loc>https://www.chesmar.com/sitemap5.xml</loc></sitemap><sitemap><loc>https://www.chesmar.com/sitemap6.xml</loc></sitemap></sitemapindex>",
+      "https://www.chesmar.com/sitemap5.xml": `<urlset><url><loc>${planUrl}</loc></url></urlset>`,
+      "https://www.chesmar.com/sitemap6.xml": `<urlset><url><loc>${homeUrl}</loc></url></urlset>`,
+      [planUrl]: chesmarDetailPage("Hidden Plan", "Starting From $410,000 · 4 Beds · 3 Baths · 2,300 Sq. Ft."),
+      [homeUrl]: chesmarDetailPage("New Homes in San Antonio", "Quick Move-In · $425,000 · 4 Beds · 3 Baths · 2,320 Sq. Ft."),
+      [chesmarIncentivesUrl]: incentiveHtml,
+    };
+    const fetcher = fixtureFetcher(documents);
+    const source: CommunitySourceConfig = { builder: "Chesmar", sourceUrl: communityUrl, privateCommunityName: "Secret Grove", scrubList: ["Secret Grove", "Hidden Plan"] };
+
+    const result = await loadOfficialDeals(source, { fetcher });
+    expect(result.catalogOk).toBe(true);
+    expect(result.private.homes[0]).toMatchObject({ privateName: "New Homes in San Antonio", status: "Quick Move-In" });
+    expect(result.private.discoveredScrubConfig?.street).toEqual([]);
+    expect(result.private.discoveredScrubConfig?.plan).toEqual(["Hidden Plan"]);
+    // Without an exclusion the heading is still a discovered private name, so the incentive text is scrubbed, not held.
+    expect(result.public.incentive?.text).toContain("this community: ask about our fall savings");
+    expect(result.public.incentive?.text).not.toContain("New Homes in San Antonio");
+
+    const relaxed = await loadOfficialDeals({ ...source, excludedTerms: ["New Homes in San Antonio"] }, { fetcher: fixtureFetcher(documents) });
+    expect(relaxed.catalogOk).toBe(true);
+    expect(relaxed.holdReasons).toEqual([]);
+    expect(relaxed.public.incentive?.text).toContain("New Homes in San Antonio: ask about our fall savings");
+    expect(JSON.stringify(relaxed.public)).not.toContain("Secret Grove");
+    expect(JSON.stringify(relaxed.public)).not.toContain("Hidden Plan");
   });
 
   it("keeps private URLs and names out of Manual public DTOs", async () => {

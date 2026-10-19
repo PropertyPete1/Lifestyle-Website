@@ -17,8 +17,9 @@ import { getDb } from "./db";
 import { makeMatchingLeadsTeam, revokeOrphanedTeamPreviewLinks } from "./dealsEligibility";
 import { resendConfiguration, sendBuilderDealsEmail } from "./dealsEmail";
 import { cleanupBuilderDealsFubRecord, formatChicagoDateTime, stripBuilderDealsTestTag } from "./dealsFub";
-import { pruneDealPhotoRenders } from "./dealsPhotos";
-import { getDealSettings } from "./dealsService";
+import { pruneDealPhotoRenders, type DealPhotoRenderPruneResult } from "./dealsPhotos";
+import { PRIVACY_RESIDUE_EVENT_KIND, getDealSettings, privacyResidueCommunityId, privacyResidueSinceStart } from "./dealsService";
+import { activeCatalogHold } from "./dealsSync";
 import { fubHeaders } from "./fub";
 
 export { syncKnownAgentsFromFub } from "./dealsKnownAgents";
@@ -477,6 +478,8 @@ type OperationalSnapshot = {
   emailFailures: { failed: number; state: HealthState };
   jobFailures: { failed: number; jobs: string[]; state: HealthState };
   holds: { communities: number; incentives: number; items: HoldItem[]; state: HealthState };
+  /** Buyer-facing community entries dropped because a private name survived scrubbing (deal_events rows in the window, plus the in-process counter). */
+  privacyResidue: { dropped: number; communityIds: number[]; droppedSinceStart: number; state: HealthState };
 };
 
 const emptyOperationalSnapshot = (): OperationalSnapshot => ({
@@ -489,10 +492,16 @@ const emptyOperationalSnapshot = (): OperationalSnapshot => ({
   emailFailures: { failed: 0, state: "unknown" },
   jobFailures: { failed: 0, jobs: [], state: "unknown" },
   holds: { communities: 0, incentives: 0, items: [], state: "unknown" },
+  privacyResidue: { dropped: 0, communityIds: [], droppedSinceStart: privacyResidueSinceStart().dropped, state: "unknown" },
 });
 
 function holdText(value: string | null | undefined) {
   return (value ?? "").trim();
+}
+
+/** A Manual-builder or manual-mode community never refreshes, so it is neither on schedule nor late. */
+function isManagedCommunity(community: { manualMode: boolean; builder: string }) {
+  return !community.manualMode && community.builder !== "Manual";
 }
 
 /** Collects every local B9 threshold without an outbound request or notification. */
@@ -505,7 +514,7 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
   const emailFailureCutoff = new Date(now.getTime() - thresholds.emailFailureHours * 60 * 60_000);
   const jobFailureCutoff = new Date(now.getTime() - thresholds.jobFailureHours * 60 * 60_000);
   try {
-    const [funnelRows, newLeadRows, latestImport, communities, photoRows, failedJobRows, staleJobRows, failedLeadRows, heldIncentives, failedEmailRows, failedRunRows] = await Promise.all([
+    const [funnelRows, newLeadRows, latestImport, communities, photoRows, failedJobRows, staleJobRows, failedLeadRows, heldIncentives, failedEmailRows, failedRunRows, residueRows] = await Promise.all([
       db.select({
         landed: sql<number>`SUM(${dealEvents.kind} = 'landed')`,
         consented: sql<number>`SUM(${dealEvents.kind} = 'consent')`,
@@ -516,7 +525,12 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
       }).from(dealEvents).where(gte(dealEvents.createdAt, sevenDaysAgo)),
       db.select({ count: sql<number>`COUNT(*)` }).from(dealLeads).where(gte(dealLeads.createdAt, sevenDaysAgo)),
       db.select({ completedAt: dealTrecImports.completedAt }).from(dealTrecImports).where(eq(dealTrecImports.current, true)).orderBy(desc(dealTrecImports.completedAt)).limit(1),
-      db.select({ id: dealCommunities.id, privateName: dealCommunities.privateName, publicLabel: dealCommunities.publicLabel, lastSuccessfulSyncAt: dealCommunities.lastSuccessfulSyncAt, holdReason: dealCommunities.holdReason }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))),
+      db.select({
+        id: dealCommunities.id, privateName: dealCommunities.privateName, publicLabel: dealCommunities.publicLabel, builder: dealCommunities.builder, manualMode: dealCommunities.manualMode,
+        lastSuccessfulSyncAt: dealCommunities.lastSuccessfulSyncAt,
+        // The two hold columns, never the "catalog: ...; incentive: ..." summary: an incentive hold is not a community-update hold.
+        catalogHoldReason: dealCommunities.catalogHoldReason, catalogHoldSeenAt: dealCommunities.catalogHoldSeenAt, incentiveHoldReason: dealCommunities.incentiveHoldReason, incentiveHoldSeenAt: dealCommunities.incentiveHoldSeenAt,
+      }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))),
       db.select({
         pending: sql<number>`SUM(${dealPhotos.processingState} = 'pending')`,
         processing: sql<number>`SUM(${dealPhotos.processingState} = 'processing')`,
@@ -532,13 +546,16 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
       db.select({ id: dealIncentives.id, communityId: dealIncentives.communityId, holdReason: dealIncentives.holdReason, createdAt: dealIncentives.createdAt }).from(dealIncentives).where(eq(dealIncentives.held, true)),
       db.select({ count: sql<number>`COUNT(*)` }).from(dealEmailLogs).where(and(eq(dealEmailLogs.deliveryStatus, "failed"), gte(dealEmailLogs.createdAt, emailFailureCutoff))),
       db.select({ jobName: dealJobRuns.jobName }).from(dealJobRuns).where(and(eq(dealJobRuns.status, "failed"), gte(dealJobRuns.startedAt, jobFailureCutoff))),
+      db.select({ detail: dealEvents.detail }).from(dealEvents).where(and(eq(dealEvents.kind, PRIVACY_RESIDUE_EVENT_KIND), gte(dealEvents.createdAt, jobFailureCutoff))),
     ]);
     const number = (value: unknown) => Number(value ?? 0);
     const importAgeHours = ageHours(latestImport[0]?.completedAt, now);
-    const communityAges = communities.map((community) => ageHours(community.lastSuccessfulSyncAt, now));
+    // Only communities the official refresh maintains can be on schedule or stale.
+    const managed = communities.filter(isManagedCommunity);
+    const communityAges = managed.map((community) => ageHours(community.lastSuccessfulSyncAt, now));
     const staleCommunities = communityAges.filter((age) => age === null || age > thresholds.communityUpdateHours).length;
     const finiteCommunityAges = communityAges.filter((age): age is number => age !== null);
-    const lastSyncTimes = communities.map((community) => community.lastSuccessfulSyncAt?.getTime() ?? null).filter((value): value is number => value !== null);
+    const lastSyncTimes = managed.map((community) => community.lastSuccessfulSyncAt?.getTime() ?? null).filter((value): value is number => value !== null);
     const photo = photoRows[0];
     const pending = number(photo?.pending), processing = number(photo?.processing), failed = number(photo?.failed), awaitingRegion = number(photo?.awaitingRegion);
     const oldestPendingAgeHours = ageHours(photo?.oldestPendingAt, now);
@@ -547,16 +564,22 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
       const community = communities.find((row) => row.id === communityId);
       return community ? `${community.privateName} (${community.publicLabel})` : `community ${communityId}`;
     };
-    // A community hold is as old as its last good data; an incentive hold is as
-    // old as the held record, because hold rules run only when it is created.
+    // A community-update hold is an active (not dismissed) catalog hold, as old
+    // as the parse result that caused it; an incentive hold is as old as the held
+    // record, because hold rules run only when it is created. A Manual community
+    // never refreshes, so a leftover catalog hold on it is not actionable.
     const holdItems: HoldItem[] = [
-      ...communities.filter((community) => holdText(community.holdReason)).map((community): HoldItem => ({ kind: "community", communityId: community.id, label: communityLabel(community.id), reason: holdText(community.holdReason), since: community.lastSuccessfulSyncAt ?? null, ageHours: ageHours(community.lastSuccessfulSyncAt, now) })),
+      ...managed.flatMap((community): HoldItem[] => {
+        const reason = activeCatalogHold(community);
+        return reason ? [{ kind: "community", communityId: community.id, label: communityLabel(community.id), reason: holdText(reason), since: community.catalogHoldSeenAt ?? null, ageHours: ageHours(community.catalogHoldSeenAt, now) }] : [];
+      }),
       ...heldIncentives.map((incentive): HoldItem => ({ kind: "incentive", communityId: incentive.communityId, label: communityLabel(incentive.communityId), reason: holdText(incentive.holdReason) || "Incentive hold awaiting Accept", since: incentive.createdAt, ageHours: ageHours(incentive.createdAt, now) })),
     ];
     const heldCommunities = holdItems.filter((item) => item.kind === "community").length;
     const failingOverAnHour = number(staleJobRows[0]?.count);
     const failedEmails = number(failedEmailRows[0]?.count);
     const failedRunNames = Array.from(new Set(failedRunRows.map((row) => row.jobName)));
+    const residueCommunityIds = Array.from(new Set(residueRows.map((row) => privacyResidueCommunityId(row.detail)).filter((id): id is number => id !== null))).sort((a, b) => a - b);
     return {
       available: true,
       funnel: {
@@ -564,13 +587,14 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
         verified: number(funnelRows[0]?.verified), listingViews: number(funnelRows[0]?.listingViews), requests: number(funnelRows[0]?.requests), newLeads: number(newLeadRows[0]?.count),
       },
       trecImport: { completedAt: latestImport[0]?.completedAt ?? null, ageHours: importAgeHours, state: healthState(importAgeHours !== null && importAgeHours <= thresholds.trecImportHours) },
-      // A held run does not count as on schedule; a dismissed hold clears holdReason and does.
-      sourceUpdates: { activeCommunities: communities.length, staleCommunities, heldCommunities, oldestAgeHours: finiteCommunityAges.length ? Math.max(...finiteCommunityAges) : null, lastSuccessfulSyncAt: lastSyncTimes.length ? new Date(Math.max(...lastSyncTimes)) : null, state: healthState(staleCommunities === 0 && heldCommunities === 0) },
+      // A held run does not count as on schedule; a dismissed hold is not a hold and does.
+      sourceUpdates: { activeCommunities: managed.length, staleCommunities, heldCommunities, oldestAgeHours: finiteCommunityAges.length ? Math.max(...finiteCommunityAges) : null, lastSuccessfulSyncAt: lastSyncTimes.length ? new Date(Math.max(...lastSyncTimes)) : null, state: healthState(staleCommunities === 0 && heldCommunities === 0) },
       photos: { pending, processing, failed, awaitingRegion, oldestPendingAgeHours, oldestPendingMinutes, state: healthState(failed === 0 && awaitingRegion === 0 && (oldestPendingMinutes === null || oldestPendingMinutes <= thresholds.pendingPhotoMinutes)) },
       fubFailures: { jobs: number(failedJobRows[0]?.count), leads: number(failedLeadRows[0]?.count), failingOverAnHour, state: healthState(failingOverAnHour === 0) },
       emailFailures: { failed: failedEmails, state: healthState(failedEmails === 0) },
       jobFailures: { failed: failedRunRows.length, jobs: failedRunNames, state: healthState(failedRunRows.length === 0) },
       holds: { communities: heldCommunities, incentives: heldIncentives.length, items: holdItems, state: healthState(holdItems.length === 0) },
+      privacyResidue: { dropped: residueRows.length, communityIds: residueCommunityIds, droppedSinceStart: privacyResidueSinceStart().dropped, state: healthState(residueRows.length === 0) },
     };
   } catch {
     return emptyOperationalSnapshot();
@@ -580,8 +604,13 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
 const money = (value: number | null, currency: string | null) => value === null ? "unavailable" : `$${value.toFixed(2)}${currency && currency !== "USD" ? ` ${currency}` : ""}`;
 const hoursLabel = (value: number | null) => value === null ? "not available" : `${value}h`;
 
-/** Reports credential presence, the Twilio account state and balance, FUB and email configuration, and every local threshold. */
-export async function builderDealsHealthCheck(now = new Date()) {
+export type HealthCheckOptions = {
+  /** Delete cached renders for links expired more than a day ago (HIDE THE SAUCE step 7). Only the scheduled jobs pass true; an admin GET never changes state. */
+  prune?: boolean;
+};
+
+/** Reports credential presence, the Twilio account state and balance, FUB and email configuration, and every local threshold. Read-only unless `prune` is set. */
+export async function builderDealsHealthCheck(now = new Date(), options: HealthCheckOptions = {}) {
   const thresholds = BUILDER_DEALS_HEALTH_THRESHOLDS;
   const twilioVerify = {
     accountSid: credentialState(process.env.TWILIO_ACCOUNT_SID),
@@ -594,8 +623,9 @@ export async function builderDealsHealthCheck(now = new Date()) {
     twilioConfigured ? inspectTwilioAccount() : Promise.resolve<TwilioInspection>({ account: "not_checked", accountStatus: null, balance: "not_checked", balanceUsd: null, currency: null }),
     checkFubAvailability(),
     builderDealsOperationalSnapshot(now),
-    // The daily check also deletes cached renders for links expired more than a day ago (HIDE THE SAUCE step 7).
-    pruneDealPhotoRenders().catch((error) => { console.warn("[builder-deals] render prune failed", error); return null; }),
+    options.prune
+      ? pruneDealPhotoRenders().catch((error) => { console.warn("[builder-deals] render prune failed", error); return null; })
+      : Promise.resolve<DealPhotoRenderPruneResult | null>(null),
   ]);
   const resend = resendConfiguration();
   const attention: string[] = [];
@@ -619,6 +649,7 @@ export async function builderDealsHealthCheck(now = new Date()) {
     if (operational.emailFailures.state === "attention") attention.push(`${operational.emailFailures.failed} alert email${operational.emailFailures.failed === 1 ? "" : "s"} failed to send in the last ${thresholds.emailFailureHours} hours.`);
     if (operational.jobFailures.state === "attention") attention.push(`${operational.jobFailures.failed} scheduled job run${operational.jobFailures.failed === 1 ? "" : "s"} failed in the last ${thresholds.jobFailureHours} hours: ${operational.jobFailures.jobs.join(", ")}.`);
     if (operational.holds.incentives > 0) attention.push(`${operational.holds.incentives} incentive hold${operational.holds.incentives === 1 ? "" : "s"} await Accept or Dismiss.`);
+    if (operational.privacyResidue.state === "attention") attention.push(`${operational.privacyResidue.dropped} buyer-facing community entr${operational.privacyResidue.dropped === 1 ? "y was" : "ies were"} dropped for private residue in the last ${thresholds.jobFailureHours} hours (community id${operational.privacyResidue.communityIds.length === 1 ? "" : "s"} ${operational.privacyResidue.communityIds.join(", ") || "unknown"}). Review the names to hide and excluded terms in Admin, Builder Deals, Communities.`);
   }
   return {
     checkedAt: now,
@@ -647,7 +678,8 @@ export function holdLines(items: HoldItem[]) {
  * scheduled run is recorded as failed and shows up in tomorrow's check.
  */
 export async function runBuilderDealsHealthJob(now = new Date()) {
-  const health = await builderDealsHealthCheck(now);
+  // The scheduled run owns the render prune; admin previews of the same check never change state.
+  const health = await builderDealsHealthCheck(now, { prune: true });
   if (!health.attention.length) return { ok: true as const, state: health.state, attention: health.attention, emailed: false, health };
   const settings = await getDealSettings();
   const sent = await sendBuilderDealsEmail({

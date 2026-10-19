@@ -6,7 +6,8 @@ import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, notInArray, 
 import { dealCommunities, dealHomes, dealPhotoRenders, dealPhotos, dealLeads, dealSettings } from "../drizzle/schema";
 import { getDb } from "./db";
 import { storageDelete, storagePut, storageReadPrivate } from "./storage";
-import { displayForLead } from "../shared/deals";
+import { dealScrubTerms, displayForLead } from "../shared/deals";
+import { effectiveScrubConfig } from "./dealsScrub";
 
 const PRIVATE_PREFIX = "builder-deals-private/";
 const MAX_DOWNLOAD_BYTES = 18 * 1024 * 1024;
@@ -146,6 +147,31 @@ export function defaultBuilderPhotoSettings(builder: string): BuilderPhotoSettin
   return { enabled: launch, region: launch ? { ...DEFAULT_LAUNCH_WATERMARK_REGION } : null, keywords: [...DEFAULT_PHOTO_HIDE_KEYWORDS], reviewedSampleIds: [], revision: launch ? LAUNCH_DEFAULT_REVISION : UNCONFIGURED_REVISION };
 }
 
+/**
+ * Rows seeded by the earlier code carry region null and were never saved by an
+ * admin; a launch builder upgrades to the reviewed default so its photos stop
+ * parking. An admin save (revision "admin-...") is never overridden.
+ */
+function launchUpgradeFor(builder: string, settings: BuilderPhotoSettings): BuilderPhotoSettings | null {
+  if (settings.revision !== UNCONFIGURED_REVISION || settings.region || !LAUNCH_BUILDERS.has(builderKey(builder))) return null;
+  return { ...defaultBuilderPhotoSettings(builder), keywords: settings.keywords, reviewedSampleIds: settings.reviewedSampleIds };
+}
+
+/**
+ * Read-only view of a builder's settings: the stored row as the processing
+ * path would interpret it (launch upgrade applied in memory), or the defaults
+ * when nothing is stored. Nothing is written, so admin GETs can use it.
+ */
+export async function readBuilderPhotoSettings(builder: string): Promise<BuilderPhotoSettings> {
+  const db = await getDb();
+  if (!db) throw new PhotoProcessingError("queue_unavailable");
+  const stored = (await db.select().from(dealSettings).where(eq(dealSettings.key, builderSettingsKey(builder))).limit(1))[0];
+  if (!stored) return defaultBuilderPhotoSettings(builder);
+  const settings = parseBuilderPhotoSettings(stored.value);
+  return launchUpgradeFor(builder, settings) ?? settings;
+}
+
+/** The processing path's reader: seeds the defaults row and persists the launch upgrade (the only write-on-read). */
 export async function getBuilderPhotoSettings(builder: string): Promise<BuilderPhotoSettings> {
   const db = await getDb();
   if (!db) throw new PhotoProcessingError("queue_unavailable");
@@ -160,11 +186,8 @@ export async function getBuilderPhotoSettings(builder: string): Promise<BuilderP
     return parseBuilderPhotoSettings(actual.value);
   }
   const settings = parseBuilderPhotoSettings(stored.value);
-  // Rows seeded by the earlier code carry region null and were never saved by
-  // an admin; a launch builder upgrades to the reviewed default so its photos
-  // stop parking. An admin save (revision "admin-...") is never overridden.
-  if (settings.revision === UNCONFIGURED_REVISION && !settings.region && LAUNCH_BUILDERS.has(builderKey(builder))) {
-    const upgraded = { ...defaultBuilderPhotoSettings(builder), keywords: settings.keywords, reviewedSampleIds: settings.reviewedSampleIds };
+  const upgraded = launchUpgradeFor(builder, settings);
+  if (upgraded) {
     await db.update(dealSettings).set({ value: JSON.stringify(upgraded) }).where(eq(dealSettings.key, key));
     return upgraded;
   }
@@ -461,14 +484,9 @@ export async function closeDealPhotoOcrWorker(graceMs = OCR_TIMEOUT_MS + 2_000) 
   await resetOcrWorker();
 }
 
+/** Every stored private name (categorized or legacy flat) minus the admin-excluded false positives; those are never OCR hide terms. */
 function safeScrubList(value: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    const values = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" ? Object.values(parsed).flat() : [];
-    return values.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
-  } catch {
-    return [];
-  }
+  return dealScrubTerms(effectiveScrubConfig(value)).filter((item) => item.trim().length > 0);
 }
 
 function photoErrorCode(error: unknown): PhotoProcessingErrorCode {

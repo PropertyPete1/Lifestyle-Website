@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
   updateBuilderDealsLeadInFub: vi.fn(),
   updateBuilderDealsProfileInFub: vi.fn(),
   appendBuilderDealsActivity: vi.fn(),
+  createBuilderDealsTourTask: vi.fn(),
+  appendBuilderDealsTourTask: vi.fn(),
+  createBuilderDealsRequestNote: vi.fn(),
+  appendBuilderDealsRequestNote: vi.fn(),
   queueFirstUnlockAlert: vi.fn(),
   queueProfileFlagAlert: vi.fn(),
   sendBuilderDealsEmail: vi.fn(),
@@ -29,6 +33,10 @@ vi.mock("./dealsFub", async (importOriginal) => ({
   updateBuilderDealsLeadInFub: (...args: unknown[]) => mocks.updateBuilderDealsLeadInFub(...args),
   updateBuilderDealsProfileInFub: (...args: unknown[]) => mocks.updateBuilderDealsProfileInFub(...args),
   appendBuilderDealsActivity: (...args: unknown[]) => mocks.appendBuilderDealsActivity(...args),
+  createBuilderDealsTourTask: (...args: unknown[]) => mocks.createBuilderDealsTourTask(...args),
+  appendBuilderDealsTourTask: (...args: unknown[]) => mocks.appendBuilderDealsTourTask(...args),
+  createBuilderDealsRequestNote: (...args: unknown[]) => mocks.createBuilderDealsRequestNote(...args),
+  appendBuilderDealsRequestNote: (...args: unknown[]) => mocks.appendBuilderDealsRequestNote(...args),
 }));
 vi.mock("./dealsAlerts", () => ({
   queueFirstUnlockAlert: (...args: unknown[]) => mocks.queueFirstUnlockAlert(...args),
@@ -36,7 +44,7 @@ vi.mock("./dealsAlerts", () => ({
 }));
 vi.mock("./dealsEmail", () => ({ sendBuilderDealsEmail: (...args: unknown[]) => mocks.sendBuilderDealsEmail(...args) }));
 
-import { dealCommunities, dealCommunityViews, dealEvents, dealFubJobs, dealFubRecords, dealLeads, dealTourRequests } from "../drizzle/schema";
+import { dealCommunities, dealCommunityViews, dealEvents, dealFubJobs, dealFubRecords, dealHomes, dealLeads, dealTourRequests } from "../drizzle/schema";
 import { createFakeDealsDb, type FakeDealsDb } from "./dealsFubFakeDb.test-support";
 import {
   LEASE_MS,
@@ -46,7 +54,9 @@ import {
   enqueueDealsRequestJobs,
   handleDealsProfileUpdate,
   previousChicagoDay,
+  requestTestMode,
   runPendingDealsFubJobs,
+  waitingForDeferredCheck,
 } from "./dealsFubJobs";
 
 const settings = { testNumbers: [] as string[], testTeamNumbers: [] as string[], testNumbersSkipChecks: true, testModeFullPipeline: false, brokerageDomains: ["kw.com"], fubRealtorTags: ["Recruit"], fubRealtorSources: ["Agent Scouting"], alertRecipients: ["peter@lifestyledesignrealty.com", "steven@lifestyledesignrealty.com"], alertMode: "immediate" as const };
@@ -58,15 +68,25 @@ const lead = {
 function job(overrides: Partial<typeof dealFubJobs.$inferSelect> = {}): typeof dealFubJobs.$inferSelect {
   return { id: 1, leadId: lead.id, operation: "first_unlock", payload: JSON.stringify({ deferredCheck: true }), status: "pending", attempts: 0, lastError: null, nextAttemptAt: new Date(Date.now() - 1000), leaseToken: null, leasedAt: null, completedAt: null, createdAt: new Date(), ...overrides };
 }
-/** Queues the candidate row, then the leased re-reads of the same job. */
-function dbWithJob(row: typeof dealFubJobs.$inferSelect, leadRow: typeof dealLeads.$inferSelect | null = lead, extra: Array<[unknown, unknown[]]> = []) {
+/**
+ * Queues the candidate row, the leased re-reads of the same job and, for any
+ * operation but first_unlock, the lead's first_unlock lookup (empty by default:
+ * no deferred check pending) before the post-delivery payload re-read.
+ */
+function dbWithJob(row: typeof dealFubJobs.$inferSelect, leadRow: typeof dealLeads.$inferSelect | null = lead, extra: Array<[unknown, unknown[]]> = [], firstUnlockRows: Array<Partial<typeof dealFubJobs.$inferSelect>> = []) {
+  const leased = { ...row, status: "leased", leaseToken: "lease-token", leasedAt: new Date() };
+  const lookup: Array<[unknown, unknown[]]> = row.operation === "first_unlock" ? [] : [[dealFubJobs, [leased]], [dealFubJobs, firstUnlockRows], [dealFubJobs, [leased]]];
   return createFakeDealsDb([
     [dealFubJobs, [row]],
-    [dealFubJobs, [{ ...row, status: "leased", leaseToken: "lease-token", leasedAt: new Date() }]],
+    [dealFubJobs, [leased]],
+    ...lookup,
     [dealLeads, leadRow ? [leadRow] : []],
     ...extra,
   ]);
 }
+const firstUnlockRow = (overrides: Partial<typeof dealFubJobs.$inferSelect> = {}) => job({ id: 90, operation: "first_unlock", payload: JSON.stringify({ deferredCheck: true }), status: "failed", attempts: 2, lastError: "FUB check deferred: FUB is still unavailable", nextAttemptAt: new Date(Date.now() + 60_000), ...overrides });
+const tourRequest = { id: 41, leadId: lead.id, homeId: 9, requestType: "tour" as const, preferredAt: new Date("2026-10-18T18:30:00.000Z"), chicagoDay: "2026-10-18", fubTaskId: null, fubNoteId: null, fubNoteSentAt: null, emailSentAt: null, createdAt: new Date("2026-10-18T15:00:00.000Z") };
+const requestedHome = { id: 9, communityId: 7, privateAddress: "8106 Private Street", privatePlanName: "Hidden Plan", status: "available" };
 const updatesOf = (db: FakeDealsDb, table: unknown) => db.writes.filter((write) => write.op === "update" && write.table === table).map((write) => write.set as Record<string, unknown>);
 const insertsOf = (db: FakeDealsDb, table: unknown) => db.writes.filter((write) => write.op === "insert" && write.table === table).map((write) => write.values as Record<string, unknown>);
 
@@ -295,5 +315,114 @@ describe("Builder Deals profile and activity outbox operations", () => {
     expect(detail).toContain("Tour and question requests: 1");
     expect(insertsOf(db, dealFubRecords)).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "note", fubId: "900", createdByUs: true })]));
     expect(updatesOf(db, dealLeads)).toEqual([]);
+  });
+});
+
+describe("Builder Deals deferred realtor check gates every other FUB write for the lead", () => {
+  it("parks a profile_update for retry while the lead's first_unlock row still carries an unsynced deferred check", async () => {
+    const db = dbWithJob(job({ id: 2, operation: "profile_update", payload: "{}" }), { ...lead, flags: "[]", name: "Pete Buyer" }, [], [firstUnlockRow()]);
+    mocks.getDb.mockResolvedValue(db);
+    await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ failed: 1, sent: 0, skipped: 0, leased: 1 });
+    expect(mocks.updateBuilderDealsProfileInFub).not.toHaveBeenCalled();
+    expect(mocks.classifyDealsAccess).not.toHaveBeenCalled();
+    const failedUpdate = updatesOf(db, dealFubJobs).find((set) => set.status === "failed")!;
+    expect(failedUpdate.lastError).toBe("waiting for deferred realtor check");
+    expect(failedUpdate.nextAttemptAt).toBeInstanceOf(Date);
+    // Not a lead-sync row: the lead's FUB badge is left alone and nobody is alerted.
+    expect(updatesOf(db, dealLeads)).toEqual([]);
+    expect(mocks.queueFirstUnlockAlert).not.toHaveBeenCalled();
+    expect(mocks.sendBuilderDealsEmail).not.toHaveBeenCalled();
+  });
+
+  it("holds a tour request task and its email the same way, so a 'Tour this home' tap cannot write to FUB before the realtor match", async () => {
+    const db = dbWithJob(job({ id: 3, operation: "request_email:41", payload: JSON.stringify({ requestId: 41, chicagoDay: "2026-10-18" }) }), { ...lead, flags: "[]" }, [[dealTourRequests, [tourRequest]], [dealHomes, [requestedHome]]], [firstUnlockRow()]);
+    mocks.getDb.mockResolvedValue(db);
+    await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ failed: 1 });
+    expect(mocks.sendBuilderDealsEmail).not.toHaveBeenCalled();
+    expect(updatesOf(db, dealTourRequests)).toEqual([]);
+    expect(updatesOf(db, dealFubJobs).find((set) => set.status === "failed")!.lastError).toBe("waiting for deferred realtor check");
+  });
+
+  it("lets the other operations through once first_unlock is synced, or when it never deferred the check", async () => {
+    mocks.updateBuilderDealsProfileInFub.mockResolvedValue({ ok: true, personId: "9001", records: [{ kind: "person", fubId: "9001", createdByUs: false }] });
+    const synced = dbWithJob(job({ id: 2, operation: "profile_update", payload: "{}" }), { ...lead, flags: "[]", name: "Pete Buyer" }, [], [firstUnlockRow({ status: "synced", completedAt: new Date() })]);
+    mocks.getDb.mockResolvedValue(synced);
+    await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ sent: 1, failed: 0 });
+    expect(mocks.updateBuilderDealsProfileInFub).toHaveBeenCalledTimes(1);
+
+    const plain = dbWithJob(job({ id: 2, operation: "profile_update", payload: "{}" }), { ...lead, flags: "[]", name: "Pete Buyer" }, [], [firstUnlockRow({ payload: "{}" })]);
+    mocks.getDb.mockResolvedValue(plain);
+    await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ sent: 1, failed: 0 });
+    expect(mocks.updateBuilderDealsProfileInFub).toHaveBeenCalledTimes(2);
+  });
+
+  it("never gates the first_unlock row itself", async () => {
+    await expect(waitingForDeferredCheck({ leadId: lead.id, operation: "first_unlock" })).resolves.toBe(false);
+    expect(mocks.getDb).not.toHaveBeenCalled();
+    mocks.getDb.mockResolvedValue(createFakeDealsDb([[dealFubJobs, [firstUnlockRow()]]]));
+    await expect(waitingForDeferredCheck({ leadId: lead.id, operation: "reverify" })).resolves.toBe(true);
+    await expect(waitingForDeferredCheck({ leadId: lead.id, operation: "activity:2026-10-18" })).resolves.toBe(true);
+  });
+});
+
+describe("Builder Deals tour and question requests respect toggle (c)", () => {
+  const testLead = { ...lead, flags: "[]", phoneE164: "+12105550300" };
+
+  it("classifies a test number as quiet only while the full pipeline is off", async () => {
+    mocks.getDealSettings.mockResolvedValue({ ...settings, testNumbers: [testLead.phoneE164] });
+    await expect(requestTestMode(testLead.phoneE164)).resolves.toEqual({ isTest: true, quiet: true });
+    mocks.getDealSettings.mockResolvedValue({ ...settings, testNumbers: [testLead.phoneE164], testModeFullPipeline: true });
+    await expect(requestTestMode(testLead.phoneE164)).resolves.toEqual({ isTest: true, quiet: false });
+    await expect(requestTestMode(lead.phoneE164)).resolves.toEqual({ isTest: false, quiet: false });
+  });
+
+  it("creates no FUB task, no FUB note and no email for a test number with the full pipeline off", async () => {
+    mocks.getDealSettings.mockResolvedValue({ ...settings, testNumbers: [testLead.phoneE164] });
+    for (const operation of ["request_task:2026-10-18", "request_note:2026-10-18", "request_email:41"] as const) {
+      const db = dbWithJob(job({ id: 5, operation, payload: JSON.stringify({ requestId: 41, chicagoDay: "2026-10-18" }) }), testLead, [[dealTourRequests, [tourRequest]], [dealHomes, [requestedHome]]]);
+      mocks.getDb.mockResolvedValue(db);
+      await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ skipped: 1, failed: 0, sent: 0 });
+      expect(updatesOf(db, dealTourRequests)).toEqual([]);
+      expect(updatesOf(db, dealFubJobs)).toEqual(expect.arrayContaining([expect.objectContaining({ status: "synced" })]));
+    }
+    expect(mocks.createBuilderDealsTourTask).not.toHaveBeenCalled();
+    expect(mocks.createBuilderDealsRequestNote).not.toHaveBeenCalled();
+    expect(mocks.sendBuilderDealsEmail).not.toHaveBeenCalled();
+  });
+
+  it("with the full pipeline on, everything the test request creates is marked TEST", async () => {
+    mocks.getDealSettings.mockResolvedValue({ ...settings, testNumbers: [testLead.phoneE164], testModeFullPipeline: true });
+    mocks.createBuilderDealsTourTask.mockResolvedValue({ ok: true, personId: "9001", taskId: "T1", records: [{ kind: "person", fubId: "9001", createdByUs: false }, { kind: "task", fubId: "T1", createdByUs: true }] });
+    mocks.createBuilderDealsRequestNote.mockResolvedValue({ ok: true, personId: "9001", records: [{ kind: "person", fubId: "9001", createdByUs: false }, { kind: "note", fubId: "N1", createdByUs: true }] });
+
+    const task = dbWithJob(job({ id: 5, operation: "request_task:2026-10-18", payload: JSON.stringify({ requestId: 41, chicagoDay: "2026-10-18" }) }), testLead, [[dealTourRequests, [tourRequest]], [dealHomes, [requestedHome]]]);
+    mocks.getDb.mockResolvedValue(task);
+    await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ sent: 1 });
+    expect(mocks.createBuilderDealsTourTask).toHaveBeenCalledWith(expect.objectContaining({ lead: expect.objectContaining({ id: lead.id, phoneE164: testLead.phoneE164, isTest: true }), privateDescription: "8106 Private Street (Hidden Plan)" }));
+    expect(updatesOf(task, dealTourRequests)).toEqual(expect.arrayContaining([{ fubTaskId: "T1" }]));
+
+    const note = dbWithJob(job({ id: 6, operation: "request_note:2026-10-18", payload: JSON.stringify({ requestId: 41, chicagoDay: "2026-10-18" }) }), testLead, [[dealTourRequests, [tourRequest]], [dealHomes, [requestedHome]]]);
+    mocks.getDb.mockResolvedValue(note);
+    await expect(runPendingDealsFubJobs()).resolves.toMatchObject({ sent: 1 });
+    expect(mocks.createBuilderDealsRequestNote).toHaveBeenCalledWith(expect.objectContaining({ lead: expect.objectContaining({ isTest: true }) }));
+
+    const email = dbWithJob(job({ id: 7, operation: "request_email:41", payload: JSON.stringify({ requestId: 41, chicagoDay: "2026-10-18" }) }), testLead, [[dealTourRequests, [tourRequest]], [dealHomes, [requestedHome]]]);
+    mocks.getDb.mockResolvedValue(email);
+    await runPendingDealsFubJobs();
+    expect(mocks.sendBuilderDealsEmail).toHaveBeenCalledTimes(1);
+    const sent = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { category: string; subject: string; content: string; recipients: string[] };
+    expect(sent).toMatchObject({ category: "tour_request", recipients: settings.alertRecipients, subject: "TEST: Builder Deals tour request" });
+    expect(sent.content).toContain("TEST RECORD");
+    expect(sent.subject).not.toContain("—");
+    expect(updatesOf(email, dealTourRequests)).toEqual([expect.objectContaining({ emailSentAt: expect.any(Date) })]);
+
+    // A live lead's email carries no TEST marker.
+    mocks.getDealSettings.mockResolvedValue(settings);
+    const live = dbWithJob(job({ id: 8, operation: "request_email:41", payload: JSON.stringify({ requestId: 41, chicagoDay: "2026-10-18" }) }), { ...lead, flags: "[]" }, [[dealTourRequests, [tourRequest]], [dealHomes, [requestedHome]]]);
+    mocks.getDb.mockResolvedValue(live);
+    await runPendingDealsFubJobs();
+    const liveEmail = mocks.sendBuilderDealsEmail.mock.calls[1]![0] as { subject: string; content: string };
+    expect(liveEmail.subject).toBe("Builder Deals tour request");
+    expect(liveEmail.content).not.toContain("TEST");
   });
 });

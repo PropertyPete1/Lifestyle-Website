@@ -438,8 +438,12 @@ export function formatChicagoDateTime(value: Date) {
   }).format(value);
 }
 
-type RequestLead = { id: number; fubPersonId: string | null; phoneE164: string; email: string | null; name?: string | null; instagramHandle?: string | null; sourceCode?: string; consentText?: string; consentAt?: Date; consentIp?: string | null };
+type RequestLead = { id: number; fubPersonId: string | null; phoneE164: string; email: string | null; name?: string | null; instagramHandle?: string | null; sourceCode?: string; consentText?: string; consentAt?: Date; consentIp?: string | null; isTest?: boolean };
 type TourRequest = { id: number; requestType: "tour" | "ask"; preferredAt: Date; chicagoDay: string; fubTaskId: string | null; fubNoteSentAt: Date | null };
+/** Toggle (c): everything a full-pipeline test lead creates in FUB is marked TEST so cleanup and the team can tell it apart. */
+const TEST_RECORD_LINE = "TEST RECORD - eligible for Builder Deals cleanup";
+function testPrefix(lead: Pick<RequestLead, "isTest">) { return lead.isTest ? "TEST " : ""; }
+function testLines(lead: Pick<RequestLead, "isTest">): string[] { return lead.isTest ? [TEST_RECORD_LINE] : []; }
 
 async function taskPersonId(lead: RequestLead) {
   if (lead.fubPersonId) return lead.fubPersonId;
@@ -459,8 +463,8 @@ export async function createBuilderDealsTourTask(input: { lead: RequestLead; req
     const personId = await taskPersonId(input.lead);
     const assignedUserId = await peterUserId();
     if (!personId || !assignedUserId) return { ok: false, error: "FUB contact or Peter assignment unavailable" };
-    const description = `${requestMarker(input.lead.id, input.request.id)}\n${requestLine(input.request, input.privateDescription)}`;
-    const response = await fub("/tasks", { method: "POST", body: JSON.stringify({ personId: Number(personId), assignedUserId: Number(assignedUserId), name: `Builder Deals ${input.request.requestType}: ${input.privateDescription}`, description, type: "Appointment", dueDateTime: input.request.preferredAt.toISOString() }) });
+    const description = [requestMarker(input.lead.id, input.request.id), ...testLines(input.lead), requestLine(input.request, input.privateDescription)].join("\n");
+    const response = await fub("/tasks", { method: "POST", body: JSON.stringify({ personId: Number(personId), assignedUserId: Number(assignedUserId), name: `${testPrefix(input.lead)}Builder Deals ${input.request.requestType}: ${input.privateDescription}`, description, type: "Appointment", dueDateTime: input.request.preferredAt.toISOString() }) });
     const task = await response.json().catch(() => ({})) as { id?: string | number; task?: { id?: string | number } };
     const taskId = task.task?.id ?? task.id;
     if (!taskId) return { ok: false, error: "FUB task did not return an id" };
@@ -512,7 +516,7 @@ export async function createBuilderDealsRequestNote(input: { lead: RequestLead; 
     if (existing?.id) return appendBuilderDealsRequestNote({ ...input, noteId: existing.id });
     if (existing) return { ok: false, error: "FUB per-day note id unavailable" };
     const marker = requestMarker(input.lead.id, input.request.id);
-    const note = await postFubNote(personId, "Builder Deals request", `${dayMarker}\n${marker}\n${requestLine(input.request, input.privateDescription)}`);
+    const note = await postFubNote(personId, `${testPrefix(input.lead)}Builder Deals request`, [dayMarker, ...testLines(input.lead), marker, requestLine(input.request, input.privateDescription)].join("\n"));
     if (note.ok && !note.id) return { ok: false, error: "FUB note did not return an id" };
     return note.ok
       ? { ok: true, personId, records: [{ kind: "person", fubId: personId, createdByUs: false }, ...(note.id ? [{ kind: "note" as const, fubId: note.id, createdByUs: true }] : [])] }

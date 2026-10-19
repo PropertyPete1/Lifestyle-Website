@@ -220,6 +220,13 @@ async function leaseDueJob(job: typeof dealFubJobs.$inferSelect) {
   return claimed ?? null;
 }
 
+/** Toggle (c): a test number writes to FUB and emails the team only with the full pipeline on; what it then creates is marked TEST. */
+export async function requestTestMode(phoneE164: string): Promise<{ quiet: boolean; isTest: boolean }> {
+  const settings = await getDealSettings();
+  const isTest = settings.testNumbers.includes(phoneE164);
+  return { isTest, quiet: isTest && !settings.testModeFullPipeline };
+}
+
 async function loadRequestJob(job: typeof dealFubJobs.$inferSelect) {
   const db = await getDb();
   if (!db) return null;
@@ -231,7 +238,10 @@ async function loadRequestJob(job: typeof dealFubJobs.$inferSelect) {
   const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, job.leadId)).limit(1))[0];
   const home = (await db.select().from(dealHomes).where(eq(dealHomes.id, request.homeId)).limit(1))[0];
   if (!lead || !home || lead.status === "blocked" || lead.status === "team") return null;
-  return { request, lead, home, privateDescription: `${home.privateAddress ?? "Requested home"}${home.privatePlanName ? ` (${home.privatePlanName})` : ""}` };
+  // A quiet test lead (full pipeline off) creates no FUB task, no note and no email; the row is skipped, not failed.
+  const testMode = await requestTestMode(lead.phoneE164);
+  if (testMode.quiet) return null;
+  return { request, lead: { ...lead, isTest: testMode.isTest }, home, privateDescription: `${home.privateAddress ?? "Requested home"}${home.privatePlanName ? ` (${home.privatePlanName})` : ""}` };
 }
 
 type LoadedRequestJob = NonNullable<Awaited<ReturnType<typeof loadRequestJob>>>;
@@ -325,11 +335,17 @@ async function executeRequestEmail(job: typeof dealFubJobs.$inferSelect): Promis
   if (!db) return { ok: false, error: "Database unavailable" };
   if (!loaded || loaded.request.emailSentAt) return { ok: true, records: [] };
   const settings = await getDealSettings();
+  const testTag = loaded.lead.isTest ? "TEST: " : "";
   const sent = await sendBuilderDealsEmail({
     category: "tour_request",
     recipients: settings.alertRecipients,
-    subject: loaded.request.requestType === "tour" ? "Builder Deals tour request" : "Builder Deals question",
-    content: `Builder Deals lead ${loaded.lead.id} requested ${loaded.privateDescription}.\nPreferred: ${formatChicagoDateTime(loaded.request.preferredAt)}\nReview the protected request in Admin, Builder Deals.`,
+    subject: `${testTag}${loaded.request.requestType === "tour" ? "Builder Deals tour request" : "Builder Deals question"}`,
+    content: [
+      loaded.lead.isTest ? "TEST RECORD (full-pipeline test mode): eligible for Builder Deals cleanup." : null,
+      `Builder Deals lead ${loaded.lead.id} requested ${loaded.privateDescription}.`,
+      `Preferred: ${formatChicagoDateTime(loaded.request.preferredAt)}`,
+      "Review the protected request in Admin, Builder Deals.",
+    ].filter(Boolean).join("\n"),
   });
   if (!sent.ok) return { ok: false, error: sent.error ?? "Builder Deals email was not accepted" };
   await db.update(dealTourRequests).set({ emailSentAt: new Date() }).where(eq(dealTourRequests.id, loaded.request.id));
@@ -416,7 +432,23 @@ async function executeActivityJob(job: typeof dealFubJobs.$inferSelect): Promise
   return appendBuilderDealsActivity({ id: lead.id, fubPersonId: lead.fubPersonId, phoneE164: lead.phoneE164, email: lead.email }, day, lines.join("\n"));
 }
 
+/**
+ * FUB was down when this lead verified, so the realtor match is still pending
+ * on its first_unlock row. Until that row syncs, no other operation for the
+ * lead (profile update, request task/note/email, activity note) may write to
+ * FUB: backoff ordering must never put a task ahead of the realtor check.
+ */
+export async function waitingForDeferredCheck(job: Pick<typeof dealFubJobs.$inferSelect, "leadId" | "operation">): Promise<boolean> {
+  if (job.operation === "first_unlock") return false;
+  const db = await getDb();
+  if (!db) return false;
+  const first = (await db.select().from(dealFubJobs).where(and(eq(dealFubJobs.leadId, job.leadId), eq(dealFubJobs.operation, "first_unlock"))).limit(1))[0];
+  if (!first || first.status === "synced") return false;
+  return Boolean((parseMetadata(first.payload) as LeadJobMetadata).deferredCheck);
+}
+
 async function executeLeasedJob(job: typeof dealFubJobs.$inferSelect): Promise<FubDeliveryResult> {
+  if (await waitingForDeferredCheck(job)) return { ok: false, error: "waiting for deferred realtor check" };
   if (LEAD_SYNC_OPERATIONS.has(job.operation)) return executeLeadJob(job);
   if (job.operation.startsWith("activity:")) return executeActivityJob(job);
   if (job.operation.startsWith("request_task:")) return executeRequestTask(job);

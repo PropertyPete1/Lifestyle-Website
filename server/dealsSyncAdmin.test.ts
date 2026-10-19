@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dealCommunities, dealHomes, dealIncentives, dealJobRuns } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
-import type { DealAdapterResult } from "./dealsAdapters";
+import type { DealAdapterResult, DealHoldReason } from "./dealsAdapters";
 
 const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
@@ -18,7 +18,7 @@ vi.mock("./dealsMap", () => ({ refreshCommunityGeography: (...args: unknown[]) =
 vi.mock("./dealsPhotos", () => ({ processDealPhoto: (...args: unknown[]) => mocks.processDealPhoto(...args), processPendingDealPhotos: (...args: unknown[]) => mocks.processPendingDealPhotos(...args) }));
 vi.mock("./dealsAdapters", async (importOriginal) => ({ ...(await importOriginal<typeof import("./dealsAdapters")>()), loadOfficialDeals: (...args: unknown[]) => mocks.loadOfficialDeals(...args) }));
 
-import { DealsAdminError, acceptIncentiveHold, dismissIncentiveHold, heldIncentiveMissingFields, listCommunityDiagnostics, refreshCommunityInBackground, saveIncentiveForCommunity, storedScrubListForCommunity, testCommunitySource } from "./dealsSyncAdmin";
+import { CATALOG_HOLD_REASON_HELP, DealsAdminError, acceptIncentiveHold, describeCatalogHold, dismissIncentiveHold, heldIncentiveMissingFields, listCommunityDiagnostics, refreshCommunityInBackground, saveIncentiveForCommunity, storedScrubListForCommunity, testCommunitySource } from "./dealsSyncAdmin";
 import { chicagoEndOfDay } from "./dealsService";
 
 const COMMUNITY_URL = "https://www.mihomes.com/new-homes/texas/greater-san-antonio/southeast-san-antonio/fixture-gardens";
@@ -164,6 +164,34 @@ describe("diagnostics and scrub storage", () => {
     expect(stored.other).toEqual(["Arroyo Fixture"]);
     const categorized = JSON.parse(storedScrubListForCommunity({ builder: "Chesmar", privateName: "Fixture Lakes", scrubList: { plan: ["Magnolia"], street: ["Grove Fixture"] }, existing: JSON.stringify(["Legacy Term"]) }));
     expect(categorized).toMatchObject({ plan: ["Magnolia"], street: ["Grove Fixture"], other: ["Legacy Term"] });
+    expect(categorized.excludedTerms).toBeUndefined();
+  });
+
+  it("extends the discovered plan and street lists by default, replaces them only with replaceDiscovered, and keeps the exclusion list beside the categories", () => {
+    const existing = JSON.stringify({ builder: ["Chesmar Homes", "Chesmar"], community: ["Fixture Lakes"], plan: ["Magnolia", "Cypress"], street: ["Grove Fixture", "New Homes in San Antonio"], other: ["Legacy Term"], excludedTerms: ["New Homes in San Antonio"] });
+    const union = JSON.parse(storedScrubListForCommunity({ builder: "Chesmar", privateName: "Fixture Lakes", scrubList: { plan: ["Oak"] }, existing }));
+    expect(union).toMatchObject({ plan: ["Magnolia", "Cypress", "Oak"], street: ["Grove Fixture"], other: ["Legacy Term"], excludedTerms: ["New Homes in San Antonio"] });
+
+    const replaced = JSON.parse(storedScrubListForCommunity({ builder: "Chesmar", privateName: "Fixture Lakes", scrubList: { plan: ["Oak"], street: [] }, existing, replaceDiscovered: true }));
+    expect(replaced).toMatchObject({ plan: ["Oak"], street: [], other: ["Legacy Term"], community: ["Fixture Lakes"], excludedTerms: ["New Homes in San Antonio"] });
+    expect(replaced.builder).toEqual(expect.arrayContaining(["Chesmar Homes", "Chesmar"]));
+
+    // A submitted list replaces the stored exclusions (an empty one clears them) and is stripped from plan/street/other at save time.
+    const excluded = JSON.parse(storedScrubListForCommunity({ builder: "Chesmar", privateName: "Fixture Lakes", scrubList: { plan: ["Oak"] }, existing, excludedTerms: ["  Magnolia ", "magnolia", "Fixture Lakes", "Chesmar"] }));
+    expect(excluded).toMatchObject({ plan: ["Cypress", "Oak"], excludedTerms: ["Magnolia", "Fixture Lakes", "Chesmar"], community: ["Fixture Lakes"] });
+    expect(excluded.builder).toEqual(expect.arrayContaining(["Chesmar"]));
+    const cleared = JSON.parse(storedScrubListForCommunity({ builder: "Chesmar", privateName: "Fixture Lakes", existing, excludedTerms: [] }));
+    expect(cleared.excludedTerms).toBeUndefined();
+    expect(cleared.street).toEqual(["Grove Fixture", "New Homes in San Antonio"]);
+  });
+
+  it("describes every catalog-level hold reason for the operator, including an unlabelled home status", () => {
+    const reasons: DealHoldReason[] = ["invalid_source_url", "unsupported_official_host", "community_fetch_failed", "sitemap_fetch_failed", "detail_fetch_failed", "missing_community_guid", "inventory_fetch_failed", "invalid_inventory_response", "incomplete_inventory", "expected_community_container_not_found", "expected_detail_container_not_found", "unlabelled_home_status", "private_text_remaining"];
+    for (const reason of reasons) expect(CATALOG_HOLD_REASON_HELP[reason]).toEqual(expect.stringMatching(/\w/));
+    expect(describeCatalogHold("unlabelled_home_status")).toEqual(["A home card's status could not be read, so nothing was published or marked sold this run."]);
+    expect(describeCatalogHold("community_fetch_failed, detail_fetch_failed")).toHaveLength(2);
+    expect(describeCatalogHold("something_new")).toEqual(["something new"]);
+    for (const text of Object.values(CATALOG_HOLD_REASON_HELP)) expect(text).not.toContain("—");
   });
 
   it("lists holds, counts and held incentives with their missing fields per community", async () => {
@@ -173,8 +201,15 @@ describe("diagnostics and scrub storage", () => {
     db.seed(dealHomes, { communityId, sourceKey: "k2", sourceUrl: "https://www.mihomes.com/b", kind: "to_be_built", status: "sold", origin: "official" });
     db.seed(dealIncentives, { communityId, normalizedText: "held", publicText: "First-year 4.25% (6.051% APR)", apr: "6.051%", active: false, held: true, holdReason: JSON.stringify(["missing_follow_on_rate"]), confirmedAt: new Date() });
     const [diagnostics] = await listCommunityDiagnostics();
-    expect(diagnostics).toMatchObject({ id: communityId, builder: "M/I Homes", refreshDue: true, catalogHold: { reason: "community_fetch_failed", ageHours: 5 }, homes: { quickMoveIn: 1, toBeBuilt: 0, sold: 1, hidden: 0, manual: 0 }, incentive: null });
+    expect(diagnostics).toMatchObject({ id: communityId, builder: "M/I Homes", refreshDue: true, catalogHold: { reason: "community_fetch_failed", ageHours: 5, help: ["The official community page could not be fetched."] }, homes: { quickMoveIn: 1, toBeBuilt: 0, sold: 1, hidden: 0, manual: 0 }, incentive: null });
     expect(diagnostics.heldIncentives[0]).toMatchObject({ reasons: ["missing_follow_on_rate"], missingFields: ["followOnRate", "followOnPeriod"] });
     expect(diagnostics.scrubConfig.plan).toEqual(["Magnolia"]);
+    expect(diagnostics.excludedTerms).toEqual([]);
+
+    // Excluded terms are reported and removed from the effective categories the admin sees.
+    db.rows(dealCommunities)[0].scrubList = JSON.stringify({ plan: ["Magnolia"], street: ["Fixture Street", "New Homes in San Antonio"], excludedTerms: ["New Homes in San Antonio"] });
+    const [excluded] = await listCommunityDiagnostics();
+    expect(excluded.excludedTerms).toEqual(["New Homes in San Antonio"]);
+    expect(excluded.scrubConfig.street).toEqual(["Fixture Street"]);
   });
 });

@@ -70,13 +70,14 @@ function BlockLeadDialog({ leadId, label, onClose }: { leadId: number | null; la
   const [reason, setReason] = useState("");
   const detail = trpc.deals.admin.leadDetail.useQuery({ id: leadId ?? 0 }, { enabled: leadId !== null && label === null, retry: false });
   const block = trpc.deals.admin.blockLeadAndKillLink.useMutation({
-    onSuccess: () => { void utils.deals.admin.leads.invalidate(); void utils.deals.admin.overview.invalidate(); void utils.deals.admin.leadDetail.invalidate(); setReason(""); onClose(); toast.success("Lead blocked and access link revoked"); },
+    // The block writes blocklist rows too, so the Blocklist table (identityList) refreshes with the leads.
+    onSuccess: () => { void utils.deals.admin.leads.invalidate(); void utils.deals.admin.identityList.invalidate(); void utils.deals.admin.overview.invalidate(); void utils.deals.admin.leadDetail.invalidate(); setReason(""); onClose(); toast.success("Lead blocked and access link revoked"); },
     onError: (error) => toast.error(error.message || "Could not block the lead"),
   });
   const who = label ?? (detail.data ? `${detail.data.lead.name || "Unnamed buyer"}, ${detail.data.lead.phoneE164}` : `Lead #${leadId ?? ""}`);
   return (
     <Dialog open={leadId !== null} onOpenChange={(open) => { if (!open && !block.isPending) { setReason(""); onClose(); } }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent>
         <DialogHeader><DialogTitle>Block and kill link</DialogTitle><DialogDescription>This immediately revokes every active Builder Deals link for this lead and adds their phone, email and device to the permanent blocklist.</DialogDescription></DialogHeader>
         <div className="space-y-4">
           <div className="border border-destructive/30 bg-destructive/5 p-3 text-sm"><p className="flex items-center gap-2 font-medium text-destructive"><AlertTriangle className="h-4 w-4" /> Nothing changes until you tap Block and kill link.</p><p className="mt-1 break-words text-muted-foreground">{who}</p></div>
@@ -109,7 +110,8 @@ export function LeadsSection({ overview }: { overview: Overview }) {
   const pageSize = 25;
   const leads = trpc.deals.admin.leads.useQuery({ search: applied, status, fubStatus, page, pageSize }, { retry: false, refetchOnWindowFocus: false, placeholderData: keepPreviousData });
   const makeLeadTeam = trpc.deals.admin.makeLeadTeam.useMutation({
-    onSuccess: () => { void utils.deals.admin.leads.invalidate(); void utils.deals.admin.overview.invalidate(); setLeadToMakeTeam(null); toast.success("Lead added to team preview"); },
+    // Team preview allowlists the identity, so the Team table (identityList) refreshes with the leads.
+    onSuccess: () => { void utils.deals.admin.leads.invalidate(); void utils.deals.admin.identityList.invalidate(); void utils.deals.admin.overview.invalidate(); setLeadToMakeTeam(null); toast.success("Lead added to team preview"); },
     onError: (error) => toast.error(error.message || "Could not enable team preview"),
   });
 

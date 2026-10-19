@@ -20,7 +20,8 @@ function NeedsPhoneRow({ row }: { row: { id: number; name: string | null; email:
   const utils = trpc.useUtils();
   const [phone, setPhone] = useState("");
   const add = trpc.deals.admin.addTeamPhone.useMutation({
-    onSuccess: () => { void utils.deals.admin.teamNeedsPhone.invalidate(); void utils.deals.admin.identityList.invalidate(); void utils.deals.admin.overview.invalidate(); toast.success(`${row.name || row.email || "Team member"} can now verify with that number.`); },
+    // Adding a number also flips matching verified leads to team, so the leads table refreshes too.
+    onSuccess: () => { void utils.deals.admin.teamNeedsPhone.invalidate(); void utils.deals.admin.identityList.invalidate(); void utils.deals.admin.leads.invalidate(); void utils.deals.admin.overview.invalidate(); toast.success(`${row.name || row.email || "Team member"} can now verify with that number.`); },
     onError: (error) => toast.error(error.message || "Could not save the number"),
   });
   const id = `needs-phone-${row.id}`;
@@ -47,7 +48,8 @@ export function TeamSection({ settings }: { settings: Settings | undefined }) {
   const pageSize = 50;
   const list = trpc.deals.admin.identityList.useQuery({ kind: "team", search: applied, page, pageSize }, { retry: false, refetchOnWindowFocus: false, placeholderData: keepPreviousData });
   const needsPhone = trpc.deals.admin.teamNeedsPhone.useQuery(undefined, { retry: false, refetchOnWindowFocus: false });
-  const refresh = () => { void utils.deals.admin.identityList.invalidate(); void utils.deals.admin.teamNeedsPhone.invalidate(); void utils.deals.admin.overview.invalidate(); };
+  // Team changes also move matching leads to or from team status, so the leads table refreshes with the allowlist.
+  const refresh = () => { void utils.deals.admin.identityList.invalidate(); void utils.deals.admin.teamNeedsPhone.invalidate(); void utils.deals.admin.leads.invalidate(); void utils.deals.admin.overview.invalidate(); };
   const addTeam = trpc.deals.admin.addTeam.useMutation({ onSuccess: () => { refresh(); setForm(EMPTY_TEAM); toast.success("Team member added. Any block or known-agent record for them was cleared."); }, onError: (error) => toast.error(error.message || "Could not add the team member") });
   const removeTeam = trpc.deals.admin.removeTeam.useMutation({
     onSuccess: (result) => { refresh(); setToRemove(null); toast.success(`Removed. ${result.revoked} team preview link${result.revoked === 1 ? "" : "s"} revoked; they are back under the normal checks.${result.mirrorWarning ? ` ${result.mirrorWarning}` : ""}`); },

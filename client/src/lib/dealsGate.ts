@@ -27,6 +27,16 @@ export type GateStartResult =
   | { ok: false; kind: string; message: string; displayPhone?: string | null };
 export type GateResendResult = { ok: true } | { ok: false; kind: string; message: string };
 
+/**
+ * Whether deals.start left a pending verification on the server (a sent code, or
+ * a number that cannot receive texts awaiting the voice call). The cached
+ * deals.state must be refetched then, so a sheet closed on the code step resumes
+ * there instead of asking for the phone again and burning a second code.
+ */
+export function startLeavesPending(result: GateStartResult): boolean {
+  return result.ok || result.kind === "cannot_receive";
+}
+
 export type GateState = {
   step: GateStep;
   /** Copy shown as the current alert or status. Server messages land here untouched. */
@@ -55,6 +65,7 @@ export type GateAction =
 
 export const GATE_COPY = {
   tooManyWrongCodes: "Too many wrong codes, start again",
+  codeSessionExpired: "Your code session expired. Start again.",
   linkExpired: "This link expired, enter your number to get a new one",
   somethingWrong: "Something went wrong, try again",
   codeMismatch: "That code didn't match. Please try again.",
@@ -67,7 +78,7 @@ export const GATE_COPY = {
 } as const;
 
 /** Progress notes rather than errors: rendered as a status in the brand colour, not as an alert. */
-const STATUS_COPY: ReadonlySet<string> = new Set<string>([GATE_COPY.freshCode, GATE_COPY.calling, GATE_COPY.linkCopied, GATE_COPY.linkExpired]);
+const STATUS_COPY: ReadonlySet<string> = new Set<string>([GATE_COPY.freshCode, GATE_COPY.calling, GATE_COPY.linkCopied, GATE_COPY.linkExpired, GATE_COPY.codeSessionExpired]);
 export function isGateStatusMessage(message: string | null): boolean {
   return message !== null && STATUS_COPY.has(message);
 }
@@ -75,12 +86,31 @@ export function isGateStatusMessage(message: string | null): boolean {
 /** Query flags the server uses to hand the sheet a one-time outcome. Never src or ig. */
 export const TRANSIENT_GATE_PARAMS = ["codeError", "expired", "error", "blocked", "gate", "cookieBlocked", "google"] as const;
 
+/** Spec sanitizer limits: a reel code is at most 40 characters, a handle at most 30 after the leading @. */
+export const SOURCE_CODE_MAX = 40;
+export const INSTAGRAM_HANDLE_MAX = 30;
+
+/**
+ * Attribution params as the server's sanitizers will read them, bounded before
+ * they are sent: an oversized ?src or ?ig would otherwise fail the server's
+ * input validation on every start and lock the visitor out of the gate.
+ */
+export function boundSourceCode(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  return value.trim().replace(/[^A-Za-z0-9-]/g, "").slice(0, SOURCE_CODE_MAX) || undefined;
+}
+
+export function boundInstagramHandle(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  return value.trim().replace(/^@+/, "").replace(/[^A-Za-z0-9._]/g, "").slice(0, INSTAGRAM_HANDLE_MAX) || undefined;
+}
+
 export function readGateParams(search: string): GateParams {
   const params = new URLSearchParams(search);
   const codeError = params.get("codeError");
   return {
-    src: params.get("src") ?? undefined,
-    ig: params.get("ig") ?? undefined,
+    src: boundSourceCode(params.get("src")),
+    ig: boundInstagramHandle(params.get("ig")),
     expired: params.get("expired") === "1",
     error: params.get("error") === "1",
     cookieBlocked: params.get("cookieBlocked") === "1",
@@ -163,6 +193,9 @@ export function gateReducer(gate: GateState, action: GateAction): GateState {
  */
 export function gateStepAlert(gate: GateState, state: GateDealsState): string | null {
   if (gate.message) return gate.message;
+  // /deals/verify found no live 10-minute code session: an explanation, shown at once
+  // because the server has already said there is no pending record to resume.
+  if (gate.codeError === "expired") return GATE_COPY.codeSessionExpired;
   if (gate.codeError && state !== undefined && !state.pending) return GATE_COPY.tooManyWrongCodes;
   return null;
 }
@@ -171,6 +204,7 @@ export function gateStepAlert(gate: GateState, state: GateDealsState): string | 
 export function codeStepAlert(gate: GateState): string | null {
   if (gate.cannotReceive) return null;
   if (gate.message) return gate.message;
-  if (gate.codeError) return GATE_COPY.codeMismatch;
+  // A pending record exists after all, so an "expired" flag is stale rather than a wrong code.
+  if (gate.codeError && gate.codeError !== "expired") return GATE_COPY.codeMismatch;
   return null;
 }

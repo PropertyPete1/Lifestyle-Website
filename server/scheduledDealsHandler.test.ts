@@ -65,6 +65,8 @@ vi.mock("./dealsPhotos", () => ({
   pruneDealPhotoRenders: () => Promise.resolve({ scanned: 0, expiredRows: 0, staleRows: 0, rowsDeleted: 0, objectsDeleted: 0, objectsFailed: 0 }),
 }));
 
+import { dealJobRuns } from "../drizzle/schema";
+import { createFakeDealsDb } from "./dealsFubFakeDb.test-support";
 import { isDueAtChicago, scheduledDealsHandler } from "./scheduledDealsHandler";
 
 function responseRecorder() {
@@ -170,5 +172,62 @@ describe("Builder Deals scheduled handler helpers", () => {
     expect(mocks.refreshOfficialDealsIfDue).not.toHaveBeenCalled();
     expect(db.insert).not.toHaveBeenCalled();
     expect(db.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("Builder Deals once-per-day job records", () => {
+  /** No run yet today: once() claims the (job, Chicago day) row, runs the work and records the outcome on that row. */
+  const freshDb = () => createFakeDealsDb([[dealJobRuns, []]]);
+  const runRows = (db: ReturnType<typeof createFakeDealsDb>) => db.writes.filter((write) => write.table === dealJobRuns);
+
+  it("records a successful catalog run as ok with the result as detail and answers with the result", async () => {
+    const result = [{ communityId: 1, reelCode: "vg1", ok: true }, { communityId: 2, reelCode: "sl1", ok: false, reason: "community_fetch_failed" }];
+    mocks.refreshOfficialDealsIfDue.mockResolvedValue(result);
+    const db = freshDb();
+    mocks.getDb.mockResolvedValue(db);
+    const { response, json } = responseRecorder();
+
+    await scheduledDealsHandler({ body: { job: "catalog" } } as Request, response);
+
+    expect(mocks.refreshOfficialDealsIfDue).toHaveBeenCalledTimes(1);
+    expect(json).toHaveBeenCalledWith({ ok: true, result });
+    expect(response.status).not.toHaveBeenCalled();
+    const writes = runRows(db);
+    expect(writes[0]).toMatchObject({ op: "insert", values: { jobName: "builder-deals-catalog-refresh", chicagoDay: "2026-10-18", status: "running" } });
+    expect(writes[1]).toMatchObject({ op: "update", set: { status: "ok", detail: JSON.stringify(result), completedAt: expect.any(Date) } });
+    expect(writes).toHaveLength(2);
+  });
+
+  it("records the run as failed and answers 500 when every due community is held", async () => {
+    mocks.refreshOfficialDealsIfDue.mockResolvedValue([{ communityId: 1, reelCode: "vg1", ok: false, reason: "community_fetch_failed" }, { communityId: 2, reelCode: "sl1", ok: false, reason: "unlabelled_home_status" }]);
+    const db = freshDb();
+    mocks.getDb.mockResolvedValue(db);
+    const { response, json } = responseRecorder();
+
+    await scheduledDealsHandler({ body: { job: "catalog" } } as Request, response);
+
+    expect(response.status).toHaveBeenCalledWith(500);
+    expect(json).toHaveBeenCalledWith({ error: "scheduled operation reported no successful community" });
+    expect(runRows(db)[1]).toMatchObject({ op: "update", set: { status: "failed", detail: "scheduled operation reported no successful community", completedAt: expect.any(Date) } });
+  });
+
+  it("records an ok:false job result as failed so tomorrow's health check sees it, and an ok:true result as ok", async () => {
+    mocks.chicagoClock.mockReturnValue({ hour: 7, minute: 2, weekday: "Tue" });
+    mocks.runBuilderDealsHealthJob.mockResolvedValue({ ok: false, state: "attention", attention: ["x"], emailed: false, emailError: "Resend 403" });
+    const failed = freshDb();
+    mocks.getDb.mockResolvedValue(failed);
+    const first = responseRecorder();
+    await scheduledDealsHandler({ body: { job: "health" } } as Request, first.response);
+    expect(first.response.status).toHaveBeenCalledWith(500);
+    expect(runRows(failed)[1]).toMatchObject({ op: "update", set: { status: "failed" } });
+
+    mocks.runBuilderDealsHealthJob.mockResolvedValue({ ok: true, state: "ok", attention: [], emailed: false });
+    const succeeded = freshDb();
+    mocks.getDb.mockResolvedValue(succeeded);
+    const second = responseRecorder();
+    await scheduledDealsHandler({ body: { job: "health" } } as Request, second.response);
+    expect(second.json).toHaveBeenCalledWith({ ok: true, result: { ok: true, state: "ok", attention: [], emailed: false } });
+    expect(runRows(succeeded)[1]).toMatchObject({ op: "update", set: { status: "ok" } });
+    expect(mocks.runBuilderDealsHealthJob).toHaveBeenCalledTimes(2);
   });
 });

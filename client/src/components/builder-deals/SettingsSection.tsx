@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Field, GOLD_BUTTON, ListField, Metric, Section, SwitchRow, TAP, Warning, inputClass } from "./shared";
-import { ageLabel, displayDate } from "./helpers";
+import { ageLabel, displayDate, mergeUntouched, touchedKeys, touchedPatch } from "./helpers";
 import type { Health, Overview, Settings } from "./types";
 
 type NumberKey = "expiryHours" | "hasAgentBlockDays" | "incentiveLapseDays" | "dailyVerificationCap" | "phoneLimitPerHour" | "ipLimitPerHour" | "testPhoneLimitPerHour";
@@ -56,20 +56,24 @@ function HealthPanel({ health }: { health: Health }) {
 export function SettingsSection({ overview, settings }: { overview: Overview; settings: Settings }) {
   const utils = trpc.useUtils();
   const [draft, setDraft] = useState<Settings>(settings);
-  const [dirty, setDirty] = useState(false);
+  // Keys the admin edited since the last save; only these are sent, so a Save never
+  // overwrites what the Team switches or Raise cap changed meanwhile.
+  const [touched, setTouched] = useState<Array<keyof Settings>>([]);
   const [seen, setSeen] = useState<Settings>(settings);
   const [confirmCap, setConfirmCap] = useState(false);
+  const dirty = touched.length > 0;
   const health = trpc.deals.admin.health.useQuery(undefined, { enabled: false, retry: false });
   const mondayReport = trpc.deals.admin.mondayReport.useQuery(undefined, { enabled: false, retry: false });
 
-  // A refetch (another admin action invalidated settings) never wipes unsaved edits: the draft follows the server only while clean.
+  // A refetch (another admin action invalidated settings) never wipes unsaved edits: untouched
+  // fields follow the server, the admin's edited fields keep their draft values.
   if (settings !== seen) {
     setSeen(settings);
-    if (!dirty) setDraft(settings);
+    setDraft((current) => mergeUntouched(settings, current, touched));
   }
 
   const save = trpc.deals.admin.saveSettings.useMutation({
-    onSuccess: (next) => { setDraft(next); setDirty(false); void utils.deals.admin.settings.invalidate(); void utils.deals.admin.overview.invalidate(); toast.success("Builder Deals settings saved"); },
+    onSuccess: (next) => { setDraft(next); setTouched([]); void utils.deals.admin.settings.invalidate(); void utils.deals.admin.overview.invalidate(); toast.success("Builder Deals settings saved"); },
     onError: (error) => toast.error(error.message || "Could not save the settings"),
   });
   const raiseCap = trpc.deals.admin.raiseDailyVerificationCap.useMutation({
@@ -79,13 +83,12 @@ export function SettingsSection({ overview, settings }: { overview: Overview; se
   const runFubRetry = trpc.deals.admin.runFubRetry.useMutation({ onSuccess: (result) => { void utils.deals.admin.overview.invalidate(); toast.success(`CRM retry pass complete: ${result.sent} sent, ${result.failed} failed, ${result.skipped} skipped.`); }, onError: (error) => toast.error(error.message) });
   const runAlerts = trpc.deals.admin.runAlertDelivery.useMutation({ onSuccess: (result) => { void utils.deals.admin.overview.invalidate(); toast.success(`Alert delivery pass complete: ${result.sent} sent, ${result.failed} failed, ${result.skipped} skipped.`); }, onError: (error) => toast.error(error.message) });
 
-  const update = (patch: Partial<Settings>) => { setDraft((current) => ({ ...current, ...patch })); setDirty(true); };
+  const update = (patch: Partial<Settings>) => { setDraft((current) => ({ ...current, ...patch })); setTouched((current) => touchedKeys(current, patch)); };
   const submit = () => {
     if (!draft.commentKeyword.trim() || !draft.textLine.trim()) { toast.error("The comment keyword and the text line are required."); return; }
     if (!draft.alertRecipients.length || !draft.syncEmailRecipients.length) { toast.error("Keep at least one alert recipient and one sync email recipient."); return; }
     if (!draft.driveDestinations.length) { toast.error("Keep at least one drive-time destination."); return; }
-    const { commentKeyword, textLine, ...rest } = draft;
-    save.mutate({ ...rest, commentKeyword: commentKeyword.trim(), textLine: textLine.trim() });
+    save.mutate(touchedPatch({ ...draft, commentKeyword: draft.commentKeyword.trim(), textLine: draft.textLine.trim() }, touched));
   };
   const listField = (key: ListKey, label: string, hint: string, placeholder: string) => <ListField key={key} label={label} value={draft[key]} onChange={(value) => update({ [key]: value } as Partial<Settings>)} placeholder={placeholder} hint={hint} />;
   const capTone = overview.capReached ? "warning" : "gold";

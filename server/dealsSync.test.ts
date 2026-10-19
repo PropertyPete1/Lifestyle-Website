@@ -194,6 +194,55 @@ describe("official refresh: holds", () => {
     await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 15 * DAY) });
     expect(community()).toMatchObject({ catalogHoldReason: null, catalogHoldSeenAt: null, holdReason: null });
   });
+
+  it("holds the run as unlabelled_home_status when a home card has no readable status, publishing nothing and sweeping nothing to sold", async () => {
+    mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }, { sourceUrl: home("8305-b") }], incentiveText: FULL_TEXT }));
+    await refreshOfficialDeals({ communityId, now: T0 });
+    expect(db.rows(dealHomes).map((row) => row.status)).toEqual(["available", "available"]);
+    mocks.sendBuilderDealsEmail.mockClear();
+
+    // A wording drift leaves one card without "Quick Move-In"/"Sold": the whole run is held, nothing flips.
+    const drifted = snapshot({ homes: [{ sourceUrl: home("8301-a") }, { sourceUrl: home("8305-b"), status: null }, { sourceUrl: home("8309-c"), status: "Quick Move-In", price: 420_000 }], incentiveText: NO_DATE_TEXT });
+    mocks.loadOfficialDeals.mockResolvedValue(drifted);
+    const later = new Date(T0.getTime() + 3 * DAY);
+    expect(await refreshOfficialDeals({ communityId, now: later })).toEqual([{ communityId, reelCode: "vg1", ok: false, reason: "unlabelled_home_status" }]);
+    const community = () => db.rows(dealCommunities)[0];
+    expect(community()).toMatchObject({ catalogHoldReason: "unlabelled_home_status", catalogHoldSeenAt: later, holdReason: "catalog: unlabelled_home_status", lastAttemptAt: later, lastSuccessfulSyncAt: T0 });
+    expect(db.rows(dealHomes).map((row) => [row.sourceUrl, row.status])).toEqual([[home("8301-a"), "available"], [home("8305-b"), "available"]]);
+    expect(db.rows(dealHomes).some((row) => row.sourceUrl === home("8309-c"))).toBe(false);
+    expect(activeIncentives().map((row) => row.publicText)).toHaveLength(1);
+    expect(String(activeIncentives()[0].publicText)).toContain("4.25%");
+    expect(emails().map((email) => email.category)).toEqual(["deals_sync_hold"]);
+    expect(emails()[0].content).toContain("catalog hold: unlabelled_home_status");
+    expect(emails()[0].content).not.toContain("sold:");
+
+    // The same parse result stays quiet; a readable page clears the hold and resumes publishing.
+    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 6 * DAY) });
+    expect(emails()).toHaveLength(1);
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }, { sourceUrl: home("8309-c"), price: 420_000 }] }));
+    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 9 * DAY) });
+    expect(community()).toMatchObject({ catalogHoldReason: null, holdReason: null });
+    expect(Object.fromEntries(db.rows(dealHomes).map((row) => [row.sourceUrl, row.status]))).toMatchObject({ [home("8301-a")]: "available", [home("8305-b")]: "sold", [home("8309-c")]: "available" });
+  });
+
+  it("keeps the admin's excluded terms across a sync and never re-adds an excluded discovered name", async () => {
+    db.rows(dealCommunities)[0].scrubList = JSON.stringify({ plan: ["Magnolia"], street: ["New Homes in San Antonio"], other: ["Vista Gardens"], excludedTerms: ["New Homes in San Antonio"] });
+    mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({
+      homes: [{ sourceUrl: home("8301-a") }],
+      discovered: { builder: [], lender: [], community: [], plan: ["Cypress"], street: ["New Homes in San Antonio", "Fixture Street"], other: [] },
+    }));
+    await refreshOfficialDeals({ communityId, now: T0 });
+    const community = db.rows(dealCommunities)[0];
+    const stored = JSON.parse(String(community.scrubList)) as Record<string, string[]>;
+    expect(stored.excludedTerms).toEqual(["New Homes in San Antonio"]);
+    expect(stored.street).toEqual(["Fixture Street"]);
+    expect(stored.plan).toEqual(["Magnolia", "Cypress"]);
+    const scrub = storedScrubConfig(community as never);
+    expect(scrub.street).toEqual(["Fixture Street"]);
+    expect(scrub.community).toEqual(["Fixture Gardens"]);
+    // The adapter configuration carries the exclusion so a re-discovered heading is not treated as private either.
+    expect(mocks.loadOfficialDeals.mock.calls[0]![0]).toMatchObject({ excludedTerms: ["New Homes in San Antonio"], scrubConfig: expect.objectContaining({ street: [] }) });
+  });
 });
 
 describe("official refresh: incentive lifecycle", () => {
@@ -314,6 +363,22 @@ describe("scheduling", () => {
     mocks.loadOfficialDeals.mockClear();
     expect(await refreshOfficialDealsIfDue(new Date("2026-10-21T12:00:00Z"))).toEqual([{ communityId: 0, reelCode: "scheduled", ok: true, skipped: "fresh_within_three_days" }]);
     expect(mocks.loadOfficialDeals).not.toHaveBeenCalled();
+  });
+
+  it("returns every due community as ok:false when all of them are held, so the scheduled run is recorded as failed instead of fresh", async () => {
+    const secondId = seedCommunity({ reelCode: "second", privateName: "Second Fixture", lastSuccessfulSyncAt: null });
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ catalogOk: false, holdReasons: ["community_fetch_failed"] }));
+    const results = await refreshOfficialDealsIfDue(new Date("2026-10-21T11:00:00Z"));
+    expect(results).toEqual([
+      { communityId, reelCode: "vg1", ok: false, reason: "community_fetch_failed" },
+      { communityId: secondId, reelCode: "second", ok: false, reason: "community_fetch_failed" },
+    ]);
+    expect(results.some((result) => result.ok)).toBe(false);
+    expect(db.rows(dealCommunities).map((row) => [row.catalogHoldReason, row.lastSuccessfulSyncAt])).toEqual([["community_fetch_failed", null], ["community_fetch_failed", null]]);
+    // One hold email names both communities; the data each one had (none yet) is untouched.
+    expect(emails().map((email) => email.category)).toEqual(["deals_sync_hold"]);
+    expect(emails()[0].subject).toBe("Builder Deals hold: Fixture Gardens, Second Fixture");
+    expect(db.rows(dealHomes)).toEqual([]);
   });
 
   it("reconciles a registered job whose cron expression changed and leaves identical jobs untouched", async () => {

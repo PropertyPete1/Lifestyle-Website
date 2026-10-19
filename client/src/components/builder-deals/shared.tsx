@@ -115,7 +115,7 @@ export function ConfirmDialog({ open, title, description, confirmLabel, destruct
 }) {
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) onCancel(); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent>
         <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
         {children}
         <DialogFooter className="gap-2">

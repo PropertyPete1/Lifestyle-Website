@@ -43,6 +43,8 @@ const mocks = vi.hoisted(() => ({
   getDealPhotoPreview: vi.fn(),
   uploadManualHomePhoto: vi.fn(),
   reprocessBuilderPhotos: vi.fn(),
+  builderDealsHealthCheck: vi.fn(),
+  builderDealsMondayReport: vi.fn(),
 }));
 
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
@@ -95,6 +97,11 @@ vi.mock("./dealsPhotosAdmin", () => {
     reprocessBuilderPhotos: (...args: unknown[]) => mocks.reprocessBuilderPhotos(...args),
   };
 });
+
+vi.mock("./dealsMaintenance", () => ({
+  builderDealsHealthCheck: (...args: unknown[]) => mocks.builderDealsHealthCheck(...args),
+  builderDealsMondayReport: (...args: unknown[]) => mocks.builderDealsMondayReport(...args),
+}));
 
 import { dealsRouter } from "./dealsRouter";
 import { DealsAdminError } from "./dealsSyncAdmin";
@@ -314,6 +321,36 @@ describe("admin.saveCommunity", () => {
     db.seed(dealCommunities, { ...base, salesPhone: null, scrubList: "{}", active: true, paused: false, manualMode: false });
     await expect(admin().saveCommunity({ ...base, privateName: "Other Place", publicLabel: "Another label" })).rejects.toMatchObject({ code: "CONFLICT" });
   });
+
+  it("replaces the discovered plan and street lists only with replaceDiscovered, and stores excluded false positives the labels may then use", async () => {
+    const id = db.seed(dealCommunities, { ...base, salesPhone: null, scrubList: JSON.stringify({ plan: ["Magnolia", "Cypress"], street: ["Onion Patch", "New Homes in San Antonio"], other: [] }), active: true, paused: false, manualMode: false });
+    // The client sends neither field: union semantics, exclusions untouched.
+    await admin().saveCommunity({ ...base, id, scrubList: { plan: ["Oak"] } });
+    let stored = JSON.parse(String(db.rows(dealCommunities)[0].scrubList));
+    expect(stored).toMatchObject({ plan: ["Magnolia", "Cypress", "Oak"], street: ["Onion Patch", "New Homes in San Antonio"] });
+    expect(stored.excludedTerms).toBeUndefined();
+    // A public label that contains the wrongly discovered heading is refused until it is excluded.
+    await expect(admin().saveCommunity({ ...base, id, publicLabel: "New Homes in San Antonio | Half-Acre Lots" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const result = await admin().saveCommunity({ ...base, id, publicLabel: "New Homes in San Antonio | Half-Acre Lots", scrubList: { plan: ["Oak"], street: ["Onion Patch"] }, replaceDiscovered: true, excludedTerms: ["New Homes in San Antonio"] });
+    expect(result).toMatchObject({ ok: true, id, excludedTerms: ["New Homes in San Antonio"] });
+    expect(result.scrubList).toMatchObject({ plan: ["Oak"], street: ["Onion Patch"] });
+    stored = JSON.parse(String(db.rows(dealCommunities)[0].scrubList));
+    expect(stored).toMatchObject({ plan: ["Oak"], street: ["Onion Patch"], excludedTerms: ["New Homes in San Antonio"], community: ["Vista Gardens"] });
+    expect(db.rows(dealCommunities)[0].publicLabel).toBe("New Homes in San Antonio | Half-Acre Lots");
+    // The community name can never be excluded away.
+    await expect(admin().saveCommunity({ ...base, id, publicLabel: "Vista Gardens homes", excludedTerms: ["Vista Gardens"] })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+describe("admin: read-only health procedures", () => {
+  it("previews the health check without the render prune and the Monday report through the maintenance module", async () => {
+    mocks.builderDealsHealthCheck.mockResolvedValue({ state: "ok", attention: [], renderPrune: null });
+    mocks.builderDealsMondayReport.mockResolvedValue({ ok: true, subject: "Builder Deals System OK: all checks passed", body: "body" });
+    expect(await admin().health()).toMatchObject({ state: "ok", renderPrune: null });
+    expect(mocks.builderDealsHealthCheck).toHaveBeenCalledWith(expect.any(Date), { prune: false });
+    expect(await admin().mondayReport()).toMatchObject({ ok: true });
+    expect(mocks.builderDealsMondayReport).toHaveBeenCalledWith();
+  });
 });
 
 describe("admin: sync-admin wiring and error mapping", () => {
@@ -437,6 +474,21 @@ describe("admin.unblock", () => {
     await admin().unblock({ id });
     expect(mocks.findBuilderDealsFubPersonId).not.toHaveBeenCalled();
     expect(db.rows(dealKnownAgents)).toHaveLength(0);
+  });
+
+  it("re-normalises a blocked Canadian number under the system's allowCanada setting instead of refusing the unblock", async () => {
+    const toronto = "+14165550123";
+    const id = db.seed(dealBlocklist, { phoneE164: toronto, email: null, deviceHash: null, searchPhone: null, reason: "fub_match:phone", expiresAt: null });
+    db.seed(dealKnownAgents, { name: "Northern Agent", phoneE164: toronto, email: null, source: "csv", fubPersonId: "78", active: true });
+    mocks.getDealSettings.mockResolvedValue(settings);
+    await expect(admin().unblock({ id })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(db.rows(dealBlocklist)).toHaveLength(1);
+
+    mocks.getDealSettings.mockResolvedValue({ ...settings, allowCanada: true });
+    await expect(admin().unblock({ id })).resolves.toMatchObject({ ok: true, nextStep: "fresh_verification_required" });
+    expect(db.rows(dealBlocklist)).toHaveLength(0);
+    expect(db.rows(dealKnownAgents)).toHaveLength(0);
+    expect(db.rows(dealDoNotAutoImport)).toEqual([expect.objectContaining({ kind: "phone", value: toronto })]);
   });
 });
 

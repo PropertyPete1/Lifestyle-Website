@@ -105,7 +105,7 @@ function CommunityForm({ id, initial, builders, onDone }: { id?: number; initial
           <Input id={`${prefix}-area-label`} className={inputClass} value={draft.areaLabel} onChange={(event) => set({ areaLabel: event.target.value })} placeholder="Southeast San Antonio" />
         </Field>
         <Field id={`${prefix}-address`} label="Private address (with ZIP)" hint="Admin only. The ZIP code centers the buyer-facing area map; the address itself is never served.">
-          <Input id={`${prefix}-address`} className={inputClass} value={draft.privateAddress} onChange={(event) => set({ privateAddress: event.target.value })} placeholder="9010 Example Rd, San Antonio TX 78263" />
+          <Input id={`${prefix}-address`} className={inputClass} value={draft.privateAddress} onChange={(event) => set({ privateAddress: event.target.value })} placeholder="123 Example Rd, San Antonio TX 78201" />
         </Field>
         <Field id={`${prefix}-sales-phone`} label="Sales office phone (private)">
           <Input id={`${prefix}-sales-phone`} className={inputClass} type="tel" inputMode="tel" value={draft.salesPhone} onChange={(event) => set({ salesPhone: event.target.value })} placeholder="(210) 555-0100" />

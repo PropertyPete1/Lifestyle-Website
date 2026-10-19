@@ -1,5 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
-import { completeVerification, currentDealSource, currentPending, dealsCsp, dealsPublicHeaders, ensureDealsCookies, exchangeAccessToken, getDealSettings, isDealsCrawler, logDealEvent, randomOpaqueToken, recordDealsLanding, setDealCookie, setGoogleDealsIdentity } from "./dealsService";
+import { completeVerification, currentDealSource, dealsCsp, dealsPublicHeaders, ensureDealsCookies, exchangeAccessToken, getDealSettings, isDealsCrawler, randomOpaqueToken, recordDealsLanding, setDealCookie, setGoogleDealsIdentity } from "./dealsService";
+import { DEALS_COOKIE } from "../shared/deals";
 import { parse as parseCookie } from "cookie";
 
 const safe = (handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
@@ -44,7 +45,9 @@ export function registerDealsRoutes(app: Express) {
     const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
     if (!/^\d{6}$/.test(code)) return res.redirect(302, "/deals?codeError=1");
     const completed = await completeVerification({ req, res, code });
-    if (!completed.ok) return res.redirect(302, completed.kind === "expired" ? "/deals?expired=1" : completed.kind === "blocked" ? "/deals?gate=1&blocked=1" : `/deals?codeError=${encodeURIComponent(completed.kind)}`);
+    // An expired 10-minute code session is a gate outcome (?codeError=expired, "Your code
+    // session expired. Start again."), not an expired personal link (?expired=1).
+    if (!completed.ok) return res.redirect(302, completed.kind === "blocked" ? "/deals?gate=1&blocked=1" : `/deals?codeError=${encodeURIComponent(completed.kind)}`);
     const settings = await getDealSettings();
     const isTest = completed.isTest;
     // Access is never held hostage by CRM availability. A durable job re-reads
@@ -77,7 +80,12 @@ export function registerDealsRoutes(app: Express) {
   // no bytes, and no hint about whether an image identifier exists.
   app.get("/deals/mine", safe(async (req, res, next) => {
     const { isLiveDealSession } = await import("./dealsService");
-    if (!(await isLiveDealSession(req))) return res.redirect(302, "/deals?gate=1");
+    if (!(await isLiveDealSession(req))) {
+      // A session cookie that no longer unlocks anything is an expired 24 h link: that
+      // visitor gets the expired page; a browser with no session at all gets the gate.
+      const hadSession = Boolean(parseCookie(req.headers.cookie || "")[DEALS_COOKIE.session]);
+      return res.redirect(302, hadSession ? "/deals?expired=1" : "/deals?gate=1");
+    }
     next();
   }));
   // Static area map for a community: session-checked, marker-free, no-store (AREA MAP). The param may be "12" or "12.png".

@@ -26,7 +26,6 @@ import {
   isInAppBrowser,
   maskPhone,
   normalizeUsPhone,
-  parseDealScrubConfig,
   sanitizeInstagramHandle,
   sanitizeSourceCode,
   scrubPrivateNames,
@@ -35,6 +34,7 @@ import {
 } from "../shared/deals";
 import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
+import { effectiveScrubConfig } from "./dealsScrub";
 import { checkTwilioVerify } from "./dealsVerification";
 
 export type DealSettings = {
@@ -441,11 +441,9 @@ export async function blockDealAccess(input: { phone?: string | null; email?: st
   });
 }
 
-/** Private per-community scrub categories; a legacy flat list lands in "other". */
+/** Private per-community scrub categories (admin-excluded false positives removed); a legacy flat list lands in "other". */
 function communityScrubConfig(community: Pick<typeof dealCommunities.$inferSelect, "builder" | "privateName" | "scrubList">): DealScrubConfig {
-  let parsed: unknown = null;
-  try { parsed = JSON.parse(community.scrubList); } catch { parsed = null; }
-  const config = parseDealScrubConfig(parsed);
+  const config = effectiveScrubConfig(community.scrubList);
   if (community.builder !== "Manual" && !config.builder.some((term) => term.toLowerCase() === community.builder.toLowerCase())) config.builder.push(community.builder);
   if (!config.community.some((term) => term.toLowerCase() === community.privateName.toLowerCase())) config.community.push(community.privateName);
   return config;
@@ -466,9 +464,47 @@ function liveIncentiveWhere(communityId: number, now: Date, lapseDays: number) {
   );
 }
 
-/** Buyer-facing payloads are refused outright when a private name survives scrubbing. */
-function assertNoPrivateResidue(payload: unknown, config: DealScrubConfig, surface: string) {
-  if (!publicNoPrivateNames(payload, config)) throw new Error(`Private builder data would reach the ${surface} catalog`);
+type ResidueSurface = "public" | "gated";
+export const PRIVACY_RESIDUE_EVENT_KIND = "privacy_residue";
+const RESIDUE_RECORD_INTERVAL_MS = 60 * 60_000;
+/** Since process start: how often each community's entry was dropped, and when its deal_events marker was last written. */
+const privacyResidue = new Map<number, { dropped: number; lastRecordedAt: number }>();
+
+export function privacyResidueSinceStart(): { dropped: number; communityIds: number[] } {
+  let dropped = 0;
+  privacyResidue.forEach((entry) => { dropped += entry.dropped; });
+  return { dropped, communityIds: Array.from(privacyResidue.keys()).sort((a, b) => a - b) };
+}
+/** Test seam for the process-wide counter. */
+export function resetPrivacyResidueCounter() { privacyResidue.clear(); }
+
+/** The deal_events detail carries ids and a hash only, never the term or any private name. */
+export function privacyResidueDetail(communityId: number, surface: ResidueSurface, marker: string) {
+  return `community:${communityId};surface:${surface};marker:${marker}`;
+}
+export function privacyResidueCommunityId(detail: string | null | undefined): number | null {
+  const match = /(?:^|;)community:(\d+)(?:;|$)/.exec(detail ?? "");
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * A private name that survives scrubbing never reaches a buyer, and never takes
+ * the other communities down with it: the offending entry is dropped from the
+ * response, counted in memory, logged as a hashed marker and recorded (at most
+ * once an hour per community) as a deal_events row the health check reports.
+ */
+async function dropPrivateResidue(communityId: number, payload: unknown, config: DealScrubConfig, surface: ResidueSurface, now = Date.now()): Promise<boolean> {
+  if (publicNoPrivateNames(payload, config)) return false;
+  const marker = hashSecret(`privacy-residue:${surface}:${communityId}:${JSON.stringify(payload)}`).slice(0, 16);
+  const entry = privacyResidue.get(communityId) ?? { dropped: 0, lastRecordedAt: 0 };
+  entry.dropped += 1;
+  privacyResidue.set(communityId, entry);
+  console.error(`[deals] private residue: community ${communityId} dropped from the ${surface} catalog (marker ${marker})`);
+  if (now - entry.lastRecordedAt >= RESIDUE_RECORD_INTERVAL_MS) {
+    entry.lastRecordedAt = now;
+    await logDealEvent({ kind: PRIVACY_RESIDUE_EVENT_KIND, detail: privacyResidueDetail(communityId, surface, marker) }).catch((error) => console.error("[deals] private residue event failed", error instanceof Error ? error.message : error));
+  }
+  return true;
 }
 
 export async function publicDealsCatalog() {
@@ -492,7 +528,7 @@ export async function publicDealsCatalog() {
       incentive: incentives[0] ? publicIncentive(incentives[0]) : null,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
     };
-    assertNoPrivateResidue(entry, communityScrubConfig(community), "public");
+    if (await dropPrivateResidue(community.id, entry, communityScrubConfig(community), "public")) continue;
     result.push(entry);
   }
   return result;
@@ -574,7 +610,7 @@ export async function gatedDealsCatalog(leadId: number) {
       incentive: incentiveRows[0] ? publicIncentive(incentiveRows[0]) : null,
       homes,
     };
-    assertNoPrivateResidue(entry, scrubNames, "gated");
+    if (await dropPrivateResidue(community.id, entry, scrubNames, "gated")) continue;
     data.push(entry);
   }
   return data;

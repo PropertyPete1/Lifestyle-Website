@@ -1,4 +1,5 @@
 import { dealScrubTerms, emptyDealScrubConfig, hasPrivateTerm, normalizedText, parseDealScrubConfig, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
+import { applyScrubExclusions } from "./dealsScrub";
 
 /**
  * Official, read-only builders supported by this module.  These display names
@@ -19,6 +20,8 @@ export interface CommunitySourceConfig {
   incentiveSourceUrl?: string;
   /** Categorized private configuration; legacy flat terms remain supported. */
   scrubConfig?: DealScrubConfig;
+  /** Admin-excluded false positives: never treated as private, even when a page discovers them again. */
+  excludedTerms?: readonly string[];
   /** Explicit reviewed plan slugs (not arbitrary child pages). */
   planSlugs?: readonly string[];
   /** Explicit records for the Manual adapter. No network request is made for these. */
@@ -55,6 +58,8 @@ export type DealHoldReason =
   | "expected_community_container_not_found"
   | "expected_detail_container_not_found"
   | "expected_incentive_container_not_found"
+  /** A home card whose status could not be read: a layout change holds the catalog instead of marking homes sold. */
+  | "unlabelled_home_status"
   | "private_text_remaining"
   | "missing_promotional_rate"
   | "missing_apr"
@@ -935,7 +940,13 @@ async function mapWithConcurrency<T, R>(
   return output;
 }
 
-export function categorizedPrivateTerms(config: Pick<CommunitySourceConfig, "builder" | "privateCommunityName" | "scrubList" | "scrubConfig">, discovered?: PrivateDealSnapshot): DealScrubConfig {
+/** A street address starts with a house number and continues with words; an H1 such as "New Homes in San Antonio" does not. */
+const STREET_ADDRESS_PATTERN = /^\d{1,6}[A-Za-z]?\s+[A-Za-z][A-Za-z0-9.'’#-]*(?:[\s,]+[A-Za-z0-9.'’#-]+)*$/;
+export function looksLikeStreetAddress(value: string | null | undefined): value is string {
+  return typeof value === "string" && STREET_ADDRESS_PATTERN.test(value.trim());
+}
+
+export function categorizedPrivateTerms(config: Pick<CommunitySourceConfig, "builder" | "privateCommunityName" | "scrubList" | "scrubConfig" | "excludedTerms">, discovered?: PrivateDealSnapshot): DealScrubConfig {
   const result = parseDealScrubConfig(config.scrubConfig ?? emptyDealScrubConfig());
   const builder = config.builder === "M/I Homes" ? ["M/I Homes", "M/I"] : config.builder === "Chesmar" ? ["Chesmar Homes", "Chesmar"] : [];
   const lender = config.builder === "M/I Homes" ? ["M/I Financial, LLC", "M/I Financial"] : config.builder === "Chesmar" ? ["HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HomeAmerican", "HMC"] : [];
@@ -945,10 +956,12 @@ export function categorizedPrivateTerms(config: Pick<CommunitySourceConfig, "bui
   for (const item of [...(discovered?.plans ?? []), ...(discovered?.homes ?? [])]) {
     const plan = item.privatePlanName ?? (discovered?.plans.includes(item) ? item.privateName : null);
     if (plan) result.plan.push(plan, plan.replace(/\s*[-–]\s*[A-Z]$/i, ""));
+    // Only a value shaped like a street address joins the street category; a
+    // page heading used as a home's name is verbatim marketing text, not a street.
     const address = item.privateAddress ?? (!discovered?.plans.includes(item) ? item.privateName : null);
-    if (address) result.street.push(address, address.replace(/^\d+\s+/, "").split(",")[0].trim());
+    if (looksLikeStreetAddress(address)) result.street.push(address, address.replace(/^\d+[A-Za-z]?\s+/, "").split(",")[0].trim());
   }
-  return parseDealScrubConfig(result);
+  return applyScrubExclusions(parseDealScrubConfig(result), config.excludedTerms ?? []);
 }
 function remainingPrivateTerm(text: string, terms: readonly string[] | DealScrubConfig, planField = false): boolean { return hasPrivateTerm(text, terms, { planField }); }
 /** Scrub checked text only; never publish markup, outbound source links or private residue. */
@@ -1014,7 +1027,9 @@ function publicIncentive(
 }
 
 function makePublicSnapshot(privateSnapshot: PrivateDealSnapshot, config: CommunitySourceConfig, incentiveHolds: readonly DealHoldReason[] = []): { snapshot: PublicDealSnapshot; catalogHolds: DealHoldReason[]; incentiveHolds: DealHoldReason[] } {
-  const discoveredNames = [...privateSnapshot.plans, ...privateSnapshot.homes].flatMap((item) => [item.privateName, item.privateAddress, item.privatePlanName].filter((name): name is string => Boolean(name)));
+  // An admin-excluded false positive is not private, however often a page repeats it.
+  const excluded = new Set((config.excludedTerms ?? []).map((term) => term.trim().toLowerCase()));
+  const discoveredNames = [...privateSnapshot.plans, ...privateSnapshot.homes].flatMap((item) => [item.privateName, item.privateAddress, item.privatePlanName].filter((name): name is string => Boolean(name) && !excluded.has(String(name).trim().toLowerCase())));
   const categories = categorizedPrivateTerms(config, privateSnapshot);
   privateSnapshot.discoveredScrubConfig = categories;
   const terms = Array.from(new Set([...dealScrubTerms(categories), ...discoveredNames]));

@@ -11,6 +11,7 @@ import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql } from "d
 import { OFFICIAL_BUILDER_HOSTS, officialHostFor } from "./dealsAdapters";
 import { type DealsAdminError, acceptIncentiveHold, dismissCatalogHold, dismissIncentiveHold, listCommunityDiagnostics, refreshCommunityGeography, refreshCommunityInBackground, saveIncentiveForCommunity, storedScrubListForCommunity, testCommunitySource } from "./dealsSyncAdmin";
 import { type PhotoAdminError, getBuilderPhotoSettingsForAdmin, getDealPhotoPreview, listBuilderPhotoSamples, reprocessBuilderPhotos, saveBuilderPhotoSettings, uploadManualHomePhoto } from "./dealsPhotosAdmin";
+import { parseStoredScrubList } from "./dealsScrub";
 import {
   chicagoDayStart,
   hashSecret,
@@ -45,11 +46,11 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
 type AdminIdentity = { phoneE164?: string | null; email?: string | null; deviceHash?: string | null };
 type AdminDb = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
-/** All admin writes use the same canonical identity as the buyer gate. */
-export function normalizeAdminDealIdentity(input: AdminIdentity): AdminIdentity {
+/** All admin writes use the same canonical identity as the buyer gate; pass the system's allowCanada setting when re-normalising a stored number. */
+export function normalizeAdminDealIdentity(input: AdminIdentity, options: { allowCanada?: boolean } = {}): AdminIdentity {
   const rawPhone = input.phoneE164?.trim();
-  const parsed = rawPhone ? normalizeUsPhone(rawPhone) : null;
-  if (parsed && !parsed.ok) throw new TRPCError({ code: "BAD_REQUEST", message: "Enter a valid US phone number." });
+  const parsed = rawPhone ? normalizeUsPhone(rawPhone, { allowCanada: options.allowCanada ?? false }) : null;
+  if (parsed && !parsed.ok) throw new TRPCError({ code: "BAD_REQUEST", message: options.allowCanada ? "Enter a valid US or Canadian phone number." : "Enter a valid US phone number." });
   const email = input.email?.trim().toLowerCase() || null;
   if (email && !z.string().email().safeParse(email).success) throw new TRPCError({ code: "BAD_REQUEST", message: "Enter a valid email address." });
   const deviceHash = input.deviceHash?.trim() || null;
@@ -172,6 +173,10 @@ const communityInput = z.object({
   sourceUrl: z.string().url(), publicLabel: z.string().trim().min(2).max(190), areaLabel: z.string().trim().min(2).max(120),
   privateAddress: z.string().trim().max(255).default(""), salesPhone: z.string().max(60).nullable().optional(), reelUrl: z.string().url().nullable().optional(),
   reelCode: z.string().trim().regex(/^[a-z0-9_-]{1,40}$/), scrubList: scrubListInput.optional(),
+  /** True: the submitted plan and street lists replace the discovered ones instead of extending them. */
+  replaceDiscovered: z.boolean().optional(),
+  /** False positives (a page heading, an everyday word) that the scrubber and residue checks ignore; omitted keeps the stored list. */
+  excludedTerms: z.array(scrubTerm).max(200).optional(),
 });
 const manualHomeInput = z.object({
   id: z.number().int().positive().optional(), communityId: z.number().int().positive(), sourceUrl: z.string().url().optional(),
@@ -418,14 +423,15 @@ export const dealsRouter = router({
     }),
     saveCommunity: adminProcedure.input(communityInput).mutation(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const { id, scrubList, salesPhone, ...data } = input;
+      const { id, scrubList, salesPhone, replaceDiscovered, excludedTerms, ...data } = input;
       validateAdminCommunityUrl(data.builder, data.sourceUrl);
       const phone = salesPhone?.trim() ? normalizeAdminDealIdentity({ phoneE164: salesPhone }).phoneE164 : null;
       const existing = id ? (await db.select({ id: dealCommunities.id, scrubList: dealCommunities.scrubList }).from(dealCommunities).where(eq(dealCommunities.id, id)).limit(1))[0] : undefined;
       if (id && !existing) throw new TRPCError({ code: "NOT_FOUND" });
       // Categorised private names: the builder/lender aliases and the community name are always present,
-      // admin terms are merged per category and a stored list is never shortened by an edit.
-      const storedScrubList = storedScrubListForCommunity({ builder: data.builder, privateName: data.privateName, scrubList, existing: existing?.scrubList ?? null });
+      // admin terms are merged per category and a stored list is never shortened by an edit unless
+      // replaceDiscovered asks for the plan/street lists to be replaced; excludedTerms are kept beside them.
+      const storedScrubList = storedScrubListForCommunity({ builder: data.builder, privateName: data.privateName, scrubList, existing: existing?.scrubList ?? null, replaceDiscovered, excludedTerms });
       const scrubConfig = parseDealScrubConfig(JSON.parse(storedScrubList));
       if (hasPrivateTerm(data.publicLabel, scrubConfig) || hasPrivateTerm(data.areaLabel, scrubConfig)) throw new TRPCError({ code: "BAD_REQUEST", message: "Public labels must not contain private builder, lender, community, plan, or street names." });
       const patch = { ...data, salesPhone: phone, scrubList: storedScrubList };
@@ -436,7 +442,7 @@ export const dealsRouter = router({
       else savedId = Number((await db.insert(dealCommunities).values(patch) as unknown as [{ insertId?: number }])[0]?.insertId ?? 0);
       // ZIP centroid + drive-time chips for the area map; a geocoder failure never fails the save.
       if (savedId) void refreshCommunityGeography(savedId).catch(() => null);
-      return { ok: true as const, id: savedId, scrubList: scrubConfig };
+      return { ok: true as const, id: savedId, scrubList: scrubConfig, excludedTerms: parseStoredScrubList(storedScrubList).excludedTerms };
     }),
     removeCommunity: adminProcedure.input(z.object({ id: z.number().int().positive(), confirm: z.literal(true) })).mutation(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -523,7 +529,8 @@ export const dealsRouter = router({
       await db.update(dealCommunities).set({ catalogUpdatedAt: new Date() }).where(eq(dealCommunities.id, home.communityId)); return { ok: true as const };
     }),
     settings: adminProcedure.query(() => getDealSettings()),
-    health: adminProcedure.query(async () => (await import("./dealsMaintenance")).builderDealsHealthCheck()),
+    /** Read-only previews: no admin GET changes state, so neither runs the render prune (the 7:00 AM job does). */
+    health: adminProcedure.query(async () => (await import("./dealsMaintenance")).builderDealsHealthCheck(new Date(), { prune: false })),
     mondayReport: adminProcedure.query(async () => (await import("./dealsMaintenance")).builderDealsMondayReport()),
     addTrecFakeRow: adminProcedure.input(z.object({ fullName: z.string().trim().min(3).max(190), confirm: z.literal(true) })).mutation(async ({ input }) => (await import("./dealsTrec")).addTrecFakeRow(input.fullName)),
     /** "Refresh now": one background adapter run for this community, recorded in deal_job_runs; refused while a run is in flight. */
@@ -572,7 +579,9 @@ export const dealsRouter = router({
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const block = (await db.select().from(dealBlocklist).where(eq(dealBlocklist.id, input.id)).limit(1))[0]; if (!block) throw new TRPCError({ code: "NOT_FOUND" });
       // searchPhone is a lookup key only: never promote it into an exemption or a matching identity.
-      const identity = normalizeAdminDealIdentity({ phoneE164: block.phoneE164, email: block.email, deviceHash: block.deviceHash });
+      // The stored number was normalised under the system's allowCanada setting; re-normalise with the same one.
+      const { allowCanada } = await getDealSettings();
+      const identity = normalizeAdminDealIdentity({ phoneE164: block.phoneE164, email: block.email, deviceHash: block.deviceHash }, { allowCanada });
       const knownWhere = adminIdentityWhere(dealKnownAgents, identity);
       const agents = knownWhere ? await db.select({ fubPersonId: dealKnownAgents.fubPersonId }).from(dealKnownAgents).where(knownWhere) : [];
       const where = or(...[identity.phoneE164 ? eq(dealLeads.phoneE164, identity.phoneE164) : undefined, identity.email ? eq(dealLeads.email, identity.email) : undefined, identity.deviceHash ? eq(dealLeads.deviceHash, identity.deviceHash) : undefined].filter((value) => value !== undefined));

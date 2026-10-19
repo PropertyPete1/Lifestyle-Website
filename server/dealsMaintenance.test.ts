@@ -6,10 +6,11 @@ const mocks = vi.hoisted(() => ({
   makeMatchingLeadsTeam: vi.fn(),
   revokeOrphanedTeamPreviewLinks: vi.fn(),
   sendBuilderDealsEmail: vi.fn(),
+  pruneDealPhotoRenders: vi.fn(),
 }));
 
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
-vi.mock("./dealsPhotos", () => ({ pruneDealPhotoRenders: () => Promise.resolve({ scanned: 0, expiredRows: 0, staleRows: 0, rowsDeleted: 0, objectsDeleted: 0, objectsFailed: 0 }) }));
+vi.mock("./dealsPhotos", () => ({ pruneDealPhotoRenders: (...args: unknown[]) => mocks.pruneDealPhotoRenders(...args) }));
 vi.mock("./dealsService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./dealsService")>()),
   getDealSettings: (...args: unknown[]) => mocks.getDealSettings(...args),
@@ -25,6 +26,8 @@ vi.mock("./dealsEmail", async (importOriginal) => ({
 
 import { dealCommunities, dealEmailLogs, dealEvents, dealFubJobs, dealIncentives, dealJobRuns, dealLeads, dealPhotos, dealTeamAllowlist, dealTrecImports } from "../drizzle/schema";
 import { createFakeDealsDb, jsonResponse } from "./dealsFubFakeDb.test-support";
+import { privacyResidueDetail } from "./dealsService";
+import { summarizeHolds } from "./dealsSync";
 import {
   BUILDER_DEALS_HEALTH_THRESHOLDS,
   builderDealsHealthCheck,
@@ -52,6 +55,8 @@ function mockFetch(handler: (call: Call) => Response) {
   return calls;
 }
 
+const pruneResult = { scanned: 3, expiredRows: 1, staleRows: 0, rowsDeleted: 1, objectsDeleted: 1, objectsFailed: 0 };
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("FUB_API_KEY", "test-key");
@@ -59,6 +64,7 @@ beforeEach(() => {
   mocks.makeMatchingLeadsTeam.mockResolvedValue(0);
   mocks.revokeOrphanedTeamPreviewLinks.mockResolvedValue(1);
   mocks.sendBuilderDealsEmail.mockResolvedValue({ ok: true, status: "sent", deliveryLog: "resend sent" });
+  mocks.pruneDealPhotoRenders.mockResolvedValue(pruneResult);
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
@@ -135,19 +141,35 @@ describe("Builder Deals team allowlist mirror", () => {
 });
 
 const hoursAgo = (hours: number, now: Date) => new Date(now.getTime() - hours * 3_600_000);
-function snapshotDb(now: Date, options: { healthy?: boolean } = {}) {
+type CommunityRow = { id: number; privateName: string; publicLabel: string; builder: string; manualMode: boolean; lastSuccessfulSyncAt: Date | null; catalogHoldReason: string | null; catalogHoldSeenAt: Date | null; incentiveHoldReason: string | null; incentiveHoldSeenAt: Date | null; holdReason: string | null };
+/** Rows shaped exactly as dealsSync writes them: the two hold columns plus the summary column it derives with summarizeHolds. */
+function communityRow(input: { id: number; privateName: string; publicLabel: string; builder?: string; manualMode?: boolean; lastSuccessfulSyncAt: Date | null; catalogHold?: { reason: string; seenAt: Date } | null; incentiveHold?: { reason: string; seenAt: Date } | null }): CommunityRow {
+  const catalogHoldReason = input.catalogHold?.reason ?? null;
+  const incentiveHoldReason = input.incentiveHold?.reason ?? null;
+  return {
+    id: input.id, privateName: input.privateName, publicLabel: input.publicLabel, builder: input.builder ?? "M/I Homes", manualMode: input.manualMode ?? false, lastSuccessfulSyncAt: input.lastSuccessfulSyncAt,
+    catalogHoldReason, catalogHoldSeenAt: input.catalogHold?.seenAt ?? null, incentiveHoldReason, incentiveHoldSeenAt: input.incentiveHold?.seenAt ?? null,
+    holdReason: summarizeHolds(catalogHoldReason, incentiveHoldReason),
+  };
+}
+function snapshotDb(now: Date, options: { healthy?: boolean; communities?: CommunityRow[]; residueRows?: Array<{ detail: string | null }> } = {}) {
   const healthy = options.healthy ?? false;
+  const communities = options.communities ?? (healthy
+    ? [communityRow({ id: 7, privateName: "Private Grove", publicLabel: "Community A", lastSuccessfulSyncAt: hoursAgo(20, now) })]
+    : [
+      // A successful refresh whose incentive is held: the catalog is on schedule, so this is an incentive hold only.
+      communityRow({ id: 7, privateName: "Private Grove", publicLabel: "Community A", lastSuccessfulSyncAt: hoursAgo(50, now), incentiveHold: { reason: "missing_follow_on_rate (text abcd1234)", seenAt: hoursAgo(30, now) } }),
+      communityRow({ id: 8, privateName: "Hidden Ranch", publicLabel: "Community B", lastSuccessfulSyncAt: hoursAgo(120, now) }),
+      // A catalog hold recorded 50h ago on a community whose last good data is older still.
+      communityRow({ id: 9, privateName: "Quiet Meadow", publicLabel: "Community C", lastSuccessfulSyncAt: hoursAgo(80, now), catalogHold: { reason: "expected_community_container_not_found", seenAt: hoursAgo(50, now) } }),
+    ]);
   return createFakeDealsDb([
     [dealEvents, [{ landed: 40, consented: 12, verificationSends: 9, verified: 7, listingViews: 6, requests: 2 }]],
+    [dealEvents, options.residueRows ?? []],
     [dealLeads, [{ count: 5 }]],
     [dealLeads, [{ count: healthy ? 0 : 1 }]],
     [dealTrecImports, [{ completedAt: hoursAgo(healthy ? 10 : 40, now) }]],
-    [dealCommunities, healthy
-      ? [{ id: 7, privateName: "Private Grove", publicLabel: "Community A", lastSuccessfulSyncAt: hoursAgo(20, now), holdReason: null }]
-      : [
-        { id: 7, privateName: "Private Grove", publicLabel: "Community A", lastSuccessfulSyncAt: hoursAgo(50, now), holdReason: "Homes container missing" },
-        { id: 8, privateName: "Hidden Ranch", publicLabel: "Community B", lastSuccessfulSyncAt: hoursAgo(120, now), holdReason: null },
-      ]],
+    [dealCommunities, communities],
     [dealPhotos, [{ pending: healthy ? 0 : 1, processing: 0, failed: 0, oldestPendingAt: healthy ? null : new Date(now.getTime() - 90 * 60_000) }]],
     [dealFubJobs, [{ count: healthy ? 0 : 2 }]],
     [dealFubJobs, [{ count: healthy ? 0 : 1 }]],
@@ -187,7 +209,7 @@ describe("Builder Deals daily health check", () => {
       expect.stringContaining("$12.50"),
       expect.stringContaining("RESEND_FROM_EMAIL"),
       expect.stringContaining("TREC file is 40h old"),
-      expect.stringContaining("Last builder update is over 4 days old for 1 of 2"),
+      expect.stringContaining("Last builder update is over 4 days old for 1 of 3"),
       expect.stringContaining("1 community update is held"),
       expect.stringContaining("oldest pending 90 minutes"),
       expect.stringContaining("1 FUB write has been failing for over 60 minutes"),
@@ -195,10 +217,72 @@ describe("Builder Deals daily health check", () => {
       expect.stringContaining("builder-deals-team-sync"),
       expect.stringContaining("1 incentive hold"),
     ]));
+    // The held incentive on Private Grove is not a community-update hold; the catalog hold is as old as its seenAt column.
     expect(health.operational.holds.items).toEqual([
-      expect.objectContaining({ kind: "community", label: "Private Grove (Community A)", reason: "Homes container missing", ageHours: 50 }),
-      expect.objectContaining({ kind: "incentive", label: "Private Grove (Community A)", ageHours: 30 }),
+      expect.objectContaining({ kind: "community", communityId: 9, label: "Quiet Meadow (Community C)", reason: "expected_community_container_not_found", ageHours: 50 }),
+      expect.objectContaining({ kind: "incentive", communityId: 7, label: "Private Grove (Community A)", ageHours: 30 }),
     ]);
+    expect(health.operational.holds.items[0]!.since).toEqual(hoursAgo(50, now));
+    expect(health.operational.sourceUpdates).toMatchObject({ activeCommunities: 3, staleCommunities: 1, heldCommunities: 1, state: "attention" });
+    expect(health.attention.filter((item) => /community update/.test(item))).toHaveLength(1);
+    expect(health.attention.some((item) => /residue/.test(item))).toBe(false);
+  });
+
+  it("reads the hold columns, not the summary: an incentive-only hold is never a community hold and a dismissed catalog hold is not a hold", async () => {
+    mockServices({ balance: "250.00" });
+    vi.stubEnv("RESEND_FROM_EMAIL", "deals@lifestyledesignrealty.com");
+    mocks.getDb.mockResolvedValue(snapshotDb(now, { healthy: true, communities: [
+      communityRow({ id: 7, privateName: "Private Grove", publicLabel: "Community A", lastSuccessfulSyncAt: hoursAgo(1, now), incentiveHold: { reason: "missing_follow_on_rate, missing_follow_on_period (text abcd1234)", seenAt: hoursAgo(1, now) } }),
+      communityRow({ id: 8, privateName: "Hidden Ranch", publicLabel: "Community B", lastSuccessfulSyncAt: hoursAgo(2, now), catalogHold: { reason: "dismissed:community_fetch_failed", seenAt: hoursAgo(90, now) } }),
+    ] }));
+    const health = await builderDealsHealthCheck(now);
+    expect(health.operational.sourceUpdates).toMatchObject({ activeCommunities: 2, staleCommunities: 0, heldCommunities: 0, state: "ok" });
+    expect(health.operational.holds.items.filter((item) => item.kind === "community")).toEqual([]);
+    expect(health.attention.some((item) => /community update/.test(item))).toBe(false);
+    expect(health.state).toBe("ok");
+  });
+
+  it("leaves Manual-builder and manual-mode communities out of the stale and active counts and the message", async () => {
+    mockServices({ balance: "250.00" });
+    vi.stubEnv("RESEND_FROM_EMAIL", "deals@lifestyledesignrealty.com");
+    mocks.getDb.mockResolvedValue(snapshotDb(now, { healthy: true, communities: [
+      communityRow({ id: 7, privateName: "Private Grove", publicLabel: "Community A", lastSuccessfulSyncAt: hoursAgo(20, now) }),
+      communityRow({ id: 8, privateName: "Hand Kept", publicLabel: "Community B", builder: "Manual", lastSuccessfulSyncAt: null }),
+      communityRow({ id: 9, privateName: "Switched Off", publicLabel: "Community C", manualMode: true, lastSuccessfulSyncAt: hoursAgo(400, now), catalogHold: { reason: "expected_community_container_not_found", seenAt: hoursAgo(300, now) } }),
+    ] }));
+    const health = await builderDealsHealthCheck(now);
+    expect(health.operational.sourceUpdates).toMatchObject({ activeCommunities: 1, staleCommunities: 0, heldCommunities: 0, oldestAgeHours: 20, state: "ok" });
+    expect(health.operational.sourceUpdates.lastSuccessfulSyncAt).toEqual(hoursAgo(20, now));
+    expect(health.attention.some((item) => /Last builder update|community update/.test(item))).toBe(false);
+    const report = await builderDealsMondayReport(now);
+    expect(report.body).toContain("0 of 1 active communities stale");
+  });
+
+  it("runs the render prune only inside the scheduled job; the admin health and Monday previews are read-only", async () => {
+    mockServices({ balance: "250.00" });
+    mocks.getDb.mockResolvedValue(snapshotDb(now, { healthy: true }));
+    const preview = await builderDealsHealthCheck(now);
+    expect(preview.renderPrune).toBeNull();
+    const explicit = await builderDealsHealthCheck(now, { prune: false });
+    expect(explicit.renderPrune).toBeNull();
+    await builderDealsMondayReport(now);
+    expect(mocks.pruneDealPhotoRenders).not.toHaveBeenCalled();
+
+    mocks.getDb.mockResolvedValue(snapshotDb(now, { healthy: true }));
+    const job = await runBuilderDealsHealthJob(now);
+    expect(mocks.pruneDealPhotoRenders).toHaveBeenCalledTimes(1);
+    expect(job.health.renderPrune).toEqual(pruneResult);
+  });
+
+  it("surfaces buyer-facing entries dropped for private residue (deal_events rows with the community id) in attention", async () => {
+    mockServices({ balance: "250.00" });
+    vi.stubEnv("RESEND_FROM_EMAIL", "deals@lifestyledesignrealty.com");
+    mocks.getDb.mockResolvedValue(snapshotDb(now, { healthy: true, residueRows: [{ detail: privacyResidueDetail(7, "public", "0123456789abcdef") }, { detail: privacyResidueDetail(7, "gated", "fedcba9876543210") }, { detail: privacyResidueDetail(12, "gated", "00ff00ff00ff00ff") }] }));
+    const health = await builderDealsHealthCheck(now);
+    expect(health.operational.privacyResidue).toMatchObject({ dropped: 3, communityIds: [7, 12], state: "attention" });
+    expect(health.state).toBe("attention");
+    expect(health.attention).toEqual([expect.stringContaining("3 buyer-facing community entries were dropped for private residue in the last 24 hours (community ids 7, 12)")]);
+    expect(health.attention[0]).not.toContain("—");
   });
 
   it("reports OK with no email when every check passes", async () => {
@@ -221,8 +305,9 @@ describe("Builder Deals daily health check", () => {
     expect(email.recipients).toEqual(settings.alertRecipients);
     expect(email.subject).not.toContain("—");
     expect(email.content).toContain("Follow Up Boss credentials did not work");
-    expect(email.content).toContain("Community update hold, Private Grove (Community A): Homes container missing (hold age 50h");
+    expect(email.content).toContain("Community update hold, Quiet Meadow (Community C): expected_community_container_not_found (hold age 50h");
     expect(email.content).toContain("Incentive hold, Private Grove (Community A): Promotional rate needs its follow-on period (hold age 30h");
+    expect(email.content).not.toContain("Community update hold, Private Grove");
   });
 
   it("flags missing Twilio credentials instead of silently skipping the check", async () => {
@@ -264,7 +349,10 @@ describe("Builder Deals Monday System OK email", () => {
     expect(report.body).toContain("Last builder update: Sat, Oct 17, 2026, 5:05 AM CDT (50h ago)");
     expect(report.body).toContain("balance $250.00 (alert under $20)");
     expect(report.body).toContain("Last 7 days: 7 verifications, 5 new leads, 9 code sends");
-    expect(report.body).toContain("Community update hold, Private Grove (Community A): Homes container missing (hold age 50h");
+    expect(report.body).toContain("1 of 3 active communities stale");
+    expect(report.body).toContain("Community update hold, Quiet Meadow (Community C): expected_community_container_not_found (hold age 50h");
+    expect(report.body).toContain("Incentive hold, Private Grove (Community A)");
+    expect(report.body).not.toContain("Community update hold, Private Grove");
     expect(report.body).toContain("TREC file: 40h old (limit 36h)");
   });
 

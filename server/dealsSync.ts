@@ -2,8 +2,9 @@ import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealPhotos } from "../drizzle/schema";
 import { getDb } from "./db";
 import { chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
-import { MAX_DETAIL_LIMIT, htmlToText, loadOfficialDeals, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type PromotionalRateFacts } from "./dealsAdapters";
-import { dealScrubTerms, emptyDealScrubConfig, mergeDealScrubConfig, normalizedDealSourceKey, normalizedText, parseDealScrubConfig, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
+import { MAX_DETAIL_LIMIT, htmlToText, loadOfficialDeals, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts } from "./dealsAdapters";
+import { dealScrubTerms, emptyDealScrubConfig, mergeDealScrubConfig, normalizedDealSourceKey, normalizedText, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
+import { applyScrubExclusions, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
 import { processPendingDealPhotos } from "./dealsPhotos";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { refreshCommunityGeography } from "./dealsMap";
@@ -55,13 +56,21 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   return config;
 }
 
-/** Categorized private names for one community; a legacy flat array lands in "other" after the known categories. */
+/**
+ * Categorized private names for one community; a legacy flat array lands in
+ * "other" after the known categories. Admin-excluded terms are removed here, so
+ * every scrubber and residue check that starts from this config ignores them.
+ */
 export function storedScrubConfig(row: Pick<CommunityRow, "builder" | "privateName" | "scrubList">): DealScrubConfig {
-  let parsed: unknown = null;
-  try { parsed = JSON.parse(row.scrubList); } catch { parsed = null; }
+  const stored = parseStoredScrubList(row.scrubList);
   const known = builderScrubConfig(row.builder);
   known.community.push(row.privateName);
-  return mergeDealScrubConfig(known, parseDealScrubConfig(parsed));
+  return applyScrubExclusions(mergeDealScrubConfig(known, stored.categories), stored.excludedTerms);
+}
+
+/** The admin's excluded-term list stored beside the categories (false positives such as a discovered page heading). */
+export function storedExcludedScrubTerms(row: Pick<CommunityRow, "scrubList">): string[] {
+  return parseStoredScrubList(row.scrubList).excludedTerms;
 }
 
 async function upsertCommunity(config: (typeof LAUNCH_DEALS)[number]) {
@@ -109,6 +118,7 @@ export function communitySourceConfig(community: CommunityRow): CommunitySourceC
     privateCommunityName: community.privateName,
     scrubList: dealScrubTerms(scrubConfig),
     scrubConfig,
+    excludedTerms: storedExcludedScrubTerms(community),
     // The safety cap only: an inventory above it is held, never truncated.
     maxDetailPages: MAX_DETAIL_LIMIT,
   };
@@ -422,14 +432,18 @@ async function writeCommunityFacts(community: CommunityRow, snapshot: DealAdapte
   if (Object.keys(patch).length) await db.update(dealCommunities).set(patch).where(eq(dealCommunities.id, community.id));
 }
 
-/** Names found on this run join the private per-community list used by every scrub. */
+/** Names found on this run join the private per-community list used by every scrub; admin-excluded terms never return and the exclusion list itself is kept. */
 async function mergeDiscoveredNames(community: CommunityRow, snapshot: DealAdapterResult) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
-  const merged = mergeDealScrubConfig(storedScrubConfig(community), snapshot.private.discoveredScrubConfig ?? null);
-  const serialized = JSON.stringify(merged);
+  const excludedTerms = storedExcludedScrubTerms(community);
+  const merged = applyScrubExclusions(mergeDealScrubConfig(storedScrubConfig(community), snapshot.private.discoveredScrubConfig ?? null), excludedTerms);
+  const serialized = serializeStoredScrubList(merged, excludedTerms);
   if (serialized !== community.scrubList) await db.update(dealCommunities).set({ scrubList: serialized }).where(eq(dealCommunities.id, community.id));
 }
+
+/** Typed against the adapter's reason union so the three hold-reason listings cannot drift apart. */
+const UNLABELLED_HOME_STATUS: DealHoldReason = "unlabelled_home_status";
 
 async function refreshCommunity(community: CommunityRow, now: Date, summaries: CommunityChangeSummary[], holds: HoldNotice[]): Promise<RefreshResult> {
   const db = await getDb();
@@ -450,6 +464,13 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     const reason = snapshot.holdReasons.join(", ");
     await recordCatalogHold(community, reason, now, holds);
     return { ...base, ok: false, reason };
+  }
+  // A home card whose status could not be read is a layout change, not a sale.
+  // Hold the whole run before anything is published or swept to sold; the last
+  // good data stays live until admin dismisses the hold or the parse recovers.
+  if (snapshot.private.homes.some((home) => home.status === null)) {
+    await recordCatalogHold(community, UNLABELLED_HOME_STATUS, now, holds);
+    return { ...base, ok: false, reason: UNLABELLED_HOME_STATUS };
   }
   const summary = emptySummary(community);
   const publishable = new Set<string>();

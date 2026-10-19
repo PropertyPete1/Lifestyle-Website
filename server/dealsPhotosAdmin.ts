@@ -16,9 +16,9 @@ import {
   UPLOAD_SOURCE_PREFIX,
   builderKey,
   builderSettingsKey,
-  getBuilderPhotoSettings,
   normalizeDealPhotoOriginal,
   processPendingDealPhotos,
+  readBuilderPhotoSettings,
   reprocessBuilderPhotos,
   validatePhotoRegion,
   type BuilderPhotoSettings,
@@ -111,7 +111,7 @@ export async function saveBuilderPhotoSettings(input: SaveBuilderPhotoSettingsIn
   const keywords = normalizePhotoKeywords(input.keywords ?? []);
   let previous: BuilderPhotoSettings | null = null;
   try {
-    previous = await getBuilderPhotoSettings(builder);
+    previous = await readBuilderPhotoSettings(builder);
   } catch {
     // Unreadable stored JSON is simply overwritten below.
   }
@@ -151,7 +151,8 @@ export type BuilderPhotoSettingsAdminView = {
  * getBuilderPhotoSettingsForAdmin
  * Input: builder?: string (one builder) or undefined (every builder with a community, plus launch builders)
  * Output: BuilderPhotoSettingsAdminView[] sorted by builder name
- * Reading seeds the stored defaults for a builder that has none yet.
+ * Read-only: a builder with no stored row shows the effective defaults; the
+ * row is written only by an admin save or by the processing path.
  */
 export async function getBuilderPhotoSettingsForAdmin(builder?: string): Promise<BuilderPhotoSettingsAdminView[]> {
   const db = await requireDb();
@@ -192,7 +193,7 @@ export async function getBuilderPhotoSettingsForAdmin(builder?: string): Promise
   const views: BuilderPhotoSettingsAdminView[] = [];
   for (const key of wanted) {
     const name = names.get(key) ?? key;
-    const settings = await getBuilderPhotoSettings(name);
+    const settings = await readBuilderPhotoSettings(name);
     views.push({
       builder: name,
       enabled: settings.enabled,

@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 const mocks = vi.hoisted(() => ({
   completeVerification: vi.fn(),
+  isLiveDealSession: vi.fn(),
   getDealSettings: vi.fn(),
   enqueueDealsFubJob: vi.fn(),
   runPendingDealsFubJobs: vi.fn(),
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./dealsService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./dealsService")>()),
   completeVerification: (...args: unknown[]) => mocks.completeVerification(...args),
+  isLiveDealSession: (...args: unknown[]) => mocks.isLiveDealSession(...args),
   getDealSettings: (...args: unknown[]) => mocks.getDealSettings(...args),
 }));
 vi.mock("./dealsFubJobs", () => ({
@@ -27,6 +29,7 @@ vi.mock("./dealsAlerts", () => ({
 }));
 
 import { registerDealsRoutes } from "./dealsRoutes";
+import { DEALS_COOKIE } from "../shared/deals";
 
 const settings = { testModeFullPipeline: false, activeReelCodes: ["sl1"] };
 const completed = { ok: true as const, token: "t".repeat(40), leadId: 31, expiresAt: new Date(Date.now() + 3_600_000), firstUnlock: true, reverifiedActive: false, isTeam: false, isTest: false, fubCheckDeferred: false, duplicate: false };
@@ -44,6 +47,7 @@ beforeAll(async () => {
 afterAll(async () => { server.close(); await once(server, "close"); });
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.isLiveDealSession.mockResolvedValue(null);
   mocks.getDealSettings.mockResolvedValue(settings);
   mocks.enqueueDealsFubJob.mockResolvedValue(undefined);
   mocks.runPendingDealsFubJobs.mockResolvedValue({ sent: 0, failed: 0, skipped: 0, leased: 0 });
@@ -106,5 +110,39 @@ describe("Builder Deals verify route side effects", () => {
     expect(response.headers.get("location")).toBe(`/deals/v/${completed.token}`);
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+});
+
+describe("Builder Deals expiry redirect contract", () => {
+  it("sends an expired 10-minute code session to the gate as ?codeError=expired, not to the expired-link page", async () => {
+    mocks.completeVerification.mockResolvedValue({ ok: false, kind: "expired" });
+    const response = await verify();
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/deals?codeError=expired");
+    expect(mocks.enqueueDealsFubJob).not.toHaveBeenCalled();
+  });
+
+  it("keeps the other verify outcomes on their own flags", async () => {
+    mocks.completeVerification.mockResolvedValue({ ok: false, kind: "invalid_code" });
+    expect((await verify()).headers.get("location")).toBe("/deals?codeError=invalid_code");
+    mocks.completeVerification.mockResolvedValue({ ok: false, kind: "blocked" });
+    expect((await verify()).headers.get("location")).toBe("/deals?gate=1&blocked=1");
+  });
+
+  it("sends a dead session cookie on /deals/mine to the expired page and a browser without one to the gate", async () => {
+    const dead = await fetch(`${baseUrl}/deals/mine`, { redirect: "manual", headers: { cookie: `${DEALS_COOKIE.session}=stale-token; ${DEALS_COOKIE.device}=device` } });
+    expect(dead.status).toBe(302);
+    expect(dead.headers.get("location")).toBe("/deals?expired=1");
+    const fresh = await fetch(`${baseUrl}/deals/mine`, { redirect: "manual" });
+    expect(fresh.status).toBe(302);
+    expect(fresh.headers.get("location")).toBe("/deals?gate=1");
+    expect(mocks.isLiveDealSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets a live session through to the page", async () => {
+    mocks.isLiveDealSession.mockResolvedValue({ leadId: 31, lead: {}, deviceHash: "d" });
+    const response = await fetch(`${baseUrl}/deals/mine`, { redirect: "manual", headers: { cookie: `${DEALS_COOKIE.session}=live` } });
+    // No static handler is registered in this harness, so Express answers 404 after the check passes.
+    expect(response.status).toBe(404);
   });
 });

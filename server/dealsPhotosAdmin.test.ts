@@ -120,8 +120,26 @@ describe("getBuilderPhotoSettingsForAdmin", () => {
     expect(views[0]).toMatchObject({ needsRegion: false, enabled: true, photos: { total: 10, processed: 9, failed: 1, awaitingRegion: 0, autoHidden: 2 } });
     expect(views[1]).toMatchObject({ needsRegion: false, enabled: true, region: DEFAULT_LAUNCH_WATERMARK_REGION, photos: { total: 0 } });
     expect(views[2]).toMatchObject({ needsRegion: true, enabled: true, region: null, photos: { awaitingRegion: 4, pending: 4 } });
-    // M/I Homes had no stored row: reading seeded its launch default.
-    expect((fake.opsFor("insert", dealSettings)[0].values as { key: string }).key).toBe(builderSettingsKey("M/I Homes"));
+    // M/I Homes had no stored row: the admin view shows its effective launch default without seeding it (no admin GET changes state).
+    expect(views[1]).toMatchObject({ revision: "launch-default-v1", keywords: [...DEFAULT_PHOTO_HIDE_KEYWORDS] });
+    expect(fake.opsFor("insert", dealSettings)).toHaveLength(0);
+    expect(fake.opsFor("update", dealSettings)).toHaveLength(0);
+  });
+
+  it("shows a legacy unreviewed launch row as upgraded without writing the upgrade back", async () => {
+    const fake = createFakeDb();
+    fake.onSelect(dealCommunities, [{ builder: "Chesmar" }]);
+    fake.onSelect(dealSettings, (op: FakeOp) => {
+      const key = renderWhere(op.where).params[0];
+      return key === builderSettingsKey("Chesmar") ? [storedSettings("Chesmar", { enabled: false, region: null, revision: "unconfigured-v1", keywords: ["Welcome Home"] })] : [];
+    });
+    fake.onSelect(dealPhotos, []);
+    vi.mocked(getDb).mockResolvedValue(fake.db as never);
+    const [chesmar] = await getBuilderPhotoSettingsForAdmin("Chesmar");
+    expect(chesmar).toMatchObject({ builder: "Chesmar", enabled: true, region: DEFAULT_LAUNCH_WATERMARK_REGION, needsRegion: false, revision: "launch-default-v1" });
+    expect(chesmar.keywords).toEqual(expect.arrayContaining(["Welcome Home", ...DEFAULT_PHOTO_HIDE_KEYWORDS]));
+    expect(fake.opsFor("insert", dealSettings)).toHaveLength(0);
+    expect(fake.opsFor("update", dealSettings)).toHaveLength(0);
   });
 });
 

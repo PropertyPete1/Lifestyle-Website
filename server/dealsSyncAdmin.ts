@@ -1,9 +1,10 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealIncentives, dealJobRuns } from "../drizzle/schema";
 import { getDb } from "./db";
-import { officialHostFor } from "./dealsAdapters";
+import { officialHostFor, type DealHoldReason } from "./dealsAdapters";
 import { chicagoDay, chicagoEndOfDay } from "./dealsService";
-import { activeCatalogHold, communityRefreshDue, refreshOfficialDeals, storedScrubConfig, summarizeHolds } from "./dealsSync";
+import { normalizeExcludedTerms, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
+import { activeCatalogHold, builderScrubConfig, communityRefreshDue, refreshOfficialDeals, storedExcludedScrubTerms, storedScrubConfig, summarizeHolds } from "./dealsSync";
 import { communityAreaMap, refreshCommunityGeography } from "./dealsMap";
 import { DEAL_SCRUB_CATEGORIES, hasPrivateTerm, mergeDealScrubConfig, normalizedText, scrubPrivateNames, type DealScrubConfig, type DealScrubConfigInput } from "../shared/deals";
 
@@ -34,14 +35,58 @@ async function requireCommunity(id: number): Promise<CommunityRow> {
   return community;
 }
 
-/** Stored scrub_list value for a saved community: categorized, with the builder and community names always present. */
-export function storedScrubListForCommunity(input: { builder: string; privateName: string; scrubList?: DealScrubConfigInput | null; existing?: string | null }): string {
-  let existing: unknown = null;
-  try { existing = input.existing ? JSON.parse(input.existing) : null; } catch { existing = null; }
-  const merged = mergeDealScrubConfig(storedScrubConfig({ builder: input.builder, privateName: input.privateName, scrubList: JSON.stringify(existing ?? {}) }), input.scrubList ?? null);
+export type StoredScrubListInput = {
+  builder: string;
+  privateName: string;
+  scrubList?: DealScrubConfigInput | null;
+  existing?: string | null;
+  /** True: the submitted plan and street lists replace the stored (discovered) ones. Default false keeps the union, so an edit never shortens the list. */
+  replaceDiscovered?: boolean;
+  /** False positives the scrubber and residue checks must ignore; omitted keeps the stored list, a list (even empty) replaces it. */
+  excludedTerms?: readonly string[] | null;
+};
+
+/**
+ * Stored scrub_list value for a saved community: categorized, with the builder
+ * and community names always present and the excluded-term list kept beside
+ * the categories. Exclusions never apply to builder, lender or community names.
+ */
+export function storedScrubListForCommunity(input: StoredScrubListInput): string {
+  const stored = parseStoredScrubList(input.existing ?? null);
+  const kept: DealScrubConfig = input.replaceDiscovered ? { ...stored.categories, plan: [], street: [] } : stored.categories;
+  const known = builderScrubConfig(input.builder);
+  known.community.push(input.privateName);
+  const merged = mergeDealScrubConfig(known, kept, input.scrubList ?? null);
   const config: DealScrubConfig = { ...merged };
   for (const category of DEAL_SCRUB_CATEGORIES) config[category] = config[category].filter((term) => term !== "Manual");
-  return JSON.stringify(config);
+  const excludedTerms = input.excludedTerms === undefined || input.excludedTerms === null ? stored.excludedTerms : normalizeExcludedTerms([...input.excludedTerms]);
+  return serializeStoredScrubList(config, excludedTerms);
+}
+
+/**
+ * Admin wording for the catalog-level hold reasons the sync can record (the
+ * incentive-level reasons are handled by heldIncentiveMissingFields). Listed
+ * here so a new reason in the adapter union is described for the operator too.
+ */
+export const CATALOG_HOLD_REASON_HELP: Partial<Record<DealHoldReason, string>> = {
+  invalid_source_url: "The saved source URL is not the builder's official community page.",
+  unsupported_official_host: "A page redirected off the builder's official host.",
+  community_fetch_failed: "The official community page could not be fetched.",
+  sitemap_fetch_failed: "The builder's sitemap could not be fetched.",
+  detail_fetch_failed: "A plan or home page could not be fetched.",
+  missing_community_guid: "The community id could not be read from the official page.",
+  inventory_fetch_failed: "The builder's inventory feed could not be fetched.",
+  invalid_inventory_response: "The builder's inventory feed returned an unexpected payload.",
+  incomplete_inventory: "The inventory is larger than the safety cap, so it was not truncated.",
+  expected_community_container_not_found: "The community page layout changed (expected container missing).",
+  expected_detail_container_not_found: "A plan or home page layout changed (stat block or gallery missing).",
+  unlabelled_home_status: "A home card's status could not be read, so nothing was published or marked sold this run.",
+  private_text_remaining: "A private name survived scrubbing; add it to the names to hide or exclude a false positive.",
+};
+
+/** One line per stored reason (the sync joins several with ", "); unknown reasons fall back to the raw code. */
+export function describeCatalogHold(reason: string): string[] {
+  return reason.split(",").map((part) => part.trim()).filter(Boolean).map((part) => CATALOG_HOLD_REASON_HELP[part as DealHoldReason] ?? part.replace(/_/g, " "));
 }
 
 const REFRESH_JOB_PREFIX = "deals-refresh-community-";
@@ -344,7 +389,7 @@ export async function listCommunityDiagnostics(now = new Date()) {
       lastAttemptAt: community.lastAttemptAt?.toISOString() ?? null,
       lastSuccessfulSyncAt: community.lastSuccessfulSyncAt?.toISOString() ?? null,
       refreshDue: community.builder !== "Manual" && !community.manualMode && communityRefreshDue(community.lastSuccessfulSyncAt, now),
-      catalogHold: catalogHold ? { reason: catalogHold, since: community.catalogHoldSeenAt?.toISOString() ?? null, ageHours: community.catalogHoldSeenAt ? Math.round((now.getTime() - community.catalogHoldSeenAt.getTime()) / 36e5) : null } : null,
+      catalogHold: catalogHold ? { reason: catalogHold, help: describeCatalogHold(catalogHold), since: community.catalogHoldSeenAt?.toISOString() ?? null, ageHours: community.catalogHoldSeenAt ? Math.round((now.getTime() - community.catalogHoldSeenAt.getTime()) / 36e5) : null } : null,
       dismissedCatalogHold: community.catalogHoldReason?.startsWith("dismissed:") ? community.catalogHoldReason.slice("dismissed:".length) : null,
       incentiveHold: community.incentiveHoldReason ? { reason: community.incentiveHoldReason, since: community.incentiveHoldSeenAt?.toISOString() ?? null, ageHours: community.incentiveHoldSeenAt ? Math.round((now.getTime() - community.incentiveHoldSeenAt.getTime()) / 36e5) : null } : null,
       homes: {
@@ -357,6 +402,7 @@ export async function listCommunityDiagnostics(now = new Date()) {
       incentive: active ? { id: active.id, publicText: active.publicText, manual: active.manual, confirmedAt: active.confirmedAt.toISOString(), expiresAt: active.expiresAt?.toISOString() ?? null, contractBy: active.contractBy?.toISOString() ?? null, closeBy: active.closeBy?.toISOString() ?? null, contractByManual: active.contractByManual, closeByManual: active.closeByManual } : null,
       heldIncentives: held.map((row) => ({ id: row.id, publicText: row.publicText, reasons: parseIncentiveHoldReasons(row.holdReason), missingFields: heldIncentiveMissingFields(row, {}, categories), confirmedAt: row.confirmedAt.toISOString() })),
       scrubConfig: categories,
+      excludedTerms: storedExcludedScrubTerms(community),
       areaMap: communityAreaMap(community),
       driveTimeChips: (() => { try { const parsed: unknown = JSON.parse(community.driveTimeChips ?? "[]"); return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : []; } catch { return []; } })(),
       lastRefreshRun: runs[0] ? { status: runs[0].status, startedAt: runs[0].startedAt.toISOString(), completedAt: runs[0].completedAt?.toISOString() ?? null, detail: runs[0].detail } : null,

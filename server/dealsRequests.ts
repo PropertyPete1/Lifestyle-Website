@@ -2,7 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { dealHomes, dealLeads, dealTourRequests } from "../drizzle/schema";
 import { getDb } from "./db";
 import { chicagoDay, hashSecret, logDealEvent } from "./dealsService";
-import { enqueueDealsRequestJobs, runPendingDealsFubJobs } from "./dealsFubJobs";
+import { enqueueDealsRequestJobs, requestTestMode, runPendingDealsFubJobs } from "./dealsFubJobs";
 
 function isDuplicateRequestError(error: unknown): boolean {
   const record = error && typeof error === "object" ? error as { code?: unknown; errno?: unknown; message?: unknown } : {};
@@ -36,10 +36,15 @@ export async function createDealsHomeRequest(input: { leadId: number; card: stri
   }
   const requestId = Number((inserted as unknown as [{ insertId?: number }])[0]?.insertId);
   if (!Number.isSafeInteger(requestId) || requestId < 1) throw new Error("Could not queue this request");
-  // The visitor never waits on CRM or notification networking. Each side effect
-  // is persisted with its own idempotency key before this mutation returns.
-  await enqueueDealsRequestJobs(lead.id, requestId, day);
-  void runPendingDealsFubJobs(3).catch((error) => console.error("[deals] request outbox run failed", error));
+  // Toggle (c): a test number with the full pipeline off keeps its request row
+  // for admin, but queues no FUB task, no FUB note and no team email.
+  const testMode = await requestTestMode(lead.phoneE164);
+  if (!testMode.quiet) {
+    // The visitor never waits on CRM or notification networking. Each side effect
+    // is persisted with its own idempotency key before this mutation returns.
+    await enqueueDealsRequestJobs(lead.id, requestId, day);
+    void runPendingDealsFubJobs(3).catch((error) => console.error("[deals] request outbox run failed", error));
+  }
   await logDealEvent({ leadId: lead.id, kind: "tour_request", sourceCode: input.sourceCode, deviceHash: input.deviceHash, detail: input.requestType });
-  return { ok: true as const, appended: prior.length > 0, duplicate: false };
+  return { ok: true as const, appended: prior.length > 0, duplicate: false, quietTest: testMode.quiet };
 }

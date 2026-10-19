@@ -4,7 +4,10 @@ import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
 import { areaMapRadiusPixels, driveTimeChipLabels, mercatorMetresPerPixel, validDealsAreaMap } from "../client/src/lib/dealsAreaMap";
 import { IDENTITY_PATTERN_OPACITY, escapeXml, identityPatternDataUri, identityPatternStyle, identityPatternSvg, identityPatternText } from "../client/src/lib/dealsIdentityPattern";
-import type { GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
+import { MINE_COPY, PROFILE_NAME_MAX, countdownExpired, countdownSeconds, isUnauthorizedDealsError, profileErrorCopy, profileInput } from "../client/src/lib/dealsMine";
+import { SITE } from "../shared/site";
+import type { GatedCatalogProps, GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
+import type { DealsIncentive } from "../client/src/components/deals/shared";
 
 /**
  * Gated page markup (A19 containment, D11 copy, D12 identity background, G1
@@ -15,6 +18,8 @@ import type { GatedCommunity, GatedLead } from "../client/src/components/deals/G
 (globalThis as { React?: typeof React }).React = React;
 const { GatedCatalog, PHOTOS_ON_REQUEST, ProtectedGallery, countdownLabel } = await import("../client/src/components/deals/GatedCatalog");
 const { AreaMap } = await import("../client/src/components/deals/AreaMap");
+const { Countdown } = await import("../client/src/components/deals/Countdown");
+const { DealsFooter, Incentive, RATE_CLASS, incentiveRateLines } = await import("../client/src/components/deals/shared");
 const { createElement } = React;
 
 const PHONE_VIEWPORT = 375;
@@ -37,9 +42,10 @@ const communities: GatedCommunity[] = [
   },
 ];
 
-function render(overrides: { lead?: Partial<GatedLead>; communities?: GatedCommunity[] } = {}) {
+function render(overrides: { lead?: Partial<GatedLead>; communities?: GatedCommunity[] } & Partial<Omit<GatedCatalogProps, "lead" | "communities">> = {}) {
+  const { lead: leadOverrides, communities: communityOverrides, ...rest } = overrides;
   // wouter's Link reads the browser location; the SSR router supplies the gated path instead.
-  return renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead: { ...lead, ...overrides.lead }, communities: overrides.communities ?? communities, now: NOW })));
+  return renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead: { ...lead, ...leadOverrides }, communities: communityOverrides ?? communities, now: NOW, ...rest })));
 }
 
 /** Every explicit pixel width in the markup: width="N" attributes and width: Npx inline styles. */
@@ -213,5 +219,124 @@ describe("area map (G1)", () => {
     expect(openingTags(html, /aria-label="Approximate area map"/).length).toBe(2);
     expect(openingTags(html, /^<img\b[^>]*src="\/deals\/mine\/maps\//).length).toBe(1);
     expect(html.match(/Approximate area map unavailable/g)?.length).toBe(1);
+  });
+});
+
+const baseIncentive: DealsIncentive = { text: "Demo incentive wording.", headlineRate: "4.25%", followOnRate: "6.25%", followOnPeriod: "Years 2 to 30", apr: "6.051%", loanType: "FHA 30-yr fixed", downPayment: null, repaymentTerms: null, contractBy: null, closeBy: null };
+const rateCells = (html: string) => Array.from(html.matchAll(/<p class="([^"]*)">([^<]*)<\/p>/g)).filter((match) => match[1] === RATE_CLASS).map((match) => decode(match[2]));
+
+describe("incentive rates: equal prominence (Reg Z)", () => {
+  it("renders the follow-on period and the headline period in the same element, size, weight and colour as the rates", () => {
+    const html = renderToStaticMarkup(createElement(Incentive, { incentive: baseIncentive }));
+    expect(rateCells(html)).toEqual(["First year: 4.25%", "Years 2 to 30: 6.25%", "APR: 6.051%"]);
+    // No smaller caption carries the period or the APR label any more.
+    expect(html).not.toMatch(/text-\[10px\][^>]*>(First year|Years 2 to 30|APR|Rate)</);
+    expect(html).not.toMatch(/>(First year|Years 2 to 30|APR|Rate)</);
+    expect(RATE_CLASS).toContain("text-lg");
+    expect(RATE_CLASS).toContain("font-medium");
+    expect(RATE_CLASS).toContain("text-gold");
+  });
+
+  it("labels a rate with no follow-on period as the rate and still carries the APR", () => {
+    expect(incentiveRateLines({ headlineRate: "5.5%", followOnRate: null, followOnPeriod: null, apr: "5.74%" })).toEqual(["Rate: 5.5%", "APR: 5.74%"]);
+    expect(incentiveRateLines({ headlineRate: null, followOnRate: null, followOnPeriod: null, apr: "5.74%" })).toEqual(["APR: 5.74%"]);
+    expect(incentiveRateLines({ headlineRate: "4.99%", followOnRate: "6.5%", followOnPeriod: null, apr: null })).toEqual(["Rate: 4.99%", "6.5%"]);
+  });
+
+  it("hides the rate row for a closing-cost-only promotion instead of showing empty gold cells", () => {
+    const closingCosts: DealsIncentive = { ...baseIncentive, text: "Builder pays closing costs.", headlineRate: null, followOnRate: null, followOnPeriod: null, apr: null };
+    expect(incentiveRateLines(closingCosts)).toEqual([]);
+    const html = renderToStaticMarkup(createElement(Incentive, { incentive: closingCosts }));
+    expect(html).toContain("Builder pays closing costs.");
+    expect(html).not.toContain("data-deals-rates");
+    expect(rateCells(html)).toEqual([]);
+    expect(html).not.toMatch(/>APR</);
+    expect(html).not.toMatch(/>Rate</);
+    const compact = renderToStaticMarkup(createElement(Incentive, { incentive: { ...closingCosts, teaser: "Closing costs covered." }, compact: true }));
+    expect(compact).toContain("Closing costs covered.");
+    expect(compact).not.toContain("data-deals-rates");
+  });
+
+  it("renders the gated page rates with the same equal-prominence cells", () => {
+    const html = render();
+    expect(rateCells(html)).toEqual(["First year: 4.25%", "Years 2 to 30: 6.25%", "APR: 6.051%"]);
+  });
+});
+
+describe("name prompt: nothing is saved until the server would accept it", () => {
+  it("builds the profile input only from a 2+ character name or a chosen timeline", () => {
+    expect(profileInput("", "")).toBeNull();
+    expect(profileInput("   ", "")).toBeNull();
+    expect(profileInput("P", "")).toBeNull();
+    expect(profileInput("P", "0-3 months")).toBeNull();
+    expect(profileInput("Pat", "")).toEqual({ name: "Pat", timeline: undefined });
+    expect(profileInput("  Pat Example ", "6-12 months")).toEqual({ name: "Pat Example", timeline: "6-12 months" });
+    expect(profileInput("", "12+ months")).toEqual({ name: undefined, timeline: "12+ months" });
+    expect(profileInput("", "someday")).toBeNull();
+    expect(profileInput("x".repeat(400), "")?.name).toHaveLength(PROFILE_NAME_MAX);
+    expect(PROFILE_NAME_MAX).toBe(190);
+  });
+
+  it("renders Save disabled with nothing entered, caps the name at 190 characters and shows the update error", () => {
+    const html = render();
+    const prompt = /<section aria-label="Add your name"[\s\S]*?<\/section>/.exec(html)?.[0] ?? "";
+    expect(prompt).not.toBe("");
+    const save = /<button[^>]*>Save<\/button>/.exec(prompt)?.[0] ?? "";
+    expect(save).toMatch(/\sdisabled=""/);
+    expect(prompt).toMatch(/<input[^>]*maxlength="190"/i);
+    expect(prompt).not.toContain('role="alert"');
+    const failed = render({ profileError: MINE_COPY.profileInvalid });
+    expect(failed).toMatch(new RegExp(`<p role="alert"[^>]*>${MINE_COPY.profileInvalid}</p>`));
+    expect(render({ profileSaved: true })).not.toContain("Add your name so we know who to text.");
+  });
+
+  it("turns update failures into readable copy and routes only UNAUTHORIZED back to the gate", () => {
+    expect(profileErrorCopy(null)).toBeNull();
+    expect(profileErrorCopy({ message: "UNAUTHORIZED", data: { code: "UNAUTHORIZED" } })).toBe(MINE_COPY.profileUnauthorized);
+    expect(profileErrorCopy({ message: '[{"code":"too_small"}]', data: { code: "BAD_REQUEST" } })).toBe(MINE_COPY.profileInvalid);
+    expect(profileErrorCopy({ message: "boom", data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(MINE_COPY.profileFailed);
+    expect(profileErrorCopy({ message: "timeout" })).toBe(MINE_COPY.profileFailed);
+    expect(isUnauthorizedDealsError({ data: { code: "UNAUTHORIZED" } })).toBe(true);
+    expect(isUnauthorizedDealsError({ data: { code: "INTERNAL_SERVER_ERROR" } })).toBe(false);
+    expect(isUnauthorizedDealsError({ message: "Request timed out" })).toBe(false);
+    expect(isUnauthorizedDealsError(null)).toBe(false);
+    for (const copy of Object.values(MINE_COPY)) expect(copy).not.toMatch(/—/);
+  });
+});
+
+describe("countdown owns the clock", () => {
+  it("counts whole seconds down to 00:00:00 and reports expiry exactly there", () => {
+    const expiresAt = new Date(NOW + 61_000).toISOString();
+    expect(countdownSeconds(expiresAt, NOW)).toBe(61);
+    expect(countdownLabel(expiresAt, NOW)).toBe("00:01:01");
+    expect(countdownExpired(expiresAt, NOW)).toBe(false);
+    expect(countdownLabel(expiresAt, NOW + 60_000)).toBe("00:00:01");
+    expect(countdownExpired(expiresAt, NOW + 60_000)).toBe(false);
+    // The label reads 00:00:00 as soon as less than a full second is left; expiry fires with it.
+    expect(countdownLabel(expiresAt, NOW + 60_999)).toBe("00:00:00");
+    expect(countdownExpired(expiresAt, NOW + 60_999)).toBe(true);
+    expect(countdownExpired(expiresAt, NOW + 61_000)).toBe(true);
+    expect(countdownExpired(expiresAt, NOW + 3_600_000)).toBe(true);
+    expect(countdownLabel(expiresAt, NOW + 3_600_000)).toBe("00:00:00");
+  });
+
+  it("renders a time element with the pinned clock, and the gated page uses it in both places", () => {
+    const expiresAt = new Date(NOW + 2 * 3600_000 + 3 * 60_000 + 4_000).toISOString();
+    const html = renderToStaticMarkup(createElement(Countdown, { expiresAt, now: NOW, className: "tabular-nums" }));
+    expect(html).toBe(`<time dateTime="${expiresAt}" class="tabular-nums">02:03:04</time>`);
+    const page = render();
+    expect(page.match(/<time [^>]*>23:14:05<\/time>/g)?.length).toBe(2);
+  });
+});
+
+describe("deals footer compliance links and logo", () => {
+  it("links the shared IABS and Consumer Protection Notice URLs and shows the Equal Housing Opportunity logo", () => {
+    const html = renderToStaticMarkup(createElement(Router, { ssrPath: "/deals" }, createElement(DealsFooter)));
+    expect(html).toContain(`href="${SITE.iabsUrl}"`);
+    expect(html).toContain(`href="${SITE.cpnUrl}"`);
+    expect(html).toMatch(/<svg[^>]*aria-label="Equal Housing Opportunity logo"/);
+    expect(html).toContain("Equal Housing Opportunity");
+    expect(html).toContain('href="/privacy"');
+    expect(decode(html)).not.toMatch(/—/);
   });
 });

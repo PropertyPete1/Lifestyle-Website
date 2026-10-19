@@ -1,7 +1,7 @@
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { GATE_COPY, codeStepAlert, gateReducer, gateStepAlert, initialGateState, readGateParams, stripTransientGateParams, type GateDealsState, type GateState } from "../client/src/lib/dealsGate";
+import { GATE_COPY, INSTAGRAM_HANDLE_MAX, SOURCE_CODE_MAX, codeStepAlert, gateReducer, gateStepAlert, initialGateState, readGateParams, startLeavesPending, stripTransientGateParams, type GateDealsState, type GateState } from "../client/src/lib/dealsGate";
 import type { GateSheetViewProps } from "../client/src/components/deals/GateSheet";
 
 /**
@@ -194,5 +194,115 @@ describe("expired and error redirects map to gate messages", () => {
 
   it("uses no em dashes in any client-owned gate copy", () => {
     for (const copy of Object.values(GATE_COPY)) expect(copy).not.toMatch(/—/);
+  });
+});
+
+describe("expired code session (/deals/verify -> ?codeError=expired)", () => {
+  it("explains the expired code session on the gate as a status, at once and without the wrong-code copy", () => {
+    const gate = fresh("?codeError=expired", undefined);
+    expect(gate.step).toBe("gate");
+    expect(gateStepAlert(gate, undefined)).toBe(GATE_COPY.codeSessionExpired);
+    expect(gateStepAlert(gate, noPending)).toBe(GATE_COPY.codeSessionExpired);
+    const html = render(gate, noPending);
+    expect(statuses(html)).toEqual([GATE_COPY.codeSessionExpired]);
+    expect(alerts(html)).toEqual([]);
+    expect(html).not.toContain(GATE_COPY.tooManyWrongCodes);
+    expect(html).not.toContain("This link expired.");
+    // Moving on clears it like any other codeError.
+    expect(gateStepAlert(gateReducer(gate, { type: "go", step: "confirm-agent" }), noPending)).toBeNull();
+  });
+
+  it("never reads a stale expired flag as a wrong code when a pending record does exist", () => {
+    const resumed = gateReducer(fresh("?codeError=expired", undefined), { type: "state_changed", state: withPending });
+    expect(resumed.step).toBe("code");
+    expect(codeStepAlert(resumed)).toBeNull();
+    expect(alerts(render(resumed, withPending))).toEqual([]);
+  });
+});
+
+describe("attribution params are bounded before they reach the server", () => {
+  it("cuts an oversized ?src and ?ig down to the sanitizer limits and strips the leading @", () => {
+    const params = readGateParams(`?src=${"a".repeat(200)}&ig=@@${"b".repeat(100)}`);
+    expect(params.src).toHaveLength(SOURCE_CODE_MAX);
+    expect(params.src).toBe("a".repeat(40));
+    expect(params.ig).toHaveLength(INSTAGRAM_HANDLE_MAX);
+    expect(params.ig).toBe("b".repeat(30));
+    expect(params.ig?.startsWith("@")).toBe(false);
+  });
+
+  it("keeps ordinary codes and handles as they are and drops what the server would reject", () => {
+    expect(readGateParams("?src=sl1&ig=@pete.realtor_tx")).toMatchObject({ src: "sl1", ig: "pete.realtor_tx" });
+    expect(readGateParams("?src=vg-1&ig=pete")).toMatchObject({ src: "vg-1", ig: "pete" });
+    expect(readGateParams("?src=%3Cscript%3E&ig=%40%40")).toMatchObject({ src: "script", ig: undefined });
+    expect(readGateParams("")).toMatchObject({ src: undefined, ig: undefined });
+    expect(readGateParams("?ig=@so%20called%20handle").ig).toBe("socalledhandle");
+  });
+
+  it("refreshes deals.state after a sent code and after cannot_receive, not after a refusal", () => {
+    expect(startLeavesPending({ ok: true, displayPhone: "(210) •••-0123" })).toBe(true);
+    expect(startLeavesPending({ ok: false, kind: "cannot_receive", message: SERVER_CANNOT_RECEIVE })).toBe(true);
+    expect(startLeavesPending({ ok: false, kind: "outside_us", message: SERVER_OUTSIDE_US })).toBe(false);
+    expect(startLeavesPending({ ok: false, kind: "blocked", message: "blocked" })).toBe(false);
+    expect(startLeavesPending({ ok: false, kind: "rate_limited", message: "later" })).toBe(false);
+  });
+});
+
+describe("gate controls: consent before Continue, pressed pills, tap targets, voice heading", () => {
+  // The rendered disabled attribute, not Tailwind's disabled: variants in the class list.
+  const continueDisabled = (html: string) => {
+    const index = html.indexOf(">Continue");
+    expect(index).toBeGreaterThan(-1);
+    return /\sdisabled=""/.test(html.slice(html.lastIndexOf("<button", index), index));
+  };
+
+  it("keeps Continue disabled until deals.state has resolved, so the consent line is on screen first", () => {
+    const loading = render(fresh(), undefined);
+    expect(continueDisabled(loading)).toBe(true);
+    expect(loading).not.toContain("you agree that");
+    const resolved = render(fresh(), { pending: null, consentText: "By tapping Continue, you agree that we may text you." } as GateDealsState);
+    expect(continueDisabled(resolved)).toBe(false);
+    expect(resolved).toContain("By tapping Continue, you agree that we may text you.");
+    // Still disabled without a choice or a full number.
+    expect(continueDisabled(render(fresh(), noPending, { choice: null }))).toBe(true);
+    expect(continueDisabled(render(fresh(), noPending, { phone: "(210) 555" }))).toBe(true);
+  });
+
+  it("marks the realtor pills with aria-pressed", () => {
+    const buyer = render(fresh(), noPending, { choice: "buyer" });
+    expect(buyer).toMatch(/<button[^>]*aria-pressed="true"[^>]*>No, just me<\/button>/);
+    expect(buyer).toMatch(/<button[^>]*aria-pressed="false"[^>]*>Yes<\/button>/);
+    const none = render(fresh(), noPending, { choice: null });
+    expect(none.match(/aria-pressed="false"/g)?.length).toBe(2);
+  });
+
+  it("gives the code-step recovery links and every close button a 44 px tap target", () => {
+    const code = gateReducer(fresh(), { type: "start_result", result: { ok: true, displayPhone: "(210) •••-0123" } });
+    const html = render(code, withPending);
+    for (const label of ["Didn't get it? Resend", "Call me with the code instead", "Wrong number? Change it"]) {
+      const encoded = label.replace("'", "&#x27;");
+      const index = html.indexOf(encoded);
+      expect(index, label).toBeGreaterThan(-1);
+      const tag = html.slice(html.lastIndexOf("<button", index), index);
+      expect(tag, label).toMatch(/class="[^"]*\bmin-h-11\b/);
+    }
+    const close = /<button[^>]*aria-label="Close gate"[^>]*>/.exec(html)?.[0] ?? "";
+    expect(close).toMatch(/class="[^"]*\bh-11\b/);
+    expect(close).toMatch(/class="[^"]*\bw-11\b/);
+  });
+
+  it("says a call is coming once the voice code is on its way, and uses you're on the confirm step", () => {
+    const code = gateReducer(fresh(), { type: "start_result", result: { ok: true, displayPhone: "(210) •••-0123" } });
+    const calling = gateReducer(code, { type: "resend_result", channel: "call", result: { ok: true } });
+    const html = decode(render(calling, withPending));
+    expect(html).toContain("Pick up, we're calling you.");
+    expect(html).not.toContain("Check your messages.");
+    expect(html).toContain("The call to (210) •••-0123 reads out a 6-digit code.");
+    expect(statuses(render(calling, withPending))).toEqual([GATE_COPY.calling]);
+    const sms = decode(render(gateReducer(calling, { type: "resend_result", channel: "sms", result: { ok: true } }), withPending));
+    expect(sms).toContain("Check your messages.");
+    expect(sms).not.toContain("Pick up, we're calling you.");
+    const confirm = decode(render(gateReducer(fresh(), { type: "go", step: "confirm-agent" }), noPending));
+    expect(confirm).toContain("you're a licensed agent");
+    expect(confirm).not.toContain("you are a licensed agent");
   });
 });

@@ -98,7 +98,9 @@ export type DealHoldReason =
   | "missing_contract_deadline"
   | "missing_closing_deadline"
   /** The offer is an adjustable-rate loan (an ARM): the headline rate is a starting rate, so the admin reads the terms before it shows. */
-  | "adjustable_rate";
+  | "adjustable_rate"
+  /** The offer states two different rate figures; the admin picks the one its APR belongs to. */
+  | "ambiguous_rate";
 
 export interface DeadlineFact {
   /** What the official page said; it is not guessed or expanded. */
@@ -632,6 +634,27 @@ function rateNear(text: string, pattern: RegExp): number | null {
  * Extracts only facts present in the supplied official text. A rate is not
  * publishable unless the disclosures needed to state that rate are also there.
  */
+/** A rate figure with its APR beside it. */
+const APR_PAIRED_RATE = /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:[(\[]\s*\d+(?:\.\d+)?%\s*(?:APR|Annual\s+Percentage\s+Rate)|[(\[]\s*APR\s*\d+(?:\.\d+)?%|\/\s*\d+(?:\.\d+)?%\s*APR)/i;
+/** A figure written as a loan rate: "4.99% fixed", "4.99% 30-year fixed FHA", "4.99% financing", "4.99% FHA/VA". */
+export const RATE_FIGURE_WORDING = /\d+(?:\.\d+)?%\s+(?:\d{1,2}[- ]?(?:year|yr)s?\.?\s+)?(?:fixed|financing|FHA|VA|USDA|conventional)\b/i;
+
+/**
+ * Every figure the text states as a loan rate (an "as low as" figure, a figure
+ * beside its APR, an "N% interest rate", "N% fixed", "N% 30-year fixed FHA").
+ */
+function statedRateFigures(text: string): number[] {
+  const patterns = [
+    /(?:rates?\s+as\s+low\s+as|as\s+low\s+as|reduced\s+to)\s+(\d+(?:\.\d+)?)%/gi,
+    new RegExp(APR_PAIRED_RATE.source, "gi"),
+    /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:interest\s+)?rate\b(?!\s*(?:reduction|discount|buy))/gi,
+    /(\d+(?:\.\d+)?)%\s+(?:\d{1,2}[- ]?(?:year|yr)s?\.?\s+)?(?:fixed|financing|FHA|VA|USDA|conventional)\b/gi,
+  ];
+  const out: number[] = [];
+  for (const pattern of patterns) for (const match of Array.from(text.matchAll(pattern))) { const value = numericValue(match[1]); if (value !== null) out.push(value); }
+  return out;
+}
+
 export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const text = normalizeIncentiveText(input);
   // "2/1 Program … year one … year two" is a temporary buydown as surely as "buydown" is.
@@ -641,10 +664,13 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   // "the rate for year one is 2% lower" names a discount, not a rate.
   const headline = rateNear(text, /\brate\s+(?:that\s+applies\s+)?(?:for|to|in|during)\s+(?:the\s+)?(?:first[- ]year|year\s*(?:1|one))\s+(?:is|of|:)?\s*(\d+(?:\.\d+)?)%(?!\s*(?:lower|less|below|off|decrease|reduction|discount|under))/i) ??
     rateNear(text, /(?:first[- ]year|year\s*1)[\s\S]{0,100}?(\d+(?:\.\d+)?)%(?!\s*(?:lower|less|below|off|decrease|reduction|discount|under))/i) ??
+    // The figure the APR is disclosed beside comes before an "as low as" figure: the APR belongs to it.
+    // "4.25% (6.051% APR)", "2.99% (APR 6.81%)", "4.99% [6.62% APR]", "4.990% (6.619% Annual Percentage Rate)", "5% Fixed / 5.805% APR".
+    rateNear(text, APR_PAIRED_RATE) ??
     rateNear(text, /(?:rates?\s+as\s+low\s+as|as\s+low\s+as|reduced\s+to)\s+(\d+(?:\.\d+)?)%/i) ??
-    // "4.25% (6.051% APR)", "2.99% (APR 6.81%)", "4.99% [6.62% APR]", "4.990% (6.619% Annual Percentage Rate)", "5% Fixed / 5.805% APR", "4.99% interest rate".
-    rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:[(\[]\s*\d+(?:\.\d+)?%\s*(?:APR|Annual\s+Percentage\s+Rate)|[(\[]\s*APR\s*\d+(?:\.\d+)?%|\/\s*\d+(?:\.\d+)?%\s*APR|(?:interest\s+)?rate\b)/i);
-  const rateMentioned = headline !== null || /\b(?:interest\s+rates?|APR|buy[- ]?down)\b|\d+(?:\.\d+)?%\s*(?:fixed|financing)/i.test(text);
+    // "4.99% interest rate".
+    rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:interest\s+)?rate\b/i);
+  const rateMentioned = headline !== null || /\b(?:interest\s+rates?|APR|buy[- ]?down)\b/i.test(text) || RATE_FIGURE_WORDING.test(text);
   const rateKind = !rateMentioned ? "none" : hasTemporaryRate ? "promotional" : "fixed";
   const promotionalRatePercent = headline;
   const promotionalPeriod = firstMatch(text, /\b(first[- ]year|year\s*1|year\s+one)\b/i) ?? firstMatch(text, /\b(for\s+year\s*\d+)\b/i);
@@ -684,6 +710,11 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
       if (followOnRatePercent === null) holdReasons.push("missing_follow_on_rate");
       if (!followOnPeriod) holdReasons.push("missing_follow_on_period");
     }
+  }
+  // Two different rate figures in one fixed-rate offer ("as low as 3.99%" and "4.99% fixed"): which one the APR belongs to is the admin's call.
+  if (rateKind === "fixed") {
+    const figures = new Set(statedRateFigures(text).filter((value) => value !== aprPercent && value !== downPaymentPercent).map((value) => value.toFixed(3)));
+    if (figures.size > 1) holdReasons.push("ambiguous_rate");
   }
   if (namesContractDeadline && !contractDeadline?.isoDate) holdReasons.push("missing_contract_deadline");
   if (namesClosingDeadline && !closingDeadline?.isoDate) holdReasons.push("missing_closing_deadline");
@@ -1280,6 +1311,20 @@ export function categorizedPrivateTerms(config: Pick<CommunitySourceConfig, "bui
 }
 function remainingPrivateTerm(text: string, terms: readonly string[] | DealScrubConfig, planField = false): boolean { return hasPrivateTerm(text, terms, { planField }); }
 /** Scrub checked text only; never publish markup, outbound source links or private residue. */
+/**
+ * What in public text still points at a private party: a link, a web
+ * address, an e-mail address, a phone number (with or without separators
+ * or a leading 1) or an NMLS id; null when there is none.
+ */
+export function publicTextResidue(text: string): "link" | "web address" | "e-mail address" | "phone number" | "NMLS id" | null {
+  if (/\b(?:https?:\/\/|www\.)\S+/i.test(text)) return "link";
+  if (/[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(text)) return "e-mail address";
+  if (/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|us|io|info|biz|co|homes|house|realty|mortgage|loans|bank|finance|lending|tx)\b/i.test(text)) return "web address";
+  if (/(?<![\d.$,])1?\d{10}(?!\d|\.\d)/.test(text) || /(?<![\d.$,])(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}(?!\d|\.\d)/.test(text)) return "phone number";
+  if (NMLS_ID_PATTERN.test(text)) return "NMLS id";
+  return null;
+}
+
 export function toPublicSafeText(
   input: string,
   config: Pick<CommunitySourceConfig, "privateCommunityName" | "scrubList" | "scrubConfig">,
@@ -1291,9 +1336,8 @@ export function toPublicSafeText(
   categories.other.push(...extraPrivateTerms.filter((term) => !known.has(term)));
   const scrubbed = scrubPrivateNames(htmlToText(input), categories, { planField });
   // A link, a bare domain ("TollBrothersMortgage.com") or a phone number, with or without separators, is residue.
-  if (!scrubbed || /\b(?:https?:\/\/|www\.)\S+/i.test(scrubbed) || /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|us|io|info|biz)\b/i.test(scrubbed) || /(?<![\d.$,])\d{10}(?!\d|\.\d)/.test(scrubbed) || /(?<![\d.$,])\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}(?!\d|\.\d)/.test(scrubbed)) return null;
-  // A lender's NMLS number names the lender as surely as its name does.
-  if (NMLS_ID_PATTERN.test(scrubbed)) return null;
+  // A link, a bare domain ("TollBrothersMortgage.com"), an e-mail address, a phone number or a lender's NMLS id is residue.
+  if (!scrubbed || publicTextResidue(scrubbed)) return null;
   // Residue is judged per category: a bare plan word such as "Magnolia trees"
   // outside a plan field is verbatim text, not a private name.
   return remainingPrivateTerm(scrubbed, categories, planField) ? null : scrubbed;

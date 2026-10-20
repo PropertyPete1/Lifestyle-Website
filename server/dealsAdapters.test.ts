@@ -174,6 +174,17 @@ describe("deals adapters", () => {
     expect(parsePromotionalRate("4.5% (6.38% APR) FHA 30-year fixed, 3.5% down; arm yourself with savings.").holdReasons).not.toContain("adjustable_rate");
     // "fixed for 5 years then adjusts" reads the fixed period as no plain term: the hold stands and the publishable flag is off.
     expect(parsePromotionalRate("4.99% (6.62% APR) FHA financing, 3.5% down payment, rate fixed for 5 years then adjusts annually for years 6-30 based on the index plus margin.").publishable).toBe(false);
+    // Two different rate figures in one fixed offer are the admin's call; the figure beside the APR is the headline.
+    const two = parsePromotionalRate("Interest Rates as Low as 3.99%. 4.99% (6.62% APR) 30-year fixed FHA with 3.5% down.");
+    expect(two).toMatchObject({ promotionalRatePercent: 4.99, aprPercent: 6.62 });
+    expect(two.holdReasons).toContain("ambiguous_rate");
+    expect(parsePromotionalRate("4.99% fixed rate FHA/VA financing. A 4.99% interest rate (5.75% Annual Percentage Rate) for FHA 30-year fixed, 3.5% down.").holdReasons).not.toContain("ambiguous_rate");
+    expect(parsePromotionalRate("4.990% (6.619% APR) FHA 30-year fixed with 3.5% down; 4.99% interest rate.").holdReasons).not.toContain("ambiguous_rate");
+    // "4.99% 30-year fixed FHA financing" is a rate: it needs its APR.
+    for (const wording of ["4.99% 30-year fixed FHA financing on select homes.", "4.99% FHA/VA on select homes.", "4.99% 30 yr fixed on select homes."]) {
+      expect(parsePromotionalRate(wording).rateKind, wording).toBe("fixed");
+      expect(parsePromotionalRate(wording).holdReasons, wording).toContain("missing_apr");
+    }
     // Boilerplate "subject to change and adjust at any time" names no stepped rate.
     expect(parsePromotionalRate("4.5% (6.38% APR) FHA 30-year fixed, 3.5% down. Prices, plans and incentives are subject to change and adjust at any time.").holdReasons).not.toContain("adjustable_rate");
     // Dates are only required when the source actually names a contract or closing deadline.

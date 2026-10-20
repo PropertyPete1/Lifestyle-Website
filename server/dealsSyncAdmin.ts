@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealIncentives, dealJobRuns } from "../drizzle/schema";
 import { getDb } from "./db";
-import { hasBuilderReader, officialHostFor, type DealHoldReason } from "./dealsAdapters";
+import { RATE_FIGURE_WORDING, hasBuilderReader, officialHostFor, publicTextResidue, type DealHoldReason } from "./dealsAdapters";
 import { chicagoDay, chicagoEndOfDay, getDealSettings } from "./dealsService";
 import { normalizeExcludedTerms, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
 import { activeCatalogHold, builderScrubConfig, communityRefreshDue, leaseBuilder, refreshOfficialDeals, storedExcludedScrubTerms, storedScrubConfig, summarizeHolds } from "./dealsSync";
@@ -82,8 +82,9 @@ export const CATALOG_HOLD_REASON_HELP: Partial<Record<DealHoldReason, string>> =
   expected_detail_container_not_found: "A plan or home page layout changed (stat block or gallery missing).",
   unlabelled_home_status: "A home card's status could not be read, so nothing was published or marked sold this run.",
   refresh_failed: "The reader hit an unexpected error on this community's pages; nothing was published or marked sold.",
-  private_text_remaining: "A private name survived scrubbing; add it to the names to hide or exclude a false positive.",
+  private_text_remaining: "A private name, link, web address, e-mail, phone number or NMLS id survived scrubbing; edit the text (or add the name to the names to hide, or exclude a false positive).",
   adjustable_rate: "The offer is an adjustable-rate loan (ARM): the headline rate is a starting rate. Read the terms, then accept or edit the wording.",
+  ambiguous_rate: "The offer names two different rates (for example \"as low as 3.99%\" and \"4.99% fixed\"). Set the headline rate to the one the APR belongs to, or edit the wording.",
 };
 
 /** One line per stored reason (the sync joins several with ", "); unknown reasons fall back to the raw code. */
@@ -171,7 +172,7 @@ function earliest(a: Date | null, b: Date | null): Date | null {
 export function incentiveRequiredFields(input: { publicText: string; headlineRate?: string | null; apr?: string | null; followOnRate?: string | null; followOnPeriod?: string | null; loanType?: string | null; downPayment?: string | null; repaymentTerms?: string | null; contractBy?: Date | null; closeBy?: Date | null; noContractDeadline?: boolean }): string[] {
   const missing: string[] = [];
   const text = input.publicText;
-  const rateMentioned = Boolean(input.headlineRate?.trim()) || /\d+(?:\.\d+)?%\s*(?:\(|\/)?\s*(?:\d+(?:\.\d+)?%\s*)?(?:APR|rate|fixed|financing)|(?:rate|APR).*\d+(?:\.\d+)?%/i.test(text);
+  const rateMentioned = Boolean(input.headlineRate?.trim()) || /\d+(?:\.\d+)?%\s*(?:\(|\/)?\s*(?:\d+(?:\.\d+)?%\s*)?(?:APR|rate|fixed|financing)|(?:rate|APR).*\d+(?:\.\d+)?%/i.test(text) || RATE_FIGURE_WORDING.test(text);
   if (rateMentioned && !input.apr?.trim()) missing.push("apr");
   if (rateMentioned && /buy[- ]?down|first[- ]year|year\s*1\b|introductory|temporarily/i.test(text)) {
     if (!input.followOnRate?.trim()) missing.push("followOnRate");
@@ -200,6 +201,8 @@ export async function saveIncentiveForCommunity(input: AdminIncentiveInput): Pro
   const categories = storedScrubConfig(community);
   const publicText = scrubPrivateNames(fields.publicText.trim(), categories);
   if (hasPrivateTerm(publicText, categories)) throw new DealsAdminError("BAD_REQUEST", "Private names remain in incentive text.");
+  const residue = publicTextResidue(publicText);
+  if (residue) throw new DealsAdminError("BAD_REQUEST", `Remove the ${residue} from the incentive text before publishing.`);
   // Every typed field is shown to buyers too, so each one gets the same check.
   for (const [field, label] of [["loanType", "loan type"], ["downPayment", "down payment"], ["repaymentTerms", "repayment terms"], ["followOnPeriod", "follow-on period"]] as const) {
     const value = fields[field]?.trim();
@@ -274,9 +277,11 @@ export function heldIncentiveMissingFields(row: IncentiveRow, patch: Omit<Accept
     if (reason === "missing_loan_type" && !merged.loanType?.trim()) missing.add("loanType");
     if (reason === "missing_apr" && !merged.apr?.trim()) missing.add("apr");
     if (reason === "missing_promotional_rate" && !merged.headlineRate?.trim()) missing.add("headlineRate");
+    // Two rate figures: the admin names the headline rate the APR belongs to before it shows.
+    if (reason === "ambiguous_rate" && !patch.headlineRate?.trim()) missing.add("headlineRate");
     if (reason === "missing_promotional_period" && !merged.followOnPeriod?.trim()) missing.add("followOnPeriod");
   }
-  if (categories && hasPrivateTerm(merged.publicText, categories)) missing.add("publicText");
+  if ((categories && hasPrivateTerm(merged.publicText, categories)) || publicTextResidue(merged.publicText)) missing.add("publicText");
   return Array.from(missing);
 }
 
@@ -295,6 +300,8 @@ export async function acceptIncentiveHold(input: AcceptIncentiveHoldInput): Prom
   const missing = heldIncentiveMissingFields(incentive, { ...patch, publicText, noContractDeadline }, categories);
   if (missing.length) throw new DealsAdminError("BAD_REQUEST", `Edit and complete this incentive before accepting: ${missing.join(", ")}`);
   if (hasPrivateTerm(publicText, categories)) throw new DealsAdminError("BAD_REQUEST", "Private names remain in incentive text.");
+  const residue = publicTextResidue(publicText);
+  if (residue) throw new DealsAdminError("BAD_REQUEST", `Remove the ${residue} from the incentive text before accepting.`);
   // The typed fields are shown to buyers too: the same check as a save, on what will be stored.
   for (const [field, label] of [["loanType", "loan type"], ["downPayment", "down payment"], ["repaymentTerms", "repayment terms"], ["followOnPeriod", "follow-on period"]] as const) {
     const value = (patch[field] ?? incentive[field])?.trim();

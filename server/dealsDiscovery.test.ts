@@ -427,6 +427,13 @@ describe("discovery", () => {
     expect(lennar.skipped).toEqual([{ url: `${LEN}/new-homes/texas/san-antonio/lubbock/far-fixture`, reason: "outside_area" }]);
     expect(requested).toEqual([`${LEN}/new-homes/texas/san-antonio`]);
 
+    // An index past the per-run cap counts what it left for later instead of dropping it silently.
+    const many = Array.from({ length: 125 }, (_, index) => ({ url: `${LEN}/new-homes/texas/san-antonio/san-antonio/fixture-${index}`, record: { name: `Fixture ${index}`, street: `${index + 1} Fixture Rd`, city: "San Antonio", zip: "78252", phone: null, priceFrom: null, geo: { lat: 29.4, lng: -98.5 } } }));
+    const capped = await discoverBuilderCommunities({ ...reader("Lennar"), index: { kind: "reader", entries: async () => many } }, fetcher);
+    expect(capped.communities).toHaveLength(120);
+    expect(capped.skipped).toHaveLength(5);
+    expect(capped.skipped.every((entry) => entry.reason === "index_truncated")).toBe(true);
+
     // Empire Homes: the region page links every community and its city pages; each community page's static map gives the name, address and pin; a city page or campaign page has none; Kyle is out.
     requested.length = 0;
     const empire = await discoverBuilderCommunities(reader("Empire Homes"), fetcher);

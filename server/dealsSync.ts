@@ -360,6 +360,18 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
       await recordIncentiveHold(community, holdString(["differs_from_manual_override"]), now, holds, `Manual override stays live: "${activeManual.publicText.slice(0, 160)}"`);
       return;
     }
+    // A superseded record may never have been publishable: this scrape's own facts judge it again before it returns.
+    if (reasons.length) {
+      const unique = Array.from(new Set(reasons));
+      await db.transaction(async (tx) => {
+        // The builder no longer shows the other promo, so a scraped record comes off (as for new held text); a manual override stays.
+        for (const row of activeRows) if (!row.manual) await tx.update(dealIncentives).set({ active: false }).where(eq(dealIncentives.id, row.id));
+        await tx.update(dealIncentives).set({ held: true, active: false, holdReason: JSON.stringify(unique), confirmedAt: now }).where(eq(dealIncentives.id, same.id));
+      });
+      summary.incentive.push(`Incentive text returned and is held (${unique.join(", ")}): "${publicText.slice(0, 160)}"`);
+      await recordIncentiveHold(community, holdString(unique), now, holds, `Held text: "${publicText.slice(0, 400)}"`);
+      return;
+    }
     // A lapsed (or superseded) record returns when a successful scrape confirms its text again.
     await db.transaction(async (tx) => {
       for (const row of activeRows) await tx.update(dealIncentives).set({ active: false }).where(eq(dealIncentives.id, row.id));

@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 
 import { featuredDeals, offerFromIncentive } from "./dealsFeatured";
-import { hashSecret } from "./dealsService";
+import { dealsCardHandle } from "./dealsService";
 
 (globalThis as { React?: typeof React }).React = React;
 const { FeaturedDeals, dealKey, rateLine } = await import("../client/src/components/deals/FeaturedDeals");
@@ -185,7 +185,7 @@ describe("Best Deals from the database, by viewer", () => {
     expect(pub.bigLots.map((deal) => deal.label)).toEqual(["Southeast San Antonio | Half-Acre Lots and Lakes"]);
 
     const gated = await featuredDeals({ view: "gated" });
-    expect(gated.bestRate?.card).toBe(hashSecret(`deals-card:${sourceKey}`).slice(0, 20));
+    expect(gated.bestRate?.card).toBe(dealsCardHandle(`${sourceKey}`));
     expect(JSON.stringify(gated)).not.toContain("Sienna Lakes");
     expect(gated.bestRate).not.toHaveProperty("detail");
 
@@ -290,7 +290,7 @@ describe("Best Deals from the database, by viewer", () => {
     const keys = ["a", "b", "c", "d"].map((letter, index) => {
       const id = community({ privateName: `Place ${letter}`, publicLabel: `Area ${letter} | New Homes`, scrubList: "{}" });
       home(id, { sourceKey: `key-${letter}`, price: 300_000 + index * 10_000 });
-      return hashSecret(`deals-card:key-${letter}`).slice(0, 20);
+      return dealsCardHandle(`key-${letter}`);
     });
     // The cheapest community is not on this buyer's list.
     const onList = new Set(keys.slice(1));

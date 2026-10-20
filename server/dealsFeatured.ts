@@ -3,7 +3,7 @@ import { dealCommunities, dealHomes, dealIncentives } from "../drizzle/schema";
 import { scrubPrivateNames, selectDealCatalogHomes } from "../shared/deals";
 import { builderExcluded, downPaymentPercentFrom, homeLotAcres, loanTypeLabel, lotAcres, mortgageRateFrom, rankFeatured, roundFeaturedForPublic, type FeaturedCandidate, type FeaturedDeals } from "../shared/dealsFeatured";
 import { getDb } from "./db";
-import { communityScrubConfig, getDealSettings, hashSecret, publicNoPrivateNames, type DealsCatalogView } from "./dealsService";
+import { communityScrubConfig, dealsCardHandle, dealsHandle, getDealSettings, hashSecret, publicNoPrivateNames, type DealsCatalogView } from "./dealsService";
 
 /**
  * Who is looking decides what a featured deal may carry:
@@ -88,12 +88,12 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
     for (const home of selectDealCatalogHomes(homes.filter((row) => row.communityId === community.id))) {
       // A home with its own lot size answers for itself, even when that text gives no acreage.
       const homeAcres = homeLotAcres(home.lotSize, communityAcres);
-      const card = view !== "public" ? hashSecret(`deals-card:${home.sourceKey}`).slice(0, 20) : undefined;
+      const card = view !== "public" ? dealsCardHandle(home.sourceKey) : undefined;
       // On a private list, only homes on that list compete, so the strip is never short.
       if (options.onlyCards && (!card || !options.onlyCards.has(card))) continue;
       candidates.push({
         communityKey: String(community.id),
-        key: hashSecret(`deals-featured:${community.id}:${home.sourceKey}`).slice(0, 12),
+        key: dealsHandle(`deals-featured:${community.id}:${home.sourceKey}`, 12),
         label,
         area,
         ...(card ? { card } : {}),

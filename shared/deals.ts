@@ -170,7 +170,8 @@ export function scrubPrivateNames(
   // Longest first prevents a shorter brand alias from leaving private residue.
   for (const { category, name } of entries.sort((a, b) => b.name.length - a.name.length)) {
     if (name.length < 4 && category !== "builder" && category !== "lender") continue;
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // A space in the name matches any run of whitespace: "Fixture  Ranch" or a line break inside it is the same name.
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
     const boundary = `(?<![a-z0-9])${escaped}(?![a-z0-9])`;
     // "the Magnolia", "Magnolia plan" and "the Magnolia plan" each become one "this plan".
     // A street name takes its house number with it: "4106 Hawthorn Oak" is one address, "this street" its public form.

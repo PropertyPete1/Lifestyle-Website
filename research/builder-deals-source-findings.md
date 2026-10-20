@@ -653,6 +653,36 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   "Coming Soon" hero without tabs reads as empty and the sync retires its
   homes (the site no longer lists them), as any builder's emptied page does.
 
+### Round-19 corrections (2026-10-20, whole-feature review)
+
+- Sync: an incentive text that returns after being superseded is judged
+  again with this scrape's facts; if it was never publishable (missing APR,
+  private residue) it goes back on hold (one e-mail) and the other scraped
+  promo comes off, instead of being revived as live.
+- Admin: "Accept this update" and the manual incentive save refuse a link,
+  web address, e-mail, phone number (a leading 1 included) or NMLS id
+  (`publicTextResidue`), and a held text carrying one lists `publicText` as
+  the field to fix, so the admin sees the text to edit.
+- Rate parser: the figure beside the APR is the headline before an "as low
+  as" figure; two different rate figures in one fixed offer hold
+  `ambiguous_rate` (the admin names the headline rate on Accept);
+  "4.99% 30-year fixed FHA", "4.99% FHA/VA" read as a rate (APR required);
+  the admin's required-fields rule mirrors it.
+- Router: `requestHome` and `saveHome` show the buyer only refusals written
+  for the buyer (`DealsRequestError`); anything else is logged and answered
+  "Request unavailable" / "Save unavailable".
+- Analytics: gate focus is recorded only for a browser carrying the probe
+  cookie; landing and gate-focus rows are capped per address per hour.
+- Card, community and featured handles are HMACs under the server secret
+  (a listing URL's plain hash no longer gives a buyer's card).
+- The scrubber matches a private name across any run of whitespace.
+- Copy: the landing card says "N quick move-in home(s)", the private list
+  "N quick move-in", the filter "Quick move-in" (the count includes homes
+  still being built, so never "available now" or "move-in ready").
+- Discovery: pages past the 120-per-run cap are listed as `index_truncated`.
+- Empire offer text: CTA labels ("View Offers", "Learn More") and the
+  leftover parenthesis of a removed loan-officer clause are cleaned.
+
 ## Lennar reader (added 2026-10-20)
 
 - Site: `www.lennar.com` (Next.js pages router). The community page

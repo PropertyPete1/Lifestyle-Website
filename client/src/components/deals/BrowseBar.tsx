@@ -9,7 +9,7 @@ export const BROWSE_COPY = {
   anyPrice: "Any price",
   beds: "Bedrooms",
   anyBeds: "Any",
-  moveInReady: "Move-in ready",
+  moveInReady: "Quick move-in",
   builderRate: "Builder rate offer",
   bigLots: "Half-acre+ lots",
   clear: "Clear filters",

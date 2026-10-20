@@ -374,8 +374,8 @@ export type BuilderDiscovery = {
   ok: boolean;
   reason?: "sitemap_unreadable";
   communities: DiscoveredCommunity[];
-  /** Community pages skipped: no record, outside the area, or unreadable. */
-  skipped: Array<{ url: string; reason: "no_community_record" | "outside_area" | "page_unreadable" }>;
+  /** Community pages skipped: no record, outside the area, unreadable, or past the per-run page cap (read on a later run once the first ones are onboarded). */
+  skipped: Array<{ url: string; reason: "no_community_record" | "outside_area" | "page_unreadable" | "index_truncated" }>;
 };
 
 /** One builder's San Antonio area communities, read from its own site, one page at a time. */
@@ -397,13 +397,17 @@ export async function discoverBuilderCommunities(reader: DiscoveryReader, fetche
   if (!entries) return { ...result, reason: "sitemap_unreadable" };
   // One page per community however the index spells it (trailing slash, case): the first spelling is the one read.
   const pages = new Map<string, { url: string; record: CommunityRecord | null }>();
+  const truncated = new Map<string, string>();
   for (const entry of entries) {
     const url = asUrl(entry.url);
     if (!url || !sameOfficialHost(url, reader.host) || !reader.communityPath.test(url.pathname)) continue;
     const key = normalizedDealSourceKey(`${url.origin}${url.pathname}`);
-    if (!pages.has(key)) pages.set(key, { url: `${url.origin}${url.pathname}`, record: entry.record });
-    if (pages.size >= MAX_COMMUNITY_PAGES) break;
+    if (pages.has(key) || truncated.has(key)) continue;
+    // Past the cap a page is counted, not dropped silently: the run's e-mail says how many were left for later.
+    if (pages.size >= MAX_COMMUNITY_PAGES) { truncated.set(key, `${url.origin}${url.pathname}`); continue; }
+    pages.set(key, { url: `${url.origin}${url.pathname}`, record: entry.record });
   }
+  for (const url of Array.from(truncated.values())) result.skipped.push({ url, reason: "index_truncated" });
   for (const { url, record: listed } of Array.from(pages.values())) {
     let record = listed;
     // A listing record without the sales address (a map pin) still needs the page; the page's record takes the pin's coordinates and phone where it has none.

@@ -29,7 +29,7 @@ import { agentDisplayPhone, agentForLead, agentForTeamId, agentRowsForLead, agen
 import { dealEvents } from "../drizzle/schema";
 import { classifyDealsAccess, revokeNonTeamMatchingDealLinks } from "./dealsEligibility";
 import { createDealsHomeRequest, setDealsHomeSaved } from "./dealsRequests";
-import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, builderPageFor, catalogViewForSession, completeVerification, createPendingVerification, exchangeAccessToken, gatedDealsCatalog, getActiveBlock, hashSecret, issueAccessToken, savedDealCards } from "./dealsService";
+import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, builderPageFor, catalogViewForSession, completeVerification, createPendingVerification, dealsCardHandle, exchangeAccessToken, gatedDealsCatalog, getActiveBlock, hashSecret, issueAccessToken, savedDealCards } from "./dealsService";
 
 const HOUR = 3_600_000;
 const AGENT_PHONE = "+12105550101";
@@ -63,7 +63,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); });
 
-const card = (id: number) => hashSecret(`deals-card:${db.rows(dealHomes).find((row) => row.id === id)!.sourceKey}`).slice(0, 20);
+const card = (id: number) => dealsCardHandle(`${db.rows(dealHomes).find((row) => row.id === id)!.sourceKey}`);
 
 describe("client link lifecycle", () => {
   it("creates a link for a team session, resolves it, and refuses buyers and bad phones", async () => {

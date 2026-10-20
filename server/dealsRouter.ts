@@ -16,6 +16,7 @@ import {
   catalogViewForSession,
   chicagoDayStart,
   hashSecret,
+  dealsHandle,
   randomOpaqueToken,
   currentPending,
   currentDealSource,
@@ -378,7 +379,9 @@ export const dealsRouter = router({
     dealsPublicHeaders(ctx.res);
     const settings = await getDealSettings();
     const { ensureDealsCookies } = await import("./dealsService");
-    const { deviceHash } = ensureDealsCookies(ctx.req, ctx.res);
+    const { deviceHash, hasProbe } = ensureDealsCookies(ctx.req, ctx.res);
+    // A browser that loaded the page carries the probe cookie; a cookie-less caller is not a visitor and writes nothing.
+    if (!hasProbe) return { ok: true as const };
     await recordGateFocus({
       sourceCode: input.c ? AGENT_CLIENT_SOURCE : currentDealSource(input.src, settings), deviceHash,
       ip: ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0",
@@ -443,10 +446,15 @@ export const dealsRouter = router({
     dealsPublicHeaders(ctx.res);
     const session = await isLiveDealSession(ctx.req);
     if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
-    const { setDealsHomeSaved } = await import("./dealsRequests");
+    const { setDealsHomeSaved, DealsRequestError } = await import("./dealsRequests");
     try {
       return await setDealsHomeSaved({ leadId: session.leadId, card: input.card, saved: input.saved, sourceCode: session.lead.sourceCode, deviceHash: session.deviceHash });
-    } catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Save unavailable" }); }
+    } catch (error) {
+      // Only a refusal written for the buyer is shown; anything else is logged here and reported generically.
+      if (error instanceof DealsRequestError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+      console.error("[deals] saveHome failed", error instanceof Error ? error.message : error);
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Save unavailable" });
+    }
   }),
   /** LDR agents only (a live team session): their client links, with each client's activity. */
   team: router({
@@ -498,7 +506,7 @@ export const dealsRouter = router({
     const db = await getDb();
     if (!db) return { ok: false as const };
     const active = await db.select({ id: dealCommunities.id }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)));
-    const community = active.find((row) => hashSecret(`deals-community:${row.id}`).slice(0, 16) === input.key);
+    const community = active.find((row) => dealsHandle(`deals-community:${row.id}`, 16) === input.key);
     if (!community) return { ok: false as const };
     const hourAgo = new Date(Date.now() - 60 * 60_000);
     const recent = (await db.select({ id: dealCommunityViews.id }).from(dealCommunityViews).where(and(eq(dealCommunityViews.leadId, session.leadId), eq(dealCommunityViews.communityId, community.id), sql`${dealCommunityViews.viewedAt} > ${hourAgo}`)).limit(1))[0];
@@ -510,10 +518,15 @@ export const dealsRouter = router({
     const session = await isLiveDealSession(ctx.req);
     if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
     if (session.lead.status === "team") throw new TRPCError({ code: "FORBIDDEN", message: "Team preview does not create buyer tour requests." });
-    const { createDealsHomeRequest } = await import("./dealsRequests");
+    const { createDealsHomeRequest, DealsRequestError } = await import("./dealsRequests");
     try {
       return await createDealsHomeRequest({ leadId: session.leadId, card: input.card, requestType: input.requestType, preferredAt: new Date(input.preferredAt), sourceCode: session.lead.sourceCode, deviceHash: session.deviceHash });
-    } catch (error) { throw new TRPCError({ code: "BAD_REQUEST", message: error instanceof Error ? error.message : "Request unavailable" }); }
+    } catch (error) {
+      // Only a refusal written for the buyer is shown; anything else is logged here and reported generically.
+      if (error instanceof DealsRequestError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+      console.error("[deals] requestHome failed", error instanceof Error ? error.message : error);
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Request unavailable" });
+    }
   }),
   updateProfile: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(190).optional(), timeline: z.enum(["0-3 months", "3-6 months", "6-12 months", "12+ months"]).optional() })).mutation(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);

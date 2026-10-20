@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { dealClientLinks, dealCommunities, dealCommunityViews, dealHomes, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
 import { normalizeUsPhone } from "../shared/deals";
 import { getDb } from "./db";
-import { getDealSettings, hashSecret, logDealEvent, randomOpaqueToken } from "./dealsService";
+import { dealsCardHandle, getDealSettings, hashSecret, logDealEvent, randomOpaqueToken } from "./dealsService";
 
 /**
  * LDR agents (every active team row: the nightly FUB user mirror plus manual
@@ -465,7 +465,7 @@ export async function agentWorkspace(agentLead: LeadRow): Promise<AgentWorkspace
     const home = homes.find((row) => row.id === homeId);
     const community = home ? communities.find((row) => row.id === home.communityId) : undefined;
     return {
-      card: home ? hashSecret(`deals-card:${home.sourceKey}`).slice(0, 20) : "",
+      card: home ? dealsCardHandle(home.sourceKey) : "",
       description: home ? [home.privateAddress, home.privatePlanName ? `(${home.privatePlanName})` : null].filter(Boolean).join(" ") || "Home" : "Home no longer listed",
       price: home?.price ?? null,
       communityLabel: community ? `${community.privateName} (${community.publicLabel})` : "",

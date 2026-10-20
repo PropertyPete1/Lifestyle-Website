@@ -124,6 +124,37 @@ describe("incentive admin", () => {
     await expect(acceptIncentiveHold({ id: heldId })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("never publishes a phone number, link, web address, e-mail or NMLS id: the held text is listed as needing an edit, and accept and save refuse it", async () => {
+    for (const [text, kind] of [
+      ["4.99% (5.75% APR) FHA 30-year fixed with 3.5% down. Call (210) 555-0142.", "phone number"],
+      ["4.99% (5.75% APR) FHA 30-year fixed with 3.5% down. Call 12105550142.", "phone number"],
+      ["4.99% (5.75% APR) FHA 30-year fixed with 3.5% down. See www.fixturehomes.com/offers/fall.", "link"],
+      ["4.99% (5.75% APR) FHA 30-year fixed with 3.5% down. See fixturehomesmortgage.com.", "web address"],
+      ["4.99% (5.75% APR) FHA 30-year fixed with 3.5% down. Write sales@fixture.homes.", "e-mail address"],
+      ["4.99% (5.75% APR) FHA 30-year fixed with 3.5% down through a lender, NMLS #50684.", "NMLS id"],
+    ] as const) {
+      const heldId = db.seed(dealIncentives, { communityId, normalizedText: `held ${kind} ${text.length}`, publicText: text, headlineRate: "4.99%", apr: "5.75%", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5%", active: false, held: true, holdReason: JSON.stringify(["private_text_remaining"]), confirmedAt: new Date() });
+      const held = db.rows(dealIncentives).find((row) => row.id === heldId)! as typeof dealIncentives.$inferSelect;
+      expect(heldIncentiveMissingFields(held), kind).toEqual(["publicText"]);
+      await expect(acceptIncentiveHold({ id: heldId })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      await expect(acceptIncentiveHold({ id: heldId, publicText: text })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      await expect(saveIncentiveForCommunity({ communityId, manual: true, publicText: text, headlineRate: "4.99%", apr: "5.75%", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5%" })).rejects.toMatchObject({ code: "BAD_REQUEST", message: `Remove the ${kind} from the incentive text before publishing.` });
+      // Edited clean, it is accepted.
+      await acceptIncentiveHold({ id: heldId, publicText: "4.99% (5.75% APR) FHA 30-year fixed with 3.5% down." });
+      expect(db.rows(dealIncentives).find((row) => row.id === heldId)).toMatchObject({ active: true, held: false });
+    }
+  });
+
+  it("asks for the headline rate before accepting an offer that names two rates, and requires an APR for '4.99% 30-year fixed FHA' wording", async () => {
+    const heldId = db.seed(dealIncentives, { communityId, normalizedText: "two rates", publicText: "Interest rates as low as 3.99%. 4.99% (6.62% APR) FHA 30-year fixed with 3.5% down.", headlineRate: "4.99%", apr: "6.62%", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5%", active: false, held: true, holdReason: JSON.stringify(["ambiguous_rate"]), confirmedAt: new Date() });
+    const held = db.rows(dealIncentives).find((row) => row.id === heldId)! as typeof dealIncentives.$inferSelect;
+    expect(heldIncentiveMissingFields(held)).toEqual(["headlineRate"]);
+    await expect(acceptIncentiveHold({ id: heldId })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await acceptIncentiveHold({ id: heldId, headlineRate: "4.99%" });
+    expect(db.rows(dealIncentives).find((row) => row.id === heldId)).toMatchObject({ active: true, headlineRate: "4.99%", apr: "6.62%" });
+    await expect(saveIncentiveForCommunity({ communityId, manual: true, publicText: "4.99% 30-year fixed FHA financing on select homes." })).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("apr") });
+  });
+
   it("accepts the 'no contract deadline in the text' tick instead of a date and dismisses a hold without publishing", async () => {
     const heldId = db.seed(dealIncentives, { communityId, normalizedText: "held", publicText: "Sign a purchase agreement by the end of the month for $5,000 in closing costs.", active: false, held: true, holdReason: JSON.stringify(["missing_contract_deadline"]), confirmedAt: new Date() });
     await expect(acceptIncentiveHold({ id: heldId })).rejects.toMatchObject({ code: "BAD_REQUEST" });

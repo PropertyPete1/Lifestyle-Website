@@ -97,7 +97,7 @@ describe("a long private list", () => {
     expect(html.match(/data-deals-community="open"/g)).toHaveLength(1);
     expect(html.match(/data-deals-community="closed"/g)).toHaveLength(11);
     expect(html).toContain("From your reel");
-    expect(html).toContain("From $310,000 · 1 move-in ready");
+    expect(html).toContain("From $310,000 · 1 quick move-in");
     expect(html).toContain("Show 8 more of 8");
     expect(html).toContain("40 homes");
     // The open community's reel loads; nothing else on the page embeds Instagram.

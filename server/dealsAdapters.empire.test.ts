@@ -136,7 +136,7 @@ describe("Empire reader: the page", () => {
     const footnote = parseEmpireCampaign(campaignPage());
     expect(footnote).toMatch(/^Disclaimer: Offer valid on select move-in ready homes.*must close by December 31st\./);
     expect(footnote).not.toMatch(/40561|743526|NMLS|A\. Person/);
-    expect(footnote).toMatch(/Alta Home Lending\s*\(?\)?\s*as lender/);
+    expect(footnote).toMatch(/use Alta Home Lending as lender\./);
     expect(parseEmpireCampaign(campaignPage(null))).toBeNull();
   });
 

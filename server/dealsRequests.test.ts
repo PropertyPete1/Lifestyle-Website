@@ -12,7 +12,7 @@ vi.mock("./dealsService", async (importOriginal) => ({
 }));
 
 import { getDb } from "./db";
-import { hashSecret, logDealEvent } from "./dealsService";
+import { dealsCardHandle, logDealEvent } from "./dealsService";
 import { enqueueDealsRequestJobs, requestTestMode, runPendingDealsFubJobs } from "./dealsFubJobs";
 import { createDealsHomeRequest } from "./dealsRequests";
 
@@ -31,7 +31,7 @@ const home = { id: 9, sourceKey: "private-home-9", status: "available" };
 const lead = { id: 4, phoneE164: "+12105550300" };
 const request = () => createDealsHomeRequest({
   leadId: lead.id,
-  card: hashSecret(`deals-card:${home.sourceKey}`).slice(0, 20),
+  card: dealsCardHandle(`${home.sourceKey}`),
   requestType: "tour",
   preferredAt: new Date(Date.now() + 60 * 60_000),
   sourceCode: "sl1",

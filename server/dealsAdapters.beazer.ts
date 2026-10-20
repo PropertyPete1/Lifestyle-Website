@@ -366,7 +366,7 @@ function cleanOfferText(value: string): string {
     .replace(/\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, " ")
     .replace(/\(?\b\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b/g, " ")
     // A loan officer named beside the lender ("; A. Person, NMLS #743526") is a private name, not a term.
-    .replace(/;\s*[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,3},?\s*NMLS\s*(?:ID\s*)?#?\s*\d+/g, " ")
+    .replace(/;\s*[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,3},?\s*NMLS\s*(?:ID\s*)?#?\s*\d+/g, "")
     .replace(NMLS_ID_PATTERN_ALL, " ")
     .replace(/\*+/g, " ")
     .replace(/\(\s*\)/g, " ")

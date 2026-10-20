@@ -1,8 +1,11 @@
 import { and, asc, eq } from "drizzle-orm";
 import { dealHomes, dealLeads, dealTourRequests } from "../drizzle/schema";
 import { getDb } from "./db";
-import { chicagoDay, hashSecret, logDealEvent } from "./dealsService";
+import { chicagoDay, dealsCardHandle, hashSecret, logDealEvent } from "./dealsService";
 import { enqueueDealsRequestJobs, requestTestMode, runPendingDealsFubJobs } from "./dealsFubJobs";
+
+/** A refusal the buyer may read as written; any other error is internal and never reaches the buyer. */
+export class DealsRequestError extends Error {}
 
 function isDuplicateRequestError(error: unknown): boolean {
   const record = error && typeof error === "object" ? error as { code?: unknown; errno?: unknown; message?: unknown } : {};
@@ -14,12 +17,12 @@ function isDuplicateRequestError(error: unknown): boolean {
 export async function createDealsHomeRequest(input: { leadId: number; card: string; requestType: "tour" | "ask"; preferredAt: Date; sourceCode: string; deviceHash: string }) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
-  if (input.preferredAt.getTime() < Date.now() + 30 * 60_000) throw new Error("Choose a time at least 30 minutes from now");
+  if (input.preferredAt.getTime() < Date.now() + 30 * 60_000) throw new DealsRequestError("Choose a time at least 30 minutes from now");
   const homes = await db.select().from(dealHomes).where(eq(dealHomes.status, "available")).orderBy(asc(dealHomes.id));
-  const home = homes.find((item) => hashSecret(`deals-card:${item.sourceKey}`).slice(0, 20) === input.card);
-  if (!home) throw new Error("That home is no longer available");
+  const home = homes.find((item) => dealsCardHandle(item.sourceKey) === input.card);
+  if (!home) throw new DealsRequestError("That home is no longer available");
   const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, input.leadId)).limit(1))[0];
-  if (!lead) throw new Error("Access expired");
+  if (!lead) throw new DealsRequestError("Access expired");
   // Dedupe and FUB task aggregation follow the Chicago date on which the
   // visitor made the request, never a later preferred-tour date.
   const day = chicagoDay(new Date());
@@ -61,10 +64,10 @@ export async function setDealsHomeSaved(input: { leadId: number; card: string; s
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const homes = await db.select().from(dealHomes).where(eq(dealHomes.status, "available")).orderBy(asc(dealHomes.id));
-  const home = homes.find((item) => hashSecret(`deals-card:${item.sourceKey}`).slice(0, 20) === input.card);
-  if (!home) throw new Error("That home is no longer available");
+  const home = homes.find((item) => dealsCardHandle(item.sourceKey) === input.card);
+  if (!home) throw new DealsRequestError("That home is no longer available");
   const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, input.leadId)).limit(1))[0];
-  if (!lead) throw new Error("Access expired");
+  if (!lead) throw new DealsRequestError("Access expired");
   const existing = await db.select().from(dealTourRequests).where(and(eq(dealTourRequests.leadId, lead.id), eq(dealTourRequests.homeId, home.id), eq(dealTourRequests.requestType, "save"))).orderBy(asc(dealTourRequests.createdAt));
   const active = existing.find((row) => !row.removedAt);
   if (!input.saved) {

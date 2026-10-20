@@ -309,6 +309,20 @@ describe("official refresh: incentive lifecycle", () => {
     expect(db.rows(dealIncentives).find((row) => row.id === held.id)).toMatchObject({ held: false, active: false, holdReason: "superseded" });
     expect(activeIncentives().map((row) => row.publicText)).toEqual([NO_DATE_TEXT]);
     expect(db.rows(dealCommunities)[0]).toMatchObject({ incentiveHoldReason: null, holdReason: null });
+
+    // The builder goes back to the held text (A → B → A): the superseded record is judged again and held, never published unchecked.
+    mocks.sendBuilderDealsEmail.mockClear();
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: HELD_TEXT }));
+    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 12 * DAY) });
+    expect(activeIncentives()).toEqual([]);
+    expect(db.rows(dealIncentives).find((row) => row.id === held.id)).toMatchObject({ held: true, active: false });
+    expect(JSON.parse(String(db.rows(dealIncentives).find((row) => row.id === held.id)!.holdReason))).toEqual(["missing_follow_on_rate", "missing_follow_on_period", "missing_contract_deadline"]);
+    expect(String(db.rows(dealCommunities)[0].incentiveHoldReason)).toMatch(/^missing_contract_deadline/);
+    expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(1);
+    // Still the same text next run: it waits for Accept, no second e-mail.
+    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 15 * DAY) });
+    expect(activeIncentives()).toEqual([]);
+    expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(1);
   });
 
   it("keeps a manual override and its sticky dates, holds a differing scrape with differs_from_manual_override, and names a dropped manual date", async () => {

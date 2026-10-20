@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dealAccessTokens, dealBlocklist, dealClientLinks, dealCommunities, dealDoNotAutoImport, dealHomes, dealKnownAgents, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
+import { dealAccessTokens, dealBlocklist, dealClientLinks, dealCommunities, dealDoNotAutoImport, dealEvents, dealHomes, dealKnownAgents, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 import type { TrpcContext } from "./_core/context";
 
@@ -109,6 +109,7 @@ vi.mock("./dealsMaintenance", () => ({
 
 import { dealsRouter } from "./dealsRouter";
 import { DealsAdminError } from "./dealsSyncAdmin";
+import { ANALYTICS_EVENTS_PER_IP_HOUR } from "./dealsService";
 
 type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
 
@@ -394,6 +395,15 @@ describe("agent client links through the router", () => {
     expect(db.rows(dealTourRequests)).toHaveLength(1);
     await expect(visitor().saveHome({ card, saved: false })).resolves.toEqual({ ok: true, saved: false, notified: false });
     await expect(visitor().saveHome({ card: "0".repeat(20), saved: true })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    // A failure underneath (a driver error with a host and table) never reaches the buyer: a refusal written for the buyer does.
+    const original = db.select.bind(db);
+    db.select = (() => { throw new Error("connect ECONNREFUSED 10.20.30.40:3306 (deal_tour_requests)"); }) as typeof db.select;
+    const failed = await visitor().saveHome({ card, saved: true }).catch((error: unknown) => error as { code: string; message: string });
+    expect(failed).toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: "Save unavailable" });
+    const failedRequest = await visitor().requestHome({ card, requestType: "tour", preferredAt: new Date(Date.now() + 2 * 3_600_000).toISOString() }).catch((error: unknown) => error as { code: string; message: string });
+    expect(failedRequest).toMatchObject({ code: "INTERNAL_SERVER_ERROR", message: "Request unavailable" });
+    db.select = original;
+    await expect(visitor().requestHome({ card, requestType: "tour", preferredAt: new Date(Date.now() + 60_000).toISOString() })).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Choose a time at least 30 minutes from now" });
     mocks.isLiveDealSession.mockResolvedValue(null);
     await expect(visitor().saveHome({ card, saved: true })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
@@ -740,5 +750,23 @@ describe("admin.blockLeadAndKillLink", () => {
     expect(db.rows(dealLeads)[0].status).toBe("blocked");
     expect(db.rows(dealAccessTokens)[0].revokedAt).toBeInstanceOf(Date);
     expect(db.rows(dealBlocklist)).toContainEqual(expect.objectContaining({ phoneE164: "+12105550123", reason: "admin review" }));
+  });
+});
+
+describe("gate focus analytics", () => {
+  it("writes nothing for a caller without the probe cookie, once an hour per device for a browser, and at most the per-address cap", async () => {
+    const events = () => db.rows(dealEvents).filter((row) => row.kind === "started_gate");
+    mocks.ensureDealsCookies.mockReturnValue({ deviceHash: "a".repeat(64), hasProbe: false });
+    for (let index = 0; index < 5; index++) await visitor().gateFocused({});
+    expect(events()).toHaveLength(0);
+    mocks.ensureDealsCookies.mockReturnValue({ deviceHash: "b".repeat(64), hasProbe: true });
+    await visitor().gateFocused({});
+    await visitor().gateFocused({});
+    expect(events()).toHaveLength(1);
+    for (let index = 0; index < ANALYTICS_EVENTS_PER_IP_HOUR + 5; index++) {
+      mocks.ensureDealsCookies.mockReturnValue({ deviceHash: index.toString(16).padStart(64, "c"), hasProbe: true });
+      await visitor().gateFocused({});
+    }
+    expect(events()).toHaveLength(ANALYTICS_EVENTS_PER_IP_HOUR);
   });
 });

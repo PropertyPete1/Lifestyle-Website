@@ -183,7 +183,7 @@ export function parseEmpireCommunity(html: string, pageUrl: string): EmpirePage 
     if (!cardUrls.includes(url)) cardUrls.push(url);
   }
   const banner = all.find((node) => elementClass(node, "banner-promotion-single"));
-  const promo = banner ? cleanOfferText(elementText(banner, html).replace(/\bRequest Information\b.*$/i, "")) || null : null;
+  const promo = banner ? cleanOfferText(elementText(banner, html).replace(/\bRequest Information\b.*$/i, "").replace(/\b(?:View|See)\s+(?:the\s+)?Offers?\b|\bLearn\s+More\b|\bGet\s+in\s+Touch\b/gi, " ")) || null : null;
   // The campaign page: a link in the banner itself first, else the market's own campaign/offers/promotion page (another market's page is never this community's terms).
   const market = /^\/us\/texas\/san-antonio\//i;
   const campaignOf = (nodes: HtmlElement[]) => nodes.map((node) => node.tag === "a" ? asUrl(decodeHtmlEntities(node.attributes.href ?? "")) : null).find((link): link is URL => link !== null && sameOfficialHost(link, host) && market.test(link.pathname) && /campaign|offers?|promotion/i.test(link.pathname)) ?? null;
@@ -207,7 +207,7 @@ function cleanOfferText(value: string): string {
     .replace(/\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, " ")
     .replace(/\(?\b\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b/g, " ")
     // A loan officer named beside the lender ("; A. Person, NMLS #743526") is a private name, not a term.
-    .replace(/;\s*[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,3},?\s*NMLS\s*(?:ID\s*)?#?\s*\d+/g, " ")
+    .replace(/;\s*[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,3},?\s*NMLS\s*(?:ID\s*)?#?\s*\d+/g, "")
     .replace(NMLS_ID_PATTERN_ALL, " ")
     .replace(/\*+/g, " ")
     .replace(/\(\s*\)/g, " ")

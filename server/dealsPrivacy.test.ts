@@ -29,6 +29,9 @@ describe("Builder Deals privacy boundary", () => {
     const scrubbed = scrubPrivateNames("Sienna Lakes by Chesmar", privateTerms);
     expect(hasPrivateTerm(scrubbed, privateTerms)).toBe(false);
     expect(hasPrivateTerm("Visit 7711 Hanging Basket", privateTerms)).toBe(true);
+    // A double space or a line break inside a name is the same name: scrubbed, not left for the residue check to drop.
+    expect(scrubPrivateNames("Sienna  Lakes by Chesmar", privateTerms)).not.toMatch(/Sienna/);
+    expect(scrubPrivateNames("Sienna\nLakes amenity center", privateTerms)).toBe("this community amenity center");
     // A builder's name before "homes" or "community" drops out; elsewhere it reads "the builder".
     const builder = { builder: ["Centex Homes", "Centex"], lender: ["Pulte Mortgage"], community: [], plan: [], street: [], other: [] };
     expect(scrubPrivateNames("Save up to $43,000 on select Centex homes, built by Centex with financing through Pulte Mortgage.", builder)).toBe("Save up to $43,000 on select homes, built by the builder with financing through the builder's lender.");
@@ -46,5 +49,16 @@ describe("Builder Deals privacy boundary", () => {
     expect(og).toContain("This week's best new-build deals in San Antonio");
     expect(hasPrivateTerm(og, privateTerms)).toBe(false);
     expect(DEALS_OG_IMAGE).toMatch(/^\/manus-storage\/builder-deals-og-card_/);
+  });
+});
+
+describe("opaque handles", () => {
+  it("keys card and community handles with the server secret: a listing URL's plain hash is not its card", async () => {
+    const { dealsCardHandle, dealsHandle, hashSecret } = await import("./dealsService");
+    const key = hashSecret("https://www.example-builder.com/homes/1");
+    expect(dealsCardHandle(key)).toMatch(/^[0-9a-f]{20}$/);
+    expect(dealsCardHandle(key)).not.toBe(hashSecret(`deals-card:${key}`).slice(0, 20));
+    expect(dealsCardHandle(key)).toBe(dealsCardHandle(key));
+    expect(dealsHandle("deals-community:7", 16)).not.toBe(hashSecret("deals-community:7").slice(0, 16));
   });
 });

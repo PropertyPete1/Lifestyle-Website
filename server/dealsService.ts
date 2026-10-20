@@ -137,6 +137,15 @@ export function hashSecret(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
+/** Without a cookie secret (a misconfigured deployment) the handles are keyed per process: never computable from a listing URL or row id, just not stable across restarts. */
+const FALLBACK_HANDLE_KEY = crypto.randomBytes(32).toString("hex");
+/** An opaque handle (hex) for a value the browser must not be able to compute from public facts (a listing URL, a row id). */
+export function dealsHandle(value: string, length: number): string {
+  return crypto.createHmac("sha256", process.env.JWT_SECRET || FALLBACK_HANDLE_KEY).update(value).digest("hex").slice(0, length);
+}
+/** A home's card handle on the signed-up list (save, request, viewed). */
+export const dealsCardHandle = (sourceKey: string) => dealsHandle(`deals-card:${sourceKey}`, 20);
+
 export function randomOpaqueToken(bytes = 32): string {
   return crypto.randomBytes(bytes).toString("base64url");
 }
@@ -396,6 +405,9 @@ export async function reserveVerificationAttempt(input: {
 }
 
 /** Server-side de-duplication prevents focus/remount activity inflating funnel data. */
+/** Landing and gate-focus analytics rows one address may write per hour (a shared office or carrier NAT stays well under it). */
+export const ANALYTICS_EVENTS_PER_IP_HOUR = 60;
+
 export async function recordGateFocus(input: { sourceCode: string; deviceHash: string; ip: string }) {
   const db = await getDb();
   if (!db) return;
@@ -403,7 +415,8 @@ export async function recordGateFocus(input: { sourceCode: string; deviceHash: s
     eq(dealEvents.kind, "started_gate"), eq(dealEvents.deviceHash, input.deviceHash),
     eq(dealEvents.sourceCode, input.sourceCode), gt(dealEvents.createdAt, new Date(Date.now() - 60 * 60_000)),
   )).limit(1))[0];
-  if (!recent) await logDealEvent({ kind: "started_gate", ...input });
+  // One address writes at most this many analytics rows an hour: a script without cookies cannot fill the events table.
+  if (!recent && (await rateLimitCount("started_gate", new Date(Date.now() - 60 * 60_000), { ip: input.ip })) < ANALYTICS_EVENTS_PER_IP_HOUR) await logDealEvent({ kind: "started_gate", ...input });
 }
 
 /** Every real Verify send has a terminal outcome. Normal STOP/landline refusals
@@ -441,7 +454,7 @@ export async function recordDealsLanding(input: { sourceCode: string; deviceHash
     eq(dealEvents.kind, "landed"), eq(dealEvents.deviceHash, input.deviceHash),
     eq(dealEvents.sourceCode, input.sourceCode), gt(dealEvents.createdAt, new Date(Date.now() - 60 * 60_000)),
   )).limit(1))[0];
-  if (!recent) await logDealEvent({ kind: "landed", ...input });
+  if (!recent && (await rateLimitCount("landed", new Date(Date.now() - 60 * 60_000), { ip: input.ip })) < ANALYTICS_EVENTS_PER_IP_HOUR) await logDealEvent({ kind: "landed", ...input });
 }
 
 /** The reason written when a visitor answers "Yes" to the agent question; an LDR agent's own client is exempt from it. */
@@ -708,7 +721,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
       homes.push({
         // Opaque, deterministic card handle for React only. It is not a
         // builder listing ID, database ID, source URL, or reversible key.
-        card: hashSecret(`deals-card:${home.sourceKey}`).slice(0, 20),
+        card: dealsCardHandle(home.sourceKey),
         kind: home.kind,
         beds: home.beds,
         baths: home.baths,
@@ -729,7 +742,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
       // The community whose reel this buyer commented on opens first on their list.
       fromYourReel: Boolean(lead.sourceCode) && community.reelCode.toLowerCase() === lead.sourceCode.toLowerCase(),
       // Opaque handle the page keys its open/closed state on.
-      key: hashSecret(`deals-community:${community.id}`).slice(0, 16),
+      key: dealsHandle(`deals-community:${community.id}`, 16),
       label: scrub(community.publicLabel),
       area: scrub(community.areaLabel),
       schoolDistrict: scrub(community.schoolDistrict ?? ""),
@@ -758,7 +771,7 @@ export async function savedDealCards(leadId: number): Promise<string[]> {
   const saves = await db.select({ homeId: dealTourRequests.homeId }).from(dealTourRequests).where(and(eq(dealTourRequests.leadId, leadId), eq(dealTourRequests.requestType, "save"), isNull(dealTourRequests.removedAt)));
   if (!saves.length) return [];
   const homes = await db.select({ sourceKey: dealHomes.sourceKey }).from(dealHomes).where(inArray(dealHomes.id, Array.from(new Set(saves.map((save) => save.homeId)))));
-  return homes.map((home) => hashSecret(`deals-card:${home.sourceKey}`).slice(0, 20));
+  return homes.map((home) => dealsCardHandle(home.sourceKey));
 }
 
 export async function isLiveDealSession(req: Request): Promise<{ leadId: number; lead: typeof dealLeads.$inferSelect; deviceHash: string } | null> {

@@ -282,6 +282,8 @@ describe("the full list versus the scrubbed list", () => {
     // A home keyed under a path the builder's site does not serve (Starlight's street keys) links the team to the community page.
     expect(builderPageFor("https://www.starlighthomes.com/san-antonio/fixture-trails/available-homes/1412-fixture-street")).toBe("https://www.starlighthomes.com/san-antonio/fixture-trails");
     expect(builderPageFor("https://www.chesmar.com/fixture-lakes/brandon/1/")).toBe("https://www.chesmar.com/fixture-lakes/brandon/1/");
+    // Davidson's home pages live under "/available-homes/" for real: the link stays.
+    expect(builderPageFor("https://www.davidsonhomes.com/states/texas/san-antonio-market-area/san-antonio/fixture-ranch/available-homes/9513-fixture-hollow/")).toBe("https://www.davidsonhomes.com/states/texas/san-antonio-market-area/san-antonio/fixture-ranch/available-homes/9513-fixture-hollow/");
   });
 
   it("drops a client back to the scrubbed list when the link is turned off, the agent leaves, or the link belongs to someone else", async () => {

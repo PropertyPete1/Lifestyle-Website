@@ -143,8 +143,16 @@ export type TexasHomesPage = {
   foreignPlan: boolean;
   /** True when the page has the sales address or pin block at all. */
   hasRecord: boolean;
+  /** The community's logo path, which the quick move-in list's rows repeat; null when the page shows none. */
+  logo: string | null;
   plans: PrivatePlanOrHome[];
 };
+
+/** A logo image's path on the official host, decoded and lower-cased for comparison; null when it is elsewhere. */
+function logoPath(src: string, base: URL): string | null {
+  const url = asUrl(new URL(decodeHtmlEntities(src), base).toString());
+  return url && sameOfficialHost(url, base.hostname) ? comparablePath(url.pathname) : null;
+}
 
 /** The community on the page; null when the page has no heading. */
 export function parseTexasHomesCommunity(html: string, pageUrl: string): TexasHomesPage | null {
@@ -168,14 +176,19 @@ export function parseTexasHomesCommunity(html: string, pageUrl: string): TexasHo
     try { query = new URL(decodeHtmlEntities(addressLink.attributes.href!)).searchParams.get("query"); } catch { query = null; }
     // Without the query, the link's lines ("241 Stone Loop<br>Castroville, TX, 78009") are the street and the city line.
     const lines = html.slice(addressLink.contentStart, addressLink.contentEnd).split(/<br\s*\/?>/i).map((line) => htmlToText(line)).filter(Boolean);
+    // "241 Stone Loop, Castroville, TX, 78009" and "241 Stone Loop, Castroville, TX 78009" alike.
     const parts = (query ?? lines.join(", ")).split(/\s*,\s*/).map((part) => part.trim()).filter(Boolean);
-    const stateIndex = parts.findIndex((part) => /^(?:TX|Texas)$/i.test(part));
+    const stateIndex = parts.findIndex((part) => /^(?:TX|Texas)(?:\s+\d{5}(?:-\d{4})?)?$/i.test(part));
     if (stateIndex >= 2) {
       street = parts.slice(0, stateIndex - 1).join(", ");
       city = parts[stateIndex - 1]!;
-      zip = /^\d{5}/.exec(parts[stateIndex + 1] ?? "")?.[0] ?? null;
+      zip = /\b(\d{5})\b/.exec(`${parts[stateIndex]} ${parts[stateIndex + 1] ?? ""}`)?.[1] ?? null;
     }
   }
+  // The community's logo (`.field--name-field-logo img`): the list's rows carry the same file, which ties each row to the community.
+  const logoField = all.find((item) => elementClass(item, "field--name-field-logo"));
+  const logoImage = logoField ? descendants(logoField).find((item) => item.tag === "img" && item.attributes.src) : undefined;
+  const logo = logoImage ? logoPath(logoImage.attributes.src!, community) : null;
   const geoField = all.find((item) => elementClass(item, "field--name-field-geolocation"));
   const geoMatch = geoField ? /(-?\d{1,2}\.\d+),\s*(-?\d{1,3}\.\d+)/.exec(elementText(geoField, html)) : null;
   const lat = geoMatch ? Number(geoMatch[1]) : NaN;
@@ -232,6 +245,7 @@ export function parseTexasHomesCommunity(html: string, pageUrl: string): TexasHo
     neighborhoodId,
     foreignPlan,
     hasRecord: Boolean(addressBlock || geoField),
+    logo,
     plans,
   };
 }
@@ -242,10 +256,19 @@ export function texasHomesRecord(html: string, pageUrl: string): TexasHomesCommu
   return page && page.hasRecord ? page.record : null;
 }
 
-export type TexasHomesListing = { homes: PrivatePlanOrHome[]; hasPager: boolean; foreignHome: boolean };
+export type TexasHomesListing = {
+  homes: PrivatePlanOrHome[];
+  hasPager: boolean;
+  /** True when a row links elsewhere, or carries another community's logo (the page's own, when it has one). */
+  foreignHome: boolean;
+  /** The exposed filter's selected neighborhood id, when the form shows one; the list must be filtered to the community's. */
+  selectedNeighborhoodId: number | null;
+  /** Rows that are not sold. */
+  available: number;
+};
 
-/** The filtered quick move-in list; null when the body is not the list. */
-export function parseTexasHomesListing(html: string, listUrl: string, now: Date, cityLine: string): TexasHomesListing | null {
+/** The filtered quick move-in list; null when the body is not the list. The rows must carry the community's logo when the page shows one. */
+export function parseTexasHomesListing(html: string, listUrl: string, now: Date, cityLine: string, logo: string | null = null): TexasHomesListing | null {
   const page = asUrl(listUrl);
   const root = parseHtmlElements(html);
   if (!page || !root) return null;
@@ -253,8 +276,13 @@ export function parseTexasHomesListing(html: string, listUrl: string, now: Date,
   const view = all.find((item) => elementClass(item, "mir-view"));
   if (!view) return null;
   const inner = descendants(view);
+  // The exposed filter form names the neighborhood the list is filtered to.
+  const select = all.find((item) => item.tag === "select" && item.attributes.name === "field_neighborhood_target_id");
+  const selectedOption = select ? descendants(select).find((item) => item.tag === "option" && "selected" in item.attributes) : undefined;
+  const selectedNeighborhoodId = selectedOption && /^\d+$/.test(selectedOption.attributes.value ?? "") ? Number(selectedOption.attributes.value) : null;
   const homes: PrivatePlanOrHome[] = [];
   let foreignHome = false;
+  let available = 0;
   for (const row of inner.filter((item) => elementClass(item, "views-row"))) {
     const parts = descendants(row);
     const title = parts.find((item) => item.tag === "h3");
@@ -262,9 +290,18 @@ export function parseTexasHomesListing(html: string, listUrl: string, now: Date,
     const street = title ? elementText(title, html) : "";
     const url = link ? asUrl(new URL(decodeHtmlEntities(link.attributes.href!), page).toString()) : null;
     if (!url || !sameOfficialHost(url, page.hostname) || !/^\/move-in-ready\/[^/]+$/i.test(pagePath(url))) { foreignHome = true; continue; }
+    // The row's community logo must be this community's: a row from another community (an unfiltered list) is never this one's.
+    if (logo) {
+      const rowLogo = parts.find((item) => elementClass(item, "mir-teaser-bottom-right"));
+      const rowImage = rowLogo ? descendants(rowLogo).find((item) => item.tag === "img" && item.attributes.src) : undefined;
+      if (!rowImage || logoPath(rowImage.attributes.src!, page) !== logo) { foreignHome = true; continue; }
+    }
     const sold = parts.some((item) => elementClass(item, "mir-teaser-sold"));
+    if (!sold) available++;
     const readable = looksLikeStreetAddress(street);
-    const status = texasHomesStatus(classText(parts, html, "mir-date"), sold, now);
+    // A row with no availability element at all (not a blank one) has wording the reader cannot find: no status.
+    const dateElement = parts.find((item) => elementClass(item, "mir-date"));
+    const status = sold || dateElement ? texasHomesStatus(dateElement ? elementText(dateElement, html) : null, sold, now) : { status: null, readyNow: false, moveInDate: null };
     const valued = positive(classText(parts, html, "mir-price"));
     const reduced = positive(classText(parts, html, "reduced-price-teaser"));
     const baths = feature(parts, html, "baths");
@@ -285,8 +322,11 @@ export function parseTexasHomesListing(html: string, listUrl: string, now: Date,
       gallery: gallery(parts, "field--name-field-images", page),
     });
   }
-  return { homes, hasPager: all.some((item) => elementClass(item, "pager") || elementClass(item, "pager__items")), foreignHome };
+  return { homes, hasPager: all.some((item) => elementClass(item, "pager") || elementClass(item, "pager__items")), foreignHome, selectedNeighborhoodId, available };
 }
+
+/** A rate ("4.99% fixed", "5.75% APR", "4.99% interest rate", "4.99% financing") or an amount of four digits or more. */
+const PROMO_FIGURE = /\d+(?:\.\d+)?\s*%\s*(?:\(|\[|fixed|rate|apr|financing|interest|limited|[0-9]{2}-?\s*year)|\$\s*[\d,]{4,}/i;
 
 export type TexasHomesHomePage = { communityUrls: string[]; promoUrl: string | null };
 
@@ -300,13 +340,15 @@ export function parseTexasHomesHomePage(html: string, host: string): TexasHomesH
     const url = asUrl(new URL(decodeHtmlEntities(link.attributes.href!), `https://${host}/`).toString());
     if (url && sameOfficialHost(url, host) && !communityUrls.includes(pageUrlOf(url))) communityUrls.push(pageUrlOf(url));
   }
+  // The promotion: a short wysiwyg heading that names a rate or an amount ("4.99% 30-year fixed FHA/VA"), then the next field's
+  // "Learn More" link. A marketing line naming a bare figure is not a promotion, nor is a link that is not a call to read more.
   let promoUrl: string | null = null;
   let named = false;
   for (const field of all.filter((item) => elementClass(item, "field--name-field-wysiwyg"))) {
     const text = elementText(field, html);
-    if (!named) { named = /\d+(?:\.\d+)?\s*%|\$\s*[\d,]{4,}/.test(text) && text.length < 300; continue; }
-    const link = descendants(field).find((item) => item.tag === "a" && item.attributes.href);
-    if (!link) continue;
+    if (!named) { named = PROMO_FIGURE.test(text) && text.length < 300; continue; }
+    const link = descendants(field).find((item) => item.tag === "a" && item.attributes.href && /\b(?:learn\s+more|details|see\s+(?:the\s+)?offer|view\s+(?:the\s+)?offer)\b/i.test(elementText(item, html)));
+    if (!link) { named = PROMO_FIGURE.test(text) && text.length < 300; continue; }
     const url = asUrl(new URL(decodeHtmlEntities(link.attributes.href!), `https://${host}/`).toString());
     if (url && sameOfficialHost(url, host)) promoUrl = pageUrlOf(url);
     break;
@@ -332,14 +374,15 @@ export function parseTexasHomesPromo(html: string): string | null {
   if (!root) return null;
   const all = descendants(root);
   const pieces: string[] = [];
-  const heading = all.filter((item) => /^h[1-3]$/.test(item.tag)).map((item) => elementText(item, html)).find((text) => /\d+(?:\.\d+)?\s*%|\$\s*[\d,]{4,}/.test(text));
+  const heading = all.filter((item) => /^h[1-3]$/.test(item.tag)).map((item) => elementText(item, html)).find((text) => PROMO_FIGURE.test(text));
   if (heading) pieces.push(heading);
   for (const field of all.filter((item) => elementClass(item, "field--name-field-wysiwyg"))) {
     const text = elementText(field, html);
     if (/^\*/.test(text)) pieces.push(text);
   }
-  const text = cleanOfferText(pieces.join(" ").slice(0, 4_000));
-  return text && /\d+(?:\.\d+)?\s*%|\$\s*[\d,]{4,}/.test(text) ? text : null;
+  // Each piece ends a sentence, so the heading and the footnote never run together.
+  const text = cleanOfferText(pieces.map((piece) => /[.!?]$/.test(piece.trim()) ? piece : `${piece.trim()}.`).join(" ").slice(0, 4_000));
+  return text && PROMO_FIGURE.test(text) ? text : null;
 }
 
 /** The home page, read once per run. */
@@ -390,9 +433,11 @@ export class TexasHomesAdapter implements DealAdapter {
       listUrl = texasHomesHomesUrl(parsed.neighborhoodId);
       const list = await getDocument(listUrl, fetcher, "text/html,application/xhtml+xml", TEXASHOMES_HOST);
       if (!list.ok) return failedResult(config, fetchedAt, privateSnapshot, [list.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
-      const listing = parseTexasHomesListing(list.text, listUrl, now(), cityLine);
+      const listing = parseTexasHomesListing(list.text, listUrl, now(), cityLine, parsed.logo);
       if (!listing) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
-      if (listing.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+      // The list must be this community's: its rows carry the community's logo, its filter names the community's id, and its
+      // homes for sale never outnumber the menu's count (an unfiltered list would show every community's homes here).
+      if (listing.foreignHome || (listing.selectedNeighborhoodId !== null && listing.selectedNeighborhoodId !== parsed.neighborhoodId) || (menuCount !== null && listing.available > menuCount)) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
       // The list must be whole: no further page, and never fewer rows than the menu counts for the community.
       if (listing.hasPager || listing.homes.length > TEXASHOMES_MAX_HOMES || (menuCount !== null && listing.homes.length < menuCount)) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
       homes = listing.homes;

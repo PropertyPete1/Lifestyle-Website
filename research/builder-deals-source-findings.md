@@ -529,6 +529,69 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   each page is read for its business record.
 - Scrub: Hakes Brothers, Hakes Bros, Hakes (no affiliated lender named).
 
+## Beazer Homes reader (added 2026-10-20)
+
+- Site: `www.beazer.com` (Next.js App Router). The community page
+  `/san-antonio-TX/<city>/<slug>` is an app shell (about 590 KB) whose data
+  rides in the React Server Components payload: `self.__next_f.push([1,
+  "…"])` chunks that join into rows of `<id>:<json>`, `<id>:T<hex
+  length>,<text>` (a text row) and `<id>:I[...]` (a module row); a string
+  "$<id>" or "$<id>:props:extraData:…" points at another row. The reader
+  (`parseBeazerFlight`, `resolveBeazerRef`) reads the rows and follows the
+  references it needs. The payload carries the `CommunityDetailPage` row
+  (`CommunityName`, `CommunityID`, `Url`, `Latitude/Longitude`,
+  `MinimumPrice`, `CommunityStatus` "Active", `HasVIPList`,
+  `ProductLines.ProductLinePage.items[]` with the sales office's
+  `StreetAddress`, `City`, `PostalCode`, `PhoneNumber` and the counselors'
+  names and e-mails — never read — and `Plans.PlanDetailPage.items[]`:
+  `PlanName`, `Url`, `Price` (0 when unpriced), size/beds/baths min-max,
+  `IsHidden`, `IsActive`, `HasHomes`, `Elevations[]` with `Price`,
+  `IsActive` and `Images`), one card grid per product line (`{ title:
+  "Quick move-in homes", cards: [{ ContentLink: { Expanded: HomeDetailPage
+  } }] }` — Veranda has two product lines and two grids), and the
+  community's current offers in `extraData.activeOffersCurrently[]`
+  (`OfferBlock`: `Content` HTML, `DisplayStartDate/EndDate`, `IsActive`,
+  `Disclaimer[].ContentLink.Expanded.Text` = "$29", a text row).
+- Homes (`HomeDetailPage`): `Url` `<community>/<plan>/<homesite>`,
+  `StreetAddress`, `City`, `Zip`, `HomesiteNumber`, `MLSNumber` (never
+  read), `Beds`, `Baths`, `SquareFoot` (+ overrides), `Availability` (ISO;
+  passed → ready now, to come → its month, null → undated quick move-in),
+  `IsActive` (false → left out), `IsModel`, `HomePrice`,
+  `Elevation.Expanded.Price` (the plan's base price — often below the
+  home's, never a previous price), `ElevationImages`/`InteriorImages`/
+  `Elevation.Expanded.Images` on `cmp.beazer.com` (DAM) and
+  `cms.beazer.com`, `ParentPlanContent…PlanName`. 67 homes across 16
+  selling communities on 2026-10-20 (7 at most, Comanche Ridge). A plan
+  row's `HasHomes` corroborates the grid: plans that say homes with no
+  grid (or an empty one) hold `expected_community_container_not_found`.
+  Hidden or inactive plans (`IsHidden`, `IsActive` false, the "LAND JOB"
+  placeholders with no figures) are left out; a plan's price is `Price`
+  or the lowest active elevation's.
+- Offers (October 2026): "Lock In 4.99%! 4.99% Limited Time 5/1 ARM [6.62%
+  APR] with Choice Lender!*" with its disclaimer (Cardinal Financial,
+  "contracted between 10/07/2026 and 12/07/2026 and close per contract by
+  12/07/2026", "FHA 5/1 Adjustable Rate Mortgage … 4.990% (6.619% Annual
+  Percentage Rate)") — held `adjustable_rate` as designed; and "Personalized
+  savings, your way! Receive up to $35,000 towards design options and
+  closing costs!*" (to-be-built homes). Display windows are honoured; the
+  rate-naming offer is chosen first. The parser now reads `[6.62% APR]`
+  and "(6.619% Annual Percentage Rate)" as the APR form and "close per
+  contract by" as a closing deadline.
+- Discovery: the site's own community search
+  (`/api/get-communities-per-area?skip=0&limit=100&orderBy=FeatureOrder:ASC
+  &filters={}&ancestorMainId=55228d07-f388-4656-9b45-c4671017e201`, the San
+  Antonio metro page's content id; a plain GET, no key, the call the
+  neighborhood pages make themselves) lists the 18 communities with
+  `Url`, `CommunityName`, `Latitude/Longitude`, `MinimumPrice`, `HasHomes`,
+  `HasVIPList` and the office's city (no street); each page is read for
+  the street. Sunday Creek at Kinder Ranch (coming soon) carries a pin in
+  Germany (53.1, 8.9) and no office: outside the area, never onboarded.
+  The metro id is a constant: if Beazer renumbers it, discovery reports
+  `sitemap_unreadable` for the builder.
+- Scrub: Beazer Homes, Beazer, Gatherings by Beazer, Gatherings; lenders
+  Beazer Mortgage Choice, Mortgage Choice, Cardinal Financial Company,
+  Cardinal Financial, Choice Lender.
+
 ## Meritage Homes: deferred
 
 - `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.
@@ -546,11 +609,12 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - Scott Felder: every San Antonio community row's `area` must slug to the URL's sub-market ("Schertz/Cibolo" → `schertzcibolo`); a blank or differently worded `area` holds every run.
 - DRB / Legend: only the by-name lookup's HTTP 400 is "no such community"; a 404, 429, 5xx or a timeout holds `community_fetch_failed`. An offer whose content block carries only a disclaimer says nothing (never published as an offer). Whether `offers-v2` ever carries such a block, and Legend's home page path (`/quick-move-in-homes/<street>-<homesite>` is DRB's shape) and dash rule (`legendSlug` keeps a hyphen; no live name carries one), are live checks.
 - Drees: the page's `var url` is read from the script block that declares `contentId` (a tracking snippet's `var url` ahead of it is not the page's); a same-host redirect answer to a search POST holds `community_fetch_failed` (one off the host `unsupported_official_host`). Live checks: whether a build-on-your-lot card is ever counted in `qmiCount` (it would hold `incomplete_inventory` every run), whether a parent community page 404s (a hand-configured parent would hold `community_fetch_failed`), and whether `isPlanAvailable` is false on a coming-soon plan list.
-- KB Home: the community's own "Move-in Ready (N)" is read from a heading; a "(0)" in another market's navigation beside the community's heading count says nothing, and a "(0)" corroborates an empty list only as a heading or with no positive count anywhere on the page.
+- KB Home: the community's own "Move-in Ready (N)" is read from a heading (a count in a nested span counts too); a "(0)" in another market's navigation beside the community's heading count says nothing, and a "(0)" corroborates an empty list only as a heading or with no positive count anywhere on the page.
 - DRB / Legend: if the API's `moveInNowHomesCount` counts hidden (`displayInventory: false`) rows the community holds `incomplete_inventory` every run; a home row with `status` other than "active" and `salesStatus` "available" would publish (row-level `status` is not read); `availabilityDate` is compared in UTC (a one-day skew around midnight is possible for the ready-now label).
-- Starlight: the footer's "**Monthly payment" note and `&copy;` line follow the terms paragraph; the reader reads the paragraph's own element (the longest `p`/`li` opening with the sentence, so a span inside it cannot cut the buydown wording off; a split paragraph that stops before the page's own "2/1 Program"/"year one" wording holds the offer as a changed page). Whether the terms are one flat `<p>` on every community page, and a sold-out community's count wording ("0 Available Homes" with no table), are live checks.
+- Starlight: the footer's "**Monthly payment" note and `&copy;` line follow the terms paragraph; the reader reads the paragraph's own element (the innermost `p`/`li` that carries the buydown wording, else the longest, so neither a span inside it nor an `li` around it and the footer changes the text; a split paragraph that stops before the page's own "2/1 Program"/"year one" wording — read up to the footer's "**"/"©" — holds the offer as a changed page). Whether the terms are one flat `<p>` on every community page, and a sold-out community's count wording ("0 Available Homes" with no table), are live checks.
 - KB Home: a community heading "Move-in Ready (0)" beside the market's count corroborates an empty list; "(0)" beside a list with homes says nothing.
-- View Homes: if the roster's `homes[]` ever omits a home the page shows (or shows one the page hides) every run holds `incomplete_inventory`; a badge wording other than "Ready Now!" / "Est. Completion- <Month>" (e.g. a sold label) holds through the sync's status rule. The promo banner changes per campaign: a page without `.promo-overview` holds the offer only (`expected_incentive_container_not_found`).
-- Texas Homes: the menu count is read as a lower bound only; a community page without the "Quick Move-In Homes in <name>" link while the menu counts homes for it holds every run (the closeouts Bent Tree and Vistas of Sonoma have no menu row; `/bent-tree` answered 403 on 2026-10-20 — a bot block would hold `community_fetch_failed`). Whether a coming-soon or sold-out page keeps the `.sales-address-link` block is unknown (without it or the pin the page holds).
+- View Homes: coming-soon roster rows are left out of discovery (as Drees); a badge month without a "Move In" line is the next such month; a promo page with offer text but no participating-communities block holds the offer. Whether the outer `regions:` key is ever quoted (`"regions":[` would hold every community) and whether coming-soon pages carry the `#floorplans` module shell are live checks. If the roster's `homes[]` ever omits a home the page shows (or shows one the page hides) every run holds `incomplete_inventory`; a badge wording other than "Ready Now!" / "Est. Completion- <Month>" (e.g. a sold label) holds through the sync's status rule. The promo banner changes per campaign: a page without `.promo-overview` holds the offer only (`expected_incentive_container_not_found`).
+- Beazer: whether a community with many homes ever carries a "Load more" grid whose payload holds the first page only (the grid had every home on 2026-10-20, 7 at most); whether `extraData.activeOffersCurrently` is present on every community page (a page without it publishes no offer, no hold); whether the metro id changes.
+- Texas Homes: the list's rows are tied to the community by the row logo (`.mir-teaser-bottom-right img`, the community page's `.field--name-field-logo img`), by the exposed filter's selected `field_neighborhood_target_id` option and by the two-sided count rule (homes for sale ≤ the menu count ≤ all rows); a community page without a logo loses the first tie. The menu count is read as a lower bound only; a community page without the "Quick Move-In Homes in <name>" link while the menu counts homes for it holds every run (the closeouts Bent Tree and Vistas of Sonoma have no menu row; `/bent-tree` answered 403 on 2026-10-20 — a bot block would hold `community_fetch_failed`). Whether a coming-soon or sold-out page keeps the `.sales-address-link` block is unknown (without it or the pin the page holds).
 - Hakes Brothers: a coming-soon page's shape is unknown (Highland Gardens, Mesa Vista, Park Place): without the business record's street, or without `#home-tabs`, the page holds `expected_community_container_not_found` until it opens; if the residence records ever list a home the cards hide (or the reverse), the community holds `incomplete_inventory` every run.
 - Century: if the live page renders the card list twice (mobile and desktop) or shows sold or model cards with `.street-number-text`, the card count exceeds the records and every run holds. The sitemap is one 2 MB urlset (8,205 URLs, no index) today.

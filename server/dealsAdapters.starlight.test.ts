@@ -78,6 +78,13 @@ describe("Starlight reader: page data", () => {
     expect(parseStarlightCommunity(spanned, COMMUNITY, NOW)!.offer).toMatch(/2\/1 Program.*year three/);
     const split = communityPage({ terms: `${lead}</p><p>${rest}` });
     expect(parseStarlightCommunity(split, COMMUNITY, NOW)).toMatchObject({ offer: null, offerTruncated: true });
+    // A footer that mentions "year one" after a fixed-rate paragraph is not the offer's wording: no truncation hold; an <li> wrapping the paragraph and the footer lines never adds the footer.
+    const fixedTerms = "*Terms are based upon a loan with the following terms: 4.99% (APR 5.81%) 30-YR Fixed FHA loan 3.5% down payment required. Rate expires on October 31, 2026.";
+    const fixedWithFooter = communityPage({ terms: fixedTerms }).replace("<p>**Monthly payment shown is an estimate.</p>", "<p>**Monthly payment shown is an estimate.</p><p>HOA dues are paid by the builder for year one on select homes.</p>");
+    expect(parseStarlightCommunity(fixedWithFooter, COMMUNITY, NOW)).toMatchObject({ offerTruncated: false, offer: expect.stringMatching(/^Terms are based upon a loan.*October 31, 2026\.$/) });
+    const listed = communityPage().replace(`<p>${TERMS}</p><p>**Monthly payment shown is an estimate.</p><p>&copy; 2026 Starlight Homes, LLC.</p>`, `<ul><li><p>${TERMS}</p><p>&copy; 2026 Starlight Homes, LLC. Privacy Policy Terms of Use 1234 Fixture Parkway Suite 500 Atlanta GA 30339</p></li></ul>`);
+    expect(listed).not.toBe(communityPage());
+    expect(parseStarlightCommunity(listed, COMMUNITY, NOW)!.offer).not.toMatch(/Privacy|Atlanta|2026 Starlight/);
     const held = await loadOfficialDeals(config, { fetcher: html(split), now: () => NOW });
     expect(held.catalogOk).toBe(true);
     expect(held.incentiveHoldReasons).toEqual(["expected_incentive_container_not_found"]);

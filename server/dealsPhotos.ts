@@ -65,6 +65,10 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "www.texas-homes.com",
   // Hakes Brothers serves its photos from its media library (…/storage/app/medialibrary/…); the path is checked below.
   "www.hakesbrothers.com",
+  // Beazer serves its photos from its DAM and CMS hosts.
+  "cmp.beazer.com",
+  "cms.beazer.com",
+  "www.beazer.com",
   // LGI Homes serves its photos from Sitecore's edge CDN (…/lgihomesinc…/…); the path is checked below.
   "edge.sitecorecloud.io",
 ]);

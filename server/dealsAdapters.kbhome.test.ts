@@ -71,6 +71,8 @@ describe("KB Home reader: page data", () => {
     expect(kbMoveInCount("<nav>Move-in Ready (57)</nav><h2>Move-in Ready (3)</h2>", false)).toBe(3);
     expect(kbMoveInCount("<nav>Move-in Ready (0)</nav><nav>Move-in Ready (3)</nav>", true)).toBe(3);
     expect(kbMoveInCount("<nav>Move-in Ready (0)</nav>", true)).toBe(0);
+    // A count in a nested span is the heading's count too.
+    expect(kbMoveInCount("<nav>Move-in Ready (57)</nav><h2 class=\"x\">Move-in Ready <span>(3)</span></h2>")).toBe(3);
     expect(kbMoveInCount("<h2>Move-in Ready (0)</h2>", true)).toBe(0);
     expect(kbMoveInCount("<h2>Move-in Ready (0)</h2>", false)).toBeNull();
     // The market navigation counts the whole market; the smaller count is the community's.

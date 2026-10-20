@@ -96,11 +96,11 @@ export function viewHomesStatus(label: string | null, moveIn: string | null, now
   const statedYear = stated ? Number(stated[2]) : null;
   const thisYear = now.getUTCFullYear();
   const thisMonth = now.getUTCMonth() + 1;
-  // A move-in line names the year (and, when it differs from the badge, the newer month); without one the badge's month is this year's, and one that has passed is a stale estimate.
+  // A move-in line names the year (and, when it differs from the badge, the newer month); without one the badge's month is the next such month (this year's at or after the current month, else next year's), as the Century reader reads a year-less month; a stated month that has passed is a stale estimate.
   if (stated && (statedMonth === null || statedYear === null || statedYear < 2000 || statedYear > thisYear + 5)) return { status: null, readyNow: false, moveInDate: null };
   if (!stated && badgeYear !== null && (badgeYear < 2000 || badgeYear > thisYear + 5)) return { status: null, readyNow: false, moveInDate: null };
   const effectiveMonth = stated ? statedMonth! : month;
-  const year = stated ? statedYear! : badgeYear ?? thisYear;
+  const year = stated ? statedYear! : badgeYear ?? (month >= thisMonth ? thisYear : thisYear + 1);
   if (year < thisYear || (year === thisYear && effectiveMonth < thisMonth)) return { status: "Quick Move-In", readyNow: false, moveInDate: null };
   const name = `${MONTH_NAMES[effectiveMonth - 1]} ${year}`;
   return { status: `Quick Move-In (${name})`, readyNow: false, moveInDate: name };
@@ -217,10 +217,10 @@ export function parseViewHomesRoster(html: string, host: string): ViewHomesListe
   return Array.from(out.values());
 }
 
-/** The roster's communities for discovery: every record (a coming-soon page without a street keeps its pin). */
+/** The roster's communities for discovery: every selling record (a coming-soon row has nothing to read yet, as with Drees). */
 export function viewHomesListingEntries(html: string, host: string): Array<{ url: string; record: ViewHomesCommunityRecord }> | null {
   const roster = parseViewHomesRoster(html, host);
-  return roster ? roster.map((row) => ({ url: row.url, record: row.record })) : null;
+  return roster ? roster.filter((row) => !/^soon$/i.test(row.status.value ?? "") && !/coming\s+soon/i.test(row.status.label ?? "")).map((row) => ({ url: row.url, record: row.record })) : null;
 }
 
 function classText(scope: readonly HtmlElement[], html: string, token: string): string | null {
@@ -375,7 +375,7 @@ function cleanOfferText(value: string): string {
     .replace(/\s+([,.;:!?])/g, "$1").replace(/\s+/g, " ").trim();
 }
 
-export type ViewHomesPromo = { text: string | null; communityUrls: string[] };
+export type ViewHomesPromo = { text: string | null; communityUrls: string[]; /** True when the page has the participating-communities block at all. */ hasCommunityList: boolean };
 
 /** The promo page's offer text (headline, option and footnotes) and the participating communities' page URLs; null when the page is not a promotion. */
 export function parseViewHomesPromo(html: string, pageUrl: string): ViewHomesPromo | null {
@@ -397,9 +397,11 @@ export function parseViewHomesPromo(html: string, pageUrl: string): ViewHomesPro
   const communityUrls: string[] = [];
   for (const link of list ? descendants(list).filter((item) => item.tag === "a" && item.attributes.href) : []) {
     const url = asUrl(new URL(decodeHtmlEntities(link.attributes.href!), page).toString());
+    // The site is on the apex host; a "www." link in the list names the same page.
+    if (url && url.hostname.toLowerCase() === `www.${page.hostname.toLowerCase()}`) url.hostname = page.hostname;
     if (url && sameOfficialHost(url, page.hostname)) communityUrls.push(pageUrlOf(url));
   }
-  return { text: text && /\d+(?:\.\d+)?\s*%|\$\s*[\d,]{4,}/.test(text) ? text : null, communityUrls };
+  return { text: text && /\d+(?:\.\d+)?\s*%|\$\s*[\d,]{4,}/.test(text) ? text : null, communityUrls, hasCommunityList: Boolean(list) };
 }
 
 /** The Texas roster, read once per run. */
@@ -488,6 +490,8 @@ export class ViewHomesAdapter implements DealAdapter {
     if (parsed.promoUrl) {
       const promo = await promotion(parsed.promoUrl, fetcher, now().getTime());
       if ("hold" in promo) incentiveHolds.push(promo.hold);
+      // An offer with no participating-communities block is a changed page: held, never applied or dropped silently.
+      else if (promo.promo?.text && !promo.promo.hasCommunityList) incentiveHolds.push("expected_incentive_container_not_found");
       else if (promo.promo?.text && promo.promo.communityUrls.some((url) => pagePath(new URL(url)) === pagePath(community))) {
         privateSnapshot.pages.push(sourcePage("incentive", parsed.promoUrl, null));
         privateSnapshot.incentive = { sourceUrl: communityPage, text: promo.promo.text, facts: parsePromotionalRate(promo.promo.text) };

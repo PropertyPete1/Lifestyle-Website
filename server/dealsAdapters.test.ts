@@ -135,7 +135,7 @@ function miDocuments(total = 15): Record<string, string> {
 
 describe("deals adapters", () => {
   it("registers the required generic builder adapters", () => {
-    expect(Object.keys(DEAL_ADAPTERS).sort()).toEqual(["Ashton Woods", "Centex", "Century Communities", "Chesmar", "Coventry Homes", "D.R. Horton", "DRB Homes", "David Weekley Homes", "Davidson Homes", "Del Webb", "Drees Custom Homes", "First America Homes", "Hakes Brothers", "Highland Homes", "KB Home", "LGI Homes", "Legend Homes", "M/I Homes", "Manual", "Perry Homes", "Pulte", "Scott Felder Homes", "Sitterle Homes", "Starlight Homes", "Texas Homes", "Toll Brothers", "View Homes"]);
+    expect(Object.keys(DEAL_ADAPTERS).sort()).toEqual(["Ashton Woods", "Beazer Homes", "Centex", "Century Communities", "Chesmar", "Coventry Homes", "D.R. Horton", "DRB Homes", "David Weekley Homes", "Davidson Homes", "Del Webb", "Drees Custom Homes", "First America Homes", "Hakes Brothers", "Highland Homes", "KB Home", "LGI Homes", "Legend Homes", "M/I Homes", "Manual", "Perry Homes", "Pulte", "Scott Felder Homes", "Sitterle Homes", "Starlight Homes", "Texas Homes", "Toll Brothers", "View Homes"]);
     expect(DEAL_ADAPTERS["Perry Homes"].builder).toBe("Perry Homes");
   });
 
@@ -201,6 +201,8 @@ describe("deals adapters", () => {
     expect(parsePromotionalRate("Lock your rate today! HOA dues are covered for year one. 4.99% (5.50% APR) 30-year fixed FHA with 3.5% down payment.")).toMatchObject({ rateKind: "fixed", publishable: true });
     expect(parsePromotionalRate("4.99% (5.5% APR) FHA financing with a term of 30 years and 3.5% down payment.")).toMatchObject({ repaymentTermYears: 30 });
     expect(parsePromotionalRate("10 yrs structural warranty. 4.99% (5.5% APR) FHA with 3.5% down payment.")).toMatchObject({ repaymentTermYears: null });
+    expect(parsePromotionalRate("4.99% (5.5% APR) 30 yr. fixed FHA with 3.5% down payment.")).toMatchObject({ repaymentTermYears: 30 });
+    expect(parsePromotionalRate("4.99% (5.5% APR) FHA, fixed for 30 years, 3.5% down payment.")).toMatchObject({ repaymentTermYears: 30 });
     // "the rate for year one is 2% lower" is a discount, not the rate.
     const discount = parsePromotionalRate("2/1 buydown on select homes: the interest rate for year one is 2% lower than the note rate. Note rate 4.99% (6.81% APR) 30-year fixed FHA, 3.5% down payment. Beginning in year three, the fixed rate of 4.99% applies.");
     expect(discount.promotionalRatePercent).not.toBe(2);
@@ -563,6 +565,10 @@ describe("deals adapters", () => {
     const closing = parsePromotionalRate("Purchase a quick move-in home closing by 11/30 and choose a 5.25% Fixed-Rate or up to $55,000 in flex cash! FHA – 5.25% (5.993% APR) based on 3.5% down payment. Below-market interest rates valid on new home contracts for eligible properties entered into as of 10/30/2026 closing by 11/30/2026. Flex cash can be applied toward rate buydown, appliances or closing costs. 30-year fixed.");
     expect(closing).toMatchObject({ rateKind: "fixed", promotionalRatePercent: 5.25, aprPercent: 5.993, loanType: "FHA", downPaymentPercent: 3.5, repaymentTermYears: 30, contractDeadline: null, closingDeadline: { raw: "11/30/2026", isoDate: "2026-11-30" }, holdReasons: [] });
     expect(parsePromotionalRate("5.25% (5.993% APR) FHA 30-year. A 2/1 buydown applies; must close on or before 12/31/2026.")).toMatchObject({ rateKind: "promotional", closingDeadline: { isoDate: "2026-12-31" } });
+    // Square brackets and the spelled-out APR name the rate too; "close per contract by" is a closing deadline; a 5/1 ARM holds as adjustable.
+    const arm = parsePromotionalRate("Lock In 4.99%! 4.99% Limited Time 5/1 ARM [6.62% APR] with Choice Lender! Homes must be contracted between 10/07/2026 and 12/07/2026 and close per contract by 12/07/2026. FHA 5/1 Adjustable Rate Mortgage with an initial interest rate of 4.990% (6.619% Annual Percentage Rate(APR)).");
+    expect(arm).toMatchObject({ promotionalRatePercent: 4.99, aprPercent: 6.62, contractDeadline: { isoDate: "2026-12-07" }, closingDeadline: { isoDate: "2026-12-07" } });
+    expect(arm.holdReasons).toContain("adjustable_rate");
   });
 
   it("fails closed without leaking a private source URL when official community GET fails", async () => {

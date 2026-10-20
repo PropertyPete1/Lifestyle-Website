@@ -222,10 +222,13 @@ export function parseStarlightCommunity(html: string, pageUrl: string, now: Date
   // buydown wording is a truncated offer, and says nothing.
   const candidates = all.filter((item) => /^(?:p|div|li|span)$/.test(item.tag)).map((item) => ({ item, text: elementText(item, html) })).filter(({ text: own }) => /^\*?\s*Terms\s+are\s+based\s+upon\s+a\s+loan/i.test(own));
   const byLength = (direction: 1 | -1) => (a: { text: string }, b: { text: string }) => direction * (a.text.length - b.text.length);
-  const termsElement = candidates.filter(({ item }) => item.tag === "p" || item.tag === "li").sort(byLength(-1))[0] ?? candidates.filter(({ item }) => item.tag === "span").sort(byLength(-1))[0] ?? candidates.filter(({ item }) => item.tag === "div").sort(byLength(1))[0] ?? null;
-  const lead = /\*?\s*Terms\s+are\s+based\s+upon\s+a\s+loan/i.exec(text);
-  const following = lead ? text.slice(lead.index, lead.index + 2_500) : "";
   const buydownWording = /\b(?:\d\/\d\s+program|buy[- ]?down|year\s+(?:one|two|three)\b)/i;
+  // The innermost `p`/`li` that carries the whole run (the buydown wording) wins over a wrapper that would add the footer; else the longest.
+  const blocks = candidates.filter(({ item }) => item.tag === "p" || item.tag === "li");
+  const termsElement = blocks.filter(({ text: own }) => buydownWording.test(own)).sort(byLength(1))[0] ?? blocks.sort(byLength(-1))[0] ?? candidates.filter(({ item }) => item.tag === "span").sort(byLength(-1))[0] ?? candidates.filter(({ item }) => item.tag === "div").sort(byLength(1))[0] ?? null;
+  // The terms run ends where the footer begins ("**Monthly payment…", "© 2026 …", "Privacy Policy"): wording after that is not the offer's.
+  const lead = /\*?\s*Terms\s+are\s+based\s+upon\s+a\s+loan/i.exec(text);
+  const following = lead ? text.slice(lead.index, lead.index + 2_500).split(/\*\*|©|\bCopyright\b|Privacy\s+Policy|Terms\s+of\s+Use/i)[0]! : "";
   const truncated = termsElement !== null && buydownWording.test(following) && !buydownWording.test(termsElement.text);
   const offer = termsElement && !truncated ? cleanOfferText(termsElement.text.slice(0, 4_000)) : null;
   return { record, foreignPage, foreignPlan, statedHomeCount: count ? Number(count[1]) : null, hasTable: Boolean(table), homes, plans, offer: offer && /\d+(?:\.\d+)?\s*%/.test(offer) ? offer : null, offerTruncated: truncated };

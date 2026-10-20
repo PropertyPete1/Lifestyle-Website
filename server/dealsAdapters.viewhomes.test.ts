@@ -113,10 +113,11 @@ describe("View Homes reader: statuses", () => {
     expect(viewHomesStatus("Est. Completion- January", "Jan 2027", NOW)).toEqual({ status: "Quick Move-In (January 2027)", readyNow: false, moveInDate: "January 2027" });
     // The move-in line names the year; a month that has passed is a stale estimate with no date.
     expect(viewHomesStatus("Est. Completion- September", "Sep 2026", NOW)).toEqual({ status: "Quick Move-In", readyNow: false, moveInDate: null });
-    // Without the line the badge's month is this year's: a month to come is dated, one that has passed is not.
+    // Without the line the badge's month is the next such month: this year's at or after the current month, next year's before it.
     expect(viewHomesStatus("Est. Completion- December", "", NOW)).toEqual({ status: "Quick Move-In (December 2026)", readyNow: false, moveInDate: "December 2026" });
     expect(viewHomesStatus("Est. Completion- October", null, NOW)).toEqual({ status: "Quick Move-In (October 2026)", readyNow: false, moveInDate: "October 2026" });
-    expect(viewHomesStatus("Est. Completion- March", null, NOW)).toEqual({ status: "Quick Move-In", readyNow: false, moveInDate: null });
+    expect(viewHomesStatus("Est. Completion- March", null, NOW)).toEqual({ status: "Quick Move-In (March 2027)", readyNow: false, moveInDate: "March 2027" });
+    expect(viewHomesStatus("Est. Completion- January", null, NOW)).toEqual({ status: "Quick Move-In (January 2027)", readyNow: false, moveInDate: "January 2027" });
     // A move-in line that names another month than the badge is the newer figure.
     expect(viewHomesStatus("Est. Completion- October", "Dec 2026", NOW)).toEqual({ status: "Quick Move-In (December 2026)", readyNow: false, moveInDate: "December 2026" });
     expect(viewHomesStatus("Sold", null, NOW)).toEqual({ status: "Sold", readyNow: false, moveInDate: null });
@@ -140,7 +141,8 @@ describe("View Homes reader: roster", () => {
     expect(roster[1]!.homes[0]).toEqual({ url: `${COMMUNITY}homes/14803-fixture-clover/`, street: "14803 Fixture Clover", plan: "Sycamore", statusText: "Est. Completion- October", moveIn: "Oct 2026", price: 345_990, squareFeet: 2_120, bedrooms: 3, bathrooms: 2.5, garage: 2, photo: `${HOST}/wp-content/uploads/2026/09/14803-fixture-clover.jpg` });
     // A photo off the official host falls back to the thumbnail on it.
     expect(roster[1]!.homes[3]!.photo).toBe(`${HOST}/wp-content/uploads/2026/09/14735-fixture-clover-400x225.jpg`);
-    expect(viewHomesListingEntries(regionPage(), "yourviewhome.com")!.map((entry) => [entry.url, entry.record.street])).toEqual([[`${HOST}/communities/fixture-mesa/`, "960 Fixture Dr"], [COMMUNITY, "14515 Fixture Clover"], [`${HOST}/communities/fixture-enclave/`, null]]);
+    // A coming-soon row has nothing to read yet and is left out of discovery.
+    expect(viewHomesListingEntries(regionPage(), "yourviewhome.com")!.map((entry) => [entry.url, entry.record.street])).toEqual([[`${HOST}/communities/fixture-mesa/`, "960 Fixture Dr"], [COMMUNITY, "14515 Fixture Clover"]]);
   });
 
   it("reads nothing from a page without the roster script, with unbalanced JSON or with another host's rows", () => {
@@ -182,11 +184,15 @@ describe("View Homes reader: promotion page", () => {
   it("reads the offer (headline, option and footnotes, with links, phones, NMLS ids and footnote marks gone) and the participating communities on the official host", () => {
     const promo = parseViewHomesPromo(promoPage(), PROMO)!;
     expect(promo.communityUrls).toEqual([COMMUNITY, `${HOST}/communities/fixture-ridge/`]);
+    expect(promo.hasCommunityList).toBe(true);
+    // A "www." link names the same page on the apex host.
+    expect(parseViewHomesPromo(promoPage({ communities: ["https://www.yourviewhome.com/communities/fixture-fields/"] }), PROMO)!.communityUrls).toEqual([COMMUNITY]);
     expect(promo.text).toBe("On Select Homes Closing by 11/30 Fixture Savings! Choose a Below-Market Rate or Flex Cash to Use Your Way! Lower rates could mean more buying power this fall. Purchase a quick move-in home closing by 11/30 and choose a 5.25% Fixed-Rate or up to $55,000 in flex cash! FHA – 5.25% (5.993% APR) based on 3.5% down payment VA – 5.25% (5.465% APR) based on 0% down payment For a limited time, View Homes is offering below-market interest rates valid on new home contracts for eligible properties entered into as of 10/30/2026 closing by 11/30/2026 (the “Promotion”). View Homes has locked in, through View Homes Lending, fixed interest rates using a pool of funds. Call or visit for details. For a limited time, View Homes is offering flex cash UP TO 10% of the home’s sales price that can be applied toward rate buydown, appliances, closing costs, or additional Realtor commission. Void where prohibited by law.");
     expect(promo.text).not.toMatch(/555|NMLS|123456|yourviewhome\.com/);
     // A page without the offer section is not a promotion; one whose copy names no rate or amount says nothing.
     expect(parseViewHomesPromo("<html><body><h1>New layout</h1></body></html>", PROMO)).toBeNull();
     expect(parseViewHomesPromo(promoPage({ option: null, disclaimer: ["Terms apply."] }), PROMO)).toMatchObject({ text: null, communityUrls: [COMMUNITY, `${HOST}/communities/fixture-ridge/`] });
+    expect(parseViewHomesPromo(promoPage().replace(/<section class="promo-info">[\s\S]*?<\/section>/, ""), PROMO)).toMatchObject({ communityUrls: [], hasCommunityList: false });
   });
 });
 
@@ -291,6 +297,10 @@ describe("View Homes reader: adapter", () => {
     const changedPromo = await load(communityPage(), { [PROMO]: "<html><body>new layout</body></html>" });
     expect(changedPromo.incentiveHoldReasons).toEqual(["expected_incentive_container_not_found"]);
     expect((await load(communityPage({ banner: null }))).private.incentive).toBeNull();
+    // A promotion page with the offer but no participating-communities block is a changed page: the offer holds.
+    const noList = await load(communityPage(), { [PROMO]: promoPage().replace(/<section class="promo-info">[\s\S]*?<\/section>/, "") });
+    expect(noList.incentiveHoldReasons).toEqual(["expected_incentive_container_not_found"]);
+    expect(noList.private.incentive).toBeNull();
     // Hosts and fetch failures.
     expect((await loadOfficialDeals({ ...config, sourceUrl: "https://www.yourviewhome.com/communities/fixture-fields/" }, { fetcher })).holdReasons).toEqual(["unsupported_official_host"]);
     const down = vi.fn(async () => new Response("busy", { status: 503, headers: { "content-type": "text/html" } }));

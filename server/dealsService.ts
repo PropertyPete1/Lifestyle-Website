@@ -1101,7 +1101,7 @@ export function leadPresentation(lead: typeof dealLeads.$inferSelect) {
   return { display: displayForLead(lead), expiresAt: lead.expiresAt.toISOString(), name: lead.name, timeline: lead.timeline, teamPreview: lead.status === "team", agentClient: Boolean(lead.agentTeamId) };
 }
 
-/** The builder's own page for a home: its source URL, except a home keyed under a path the site does not serve (Starlight's `/available-homes/<street>` keys), whose page is the community's. */
+/** The builder's own page for a home: its source URL, except a home keyed under a path the site does not serve (Starlight's `/available-homes/<street>` keys, on Starlight's host only — Davidson's home pages live under the same segment for real), whose page is the community's. */
 export function builderPageFor(sourceUrl: string): string {
-  return sourceUrl.replace(/\/available-homes\/[^/?#]+\/?(?=$|[?#])/i, "");
+  return /^https:\/\/www\.starlighthomes\.com\//i.test(sourceUrl) ? sourceUrl.replace(/\/available-homes\/[^/?#]+\/?(?=$|[?#])/i, "") : sourceUrl;
 }

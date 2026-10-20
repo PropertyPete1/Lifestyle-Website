@@ -7,7 +7,7 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { ASHTON_HOST, CENTURY_HOST, LGI_HOST, SCOTTFELDER_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { ASHTON_HOST, CENTURY_HOST, DRB_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
@@ -19,6 +19,8 @@ import { ashtonListingEntries, ashtonListingUrl, ashtonRecord } from "./dealsAda
 import { lgiListingEntries, lgiListingUrl, lgiRecord } from "./dealsAdapters.lgi";
 import { sitterleListingEntries, sitterleListingUrl, sitterleRecord } from "./dealsAdapters.sitterle";
 import { scottFelderListingEntries, scottFelderListingUrl, scottFelderRecord } from "./dealsAdapters.scottfelder";
+import { DRB_API_HOST, drbListingEntries, drbListingUrl } from "./dealsAdapters.drb";
+import { starlightListingEntries, starlightListingUrl, starlightRecord } from "./dealsAdapters.starlight";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -45,7 +47,7 @@ export type DiscoveryReader = {
    * sitemap is too large or missing) its own market listing. A listing entry
    * may carry the community's record itself; then its page is not read.
    */
-  index: { kind: "sitemap"; url: string } | { kind: "listing"; url: string; accept: string; entries: (body: string, host: string) => ListingEntry[] | null };
+  index: { kind: "sitemap"; url: string } | { kind: "listing"; url: string; accept: string; /** The listing's own host when the builder's API is not its site (default: the site). */ host?: string; entries: (body: string, host: string) => ListingEntry[] | null };
   /** Path of a community page in the builder's San Antonio market. */
   communityPath: RegExp;
   /** Reads the community's record from its page when the site has no schema.org record (default: communityRecordFromHtml). */
@@ -167,6 +169,21 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     index: { kind: "listing", url: scottFelderListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => scottFelderListingEntries(body, host) },
     communityPath: /^\/communities\/san-antonio-area\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
     record: scottFelderRecord,
+  },
+  {
+    // DRB Homes: the site is client-rendered; its public API lists the San Antonio region's communities with every record (sales address, pin, phone, price), so no page is read.
+    builder: "DRB Homes", host: DRB_HOST,
+    index: { kind: "listing", url: drbListingUrl(), accept: "application/json", host: DRB_API_HOST, entries: (body, host) => drbListingEntries(body, host) },
+    communityPath: /^\/drbhomes\/find-your-home\/communities\/texas\/san-antonio\/[a-z0-9-]+(?:\/(?:overview|home-plans|quick-move-in-homes))?\/?$/i,
+    // The page carries no record (it is an app shell); a listing entry without an address is skipped by the pin rule.
+    record: () => null,
+  },
+  {
+    // Starlight: the market page links every community; each page's business record gives the sales address, phone and pin.
+    builder: "Starlight Homes", host: STARLIGHT_HOST,
+    index: { kind: "listing", url: starlightListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => starlightListingEntries(body, host) },
+    communityPath: /^\/san-antonio\/(?!areas\/)[a-z0-9-]+\/?$/i,
+    record: (html) => starlightRecord(html),
   },
   { builder: "Century Communities", host: CENTURY_HOST, index: { kind: "sitemap", url: `https://${CENTURY_HOST}/sitemap.xml` }, communityPath: /^\/find-your-new-home\/texas\/san-antonio-metro\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({
@@ -308,7 +325,7 @@ async function indexedEntries(reader: DiscoveryReader, fetcher: HtmlFetcher): Pr
     const urls = await officialSitemapUrls(reader.index.url, reader.host, fetcher);
     return urls ? urls.map((url) => ({ url, record: null })) : null;
   }
-  const page = await getDocument(reader.index.url, fetcher, reader.index.accept, reader.host);
+  const page = await getDocument(reader.index.url, fetcher, reader.index.accept, reader.index.host ?? reader.host);
   if (!page.ok) return null;
   return reader.index.entries(page.text, reader.host);
 }

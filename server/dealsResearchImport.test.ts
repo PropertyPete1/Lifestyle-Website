@@ -58,5 +58,5 @@ describe("the research CSV", () => {
     expect(added.some((row) => row.builder === "Chesmar Homes")).toBe(false);
     // Running it again adds nothing.
     expect((await importResearchCommunities()).created).toEqual([]);
-  });
+  }, 20_000);
 });

@@ -14,12 +14,14 @@ import { AshtonWoodsAdapter } from "./dealsAdapters.ashton";
 import { LgiHomesAdapter } from "./dealsAdapters.lgi";
 import { SitterleAdapter } from "./dealsAdapters.sitterle";
 import { ScottFelderAdapter } from "./dealsAdapters.scottfelder";
+import { DrbHomesAdapter } from "./dealsAdapters.drb";
+import { StarlightAdapter } from "./dealsAdapters.starlight";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "DRB Homes" | "Starlight Homes" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -243,8 +245,10 @@ export const ASHTON_HOST = "www.ashtonwoods.com";
 export const LGI_HOST = "www.lgihomes.com";
 export const SITTERLE_HOST = "www.sitterlehomes.com";
 export const SCOTTFELDER_HOST = "www.scottfelderhomes.com";
+export const DRB_HOST = "www.drbhomes.com";
+export const STARLIGHT_HOST = "www.starlighthomes.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST, "DRB Homes": DRB_HOST, "Starlight Homes": STARLIGHT_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -554,21 +558,23 @@ function rateNear(text: string, pattern: RegExp): number | null {
  */
 export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const text = normalizeIncentiveText(input);
-  const hasTemporaryRate = /\b(?:buy[- ]?down|first[- ]year|year\s*1|temporarily|introductory)\b/i.test(text);
-  const headline = rateNear(text, /(?:first[- ]year|year\s*1)[\s\S]{0,100}?(\d+(?:\.\d+)?)%/i) ??
+  // "2/1 Program … year one … year two" is a temporary buydown as surely as "buydown" is.
+  const hasTemporaryRate = /\b(?:buy[- ]?down|first[- ]year|year\s*1|year\s+(?:one|two)|temporarily|introductory|\d\/\d\s+(?:program|rate\s+program))\b/i.test(text);
+  const headline = rateNear(text, /\brate\s+(?:that\s+applies\s+)?(?:for|to|in|during)\s+(?:the\s+)?(?:first[- ]year|year\s*(?:1|one))\s+(?:is|of|:)?\s*(\d+(?:\.\d+)?)%/i) ??
+    rateNear(text, /(?:first[- ]year|year\s*1)[\s\S]{0,100}?(\d+(?:\.\d+)?)%/i) ??
     rateNear(text, /(?:rates?\s+as\s+low\s+as|as\s+low\s+as|reduced\s+to)\s+(\d+(?:\.\d+)?)%/i) ??
     // "4.25% (6.051% APR)", "5% Fixed / 5.805% APR", "4.99% interest rate".
     rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:\(\s*\d+(?:\.\d+)?%\s*APR|\/\s*\d+(?:\.\d+)?%\s*APR|(?:interest\s+)?rate\b)/i);
   const rateMentioned = headline !== null || /\b(?:interest\s+rates?|APR|buy[- ]?down)\b|\d+(?:\.\d+)?%\s*(?:fixed|financing)/i.test(text);
   const rateKind = !rateMentioned ? "none" : hasTemporaryRate ? "promotional" : "fixed";
   const promotionalRatePercent = headline;
-  const promotionalPeriod = firstMatch(text, /\b(first[- ]year|year\s*1)\b/i) ?? firstMatch(text, /\b(for\s+year\s*\d+)\b/i);
-  const followOnPeriod = firstMatch(text, /\b(years?\s*2\s*(?:-|to|through)\s*\d+|after\s+(?:the\s+)?first\s+year)\b/i);
+  const promotionalPeriod = firstMatch(text, /\b(first[- ]year|year\s*1|year\s+one)\b/i) ?? firstMatch(text, /\b(for\s+year\s*\d+)\b/i);
+  const followOnPeriod = firstMatch(text, /\b(years?\s*2\s*(?:-|to|through)\s*\d+|after\s+(?:the\s+)?first\s+year|(?:beginning|starting)\s+(?:in\s+)?year\s+(?:three|3|two|2)|years?\s+(?:three|3)\s+(?:onward|and\s+beyond|through\s+\d+))\b/i);
   // "5.25% (6.051% APR) for years 2-30" names its rate before the period, so
   // that trailing form is tried first. The forward look after the period stops
   // at down-payment or APR wording so "3.5% down" is never read as a rate.
   const followOnRatePercent = rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:\([^)]{0,40}\)\s*)?(?:interest\s+rate\s*)?for\s+years?\s*2\b/i) ??
-    rateNear(text, /(?:years?\s*2\s*(?:-|to|through)\s*\d+|after\s+(?:the\s+)?first\s+year)(?:(?!\b(?:down|payments?|APR)\b)[\s\S]){0,80}?(\d+(?:\.\d+)?)%(?!\s*(?:minimum\s+)?down\b)/i);
+    rateNear(text, /(?:years?\s*2\s*(?:-|to|through)\s*\d+|after\s+(?:the\s+)?first\s+year|(?:beginning|starting)\s+(?:in\s+)?year\s+(?:three|3|two|2)|years?\s+(?:three|3)\s+(?:onward|and\s+beyond|through\s+\d+))(?:(?!\b(?:down|payments?|APR)\b)[\s\S]){0,80}?(\d+(?:\.\d+)?)%(?!\s*(?:minimum\s+)?down\b)/i);
   const aprPercent = rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:annual\s+percentage\s+rate|apr)\b/i) ??
     rateNear(text, /\b(?:APR|ANNUAL\s+PERCENTAGE\s+RATE)\s*(?::|=|is)?\s*(\d+(?:\.\d+)?)%/i);
   const repaymentTermYears = numberMatch(text, /\b(\d{1,2})(?:[- ]year|\s*yr)\b/i);
@@ -1151,8 +1157,10 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "Toll Brothers") { config.builder.push("Toll Brothers", "Toll Brothers Inc"); config.lender.push("Toll Brothers Mortgage Company", "Toll Brothers Mortgage", "TBI Mortgage", "TBI"); }
   if (builder === "David Weekley Homes") { config.builder.push("David Weekley Homes", "David Weekley", "Weekley Homes", "Weekley"); config.lender.push("Priority Home Mortgage"); }
   if (builder === "Ashton Woods") { config.builder.push("Ashton Woods Homes", "Ashton Woods", "Starlight Homes"); config.lender.push("Velocio Mortgage", "Velocio"); }
+  if (builder === "Starlight Homes") { config.builder.push("Starlight Homes", "Starlight", "Ashton Woods"); config.lender.push("Velocio Mortgage", "Velocio", "Trailblazer Mortgage", "Trailblazer"); }
   if (builder === "LGI Homes") { config.builder.push("LGI Homes", "LGI", "Terrata Homes", "CompleteHome"); config.lender.push("LGI Mortgage Solutions", "CalCon Mutual Mortgage", "One Trust Home Loans", "OneTrust Home Loans"); }
   if (builder === "Sitterle Homes") { config.builder.push("Sitterle Homes", "Sitterle"); }
+  if (builder === "DRB Homes") { config.builder.push("DRB Homes", "DRB Group", "DRB Elevate", "DRB"); }
   if (builder === "Scott Felder Homes") { config.builder.push("Scott Felder Homes", "Scott Felder"); config.lender.push("Southern Lending", "First Continental Mortgage", "First Continental"); }
   if (builder === "Highland Homes") { config.builder.push("Highland Homes", "Highland"); config.lender.push("Highland HomeLoans", "Highland Home Loans"); }
   if (builder === "Davidson Homes") { config.builder.push("Davidson Homes", "Davidson"); config.lender.push("NorthStar Mortgage Advisors", "NorthStar Mortgage", "NorthStar"); }
@@ -1803,6 +1811,8 @@ let ashtonAdapter: DealAdapter | null = null;
 let lgiAdapter: DealAdapter | null = null;
 let sitterleAdapter: DealAdapter | null = null;
 let scottFelderAdapter: DealAdapter | null = null;
+let drbAdapter: DealAdapter | null = null;
+let starlightAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
@@ -1824,6 +1834,8 @@ export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   get "LGI Homes"() { return (lgiAdapter ??= new LgiHomesAdapter()); },
   get "Sitterle Homes"() { return (sitterleAdapter ??= new SitterleAdapter()); },
   get "Scott Felder Homes"() { return (scottFelderAdapter ??= new ScottFelderAdapter()); },
+  get "DRB Homes"() { return (drbAdapter ??= new DrbHomesAdapter()); },
+  get "Starlight Homes"() { return (starlightAdapter ??= new StarlightAdapter()); },
   Manual: new ManualAdapter(),
 };
 

@@ -194,6 +194,92 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   address, pin, phone, price); "BOOK BY APPOINTMENT" (Crown Ridge Manor) is
   not an address, so that page is read and its pin keeps it.
 
+## DRB Homes reader (added 2026-10-20)
+
+- Site: `www.drbhomes.com` is a client-rendered Angular app (every page is the
+  same 72 KB shell, no server-rendered content, no JSON-LD beyond the
+  WebSite record). Content comes from the builder's own public JSON API on
+  `api.drbhomes.com` (no key, plain GET, CORS-open), which the page calls:
+  `public/community/state/region/by-name?state=texas&region=san-antonio&name=<slug>`
+  → `{ id }` (HTTP 400 "No community with such name" otherwise);
+  `public-drb/community/<id>` (name, address with pin, `salesOfficePhone`,
+  `priceFrom`, `communityAvailabilityRef.name` Active | Closeout |
+  ComingSoon, `moveInNowHomesCount`, `plansCount`);
+  `public/community/<id>/move-in-homes?page=1&limit=1000` (`items[]`,
+  `meta.totalItems`); `public/community/<id>/plans?page=1&limit=1000`;
+  `public/offers-v2/by-community/<id>`. The San Antonio region lists 19
+  communities (17 selling, 2 coming soon: Confluence in Marion, Davis Ranch);
+  the separate "New Braunfels" region holds only Confluence. The API rows
+  carry staff names, e-mails, `createdBy`/`lastIP` audit fields: never read.
+- Homes: `salesStatus` "available" | "sold" (45 rows seen: 44 available, 1
+  sold); `availabilityDate` ISO; the page labels "Available Now" once the
+  date has passed and "Available <Month YYYY>" otherwise (compared by day,
+  so an October 30 home shows "Available October 2026"); `originalPrice` 0
+  means no previous price; `isModel`, `displayInventory`. Home page:
+  `/…/<community slug>/quick-move-in-homes/<street slug>-<homesite digits>`
+  ("151 Red Arrow" + "12.19" → `151-red-arrow-1219`), verified on five cards.
+- Slug: lower case, punctuation dropped, each space a hyphen; "Meyer Ranch –
+  Premier" and "Meyer Ranch - Enclave" are `meyer-ranch--premier` /
+  `meyer-ranch--enclave` (verified against `by-name` for all 19). The adapter
+  resolves the slug through `by-name` every run, so a wrong slug holds
+  (`expected_community_container_not_found`) rather than reading another
+  community.
+- Corroboration: the API's `meta.totalItems` against the rows read, and the
+  community's `moveInNowHomesCount` against the homes read (fewer → hold
+  `incomplete_inventory`); a row filed under another `communityId` holds
+  `invalid_inventory_response`.
+- Plans: `communityPlanSalesStatus` "available" and `status` "active" only;
+  `basePrice`; plan page `/…/home-plans/<plan slug>` ("Palm Plan" →
+  `palm-plan`).
+- Offers: `offers-v2` was empty for every San Antonio community in October
+  2026; the shape (from a Georgia community): `title`, `description`,
+  `status`, `displayFrom`, `displayThrough`, `visibilities`,
+  `content.disclaimer` (long legal text naming the contract window "signed
+  … between October 1, 2026, and December 31, 2026", which the rate parser
+  reads as the contract deadline). One current offer is the text (a
+  rate-naming one first); links, phones, e-mails and NMLS ids are stripped.
+  `marketingDisplayPromotion` / `marketingPromotionDisclaimer` on the
+  community row were false/null everywhere and are not read.
+- Photos: `assets.drbhomes.com/ndg-cms-prod-assets/image/<id>.jpg`;
+  `images[].type` names drawings (`inventory_floorplan`, `plan_floorplan`),
+  which are skipped.
+- Discovery: the region list on the API host (`DiscoveryReader.index.host`),
+  every record complete, no page read; coming-soon rows are left out.
+- Scrub: DRB Homes, DRB Group, DRB Elevate, DRB (the 55+ brand "DRB Elevate"
+  shares the API; its communities carry `brand: "drbelevate"` and none is in
+  the San Antonio region).
+
+## Starlight Homes reader (added 2026-10-20)
+
+- Site: `www.starlighthomes.com` (Ashton Woods' entry-level brand, its own
+  site and markup). Market page `/san-antonio` links 7 communities (Cordova
+  Trails in Seguin, Hennersby Hollow, Roosevelt Heights, Saddlebrook Ranch in
+  Schertz, Sutton Farms, The Wilder in Adkins, Trails at Culebra). Community
+  page `/san-antonio/<slug>` (~380 KB, server-rendered).
+- Record: schema.org `HomeAndConstructionBusiness` (name "<Community> by
+  Starlight Homes", street, city, ZIP, `telephone` "+1-830-…", `geo`); the
+  review records on the page carry reviewer names and are never read.
+- Homes: `table.qmi-table` rows (price, street, plan link, "3 Beds | 2
+  Baths<br>1,402 sq. ft.", availability "Ready Now" | "Available <Month
+  YYYY>"), under "N Available Homes In This Neighborhood" (the count is
+  checked against the rows; rows without the count, or a count without the
+  table, hold). The homes have no pages; each is filed as a fragment of the
+  community page. No photos per home.
+- Plans: `.plan-card` with heading link, specs, `awh.widen.net` photos; no
+  price (the site sells by monthly payment: "Own your new home from
+  $1,427/month*", which is not read).
+- Offer: the footer paragraph "*Terms are based upon a loan with the
+  following terms…" states the current financing in full per community: a
+  2/1 buydown ("2.99% (APR 6.81%) 30-YR Fixed FHA loan 3.5% down … year one
+  is 2.99% … year two is 3.99% … Beginning in year three, the fixed rate of
+  4.99%", "rate expires on October 31, 2026") or a 5/1 ARM (held
+  `adjustable_rate`). The rate parser now reads "year one/two/three" and
+  "2/1 Program" wording as a temporary buydown. Lenders named: Velocio
+  Mortgage, Trailblazer Mortgage (NMLS ids stripped).
+- Discovery: the market page's links; each page is read for its record.
+- Scrub: Starlight Homes, Starlight, Ashton Woods; lenders Velocio Mortgage,
+  Trailblazer Mortgage.
+
 ## Meritage Homes: deferred
 
 - `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.

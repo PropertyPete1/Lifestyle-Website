@@ -57,6 +57,7 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "www.sitterlehomes.com",
   // Scott Felder Homes serves its photos from the BuilderCloud bucket (…/buildercloud/…); the path is checked below.
   "s3.amazonaws.com",
+  "assets.drbhomes.com",
   // LGI Homes serves its photos from Sitecore's edge CDN (…/lgihomesinc…/…); the path is checked below.
   "edge.sitecorecloud.io",
 ]);

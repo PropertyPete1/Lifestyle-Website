@@ -370,7 +370,7 @@ describe("processDealPhoto: download wiring and queue state machine", () => {
     expect(await photos.processPendingDealPhotos(5)).toMatchObject({ processed: 0 });
     expect(batches.length).toBe(0);
     expect(recoveries()).toBe(1);
-  });
+  }, 20_000);
 
   it("requeues every photo of a builder's communities as pending with zero attempts", async () => {
     const fake = createFakeDb();

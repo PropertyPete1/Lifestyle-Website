@@ -151,6 +151,47 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Incentives:** a payment calculator and no offer terms; nothing read.
 - **Scrub:** Sitterle Homes, Sitterle.
 
+## Scott Felder Homes reader (added 2026-10-20)
+
+- Site: `www.scottfelderhomes.com` (canonical; the apex serves the same app). A
+  server-rendered React app; every page embeds the builder's whole catalogue
+  (all markets, ~3.7 MB) in `window.__PRELOADED_STATE__ = {...}`:
+  `cloudData.communities|homes|plans[<builder id>].data[]` (BuilderCloud
+  records). Community pages: `/communities/san-antonio-area/<sub-market>/<slug>`
+  (sub-markets `san-antonio`, `boerne`, `new-braunfels`, `schertzcibolo`; the
+  market page links 11 communities). An unknown path renders the market page
+  with HTTP 200, so the reader requires the `<h1>` to name the community.
+- Homes: `containedIn` = community id, `status` "Active" | "Under
+  Construction" (one blank seen: no status, the run holds), `moveInDate`
+  ISO. The page labels a card "Ready Now!" once `moveInDate` has passed and
+  "available - <Month>" otherwise, whatever the status; the reader publishes
+  Active + passed date as ready now, a future date as its month, and Under
+  Construction + passed date as an undated quick move-in. Stale dates are
+  common (Mayfair homes dated February 2026 in October). `isLot` rows are
+  lots. The page shows at most six cards; the state is complete, and the
+  page's "N Quick Move-In Homes" line is checked against it.
+- Home URL: `/homes/<metro>/<sub-market>/<community slug>/<street slug>`
+  (slug = lower case, non-alphanumerics to one hyphen) — verified against all
+  rendered cards in the San Antonio market. Plans: `/plan/<slug>/<plan slug>`,
+  priced per community in `communities[].communityModelProperties.price`
+  (`hide_price` / `dont_show_price_on_detail` hide it).
+- Parent communities (`is_parent_community`, children carry
+  `parent_community`): Prominence lists Prominence 55'/60'; the parent page
+  renders no cards, the reader publishes the children's homes under their
+  own slugs.
+- Offer: community `headline` / `custom_banner` / `card_feature_headline`
+  ("Rates as Low As 3.99%*", "RATES AS LOW AS 2.99% on SELECT HOMES
+  (FHA/VA)!") plus per-home `special_feature_headline`; the fine print (a
+  temporary buydown, note rate 5.99%) lives only in a blog post, so the rate
+  parser holds the offer (`missing_apr`) for a look. Lender names on the
+  page: Southern Lending, First Continental Mortgage.
+- Photos: `s3.amazonaws.com/buildercloud/<hash>.jpeg` (the page serves them
+  through a CloudFront resizer); the bucket path is pinned. Agents
+  (`cloudData.agents`) are private names and never read.
+- Discovery: the market page's links with the state's records (sales
+  address, pin, phone, price); "BOOK BY APPOINTMENT" (Crown Ridge Manor) is
+  not an address, so that page is read and its pin keeps it.
+
 ## Meritage Homes: deferred
 
 - `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.

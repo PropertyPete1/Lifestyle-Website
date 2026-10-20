@@ -7,7 +7,7 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { ASHTON_HOST, CENTURY_HOST, LGI_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { ASHTON_HOST, CENTURY_HOST, LGI_HOST, SCOTTFELDER_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
@@ -18,6 +18,7 @@ import { weekleyListingEntries, weekleyListingUrl, weekleyRecord } from "./deals
 import { ashtonListingEntries, ashtonListingUrl, ashtonRecord } from "./dealsAdapters.ashton";
 import { lgiListingEntries, lgiListingUrl, lgiRecord } from "./dealsAdapters.lgi";
 import { sitterleListingEntries, sitterleListingUrl, sitterleRecord } from "./dealsAdapters.sitterle";
+import { scottFelderListingEntries, scottFelderListingUrl, scottFelderRecord } from "./dealsAdapters.scottfelder";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -159,6 +160,13 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     index: { kind: "listing", url: sitterleListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => sitterleListingEntries(body, host) },
     communityPath: /^\/communities\/(?!comm_|feed$|page\/)[a-z0-9-]+\/?$/i,
     record: (html) => sitterleRecord(html),
+  },
+  {
+    // Scott Felder: the San Antonio market page links each community, and its inline state carries every record (sales address, pin, phone, price); a page is read only when the address is missing.
+    builder: "Scott Felder Homes", host: SCOTTFELDER_HOST,
+    index: { kind: "listing", url: scottFelderListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => scottFelderListingEntries(body, host) },
+    communityPath: /^\/communities\/san-antonio-area\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
+    record: scottFelderRecord,
   },
   { builder: "Century Communities", host: CENTURY_HOST, index: { kind: "sitemap", url: `https://${CENTURY_HOST}/sitemap.xml` }, communityPath: /^\/find-your-new-home\/texas\/san-antonio-metro\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({

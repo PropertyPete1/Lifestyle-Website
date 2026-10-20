@@ -13,12 +13,13 @@ import { DavidWeekleyAdapter } from "./dealsAdapters.weekley";
 import { AshtonWoodsAdapter } from "./dealsAdapters.ashton";
 import { LgiHomesAdapter } from "./dealsAdapters.lgi";
 import { SitterleAdapter } from "./dealsAdapters.sitterle";
+import { ScottFelderAdapter } from "./dealsAdapters.scottfelder";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -241,8 +242,9 @@ export const WEEKLEY_HOST = "www.davidweekleyhomes.com";
 export const ASHTON_HOST = "www.ashtonwoods.com";
 export const LGI_HOST = "www.lgihomes.com";
 export const SITTERLE_HOST = "www.sitterlehomes.com";
+export const SCOTTFELDER_HOST = "www.scottfelderhomes.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -1146,6 +1148,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "Ashton Woods") { config.builder.push("Ashton Woods Homes", "Ashton Woods", "Starlight Homes"); config.lender.push("Velocio Mortgage", "Velocio"); }
   if (builder === "LGI Homes") { config.builder.push("LGI Homes", "LGI", "Terrata Homes", "CompleteHome"); config.lender.push("LGI Mortgage Solutions", "CalCon Mutual Mortgage", "One Trust Home Loans", "OneTrust Home Loans"); }
   if (builder === "Sitterle Homes") { config.builder.push("Sitterle Homes", "Sitterle"); }
+  if (builder === "Scott Felder Homes") { config.builder.push("Scott Felder Homes", "Scott Felder"); config.lender.push("Southern Lending", "First Continental Mortgage", "First Continental"); }
   if (builder === "Highland Homes") { config.builder.push("Highland Homes", "Highland"); config.lender.push("Highland HomeLoans", "Highland Home Loans"); }
   if (builder === "Davidson Homes") { config.builder.push("Davidson Homes", "Davidson"); config.lender.push("NorthStar Mortgage Advisors", "NorthStar Mortgage", "NorthStar"); }
   if (builder === "First America Homes") { config.builder.push("First America Homes", "First America"); }
@@ -1794,6 +1797,7 @@ let weekleyAdapter: DealAdapter | null = null;
 let ashtonAdapter: DealAdapter | null = null;
 let lgiAdapter: DealAdapter | null = null;
 let sitterleAdapter: DealAdapter | null = null;
+let scottFelderAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
@@ -1814,6 +1818,7 @@ export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   get "Ashton Woods"() { return (ashtonAdapter ??= new AshtonWoodsAdapter()); },
   get "LGI Homes"() { return (lgiAdapter ??= new LgiHomesAdapter()); },
   get "Sitterle Homes"() { return (sitterleAdapter ??= new SitterleAdapter()); },
+  get "Scott Felder Homes"() { return (scottFelderAdapter ??= new ScottFelderAdapter()); },
   Manual: new ManualAdapter(),
 };
 

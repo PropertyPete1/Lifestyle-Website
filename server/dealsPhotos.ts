@@ -55,6 +55,8 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "assetcontentdeliveryapi.davidweekleyhomes.com",
   "awh.widen.net",
   "www.sitterlehomes.com",
+  // Scott Felder Homes serves its photos from the BuilderCloud bucket (…/buildercloud/…); the path is checked below.
+  "s3.amazonaws.com",
   // LGI Homes serves its photos from Sitecore's edge CDN (…/lgihomesinc…/…); the path is checked below.
   "edge.sitecorecloud.io",
 ]);
@@ -281,6 +283,7 @@ export function safeDealImageUrl(raw: string): URL {
   // A shared image CDN is approved for the builder's own account only.
   if (url.hostname.toLowerCase() === "res.cloudinary.com" && !url.pathname.startsWith("/perryhomes/")) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "edge.sitecorecloud.io" && !/^\/lgihomes/i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
+  if (url.hostname.toLowerCase() === "s3.amazonaws.com" && !/^\/buildercloud\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   return url;
 }
 

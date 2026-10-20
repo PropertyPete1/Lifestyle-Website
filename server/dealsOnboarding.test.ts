@@ -105,6 +105,18 @@ describe("onboarding discovered communities", () => {
     expect((await publicDealsCatalog()).map((entry) => entry.label)).toEqual(["Southeast San Antonio | Half-Acre Lots and Lakes"]);
   });
 
+  it("keeps a label an admin rewrote while the community waited, and still turns it on", async () => {
+    const { created: [id] } = await onboardDiscoveredCommunities([discovered]);
+    db.rows(dealCommunities).find((r) => r.id === id)!.publicLabel = "Southeast San Antonio | Peter's Pick";
+    mocks.loadOfficialDeals.mockResolvedValue({
+      ok: true, catalogOk: true, incentiveHoldReasons: [], holdReasons: [], fetchedAt: new Date().toISOString(),
+      private: { builder: "Chesmar", sourceUrl: discovered.sourceUrl, privateCommunityName: "Sienna Lakes", pages: [], plans: [], incentive: null, homes: [{ sourceUrl: `${discovered.sourceUrl}homes/1/`, privateName: "1", status: "Quick Move-In", price: 507_990, bedrooms: 4, bathrooms: 3, squareFeet: 2776, gallery: [] }], communityFacts: { fromPrice: 499_990, schoolDistrict: null, lotSizes: "Half-acre lots", amenities: ["Lakes"] } },
+      public: { plans: [], homes: [], incentive: null, holdReasons: [] },
+    } as unknown as DealAdapterResult);
+    await refreshOfficialDeals();
+    expect(db.rows(dealCommunities).find((r) => r.id === id)).toMatchObject({ active: true, awaitingFirstSync: false, publicLabel: "Southeast San Antonio | Peter's Pick" });
+  });
+
   it("keeps a community that fails its first sync off the page, and never revives one an admin turned off", async () => {
     const { created: [id] } = await onboardDiscoveredCommunities([discovered]);
     mocks.loadOfficialDeals.mockResolvedValue({ ok: false, catalogOk: false, holdReasons: ["community_fetch_failed"], incentiveHoldReasons: [], fetchedAt: "", private: { homes: [], plans: [] }, public: { holdReasons: [] } });

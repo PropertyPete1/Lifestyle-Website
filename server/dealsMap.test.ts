@@ -180,22 +180,19 @@ describe("area map image route", () => {
     }
   });
 
-  it("moves the landing card's circle 1.5 to 3 miles off the ZIP center, keyed by a server secret, with the ZIP center still inside", () => {
-    const distances = Array.from({ length: 200 }, (_, index) => {
-      const center = publicMapCenter(index + 1, CENTROID, 8);
-      return milesBetween(center, CENTROID);
-    });
-    expect(Math.min(...distances)).toBeGreaterThanOrEqual(1.45);
-    expect(Math.max(...distances)).toBeLessThanOrEqual(3.05);
-    // Stable for one community, different between communities.
-    expect(publicMapCenter(5, CENTROID, 8)).toEqual(publicMapCenter(5, CENTROID, 8));
-    expect(publicMapCenter(5, CENTROID, 8)).not.toEqual(publicMapCenter(6, CENTROID, 8));
-    // Never more than 40% of a small radius Admin might set, so the ZIP center stays well inside.
-    expect(milesBetween(publicMapCenter(5, CENTROID, 2), CENTROID)).toBeLessThanOrEqual(0.81);
-    // Another secret gives another offset: the public community id alone cannot undo it.
-    const withSecret = publicMapCenter(5, CENTROID, 8);
-    env.ENV.cookieSecret = "another-secret";
-    try { expect(publicMapCenter(5, CENTROID, 8)).not.toEqual(withSecret); } finally { env.ENV.cookieSecret = "test-secret"; }
+  it("centers the landing card's map on a coarse grid cell, so nearby ZIPs share one image and the ZIP center stays well inside", () => {
+    // Points within the same 4-mile cell give the same center; the ZIP center is never more than ~3 miles from it.
+    const a = publicMapCenter(1, { lat: 29.3005, lng: -98.3205 }, 8);
+    const b = publicMapCenter(2, { lat: 29.3045, lng: -98.3185 }, 8);
+    expect(a).toEqual(b);
+    const distances = Array.from({ length: 100 }, (_, index) => milesBetween(publicMapCenter(index, { lat: 29.2 + index * 0.0077, lng: -98.6 + index * 0.0061 }, 8), { lat: 29.2 + index * 0.0077, lng: -98.6 + index * 0.0061 }));
+    expect(Math.max(...distances)).toBeLessThanOrEqual(3);
+    // Many distinct ZIP centers share a handful of images: the image says "this part of town", not which ZIP.
+    expect(new Set(Array.from({ length: 100 }, (_, index) => JSON.stringify(publicMapCenter(index, { lat: 29.2 + index * 0.0077, lng: -98.6 + index * 0.0061 }, 8)))).size).toBeLessThan(40);
+    // A small radius Admin might set gets a finer cell, so the ZIP center is still inside the circle.
+    expect(milesBetween(publicMapCenter(5, CENTROID, 2), CENTROID)).toBeLessThanOrEqual(1);
+    // The community id plays no part: two communities in one ZIP get the same image.
+    expect(publicMapCenter(5, CENTROID, 8)).toEqual(publicMapCenter(6, CENTROID, 8));
   });
 
   it("serves the landing card's wide map without a session: zoomed out, cacheable, marker-free and off the ZIP center", async () => {
@@ -214,7 +211,7 @@ describe("area map image route", () => {
       expect(request.searchParams.get("zoom")).toBe("10");
       const center = publicMapCenter(communityId, CENTROID, 8);
       expect(request.searchParams.get("center")).toBe(`${center.lat},${center.lng}`);
-      expect(milesBetween(center, CENTROID)).toBeGreaterThan(1.4);
+      expect(request.searchParams.get("center")).not.toBe(`${CENTROID.lat},${CENTROID.lng}`);
       expect(request.searchParams.has("markers")).toBe(false);
       // The private list's closer map is still behind the session check.
       const gated = responseRecorder();
@@ -265,5 +262,13 @@ describe("area map image route", () => {
     const other = responseRecorder();
     await dealsMapImageHandler({ ...request, ip: "203.0.113.78" } as unknown as Request, other.response, "public");
     expect(other.raw.status).toHaveBeenCalledWith(404);
+    // A rotating IPv6 address inside one /64 is one visitor.
+    for (let index = 0; index < PUBLIC_MAP_REQUESTS_PER_WINDOW; index++) {
+      const { response } = responseRecorder();
+      await dealsMapImageHandler({ ...request, ip: `2001:db8:abcd:1234::${(index + 1).toString(16)}` } as unknown as Request, response, "public");
+    }
+    const v6 = responseRecorder();
+    await dealsMapImageHandler({ ...request, ip: "2001:db8:abcd:1234:ffff::1" } as unknown as Request, v6.response, "public");
+    expect(v6.raw.status).toHaveBeenCalledWith(429);
   });
 });

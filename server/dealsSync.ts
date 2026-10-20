@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, ne, or } from "drizzle-orm";
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealJobRuns, dealPhotos, dealSyncDigestEntries } from "../drizzle/schema";
 import { getDb } from "./db";
 import { chicagoClock, chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
@@ -514,17 +514,24 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
   const incentiveHold = community.incentiveHoldReason;
   if (community.awaitingFirstSync) {
     // First clean pull of a discovered community: its headline now uses what the pull found, then it goes live.
+    // Whether the label is still the generated one is judged on the row as it was before this pull's facts.
     const facts = snapshot.private.communityFacts;
-    const { relabelFromCentroid } = await import("./dealsOnboarding");
+    const { generatedLabelFor, relabelFromCentroid } = await import("./dealsOnboarding");
     const { lotAcres } = await import("../shared/dealsFeatured");
     await relabelFromCentroid(community.id, {
       acres: lotAcres(facts?.lotSizes ?? null, { field: true }),
       fromPrice: facts?.fromPrice ?? community.fromPrice,
       amenities: facts?.amenities ?? [],
       moveInReadyCount: snapshot.private.homes.filter((home) => /quick\s+move|available\s+now/i.test(home.status ?? "")).length,
-    });
+    }, { labelUntouched: community.publicLabel === generatedLabelFor(community) });
   }
-  await db.update(dealCommunities).set({ lastSuccessfulSyncAt: now, catalogUpdatedAt: now, catalogHoldReason: null, catalogHoldSeenAt: null, holdReason: summarizeHolds(null, incentiveHold), ...(community.awaitingFirstSync ? { active: true, awaitingFirstSync: false } : {}) }).where(eq(dealCommunities.id, community.id));
+  await db.update(dealCommunities).set({ lastSuccessfulSyncAt: now, catalogUpdatedAt: now, catalogHoldReason: null, catalogHoldSeenAt: null, holdReason: summarizeHolds(null, incentiveHold) }).where(eq(dealCommunities.id, community.id));
+  // Goes live only if it is still waiting: an admin who turned it on or off, paused it or
+  // switched it to manual while this pull ran has the last word (those clear the wait).
+  if (community.awaitingFirstSync) {
+    await db.update(dealCommunities).set({ active: true, awaitingFirstSync: false })
+      .where(and(eq(dealCommunities.id, community.id), eq(dealCommunities.awaitingFirstSync, true), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
+  }
   if (hasChanges(summary)) summaries.push(summary);
   return { ...base, ok: true };
 }
@@ -535,15 +542,18 @@ function money(value: number) {
 
 type RunEmail = { category: string; subject: string; content: string };
 
-/** One change-summary email per run and one email for every new hold; failures never fail the sync. */
-async function sendRunEmails(summaries: readonly CommunityChangeSummary[], holds: readonly HoldNotice[]) {
+/** One change-summary email and one hold email per run; a failure never fails the sync, and is reported as false. */
+async function sendRunEmails(summaries: readonly CommunityChangeSummary[], holds: readonly HoldNotice[]): Promise<boolean> {
   const messages = composeRunEmails(summaries, holds);
-  if (!messages.length) return;
+  if (!messages.length) return true;
   let recipients: string[] = [];
   try { recipients = (await getDealSettings()).syncEmailRecipients; } catch { recipients = []; }
+  let allSent = true;
   for (const message of messages) {
-    await sendBuilderDealsEmail({ ...message, recipients }).catch((error) => console.error("[deals-sync] email failed", error instanceof Error ? error.message : error));
+    const result = await sendBuilderDealsEmail({ ...message, recipients }).catch((error) => { console.error("[deals-sync] email failed", error instanceof Error ? error.message : error); return null; });
+    if (!result || (typeof result === "object" && "ok" in result && (result as { ok?: boolean }).ok === false)) allSent = false;
   }
+  return allSent;
 }
 
 function composeRunEmails(summaries: readonly CommunityChangeSummary[], holds: readonly HoldNotice[]): RunEmail[] {
@@ -663,13 +673,72 @@ function dueCandidates(rows: readonly CommunityRow[], now: Date, everyDays: numb
     && (!community.lastAttemptAt || now.getTime() - community.lastAttemptAt.getTime() >= CATALOG_RETRY_GAP_MS));
 }
 
-/** Atomically takes a community for this batch, so two overlapping batches never check it twice. */
-async function claimCommunity(communityId: number, at: Date): Promise<boolean> {
+/**
+ * Atomically takes a community for this batch, so two overlapping batches never
+ * check it twice, and only while it is still checkable (an admin may have paused,
+ * archived or switched it to manual since the batch listed it). Returns the row
+ * as it is now.
+ */
+async function claimCommunity(communityId: number, at: Date): Promise<CommunityRow | null> {
   const db = await getDb();
-  if (!db) return false;
+  if (!db) return null;
   const claimed = await db.update(dealCommunities).set({ lastAttemptAt: at })
-    .where(and(eq(dealCommunities.id, communityId), or(isNull(dealCommunities.lastAttemptAt), lt(dealCommunities.lastAttemptAt, new Date(at.getTime() - CATALOG_RETRY_GAP_MS)))));
-  return Number((claimed as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) === 1;
+    .where(and(
+      eq(dealCommunities.id, communityId),
+      or(isNull(dealCommunities.lastAttemptAt), lt(dealCommunities.lastAttemptAt, new Date(at.getTime() - CATALOG_RETRY_GAP_MS))),
+      or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)),
+      eq(dealCommunities.paused, false),
+      eq(dealCommunities.manualMode, false),
+    ));
+  if (Number((claimed as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) !== 1) return null;
+  return (await db.select().from(dealCommunities).where(eq(dealCommunities.id, communityId)).limit(1))[0] ?? null;
+}
+
+const BUILDER_LEASE_PREFIX = "builder-deals-lane-";
+/** A lease older than this belongs to a run that died; the next batch may take it. */
+export const BUILDER_LEASE_STALE_MS = 30 * 60_000;
+
+/**
+ * One request stream per builder: a batch lane or "Refresh now" holds the
+ * builder's lease while it reads that builder's pages. The (job, day) unique
+ * key on deal_job_runs settles two takers racing for it. Returns a release.
+ */
+export async function leaseBuilder(builder: string, now = new Date()): Promise<(() => Promise<void>) | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const jobName = `${BUILDER_LEASE_PREFIX}${builder}`;
+  const day = chicagoDay(now);
+  const stale = new Date(now.getTime() - BUILDER_LEASE_STALE_MS);
+  const existing = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).limit(1))[0];
+  if (existing) {
+    const taken = await db.update(dealJobRuns).set({ status: "running", startedAt: now, completedAt: null })
+      .where(and(eq(dealJobRuns.id, existing.id), or(ne(dealJobRuns.status, "running"), lt(dealJobRuns.startedAt, stale))));
+    if (Number((taken as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) !== 1) return null;
+  } else {
+    try { await db.insert(dealJobRuns).values({ jobName, chicagoDay: day, status: "running", startedAt: now }); } catch { return null; }
+  }
+  return async () => {
+    const connection = await getDb();
+    if (!connection) return;
+    await connection.update(dealJobRuns).set({ status: "ok", completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running"))).catch(() => undefined);
+  };
+}
+
+/** Builders some run is reading right now (a live lease), so their communities may still be in flight. */
+export async function buildersInFlight(now = new Date()): Promise<string[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({ jobName: dealJobRuns.jobName }).from(dealJobRuns)
+    .where(and(eq(dealJobRuns.chicagoDay, chicagoDay(now)), eq(dealJobRuns.status, "running"), gte(dealJobRuns.startedAt, new Date(now.getTime() - BUILDER_LEASE_STALE_MS))));
+  return rows.flatMap((row) => row.jobName.startsWith(BUILDER_LEASE_PREFIX) ? [row.jobName.slice(BUILDER_LEASE_PREFIX.length)] : []);
+}
+
+/** What one community's check found, written as its own digest entry the moment it finishes, so a restart loses nothing. */
+async function recordDigestEntry(summaries: readonly CommunityChangeSummary[], holds: readonly HoldNotice[]) {
+  if (!summaries.length && !holds.length) return;
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(dealSyncDigestEntries).values({ summaries: JSON.stringify(summaries), holds: JSON.stringify(holds) }).catch((error) => console.error("[deals-sync] digest entry failed", error instanceof Error ? error.message : error));
 }
 
 /**
@@ -696,25 +765,34 @@ export async function refreshDueCommunitiesBatch(options: { clock?: () => number
     || a.id - b.id);
   const byBuilder = new Map<string, DueCandidate[]>();
   for (const community of due) byBuilder.set(community.builder, [...(byBuilder.get(community.builder) ?? []), community]);
-  const lanesOfWork = Array.from(byBuilder.values());
+  const lanesOfWork = Array.from(byBuilder.entries());
   const results: RefreshResult[] = [];
-  const summaries: CommunityChangeSummary[] = [];
-  const holds: HoldNotice[] = [];
   let stoppedForTime = false;
   let next = 0;
   const lane = async () => {
     while (next < lanesOfWork.length) {
-      const communities = lanesOfWork[next++]!;
-      for (const community of communities) {
-        if (clock() >= deadline) { stoppedForTime = true; return; }
-        const at = new Date(clock());
-        if (!(await claimCommunity(community.id, at))) continue;
-        try {
-          results.push(await refreshCommunity({ ...community, lastAttemptAt: at }, at, summaries, holds));
-        } catch (error) {
-          console.error(`[deals-sync] community ${community.id} refresh failed`, error instanceof Error ? error.message : error);
-          results.push({ communityId: community.id, reelCode: community.reelCode, ok: false, reason: "refresh_failed" });
+      const [builder, communities] = lanesOfWork[next++]!;
+      // Another batch (or Refresh now) is already reading this builder: leave it to them.
+      const release = await leaseBuilder(builder, new Date(clock()));
+      if (!release) continue;
+      try {
+        for (const community of communities) {
+          if (clock() >= deadline) { stoppedForTime = true; return; }
+          const at = new Date(clock());
+          const fresh = await claimCommunity(community.id, at);
+          if (!fresh) continue;
+          const summaries: CommunityChangeSummary[] = [];
+          const holds: HoldNotice[] = [];
+          try {
+            results.push(await refreshCommunity(fresh, at, summaries, holds));
+          } catch (error) {
+            console.error(`[deals-sync] community ${community.id} refresh failed`, error instanceof Error ? error.message : error);
+            results.push({ communityId: community.id, reelCode: community.reelCode, ok: false, reason: "refresh_failed" });
+          }
+          await recordDigestEntry(summaries, holds);
         }
+      } finally {
+        await release();
       }
     }
   };
@@ -723,16 +801,15 @@ export async function refreshDueCommunitiesBatch(options: { clock?: () => number
     await Promise.all(Array.from({ length: Math.min(Math.max(1, options.lanes ?? CATALOG_BATCH_LANES), lanesOfWork.length) }, lane));
     void processPendingDealPhotos(10).catch((error) => console.warn("[deals-photo] retry queue drain failed", error));
   }
-  if (summaries.length || holds.length) {
-    await db.insert(dealSyncDigestEntries).values({ summaries: JSON.stringify(summaries), holds: JSON.stringify(holds) });
-  }
   const checkedIds = new Set(results.map((result) => result.communityId));
   const remaining = due.filter((community) => !checkedIds.has(community.id)).length;
-  // Still to do today: due and not tried yet today (a failed one being retried later does not hold the summary back).
+  // Still to do today: due and not tried yet today (a failed one being retried later does not hold
+  // the summary back), and nothing still being read by another run.
   const today = chicagoDay(now);
   const fresh = await db.select().from(dealCommunities).where(and(or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
   const untriedToday = dueCandidates(fresh, new Date(clock()), catalogRefreshDays).filter((community) => !community.lastAttemptAt || chicagoDay(community.lastAttemptAt) !== today).length;
-  const digest = await sendSyncDigestIfReady(new Date(clock()), untriedToday === 0);
+  const inFlight = (await buildersInFlight(new Date(clock()))).length;
+  const digest = await sendSyncDigestIfReady(new Date(clock()), untriedToday === 0 && inFlight === 0);
   return {
     checked: results.filter((result) => !result.skipped).length,
     ok: results.filter((result) => result.ok).length,
@@ -744,20 +821,36 @@ export async function refreshDueCommunitiesBatch(options: { clock?: () => number
   };
 }
 
-/** Claims a once-a-day digest slot; false when another batch already sent it. */
-async function claimDigestSlot(slot: "morning" | "evening", now: Date): Promise<boolean> {
+/**
+ * Claims a once-a-day digest slot; null when another batch has it or already
+ * spent it. A slot whose send failed (status "failed") may be taken again, so
+ * a bad email minute never loses a day's changes.
+ */
+async function claimDigestSlot(slot: "morning" | "evening", now: Date): Promise<{ done: (ok: boolean) => Promise<void> } | null> {
   const db = await getDb();
-  if (!db) return false;
+  if (!db) return null;
   const jobName = `builder-deals-sync-digest-${slot}`;
   const day = chicagoDay(now);
-  if ((await db.select({ id: dealJobRuns.id }).from(dealJobRuns).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).limit(1)).length) return false;
-  try {
-    // The (job, day) unique key settles two batches racing for the same slot.
-    await db.insert(dealJobRuns).values({ jobName, chicagoDay: day, status: "ok", completedAt: now });
-    return true;
-  } catch {
-    return false;
+  const existing = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).limit(1))[0];
+  if (existing) {
+    const retaken = await db.update(dealJobRuns).set({ status: "running", startedAt: now, completedAt: null })
+      .where(and(eq(dealJobRuns.id, existing.id), or(eq(dealJobRuns.status, "failed"), and(eq(dealJobRuns.status, "running"), lt(dealJobRuns.startedAt, new Date(now.getTime() - BUILDER_LEASE_STALE_MS))))));
+    if (Number((retaken as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) !== 1) return null;
+  } else {
+    try {
+      // The (job, day) unique key settles two batches racing for the same slot.
+      await db.insert(dealJobRuns).values({ jobName, chicagoDay: day, status: "running", startedAt: now });
+    } catch {
+      return null;
+    }
   }
+  return {
+    done: async (ok) => {
+      const connection = await getDb();
+      if (!connection) return;
+      await connection.update(dealJobRuns).set({ status: ok ? "ok" : "failed", completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).catch(() => undefined);
+    },
+  };
 }
 
 /**
@@ -773,18 +866,20 @@ export async function sendSyncDigestIfReady(now: Date, allTriedToday: boolean): 
   const { hour } = chicagoClock(now);
   const slot = hour >= DIGEST_EVENING_HOUR ? "evening" : allTriedToday || hour >= DIGEST_MORNING_DEADLINE_HOUR ? "morning" : null;
   if (!slot) return "waiting";
-  const unsent = await db.select().from(dealSyncDigestEntries).where(isNull(dealSyncDigestEntries.sentAt)).orderBy(dealSyncDigestEntries.id);
+  const pending = await db.select({ id: dealSyncDigestEntries.id }).from(dealSyncDigestEntries).where(isNull(dealSyncDigestEntries.sentAt)).limit(1);
   // The evening follow-up only goes out when something new turned up; the morning slot is spent either way.
-  if (slot === "evening" && !unsent.length) return "nothing_new";
-  if (!(await claimDigestSlot(slot, now))) return unsent.length ? "waiting" : "nothing_new";
-  const claimed: Array<typeof dealSyncDigestEntries.$inferSelect> = [];
-  for (const entry of unsent) {
-    const result = await db.update(dealSyncDigestEntries).set({ sentAt: now }).where(and(eq(dealSyncDigestEntries.id, entry.id), isNull(dealSyncDigestEntries.sentAt)));
-    if (Number((result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) === 1) claimed.push(entry);
-  }
-  if (!claimed.length) return "nothing_new";
+  if (slot === "evening" && !pending.length) return "nothing_new";
+  const claim = await claimDigestSlot(slot, now);
+  if (!claim) return pending.length ? "waiting" : "nothing_new";
+  // Read the entries under the slot, send, and only then mark them sent: a failed send
+  // releases the slot (status "failed") and the entries stay unsent for the next try.
+  const unsent = await db.select().from(dealSyncDigestEntries).where(isNull(dealSyncDigestEntries.sentAt)).orderBy(dealSyncDigestEntries.id);
+  if (!unsent.length) { await claim.done(true); return "nothing_new"; }
   const parse = <T,>(text: string): T[] => { try { const value: unknown = JSON.parse(text); return Array.isArray(value) ? value as T[] : []; } catch { return []; } };
-  await sendRunEmails(claimed.flatMap((entry) => parse<CommunityChangeSummary>(entry.summaries)), claimed.flatMap((entry) => parse<HoldNotice>(entry.holds)));
+  const sent = await sendRunEmails(unsent.flatMap((entry) => parse<CommunityChangeSummary>(entry.summaries)), unsent.flatMap((entry) => parse<HoldNotice>(entry.holds)));
+  if (!sent) { await claim.done(false); return "waiting"; }
+  await db.update(dealSyncDigestEntries).set({ sentAt: now }).where(inArray(dealSyncDigestEntries.id, unsent.map((entry) => entry.id)));
+  await claim.done(true);
   return "sent";
 }
 
@@ -801,27 +896,24 @@ export async function revalidateDealIncentives(now = new Date()) {
   const rows = await db.select().from(dealIncentives).where(eq(dealIncentives.active, true));
   const lapseBefore = now.getTime() - settings.incentiveLapseDays * 24 * 60 * 60_000;
   const stale = rows.filter((row) => (row.expiresAt && row.expiresAt <= now) || (!row.expiresAt && row.confirmedAt.getTime() <= lapseBefore));
+  const retired: CommunityChangeSummary[] = [];
   for (const row of stale) {
     const expired = Boolean(row.expiresAt);
     await db.update(dealIncentives).set({ active: false, holdReason: expired ? "expired" : "lapsed_unconfirmed" }).where(eq(dealIncentives.id, row.id));
     const community = (await db.select().from(dealCommunities).where(eq(dealCommunities.id, row.communityId)).limit(1))[0];
     await db.update(dealCommunities).set({ catalogUpdatedAt: now }).where(eq(dealCommunities.id, row.communityId));
     const name = community?.privateName ?? `community ${row.communityId}`;
-    await sendBuilderDealsEmail({
-      category: expired ? "deals_incentive_expired" : "deals_incentive_lapsed",
-      recipients: settings.syncEmailRecipients,
-      subject: `Builder Deals incentive ${expired ? "expired" : "lapsed"}: ${name}`,
-      content: [
+    // Into the daily digest, not an email per incentive: a month end can retire dozens at once.
+    retired.push({
+      communityId: row.communityId, privateName: name, builder: community?.builder ?? "", added: [], sold: [], reappeared: [], priceChanges: [],
+      incentive: [
         expired
-          ? `The incentive for ${name} reached its ${row.contractBy && row.expiresAt && row.contractBy.getTime() === row.expiresAt.getTime() ? "contract-by" : "close-by"} date (${isoDay(row.expiresAt)}) and came off the page.`
-          : `The incentive for ${name} has no dates and was not re-confirmed by a successful scrape for ${settings.incentiveLapseDays} days (last confirmed ${isoDay(row.confirmedAt)}), so it came off the page.`,
-        "",
-        `Text: "${row.publicText}"`,
-        row.manual ? "This was a manual override." : "It returns only when the builder's text changes (expired) or the same text is confirmed again (lapsed).",
-        "",
-        "Review in Admin, Builder Deals: /admin/deals",
-      ].join("\n"),
-    }).catch((error) => console.error("[deals-sync] incentive email failed", error instanceof Error ? error.message : error));
+          ? `came off the page: reached its ${row.contractBy && row.expiresAt && row.contractBy.getTime() === row.expiresAt.getTime() ? "contract-by" : "close-by"} date (${isoDay(row.expiresAt)})`
+          : `came off the page: no dates and not re-confirmed for ${settings.incentiveLapseDays} days (last confirmed ${isoDay(row.confirmedAt)})`,
+        `  "${row.publicText}"${row.manual ? " (manual override)" : ""}`,
+      ],
+    });
   }
+  await recordDigestEntry(retired, []);
   return { ok: true as const, expired: stale.filter((row) => Boolean(row.expiresAt)).length, lapsed: stale.filter((row) => !row.expiresAt).length, checked: rows.length };
 }

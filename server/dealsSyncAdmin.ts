@@ -1,10 +1,10 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealIncentives, dealJobRuns } from "../drizzle/schema";
 import { getDb } from "./db";
-import { officialHostFor, type DealHoldReason } from "./dealsAdapters";
+import { hasBuilderReader, officialHostFor, type DealHoldReason } from "./dealsAdapters";
 import { chicagoDay, chicagoEndOfDay, getDealSettings } from "./dealsService";
 import { normalizeExcludedTerms, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
-import { activeCatalogHold, builderScrubConfig, communityRefreshDue, refreshOfficialDeals, storedExcludedScrubTerms, storedScrubConfig, summarizeHolds } from "./dealsSync";
+import { activeCatalogHold, builderScrubConfig, communityRefreshDue, leaseBuilder, refreshOfficialDeals, storedExcludedScrubTerms, storedScrubConfig, summarizeHolds } from "./dealsSync";
 import { communityAreaMap, refreshCommunityGeography } from "./dealsMap";
 import { DEAL_SCRUB_CATEGORIES, hasPrivateTerm, mergeDealScrubConfig, normalizeRateFigure, normalizedText, scrubPrivateNames, type DealScrubConfig, type DealScrubConfigInput } from "../shared/deals";
 
@@ -100,6 +100,7 @@ export async function refreshCommunityInBackground(communityId: number): Promise
   const community = await requireCommunity(communityId);
   if (community.builder === "Manual" || community.manualMode) throw new DealsAdminError("PRECONDITION_FAILED", "This community is in manual mode, no auto-update.");
   if (!community.active && !community.awaitingFirstSync) throw new DealsAdminError("PRECONDITION_FAILED", "This community is archived.");
+  if (!hasBuilderReader(community.builder)) throw new DealsAdminError("PRECONDITION_FAILED", `There is no reader for ${community.builder} pages yet, so this community cannot be refreshed automatically.`);
   const jobName = `${REFRESH_JOB_PREFIX}${communityId}`;
   const day = chicagoDay();
   const existing = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).limit(1))[0];
@@ -116,7 +117,18 @@ export async function refreshCommunityInBackground(communityId: number): Promise
     await connection.update(dealJobRuns).set({ status, detail: detail.slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).catch(() => undefined);
   };
   setImmediate(() => {
-    refreshOfficialDeals({ communityId })
+    // One request stream per builder: wait for the builder's lease (a running batch lane) before reading its pages.
+    const run = async () => {
+      for (let attempt = 0; ; attempt++) {
+        const release = await leaseBuilder(community.builder);
+        if (release) {
+          try { return await refreshOfficialDeals({ communityId }); } finally { await release(); }
+        }
+        if (attempt >= 20) throw new Error("builder busy: another check of this builder's pages is still running");
+        await new Promise((resolve) => setTimeout(resolve, 15_000));
+      }
+    };
+    run()
       .then((results) => finish(results.some((result) => result.ok) ? "ok" : "failed", JSON.stringify(results)))
       .catch((error) => finish("failed", error instanceof Error ? error.message : "refresh failed"));
   });
@@ -279,6 +291,12 @@ export async function acceptIncentiveHold(input: AcceptIncentiveHoldInput): Prom
   const publicText = patch.publicText?.trim() ? scrubPrivateNames(patch.publicText.trim(), categories) : incentive.publicText;
   const missing = heldIncentiveMissingFields(incentive, { ...patch, publicText, noContractDeadline }, categories);
   if (missing.length) throw new DealsAdminError("BAD_REQUEST", `Edit and complete this incentive before accepting: ${missing.join(", ")}`);
+  if (hasPrivateTerm(publicText, categories)) throw new DealsAdminError("BAD_REQUEST", "Private names remain in incentive text.");
+  // The typed fields are shown to buyers too: the same check as a save, on what will be stored.
+  for (const [field, label] of [["loanType", "loan type"], ["downPayment", "down payment"], ["repaymentTerms", "repayment terms"], ["followOnPeriod", "follow-on period"]] as const) {
+    const value = (patch[field] ?? incentive[field])?.trim();
+    if (value && hasPrivateTerm(value, categories)) throw new DealsAdminError("BAD_REQUEST", `Private names remain in the ${label}. Keep it to the program and figures (for example "FHA" or "3.5% down").`);
+  }
   const contractBy = patch.contractBy ? adminDate(patch.contractBy) : incentive.contractBy;
   const closeBy = patch.closeBy ? adminDate(patch.closeBy) : incentive.closeBy;
   const now = new Date();
@@ -407,7 +425,7 @@ export async function listCommunityDiagnostics(now = new Date()) {
       lastAttemptAt: community.lastAttemptAt?.toISOString() ?? null,
       lastSuccessfulSyncAt: community.lastSuccessfulSyncAt?.toISOString() ?? null,
       awaitingFirstSync: community.awaitingFirstSync,
-      refreshDue: community.builder !== "Manual" && !community.manualMode && communityRefreshDue(community.lastSuccessfulSyncAt, now, refreshEvery),
+      refreshDue: community.builder !== "Manual" && !community.manualMode && hasBuilderReader(community.builder) && communityRefreshDue(community.lastSuccessfulSyncAt, now, refreshEvery),
       catalogHold: catalogHold ? { reason: catalogHold, help: describeCatalogHold(catalogHold), since: community.catalogHoldSeenAt?.toISOString() ?? null, ageHours: community.catalogHoldSeenAt ? Math.round((now.getTime() - community.catalogHoldSeenAt.getTime()) / 36e5) : null } : null,
       dismissedCatalogHold: community.catalogHoldReason?.startsWith("dismissed:") ? community.catalogHoldReason.slice("dismissed:".length) : null,
       incentiveHold: community.incentiveHoldReason ? { reason: community.incentiveHoldReason, since: community.incentiveHoldSeenAt?.toISOString() ?? null, ageHours: community.incentiveHoldSeenAt ? Math.round((now.getTime() - community.incentiveHoldSeenAt.getTime()) / 36e5) : null } : null,

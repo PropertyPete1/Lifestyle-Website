@@ -1,7 +1,7 @@
-import crypto from "node:crypto";
 import type { Request, Response } from "express";
 import { eq } from "drizzle-orm";
 import { dealCommunities } from "../drizzle/schema";
+import { clientIpKey } from "../shared/deals";
 import { ENV } from "./_core/env";
 import { makeRequest, type DistanceMatrixResult, type GeocodingResult } from "./_core/map";
 import { getDb } from "./db";
@@ -25,11 +25,8 @@ const MAX_CIRCLE_RADIUS_PX = 150;
 export const AREA_MAP_WIDTH = 800;
 export const AREA_MAP_HEIGHT = 400;
 export const AREA_MAP_ATTRIBUTION = "Map data and imagery from Google. Centered on the ZIP code area, not the community.";
-/** The landing card names no ZIP code: its circle is moved off the ZIP center by a few miles. */
+/** The landing card names no ZIP code: its circle sits on a coarse grid cell, not the ZIP center. */
 export const PUBLIC_AREA_MAP_ATTRIBUTION = "Map data and imagery from Google. General area only.";
-/** How far the landing card's circle is moved off the ZIP center (never more than 40% of its radius). */
-const PUBLIC_OFFSET_MIN_MILES = 1.5;
-const PUBLIC_OFFSET_MAX_MILES = 3;
 export const DEFAULT_DRIVE_DESTINATIONS = ["downtown San Antonio", "Randolph AFB", "Lackland AFB", "The Pearl"];
 const IMAGE_CACHE_MS = 24 * 60 * 60_000;
 /** Enough for both maps of every community; stored as WebP (about 40 KB each). */
@@ -147,16 +144,22 @@ export async function refreshCommunityGeography(communityId: number): Promise<{ 
   }
 }
 
-/** A keyed, per-community direction and distance, so the offset cannot be recomputed from the public id. */
-export function publicMapCenter(communityId: number, centroid: Centroid, radiusMiles: number): Centroid {
-  const key = ENV.cookieSecret || "deals-public-map-offset";
-  const digest = crypto.createHmac("sha256", key).update(`deals-public-map-offset:${communityId}`).digest();
-  const fraction = (offset: number) => digest.readUInt32BE(offset) / 0xffffffff;
-  const miles = Math.min(PUBLIC_OFFSET_MIN_MILES + (PUBLIC_OFFSET_MAX_MILES - PUBLIC_OFFSET_MIN_MILES) * fraction(0), radiusMiles * 0.4);
-  const bearing = 2 * Math.PI * fraction(4);
-  const lat = centroid.lat + (miles * Math.cos(bearing)) / 69.0;
-  const lng = centroid.lng + (miles * Math.sin(bearing)) / (69.172 * Math.cos(centroid.lat * Math.PI / 180));
-  return { lat: Number(lat.toFixed(6)), lng: Number(lng.toFixed(6)) };
+/** The landing card's image is centered on a coarse grid cell, never on the ZIP itself: a cell is about 4 miles. */
+const PUBLIC_GRID_MILES = 4;
+
+/**
+ * The public map's center: the middle of the coarse grid cell the ZIP centroid
+ * falls in, so many communities (and ZIPs) share one image and the picture
+ * says nothing finer than "this part of town". The cell shrinks for a small
+ * radius so the ZIP centroid always stays well inside the circle.
+ */
+export function publicMapCenter(_communityId: number, centroid: Centroid, radiusMiles: number): Centroid {
+  const cellMiles = Math.min(PUBLIC_GRID_MILES, radiusMiles * 0.6);
+  const cellLat = cellMiles / 69.0;
+  // One fixed grid for the whole area (sized at San Antonio's latitude), so neighbours never fall into different grids.
+  const cellLng = cellMiles / (69.172 * Math.cos(29.4241 * Math.PI / 180));
+  const snap = (value: number, cell: number) => (Math.floor(value / cell) + 0.5) * cell;
+  return { lat: Number(snap(centroid.lat, cellLat).toFixed(6)), lng: Number(snap(centroid.lng, cellLng).toFixed(6)) };
 }
 
 function circlePixels(radiusMiles: number, lat: number, zoom: number): number {
@@ -278,18 +281,35 @@ export function resetAreaMapCache() {
   imageCache.clear();
   failureCache.clear();
   publicMapHits.clear();
+  nextHitSweep = 0;
   wideStaticMapsAllowed = null;
 }
 
-/** Public map requests allowed per visitor IP in ten minutes (a full landing page is far fewer). */
-export const PUBLIC_MAP_REQUESTS_PER_WINDOW = 300;
+/**
+ * Public map requests allowed per visitor (IPv4 address or IPv6 /64) in ten
+ * minutes. Cards load their map lazily as they scroll into view and the image
+ * is browser-cached for an hour, so even a page of every community in the
+ * area stays far below this; a script pulling every map does not.
+ */
+export const PUBLIC_MAP_REQUESTS_PER_WINDOW = 900;
 const PUBLIC_MAP_WINDOW_MS = 10 * 60_000;
+const PUBLIC_MAP_TRACKED_VISITORS = 20_000;
 const publicMapHits = new Map<string, { count: number; resetAt: number }>();
+let nextHitSweep = 0;
 
 function publicMapAllowed(ip: string, now = Date.now()): boolean {
-  if (publicMapHits.size > 10_000) for (const [key, entry] of Array.from(publicMapHits.entries())) if (entry.resetAt <= now) publicMapHits.delete(key);
-  const entry = publicMapHits.get(ip);
-  if (!entry || entry.resetAt <= now) { publicMapHits.set(ip, { count: 1, resetAt: now + PUBLIC_MAP_WINDOW_MS }); return true; }
+  // Expired visitors are swept at most once a minute, not on every request.
+  if (now >= nextHitSweep) {
+    nextHitSweep = now + 60_000;
+    for (const [key, entry] of Array.from(publicMapHits.entries())) if (entry.resetAt <= now) publicMapHits.delete(key);
+  }
+  const key = clientIpKey(ip);
+  const entry = publicMapHits.get(key);
+  if (!entry || entry.resetAt <= now) {
+    if (publicMapHits.size >= PUBLIC_MAP_TRACKED_VISITORS) publicMapHits.delete(publicMapHits.keys().next().value as string);
+    publicMapHits.set(key, { count: 1, resetAt: now + PUBLIC_MAP_WINDOW_MS });
+    return true;
+  }
   entry.count += 1;
   return entry.count <= PUBLIC_MAP_REQUESTS_PER_WINDOW;
 }

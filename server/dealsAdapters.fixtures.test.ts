@@ -195,5 +195,9 @@ describe("Chesmar adapter on the captured-shaped fixtures", () => {
     expect(stats?.block).toBe("4 Beds 3 Baths 2,900 Sq. Ft.");
     expect(stats?.region).toContain("$410,000");
     expect(parseCommunityFacts('<p>Priced from $354,990</p><p>Northside ISD</p><ul class="amenities"><li>Pool</li><li>Trails</li></ul>')).toEqual({ fromPrice: 354990, schoolDistrict: "Northside ISD", lotSizes: null, amenities: ["Pool", "Trails"] });
+    // A lot size needs a lot word next to it: a park's acreage is never a lot size.
+    expect(parseCommunityFacts("<p>Walk to a one-acre dog park and 15 acres of trails.</p>").lotSizes).toBeNull();
+    expect(parseCommunityFacts("<p>Homesites from 0.25 to 0.5 acres with a one-acre dog park.</p>").lotSizes).toBe("Homesites from 0.25 to 0.5 acres");
+    expect(parseCommunityFacts("<p>Quarter-acre lots</p>").lotSizes).toBe("Quarter-acre lots");
   });
 });

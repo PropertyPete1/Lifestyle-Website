@@ -46,7 +46,7 @@ when it is saved.
 
 | Viewer | What a featured deal carries |
 | --- | --- |
-| Landing page (no sign-up) | Public label, area, price, beds, sq ft, payment, rate. Tapping opens the gate. |
+| Landing page (no sign-up) | Public label, area, payment, rate, beds, and rounded figures only: a price band ("$340s"), square feet to the hundred, lot to the tenth of an acre. A community's starting price is a band too ("From the $490s"). Tapping opens the gate. |
 | Reel buyer's private list | The same, scrubbed like the catalog, plus the card handle: tapping jumps to the home. |
 | Team and agent clients | Plus the community name and the address or plan. |
 
@@ -59,19 +59,21 @@ a shaded circle and no pin.
 
 | Where | Circle | Centered on | Setting |
 | --- | --- | --- | --- |
-| Public landing card | about 8 miles | a point 1.5 to 3 miles off the ZIP center | `publicAreaMapRadiusMiles` |
+| Public landing card | about 8 miles | the middle of a 4-mile grid cell, not the ZIP | `publicAreaMapRadiusMiles` |
 | Private list (after sign-up) | about 5 miles | the ZIP code centroid | `areaMapRadiusMiles` |
 
 The landing card names no ZIP code: its JSON carries only the circle's size in
 pixels (no coordinates, no zoom), its caption says "General area only", and its
-center is moved off the ZIP center by a per-community distance and direction
-keyed by the server secret, never more than 40% of the radius, so the ZIP
-center always stays inside the circle.
+image is centered on the middle of a coarse grid cell (about 4 miles, finer for
+a small radius so the ZIP center always stays inside the circle). Every ZIP
+whose center falls in the same cell gets the same image, so the picture says
+"this part of town" and nothing finer; the community id plays no part.
 
 Images are WebP, kept a day per community, and a failed map provider call is not
 retried for ten minutes. The public image is served from `/deals/maps/:id.webp`
 only for a community the landing page shows, without a session, without
-setting any cookie, rate-limited per visitor, and may be cached for an hour.
+setting any cookie, rate-limited per visitor (900 per 10 minutes, by IPv4
+address or IPv6 /64; cards load their map lazily), and may be cached for an hour.
 The private one stays behind the session check at `/deals/mine/maps/:id.webp`.
 The exact address comes from an agent.
 

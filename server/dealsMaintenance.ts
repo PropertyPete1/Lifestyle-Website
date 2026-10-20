@@ -19,6 +19,7 @@ import { resendConfiguration, sendBuilderDealsEmail } from "./dealsEmail";
 import { cleanupBuilderDealsFubRecord, formatChicagoDateTime, stripBuilderDealsTestTag } from "./dealsFub";
 import { pruneDealPhotoRenders, type DealPhotoRenderPruneResult } from "./dealsPhotos";
 import { PRIVACY_RESIDUE_EVENT_KIND, getDealSettings, privacyResidueCommunityId, privacyResidueSinceStart } from "./dealsService";
+import { hasBuilderReader } from "./dealsAdapters";
 import { activeCatalogHold } from "./dealsSync";
 import { fubHeaders } from "./fub";
 
@@ -394,8 +395,8 @@ export async function cleanupDealsTestRecords(now = new Date()): Promise<DealsTe
 export const BUILDER_DEALS_HEALTH_THRESHOLDS = {
   /** The TREC source runs nightly; older than 36 hours needs review. */
   trecImportHours: 36,
-  /** Official community data refreshes every 3 days; over 4 days means a missed run. */
-  communityUpdateHours: 96,
+  /** Official community data refreshes daily by default; a day of slack past the Admin cadence means a missed run. */
+  communityUpdateHours: 48,
   /** No photo may wait in the processing queue for over an hour. */
   pendingPhotoMinutes: 60,
   /** A FUB write still failing an hour after it was queued needs review. */
@@ -500,15 +501,16 @@ function holdText(value: string | null | undefined) {
 }
 
 /** A Manual-builder or manual-mode community never refreshes, so it is neither on schedule nor late. */
+/** Only a community the scheduled refresh maintains can be on schedule or stale: not manual, and its builder has a reader. */
 function isManagedCommunity(community: { manualMode: boolean; builder: string }) {
-  return !community.manualMode && community.builder !== "Manual";
+  return !community.manualMode && community.builder !== "Manual" && hasBuilderReader(community.builder);
 }
 
 /** Collects every local B9 threshold without an outbound request or notification. */
 export async function builderDealsOperationalSnapshot(now = new Date()): Promise<OperationalSnapshot> {
   const db = await getDb();
   if (!db) return emptyOperationalSnapshot();
-  const thresholds = BUILDER_DEALS_HEALTH_THRESHOLDS;
+  const thresholds: { -readonly [K in keyof typeof BUILDER_DEALS_HEALTH_THRESHOLDS]: number } = { ...BUILDER_DEALS_HEALTH_THRESHOLDS };
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60_000);
   const fubFailureCutoff = new Date(now.getTime() - thresholds.fubFailureMinutes * 60_000);
   const emailFailureCutoff = new Date(now.getTime() - thresholds.emailFailureHours * 60 * 60_000);
@@ -548,6 +550,10 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
       db.select({ jobName: dealJobRuns.jobName }).from(dealJobRuns).where(and(eq(dealJobRuns.status, "failed"), gte(dealJobRuns.startedAt, jobFailureCutoff))),
       db.select({ detail: dealEvents.detail }).from(dealEvents).where(and(eq(dealEvents.kind, PRIVACY_RESIDUE_EVENT_KIND), gte(dealEvents.createdAt, jobFailureCutoff))),
     ]);
+    // The stale limit follows Admin's "Check each builder page every (days)" plus a day of slack.
+    const refreshDays = await getDealSettings().then((settings) => settings.catalogRefreshDays).catch(() => 1);
+    const cadenceDays = Number.isInteger(refreshDays) && refreshDays >= 1 && refreshDays <= 30 ? refreshDays : 1;
+    thresholds.communityUpdateHours = Math.max(BUILDER_DEALS_HEALTH_THRESHOLDS.communityUpdateHours, (cadenceDays + 1) * 24);
     const number = (value: unknown) => Number(value ?? 0);
     const importAgeHours = ageHours(latestImport[0]?.completedAt, now);
     // Only communities the official refresh maintains can be on schedule or stale.

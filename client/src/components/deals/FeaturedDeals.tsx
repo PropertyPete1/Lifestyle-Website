@@ -25,7 +25,7 @@ export function rateLine(deal: Pick<FeaturedDeal, "rate" | "downPercent">): stri
 }
 
 function homeLine(deal: FeaturedDeal): string {
-  return [money.format(deal.price), deal.beds ? `${deal.beds} beds` : null, deal.sqft ? `${deal.sqft.toLocaleString()} sq ft` : null, deal.kind === "to_be_built" ? "to be built" : null].filter(Boolean).join(" · ");
+  return [deal.priceLabel || money.format(deal.price), deal.beds ? `${deal.beds} beds` : null, deal.sqftLabel ?? (deal.sqft ? `${deal.sqft.toLocaleString()} sq ft` : null), deal.kind === "to_be_built" ? "to be built" : null].filter(Boolean).join(" · ");
 }
 
 /** The same home can win several ways; it is shown once, with a tag for each extra win. */

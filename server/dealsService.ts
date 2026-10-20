@@ -37,6 +37,7 @@ import {
 import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { effectiveScrubConfig } from "./dealsScrub";
+import { loanTypeLabel, priceBandFloor, priceBandLabel } from "../shared/dealsFeatured";
 import { checkTwilioVerify } from "./dealsVerification";
 
 export type DealSettings = {
@@ -586,7 +587,7 @@ export async function publicDealsCatalog(src?: string | null) {
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
   const { areaMapRadius, communityAreaMap } = await import("./dealsMap");
   const publicRadius = areaMapRadius(settings, "public");
-  const result = [] as Array<{ label: string; area: string; fromPrice: number | null; reelUrl: string | null; homesAvailable: number; incentive: ReturnType<typeof publicIncentive> | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean }>;
+  const result = [] as Array<{ label: string; area: string; fromPrice: number | null; fromPriceLabel: string | null; reelUrl: string | null; homesAvailable: number; incentive: ReturnType<typeof publicIncentive> | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean }>;
   if (!communities.length) return result;
   const reelCode = src?.trim().toLowerCase() || null;
   // Two reads for the whole page, however many communities there are.
@@ -603,10 +604,12 @@ export async function publicDealsCatalog(src?: string | null) {
       fromYourReel: Boolean(reelCode) && community.reelCode.toLowerCase() === reelCode,
       label: community.publicLabel,
       area: community.areaLabel,
-      fromPrice: community.fromPrice,
+      // The starting price as a band only ("From the $490s"); the exact figure waits for sign-up.
+      fromPrice: community.fromPrice ? priceBandFloor(community.fromPrice) : null,
+      fromPriceLabel: community.fromPrice ? `From the ${priceBandLabel(community.fromPrice)}` : null,
       reelUrl: community.reelUrl,
       homesAvailable: availableCount.get(community.id) ?? 0,
-      incentive: incentive ? publicIncentive(incentive) : null,
+      incentive: incentive ? publicIncentive(incentive, (value) => scrubPrivateNames(value, communityScrubConfig(community))) : null,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       // A wide circle around the ZIP code centroid: "this side of town", never the community.
       areaMap: communityAreaMap(community, { variant: "public", radiusMiles: publicRadius }),
@@ -617,7 +620,13 @@ export async function publicDealsCatalog(src?: string | null) {
   return result;
 }
 
-function publicIncentive(row: typeof dealIncentives.$inferSelect) {
+/**
+ * The incentive as a buyer may see it. The typed loan type becomes the program
+ * name only (FHA, VA, USDA, Conventional, Jumbo), never a lender's name; the
+ * other typed fields are scrubbed with the community's list. The team
+ * (`full`) sees what the admin typed.
+ */
+function publicIncentive(row: typeof dealIncentives.$inferSelect, scrub: (value: string) => string = (value) => value, full = false) {
   // The landing can show the builder's rate wording, period, and APR without
   // exposing the full gated catalog narrative. Detailed terms remain present
   // in `text` for the verified personal list.
@@ -631,11 +640,11 @@ function publicIncentive(row: typeof dealIncentives.$inferSelect) {
     // still carry their own "APR" or "rate" label; the card prints the label.
     headlineRate: normalizeRateFigure(row.headlineRate),
     followOnRate: normalizeRateFigure(row.followOnRate),
-    followOnPeriod: row.followOnPeriod,
+    followOnPeriod: row.followOnPeriod ? scrub(row.followOnPeriod) : row.followOnPeriod,
     apr: normalizeRateFigure(row.apr),
-    loanType: row.loanType,
-    downPayment: row.downPayment,
-    repaymentTerms: row.repaymentTerms,
+    loanType: full ? row.loanType : loanTypeLabel(row.loanType),
+    downPayment: row.downPayment ? scrub(row.downPayment) : row.downPayment,
+    repaymentTerms: row.repaymentTerms ? scrub(row.repaymentTerms) : row.repaymentTerms,
     contractBy: row.contractBy?.toISOString() ?? null,
     closeBy: row.closeBy?.toISOString() ?? null,
   };
@@ -732,7 +741,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
       fromPrice: community.fromPrice,
       reelUrl: community.reelUrl,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
-      incentive: incentive ? publicIncentive(incentive) : null,
+      incentive: incentive ? publicIncentive(incentive, scrub, full) : null,
       homes,
       ...(full ? { details: { builderName: community.builder === "Manual" ? null : community.builder, communityName: community.privateName, address: community.privateAddress || null, salesLine: view.builderPages ? community.salesPhone : null, builderPage: view.builderPages && /^https?:\/\//i.test(community.sourceUrl) ? community.sourceUrl : null } } : {}),
     };

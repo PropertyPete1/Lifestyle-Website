@@ -27,7 +27,7 @@ vi.mock("./_core/heartbeat", () => ({
 }));
 
 import { parsePromotionalRate } from "./dealsAdapters";
-import { communityRefreshDue, refreshDueCommunitiesBatch, refreshOfficialDeals, revalidateDealIncentives, sendSyncDigestIfReady, storedScrubConfig } from "./dealsSync";
+import { buildersInFlight, communityRefreshDue, leaseBuilder, refreshDueCommunitiesBatch, refreshOfficialDeals, revalidateDealIncentives, sendSyncDigestIfReady, storedScrubConfig } from "./dealsSync";
 import { DEALS_JOB_DEFINITIONS, ensureDealsCron } from "./registerCron";
 import { chicagoEndOfDay } from "./dealsService";
 
@@ -332,14 +332,20 @@ describe("official refresh: incentive lifecycle", () => {
     expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(0);
   });
 
-  it("expires dated records and lapses undated ones in the evening job with one email each, leaving fresh records alone", async () => {
+  it("expires dated records and lapses undated ones in the evening job, into one digest entry for the follow-up email, leaving fresh records alone", async () => {
     db.seed(dealIncentives, { communityId, normalizedText: "dated", publicText: "Dated promo", active: true, expiresAt: new Date(T0.getTime() - 60_000), closeBy: new Date(T0.getTime() - 60_000), confirmedAt: new Date(T0.getTime() - DAY) });
     db.seed(dealIncentives, { communityId, normalizedText: "undated old", publicText: "Undated old promo", active: true, confirmedAt: new Date(T0.getTime() - 15 * DAY) });
     db.seed(dealIncentives, { communityId, normalizedText: "undated fresh", publicText: "Undated fresh promo", active: true, confirmedAt: new Date(T0.getTime() - 2 * DAY) });
     const result = await revalidateDealIncentives(T0);
     expect(result).toEqual({ ok: true, expired: 1, lapsed: 1, checked: 3 });
     expect(db.rows(dealIncentives).map((row) => [row.active, row.holdReason])).toEqual([[false, "expired"], [false, "lapsed_unconfirmed"], [true, null]]);
-    expect(emails().map((email) => email.subject)).toEqual(["Builder Deals incentive expired: Fixture Gardens", "Builder Deals incentive lapsed: Fixture Gardens"]);
+    // No email per incentive: both go into the digest, and the 6 PM follow-up carries them in one message.
+    expect(emails()).toEqual([]);
+    expect(db.rows(dealSyncDigestEntries)).toHaveLength(1);
+    expect(await sendSyncDigestIfReady(new Date("2026-10-18T23:10:00Z"), true)).toBe("sent");
+    expect(emails().map((email) => email.subject)).toEqual(["Builder Deals update: 4 changes"]);
+    expect(emails()[0].content).toContain("came off the page: reached its close-by date (2026-10-18)");
+    expect(emails()[0].content).toContain("came off the page: no dates and not re-confirmed for 14 days");
     expect(emails()[0].recipients).toEqual(["peter@lifestyledesignrealty.com"]);
     expect(mocks.loadOfficialDeals).not.toHaveBeenCalled();
   });
@@ -447,6 +453,71 @@ describe("scheduling", () => {
     expect(mocks.loadOfficialDeals).not.toHaveBeenCalled();
     expect(db.rows(dealCommunities).find((row) => row.id === waiting)).toMatchObject({ lastAttemptAt: null, catalogHoldReason: null, active: false, awaitingFirstSync: true });
     expect(emails()).toEqual([]);
+  });
+
+  it("lets an admin's pause, archive or manual switch during a batch win: the community is skipped or stays off", async () => {
+    const at = Date.parse("2026-10-21T11:00:00Z");
+    const waiting = seedCommunity({ reelCode: "auto-w", privateName: "Waiting", sourceUrl: `${COMMUNITY_URL}-w`, active: false, awaitingFirstSync: true });
+    const paused = seedCommunity({ reelCode: "p", privateName: "Paused Later", sourceUrl: `${COMMUNITY_URL}-p` });
+    mocks.loadOfficialDeals.mockImplementation(async (config: { sourceUrl: string }) => {
+      // The admin acts while the batch is reading pages: turns the waiting one off, pauses the other.
+      if (config.sourceUrl.endsWith("-w")) { const row = db.rows(dealCommunities).find((r) => r.id === waiting)!; row.active = false; row.awaitingFirstSync = false; }
+      if (config.sourceUrl === COMMUNITY_URL) { db.rows(dealCommunities).find((r) => r.id === paused)!.paused = true; }
+      return snapshot({ homes: [{ sourceUrl: `${config.sourceUrl}/fixture-a-plan/8301-a` }] });
+    });
+    const batch = await refreshDueCommunitiesBatch({ clock: () => at, lanes: 1 });
+    // The waiting community was turned off mid-pull: it stays off. The paused one was never read.
+    expect(db.rows(dealCommunities).find((r) => r.id === waiting)).toMatchObject({ active: false, awaitingFirstSync: false });
+    expect(batch.results.some((result) => result.communityId === paused)).toBe(false);
+    expect(mocks.loadOfficialDeals.mock.calls.some(([config]) => (config as { sourceUrl: string }).sourceUrl.endsWith("-p"))).toBe(false);
+  });
+
+  it("keeps a day's changes when the digest email fails, and sends them on the next try", async () => {
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));
+    mocks.sendBuilderDealsEmail.mockResolvedValueOnce({ ok: false, status: "failed", deliveryLog: "Resend 500" });
+    expect(await refreshDueCommunitiesBatch({ clock: () => Date.parse("2026-10-21T11:00:00Z") })).toMatchObject({ digest: "waiting" });
+    expect(db.rows(dealSyncDigestEntries).every((entry) => entry.sentAt === null)).toBe(true);
+    // Ten minutes later the slot is free again and the same entries go out.
+    expect(await sendSyncDigestIfReady(new Date("2026-10-21T11:10:00Z"), true)).toBe("sent");
+    expect(emails().map((email) => email.category)).toEqual(["deals_sync_summary", "deals_sync_summary"]);
+    expect(db.rows(dealSyncDigestEntries).every((entry) => entry.sentAt !== null)).toBe(true);
+  });
+
+  it("writes each community's digest entry as it finishes, so a crash mid-batch loses nothing already found", async () => {
+    seedCommunity({ reelCode: "b", privateName: "B", sourceUrl: `${COMMUNITY_URL}-b` });
+    let calls = 0;
+    mocks.loadOfficialDeals.mockImplementation(async (config: { sourceUrl: string }) => {
+      calls += 1;
+      if (calls === 2) throw new Error("boom");
+      return snapshot({ homes: [{ sourceUrl: `${config.sourceUrl}/fixture-a-plan/8301-a` }] });
+    });
+    await refreshDueCommunitiesBatch({ clock: () => Date.parse("2026-10-21T09:00:00Z"), lanes: 1 });
+    expect(db.rows(dealSyncDigestEntries)).toHaveLength(1);
+    expect(JSON.parse(db.rows(dealSyncDigestEntries)[0]!.summaries as string)).toHaveLength(1);
+  });
+
+  it("holds a builder lease: a second batch (or Refresh now) skips a builder another run is reading, and the morning email waits for it", async () => {
+    const at = Date.parse("2026-10-21T11:00:00Z");
+    seedCommunity({ reelCode: "c1", privateName: "C1", builder: "Chesmar", sourceUrl: "https://www.chesmar.com/c1/" });
+    const release = await leaseBuilder("M/I Homes", new Date(at));
+    expect(release).not.toBeNull();
+    expect(await leaseBuilder("M/I Homes", new Date(at))).toBeNull();
+    expect(await buildersInFlight(new Date(at))).toEqual(["M/I Homes"]);
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));
+    const batch = await refreshDueCommunitiesBatch({ clock: () => at });
+    // Only Chesmar was read; the M/I community is left for the run that holds the lease, and the summary waits.
+    expect(batch.results.map((result) => result.reelCode)).toEqual(["c1"]);
+    expect(batch).toMatchObject({ remaining: 1, digest: "waiting" });
+    // That other run has claimed the M/I community (tried today, still in flight): the summary still waits for it.
+    db.rows(dealCommunities)[0].lastAttemptAt = new Date(at - 5 * 60_000);
+    expect(await refreshDueCommunitiesBatch({ clock: () => at + 60_000 })).toMatchObject({ checked: 0, digest: "waiting" });
+    await release!();
+    expect(await buildersInFlight(new Date(at))).toEqual([]);
+    expect(await refreshDueCommunitiesBatch({ clock: () => at + 120_000 })).toMatchObject({ checked: 0, digest: "sent" });
+    // A lease older than 30 minutes belongs to a dead run and can be taken.
+    const stale = await leaseBuilder("Chesmar", new Date(at));
+    expect(stale).not.toBeNull();
+    expect(await leaseBuilder("Chesmar", new Date(at + 31 * 60_000))).not.toBeNull();
   });
 
   it("sends the morning summary once, holds later finds for the 6 PM follow-up, and sends at 10 AM if checks are still running", async () => {

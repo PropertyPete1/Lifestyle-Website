@@ -157,11 +157,11 @@ function snapshotDb(now: Date, options: { healthy?: boolean; communities?: Commu
   const communities = options.communities ?? (healthy
     ? [communityRow({ id: 7, privateName: "Private Grove", publicLabel: "Community A", lastSuccessfulSyncAt: hoursAgo(20, now) })]
     : [
-      // A successful refresh whose incentive is held: the catalog is on schedule, so this is an incentive hold only.
-      communityRow({ id: 7, privateName: "Private Grove", publicLabel: "Community A", lastSuccessfulSyncAt: hoursAgo(50, now), incentiveHold: { reason: "missing_follow_on_rate (text abcd1234)", seenAt: hoursAgo(30, now) } }),
+      // A successful refresh whose incentive is held: the catalog is on schedule (daily), so this is an incentive hold only.
+      communityRow({ id: 7, privateName: "Private Grove", publicLabel: "Community A", lastSuccessfulSyncAt: hoursAgo(20, now), incentiveHold: { reason: "missing_follow_on_rate (text abcd1234)", seenAt: hoursAgo(30, now) } }),
       communityRow({ id: 8, privateName: "Hidden Ranch", publicLabel: "Community B", lastSuccessfulSyncAt: hoursAgo(120, now) }),
-      // A catalog hold recorded 50h ago on a community whose last good data is older still.
-      communityRow({ id: 9, privateName: "Quiet Meadow", publicLabel: "Community C", lastSuccessfulSyncAt: hoursAgo(80, now), catalogHold: { reason: "expected_community_container_not_found", seenAt: hoursAgo(50, now) } }),
+      // A catalog hold recorded 50h ago on a community whose last good data is still within the daily limit.
+      communityRow({ id: 9, privateName: "Quiet Meadow", publicLabel: "Community C", lastSuccessfulSyncAt: hoursAgo(40, now), catalogHold: { reason: "expected_community_container_not_found", seenAt: hoursAgo(50, now) } }),
     ]);
   return createFakeDealsDb([
     [dealEvents, [{ landed: 40, consented: 12, verificationSends: 9, verified: 7, listingViews: 6, requests: 2 }]],
@@ -202,14 +202,14 @@ describe("Builder Deals daily health check", () => {
     mockServices({ balance: "12.50" });
     mocks.getDb.mockResolvedValue(snapshotDb(now));
     const health = await builderDealsHealthCheck(now);
-    expect(BUILDER_DEALS_HEALTH_THRESHOLDS).toMatchObject({ twilioMinimumBalanceUsd: 20, pendingPhotoMinutes: 60, fubFailureMinutes: 60, trecImportHours: 36, communityUpdateHours: 96, emailFailureHours: 24, jobFailureHours: 24 });
+    expect(BUILDER_DEALS_HEALTH_THRESHOLDS).toMatchObject({ twilioMinimumBalanceUsd: 20, pendingPhotoMinutes: 60, fubFailureMinutes: 60, trecImportHours: 36, communityUpdateHours: 48, emailFailureHours: 24, jobFailureHours: 24 });
     expect(health.twilioVerify).toMatchObject({ account: "active", balance: "low", balanceUsd: 12.5, currency: "USD", state: "attention" });
     expect(health.state).toBe("attention");
     expect(health.attention).toEqual(expect.arrayContaining([
       expect.stringContaining("$12.50"),
       expect.stringContaining("RESEND_FROM_EMAIL"),
       expect.stringContaining("TREC file is 40h old"),
-      expect.stringContaining("Last builder update is over 4 days old for 1 of 3"),
+      expect.stringContaining("Last builder update is over 2 days old for 1 of 3"),
       expect.stringContaining("1 community update is held"),
       expect.stringContaining("oldest pending 90 minutes"),
       expect.stringContaining("1 FUB write has been failing for over 60 minutes"),
@@ -346,7 +346,7 @@ describe("Builder Deals Monday System OK email", () => {
     expect(report.body).not.toContain("—");
     expect(report.body).toContain("Last health check result: ATTENTION");
     expect(report.body).toContain("Last scheduled 7:00 AM check: ok on 2026-10-17");
-    expect(report.body).toContain("Last builder update: Sat, Oct 17, 2026, 5:05 AM CDT (50h ago)");
+    expect(report.body).toContain("Last builder update: Sun, Oct 18, 2026, 11:05 AM CDT (20h ago)");
     expect(report.body).toContain("balance $250.00 (alert under $20)");
     expect(report.body).toContain("Last 7 days: 7 verifications, 5 new leads, 9 code sends");
     expect(report.body).toContain("1 of 3 active communities stale");

@@ -933,7 +933,8 @@ export function parseCommunityFacts(html: string): NonNullable<PrivateDealSnapsh
   const fromPrice = numericValue(range?.[1] ?? from?.[1] ?? "");
   const district = /\bSchool\s+Districts?(?:\(s\))?\s*:\s*((?:[A-Z][A-Za-z.'-]+\s+){1,4}(?:ISD|CISD|Independent\s+School\s+District|School\s+District))\b/.exec(text)
     ?? /\b((?:[A-Z][A-Za-z.'-]+\s+){1,4}(?:ISD|CISD|Independent\s+School\s+District|School\s+District))\b/.exec(text);
-  const lots = /\b((?:half|quarter|third|one|two)[- ]acre\+?(?:\s+(?:home)?sites|\s+lots)?|\d+(?:\.\d+)?\s*(?:-|–|to)\s*\d+(?:\.\d+)?[- ]acre\+?(?:\s+(?:home)?sites|\s+lots)?|\d+(?:\.\d+)?\+?[- ]acre(?:\s+(?:home)?sites|\s+lots)|\d{2,3}(?:'|\s*-?\s*(?:ft|foot|feet))(?:\s+wide)?\s+(?:home)?sites)\b/i.exec(text);
+  // A lot size needs a lot word next to it: "a one-acre dog park" is not a lot size.
+  const lots = /\b((?:half|quarter|third|one|two)[- ]acre\+?\s+(?:home\s*sites?|homesites?|lots?)|\d+(?:\.\d+)?\s*(?:-|–|to)\s*\d+(?:\.\d+)?[- ]acre\+?\s+(?:home\s*sites?|homesites?|lots?)|\d+(?:\.\d+)?\+?[- ]acre\s+(?:home\s*sites?|homesites?|lots?)|(?:home\s*sites?|homesites?|lots?)\s+(?:from|of|on|up\s+to)\s+(?:\d+(?:\.\d+)?\s*(?:-|–|to)\s*)?\d+(?:\.\d+)?\+?[- ]acres?|\d{2,3}(?:'|\s*-?\s*(?:ft|foot|feet))(?:\s+wide)?\s+(?:home)?sites)\b/i.exec(text);
   return {
     fromPrice: fromPrice !== null && Number.isInteger(fromPrice) && fromPrice >= 50_000 ? fromPrice : null,
     schoolDistrict: district ? normalizeWhitespace(district[1]) : null,

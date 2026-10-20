@@ -35,9 +35,11 @@ community URL pattern).
 3. Its ZIP code centroid is looked up, and the area label and headline are set
    from it (see below).
 4. The daily sync picks up awaiting rows like active ones. On the first clean
-   pull (homes, photos, incentive all read without a hold), the headline is
-   rebuilt from what the pull found and the community goes live
-   (`active = true`, `awaiting_first_sync = false`).
+   pull of its homes (no community hold; an incentive hold only keeps the offer
+   off), the headline is rebuilt from what the pull found and the community
+   goes live (`active = true`, `awaiting_first_sync = false`), unless an admin
+   paused it, switched it to manual, or turned it on or off by hand in the
+   meantime. A label an admin rewrote is never regenerated.
 5. A first pull that fails leaves it hidden; the next run tries again.
 
 Admin shows these rows with "Added automatically, goes live after its first
@@ -55,7 +57,7 @@ label can never carry a builder, community, street or plan name.
 | --- | --- |
 | Up to 4 miles | Central San Antonio |
 | Up to 22 miles | The side of town, e.g. Southeast San Antonio |
-| Farther, in a larger town | The town: New Braunfels, Seguin, Boerne, Castroville, Floresville, Pleasanton, Bulverde, Spring Branch, Canyon Lake, Lytle, Bandera |
+| Farther, in a larger town | The town: New Braunfels, Seguin, Boerne, Floresville, Pleasanton, Bulverde, Spring Branch, Canyon Lake |
 | Farther, anywhere else | The direction, e.g. South of San Antonio |
 
 A suburb inside the metro (Converse, Schertz) gets the side of town, not its
@@ -87,16 +89,22 @@ The scheduled check runs every 10 minutes from 4 AM to 10 PM Central
   so a builder's site sees one stream of requests per call;
 - stops starting new communities after about four minutes; the next call picks
   up the rest;
-- claims each community before checking it, so two overlapping calls never
-  check the same one, and does not retry a failed one for 90 minutes.
+- holds a lease per builder while reading its pages (so an overlapping call,
+  or Refresh now, waits instead of opening a second stream), claims each
+  community before checking it (re-reading it, so a community paused or
+  archived since the call started is left alone), and does not retry a failed
+  one for 90 minutes.
 
 Communities whose builder has no reader yet are skipped quietly: no hold, no
 email.
 
-Changes and new holds go into one morning email instead of one per call. It is
-sent once every due community has been tried that day, or at 10 AM at the
-latest. Anything found later in the day goes out in one 6 PM follow-up, only if
-there is something new. "Refresh now" in Admin still emails right away.
+Each community's changes and new holds are written to the digest the moment
+its check finishes. One morning email goes out once every due community has
+been tried that day and nothing is still being read, or at 10 AM at the
+latest. Anything found later in the day (including incentives the 6:15 PM job
+retires) goes out in one 6 PM follow-up, only if there is something new. The
+entries are marked sent only after the email went out, so a failed send is
+retried by the next call. "Refresh now" in Admin still emails right away.
 
 ## Browsing every community
 

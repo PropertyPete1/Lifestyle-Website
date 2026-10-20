@@ -454,7 +454,8 @@ export async function agentWorkspace(agentLead: LeadRow): Promise<AgentWorkspace
     db.select({ id: dealLeads.id, expiresAt: dealLeads.expiresAt, status: dealLeads.status, phoneE164: dealLeads.phoneE164, clientLinkId: dealLeads.clientLinkId }).from(dealLeads).where(inArray(dealLeads.id, leadIds)),
     db.select().from(dealTourRequests).where(and(inArray(dealTourRequests.leadId, leadIds), isNull(dealTourRequests.removedAt))).orderBy(desc(dealTourRequests.createdAt)),
     // Views are already de-duplicated to one row per community per hour, so the latest one is found in memory.
-    db.select({ leadId: dealCommunityViews.leadId, viewedAt: dealCommunityViews.viewedAt }).from(dealCommunityViews).where(inArray(dealCommunityViews.leadId, leadIds)).orderBy(desc(dealCommunityViews.viewedAt)).limit(5_000),
+    // The latest view of each client, one small read per client, so a long history never pushes a client off the end.
+    Promise.all(leadIds.map((leadId) => db.select({ leadId: dealCommunityViews.leadId, viewedAt: dealCommunityViews.viewedAt }).from(dealCommunityViews).where(eq(dealCommunityViews.leadId, leadId)).orderBy(desc(dealCommunityViews.viewedAt)).limit(1))).then((rows) => rows.flat()),
   ]) : [[], [], []];
   const homeIds = Array.from(new Set(requests.map((request) => request.homeId)));
   const homes = homeIds.length ? await db.select().from(dealHomes).where(inArray(dealHomes.id, homeIds)) : [];

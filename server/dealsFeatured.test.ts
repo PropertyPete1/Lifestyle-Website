@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dealCommunities, dealHomes, dealIncentives, dealSettings } from "../drizzle/schema";
-import { acresFromText, builderExcluded, downPaymentPercentFrom, loanTypeLabel, lotAcres, monthlyPrincipalAndInterest, mortgageRateFrom, percentFrom, rankFeatured, type FeaturedCandidate } from "../shared/dealsFeatured";
+import { acresFromText, builderExcluded, downPaymentPercentFrom, loanTypeLabel, lotAcres, monthlyPrincipalAndInterest, mortgageRateFrom, percentFrom, priceBandLabel, rankFeatured, type FeaturedCandidate } from "../shared/dealsFeatured";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 
 /**
@@ -55,7 +55,10 @@ describe("the payment math", () => {
     expect(lotAcres("15 acres of trails and 0.25-acre lots")).toBe(0.25);
     expect(lotAcres("15 acres of trails")).toBeNull();
     expect(lotAcres("a 200-acre community with half-acre homesites")).toBe(0.5);
-    expect(lotAcres("lots up to 1 acre")).toBe(1);
+    // "Up to" promises nothing about the smallest lot.
+    expect(lotAcres("lots up to 1 acre")).toBeNull();
+    expect(lotAcres("Homesites up to 1 acre", { field: true })).toBeNull();
+    expect(lotAcres("Lots from 0.25 up to 1 acre")).toBe(0.25);
     expect(lotAcres("0.52 acres", { field: true })).toBe(0.52);
     expect(lotAcres("40 acres", { field: true })).toBeNull();
   });
@@ -201,14 +204,29 @@ describe("Best Deals from the database, by viewer", () => {
       const featured = await featuredDeals(view);
       expect(JSON.stringify(featured)).not.toMatch(/Pulte/i);
       expect(featured.bestRate).toMatchObject({ rate: { loanType: "Conventional" } });
-      // The home's own 0.15-acre lot wins over the community's "up to 0.5 acres", so it is not a big lot.
-      expect(featured.bestRate?.acres).toBe(0.15);
+      // The home's own 0.15-acre lot wins over the community's "up to 0.5 acres", so it is not a big lot (the landing page sees it to the tenth).
+      expect(featured.bestRate?.acres).toBe(view === "public" ? 0.2 : 0.15);
       expect(featured.bigLots).toEqual([]);
     }
     // A park in the label never makes a big lot either.
     const park = community({ privateName: "Park Place", publicLabel: "West San Antonio | Homes by a 200-acre park", scrubList: "{}" });
     home(park, { price: 360_000 });
     expect((await featuredDeals("public")).bigLots).toEqual([]);
+  });
+
+  it("gives the landing page bands only: price to the $10K, square feet to the hundred, lot to the tenth", async () => {
+    const id = community({});
+    home(id, { price: 349_990, sqft: 2_318, lotSize: "0.52 acres" });
+    const pub = await featuredDeals("public");
+    expect(pub.lowestPayment[0]).toMatchObject({ price: 340_000, priceLabel: "$340s", sqft: 2_300, sqftLabel: "about 2,300 sq ft", acres: 0.5 });
+    // Still the real payment, on the real price.
+    expect(pub.lowestPayment[0]?.estMonthly).toBe(monthlyPrincipalAndInterest({ price: 349_990, ratePercent: 7.4, downPercent: 5 }));
+    expect(JSON.stringify(pub)).not.toMatch(/349990|2318|0\.52/);
+    const gated = await featuredDeals({ view: "gated" });
+    expect(gated.lowestPayment[0]).toMatchObject({ price: 349_990, sqft: 2_318 });
+    expect(gated.lowestPayment[0]).not.toHaveProperty("priceLabel");
+    expect(priceBandLabel(1_250_000)).toBe("$1.2M+");
+    expect(decode(renderToStaticMarkup(React.createElement(FeaturedDeals, { featured: pub, locked: true })))).toContain("$340s · about 2,300 sq ft");
   });
 
   it("ranks a private list's strip among that list's homes only, so it is never short", async () => {

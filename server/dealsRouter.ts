@@ -399,12 +399,8 @@ export const dealsRouter = router({
     const featured = await featuredDeals(view, { onlyCards: listCards });
     const connection = await getDb();
     if (connection) {
-      const active = await connection.select({ id: dealCommunities.id }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)));
       const hourAgo = new Date(Date.now() - 60 * 60_000);
-      // One view row per community per hour, read and written in one go however many communities there are.
-      const recent = new Set((await connection.select({ communityId: dealCommunityViews.communityId }).from(dealCommunityViews).where(and(eq(dealCommunityViews.leadId, session.leadId), sql`${dealCommunityViews.viewedAt} > ${hourAgo}`))).map((row) => row.communityId));
-      const unseen = active.filter((community) => !recent.has(community.id));
-      if (unseen.length) await connection.insert(dealCommunityViews).values(unseen.map((community) => ({ leadId: session.leadId, communityId: community.id })));
+      // Community views are logged as the buyer opens each community (deals.viewedCommunity), not for the whole list.
       const recentListView = (await connection.select({ id: dealEvents.id }).from(dealEvents).where(and(eq(dealEvents.leadId, session.leadId), eq(dealEvents.kind, "viewed_listings"), sql`${dealEvents.createdAt} > ${hourAgo}`)).limit(1))[0];
       if (!recentListView) await logDealEvent({ leadId: session.leadId, kind: "viewed_listings", sourceCode: session.lead.sourceCode, deviceHash: session.deviceHash, ip: ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0" });
     }
@@ -489,6 +485,25 @@ export const dealsRouter = router({
       if (!(await revokeClientLink(session.lead, input.id))) throw new TRPCError({ code: "NOT_FOUND", message: "That link is not one of yours." });
       return { ok: true as const };
     }),
+  }),
+  /**
+   * The buyer opened a community on their list: one view row per community per
+   * hour, for the agent's "last viewed" and the FUB activity note. The key is
+   * the opaque handle the list carries, never a community id.
+   */
+  viewedCommunity: publicProcedure.input(z.object({ key: z.string().regex(/^[a-f0-9]{16}$/) })).mutation(async ({ input, ctx }) => {
+    dealsPublicHeaders(ctx.res);
+    const session = await isLiveDealSession(ctx.req);
+    if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
+    const db = await getDb();
+    if (!db) return { ok: false as const };
+    const active = await db.select({ id: dealCommunities.id }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)));
+    const community = active.find((row) => hashSecret(`deals-community:${row.id}`).slice(0, 16) === input.key);
+    if (!community) return { ok: false as const };
+    const hourAgo = new Date(Date.now() - 60 * 60_000);
+    const recent = (await db.select({ id: dealCommunityViews.id }).from(dealCommunityViews).where(and(eq(dealCommunityViews.leadId, session.leadId), eq(dealCommunityViews.communityId, community.id), sql`${dealCommunityViews.viewedAt} > ${hourAgo}`)).limit(1))[0];
+    if (!recent) await db.insert(dealCommunityViews).values({ leadId: session.leadId, communityId: community.id });
+    return { ok: true as const };
   }),
   requestHome: publicProcedure.input(z.object({ card: z.string().length(20), requestType: z.enum(["tour", "ask"]), preferredAt: z.string().datetime() })).mutation(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);

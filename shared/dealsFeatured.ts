@@ -61,7 +61,7 @@ function acreMentions(text: string): AcreMention[] {
     if (Number.isFinite(value) && value > 0) found.push({ value, start: match.index ?? 0, end: (match.index ?? 0) + match[0].length });
   };
   // "0.15 to 0.5 acres", "1/4 - 1/2 acre": the low end of a range counts too.
-  for (const match of Array.from(text.matchAll(/(?<![\d/.])(\d*\.?\d+)\s*(?:to|-|–|—)\s*\d*\.?\d+\s*-?\s*acres?\b/gi))) push(Number(match[1]), match);
+  for (const match of Array.from(text.matchAll(/(?<![\d/.])(\d*\.?\d+)\s*(?:up\s+to|to|-|–|—)\s*\d*\.?\d+\s*-?\s*acres?\b/gi))) push(Number(match[1]), match);
   for (const match of Array.from(text.matchAll(/(\d+)\s*\/\s*(\d+)\s*(?:to|-|–|—)\s*\d+\s*\/\s*\d+\s*-?\s*acres?\b/gi))) push(Number(match[1]) / Number(match[2]), match);
   for (const match of Array.from(text.matchAll(/(\d+)\s*\/\s*(\d+)\s*-?\s*acres?\b/gi))) push(Number(match[1]) / Number(match[2]), match);
   for (const match of Array.from(text.matchAll(/(?<![\d/])(\d*\.?\d+)\s*\+?\s*-?\s*acres?\b/gi))) push(Number(match[1]), match);
@@ -88,9 +88,12 @@ export function lotAcres(text: string | null | undefined, options: { field?: boo
   const values = acreMentions(text).filter((mention) => {
     if (mention.value > MAX_LOT_ACRES) return false;
     const after = text.slice(mention.end, mention.end + 25);
+    const before = text.slice(Math.max(0, mention.start - 25), mention.start);
     if (/^\s*of\b/i.test(after)) return false;
+    // "Homesites up to 1 acre" promises nothing about the smallest lot.
+    if (/\b(?:up\s+to|as\s+(?:large|big)\s+as|max(?:imum)?)\s*$/i.test(before)) return false;
     if (options.field) return true;
-    return LOT_WORDS.test(text.slice(mention.start, mention.end)) || LOT_WORDS.test(after) || LOT_WORDS.test(text.slice(Math.max(0, mention.start - 25), mention.start));
+    return LOT_WORDS.test(text.slice(mention.start, mention.end)) || LOT_WORDS.test(after) || LOT_WORDS.test(before);
   }).map((mention) => mention.value);
   return values.length ? Math.min(...values) : null;
 }
@@ -162,6 +165,10 @@ export type FeaturedDeal = {
   rate: FeaturedRate;
   downPercent: number;
   acres: number | null;
+  /** Landing page only: "$340s" shown instead of the exact price. */
+  priceLabel?: string;
+  /** Landing page only: "about 2,300 sq ft". */
+  sqftLabel?: string | null;
 };
 
 export type FeaturedDeals = {
@@ -244,4 +251,41 @@ export function builderExcluded(names: string | null | undefined | ReadonlyArray
 /** "4.999%" style figure with no trailing zeros. */
 export function formatRate(percent: number): string {
   return `${Number(percent.toFixed(3))}%`;
+}
+
+/** "$340s" for $340,000 to $349,999; "$1.2M+" above a million. Never the exact price. */
+export function priceBandLabel(price: number): string {
+  if (!Number.isFinite(price) || price <= 0) return "";
+  if (price >= 1_000_000) return `$${(Math.floor(price / 100_000) / 10).toFixed(1)}M+`;
+  return `$${Math.floor(price / 10_000) * 10}s`;
+}
+
+/** The low end of the price band, as a number: 349,990 -> 340,000. */
+export function priceBandFloor(price: number): number {
+  return price >= 1_000_000 ? Math.floor(price / 100_000) * 100_000 : Math.floor(price / 10_000) * 10_000;
+}
+
+/** Square feet to the nearest hundred: 2,318 -> 2,300. */
+export function roundedSqft(sqft: number): number {
+  return Math.max(100, Math.round(sqft / 100) * 100);
+}
+
+/**
+ * The landing page (no sign-up) gets rounded figures only: a price band, square
+ * feet to the hundred, lot size to the tenth of an acre. Exact figures could be
+ * typed into a listing site to find the home without talking to an agent.
+ */
+export function roundForPublic(deal: FeaturedDeal): FeaturedDeal {
+  return {
+    ...deal,
+    price: priceBandFloor(deal.price),
+    priceLabel: `${priceBandLabel(deal.price)}`,
+    sqft: deal.sqft ? roundedSqft(deal.sqft) : deal.sqft ?? null,
+    sqftLabel: deal.sqft ? `about ${roundedSqft(deal.sqft).toLocaleString("en-US")} sq ft` : null,
+    acres: deal.acres ? Math.round(deal.acres * 10) / 10 : deal.acres,
+  };
+}
+
+export function roundFeaturedForPublic(featured: FeaturedDeals): FeaturedDeals {
+  return { ...featured, lowestPayment: featured.lowestPayment.map(roundForPublic), bestRate: featured.bestRate ? roundForPublic(featured.bestRate) : null, bigLots: featured.bigLots.map(roundForPublic) };
 }

@@ -1,7 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealIncentives } from "../drizzle/schema";
 import { scrubPrivateNames, selectDealCatalogHomes } from "../shared/deals";
-import { builderExcluded, downPaymentPercentFrom, loanTypeLabel, lotAcres, mortgageRateFrom, rankFeatured, type FeaturedCandidate, type FeaturedDeals } from "../shared/dealsFeatured";
+import { builderExcluded, downPaymentPercentFrom, loanTypeLabel, lotAcres, mortgageRateFrom, rankFeatured, roundFeaturedForPublic, type FeaturedCandidate, type FeaturedDeals } from "../shared/dealsFeatured";
 import { getDb } from "./db";
 import { communityScrubConfig, getDealSettings, hashSecret, publicNoPrivateNames, type DealsCatalogView } from "./dealsService";
 
@@ -50,8 +50,8 @@ function hostOf(url: string): string | null {
  * builder column, the builder and lender names in its private list, its own
  * name and its site, so a Lennar community added by hand ("Manual") is still out.
  */
-export function communityExcludedFromFeatured(community: Pick<typeof dealCommunities.$inferSelect, "builder" | "privateName" | "sourceUrl">, config: { builder: readonly string[]; lender: readonly string[] }, excluded: readonly string[]): boolean {
-  return builderExcluded([community.builder, ...config.builder, ...config.lender, community.privateName, hostOf(community.sourceUrl)], excluded);
+export function communityExcludedFromFeatured(community: Pick<typeof dealCommunities.$inferSelect, "builder" | "privateName" | "sourceUrl">, config: { builder: readonly string[]; lender: readonly string[]; other?: readonly string[] }, excluded: readonly string[]): boolean {
+  return builderExcluded([community.builder, ...config.builder, ...config.lender, ...(config.other ?? []), community.privateName, hostOf(community.sourceUrl)], excluded);
 }
 
 export async function featuredDeals(view: FeaturedView, options: { onlyCards?: ReadonlySet<string> } = {}): Promise<FeaturedDeals> {
@@ -106,5 +106,7 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
       });
     }
   }
-  return rankFeatured(candidates, ranking);
+  const ranked = rankFeatured(candidates, ranking);
+  // Ranked on exact figures; shown to the landing page in bands only.
+  return view === "public" ? roundFeaturedForPublic(ranked) : ranked;
 }

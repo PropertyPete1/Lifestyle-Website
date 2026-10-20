@@ -13,7 +13,7 @@ const METRO_MILES = 22;
 const EARTH_MILES = 3958.8;
 
 /** Larger towns a label may name; a small town is too precise and falls back to the side of San Antonio. */
-export const MAJOR_TOWNS = ["New Braunfels", "Seguin", "Boerne", "Castroville", "Floresville", "Pleasanton", "Bulverde", "Spring Branch", "Canyon Lake", "Lytle", "Bandera"] as const;
+export const MAJOR_TOWNS = ["New Braunfels", "Seguin", "Boerne", "Floresville", "Pleasanton", "Bulverde", "Spring Branch", "Canyon Lake"] as const;
 
 const SECTORS = ["North", "Northeast", "East", "Southeast", "South", "Southwest", "West", "Northwest"] as const;
 export type Sector = (typeof SECTORS)[number];
@@ -91,6 +91,7 @@ function lotPhrase(acres: number): string {
 export function priceBand(price: number): string | null {
   if (!Number.isFinite(price) || price <= 0) return null;
   if (price >= 1_000_000) return "Over $1M";
+  if (price < 100_000) return "Under $100K";
   return `From the $${Math.floor(price / 100_000)}00s`;
 }
 

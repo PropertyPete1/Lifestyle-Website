@@ -164,6 +164,8 @@ export type GatedCatalogProps = {
   onExpire?: () => void;
   /** Best Deals across every community; each deal jumps to its home's card. */
   featured?: FeaturedDealsData | null;
+  /** Called with a community's key when the buyer opens it (every open community on a short list). */
+  onViewCommunity?: (key: string) => void;
 };
 
 /**
@@ -210,7 +212,7 @@ function CommunitySection({ community, homes, open, onToggle, autoLoadReel, team
   </section>;
 }
 
-export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire, featured }: GatedCatalogProps) {
+export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire, featured, onViewCommunity }: GatedCatalogProps) {
   const [promptDismissed, setPromptDismissed] = useState(false);
   const updatedAt = communities.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
   const savedSet = new Set(saved ?? []);
@@ -238,6 +240,14 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
     setOpened((current) => new Set(current).add(key));
     setPendingCard(card);
   };
+  // Every open community counts as viewed once per page load (the list already holds one row per hour server-side).
+  const [reported] = useState(() => new Set<string>());
+  useEffect(() => {
+    if (!onViewCommunity) return;
+    for (const { community, key } of visible) {
+      if ((!many || opened.has(key)) && community.key && !reported.has(key)) { reported.add(key); onViewCommunity(community.key); }
+    }
+  }, [visible, opened, many, onViewCommunity, reported]);
   useEffect(() => {
     if (!pendingCard || typeof window === "undefined") return;
     const frame = window.requestAnimationFrame(() => { scrollToHomeCard(pendingCard); setPendingCard(null); });

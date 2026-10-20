@@ -334,7 +334,9 @@ describe("agent client links through the router", () => {
 
   it("serves Best Deals on the landing page without card handles, and on the private list only for cards on that list", async () => {
     const landing = await visitor().featured();
-    expect(landing.lowestPayment).toEqual([expect.objectContaining({ label: "Southeast San Antonio | Lots", price: 489_990, estMonthly: expect.any(Number) })]);
+    // The landing page gets the price band, never the exact figure.
+    expect(landing.lowestPayment).toEqual([expect.objectContaining({ label: "Southeast San Antonio | Lots", price: 480_000, priceLabel: "$480s", estMonthly: expect.any(Number) })]);
+    expect(JSON.stringify(landing)).not.toContain("489990");
     expect(JSON.stringify(landing)).not.toMatch(/"card"|"detail"|Fixture|118 Fixture/);
     const buyer = row({ id: 52, phoneE164: "+12105550152" });
     db.seed(dealLeads, buyer);

@@ -98,8 +98,8 @@ export async function onboardDiscoveredCommunities(discovered: readonly Discover
       salesPhone: community.salesPhone?.trim().slice(0, 40) || null,
       publicLabel: publicLabelFor(area, headlineFactsFor(community)).slice(0, 190),
       areaLabel: area,
-      schoolDistrict: null,
-      lotSizes: null,
+      schoolDistrict: community.schoolDistrict?.trim().slice(0, 160) || null,
+      lotSizes: community.lotSizesText?.trim().slice(0, 160) || null,
       amenities: "[]",
       fromPrice: community.priceFrom && community.priceFrom > 0 ? Math.round(community.priceFrom) : null,
       reelCode: autoReelCode(community.sourceUrl),
@@ -122,17 +122,25 @@ export async function onboardDiscoveredCommunities(discovered: readonly Discover
 }
 
 /** Recompute an auto community's area and headline from its centroid and current facts (only while it awaits its first sync). */
-export async function relabelFromCentroid(communityId: number, facts?: HeadlineFacts): Promise<CommunityRow | null> {
+/** The label the system would generate for this row as it stands. */
+export function generatedLabelFor(row: Pick<CommunityRow, "areaLabel" | "lotSizes" | "fromPrice" | "amenities">): string {
+  return publicLabelFor(row.areaLabel, { acres: lotAcres(row.lotSizes, { field: true }), fromPrice: row.fromPrice, amenities: JSON.parse(row.amenities ?? "[]") as string[] }).slice(0, 190);
+}
+
+export async function relabelFromCentroid(communityId: number, facts?: HeadlineFacts, options: { labelUntouched?: boolean } = {}): Promise<CommunityRow | null> {
   const db = await getDb();
   if (!db) return null;
   const row = (await db.select().from(dealCommunities).where(eq(dealCommunities.id, communityId)).limit(1))[0];
   if (!row || !row.awaitingFirstSync) return row ?? null;
+  // A label an admin rewrote is theirs: only a label the system generated is regenerated.
+  const rowFacts: HeadlineFacts = { acres: lotAcres(row.lotSizes, { field: true }), fromPrice: row.fromPrice, amenities: JSON.parse(row.amenities ?? "[]") as string[] };
+  if (!(options.labelUntouched ?? row.publicLabel === generatedLabelFor(row))) return row;
   const lat = Number.parseFloat(row.zipCentroidLat ?? "");
   const lng = Number.parseFloat(row.zipCentroidLng ?? "");
   const centroid = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
   const city = row.privateAddress.split(",").map((part) => part.trim()).at(-2) ?? null;
   const area = areaLabelFor({ centroid, city });
-  const headlineFacts: HeadlineFacts = facts ?? { acres: lotAcres(row.lotSizes, { field: true }), fromPrice: row.fromPrice, amenities: JSON.parse(row.amenities ?? "[]") as string[] };
+  const headlineFacts: HeadlineFacts = facts ?? rowFacts;
   const publicLabel = publicLabelFor(area, headlineFacts).slice(0, 190);
   await db.update(dealCommunities).set({ areaLabel: area, publicLabel }).where(eq(dealCommunities.id, communityId));
   return { ...row, areaLabel: area, publicLabel };

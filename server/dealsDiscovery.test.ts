@@ -27,6 +27,8 @@ import { DISCOVERY_READERS, communityRecordFromHtml, discoverBuilderCommunities,
 const CH = "https://www.chesmar.com";
 const MI = "https://www.mihomes.com";
 const DRH = "https://www.drhorton.com";
+const KB = "https://www.kbhome.com";
+const kbPage = (name: string, street: string, city: string, zip: string, geo: { latitude: number; longitude: number }) => `<html><head><script type='application/ld+json'>${JSON.stringify({ "@context": "https://schema.org", "@graph": [{ "@type": "Place", "@id": `${KB}/new-homes-san-antonio/x#community`, name, address: { "@type": "PostalAddress", streetAddress: street, addressLocality: city, addressRegion: "TX", postalCode: zip, addressCountry: "US" }, telephone: "+1-830-555-0066", geo: { "@type": "GeoCoordinates", ...geo } }, { "@type": "Product", "@id": `${KB}/new-homes-san-antonio/x#homes`, name: `New Homes at ${name}` }] })}</script></head><body><script>FloorPlanList = []; LocalQMIs = [];</script></body></html>`;
 const CC = "https://www.centurycommunities.com";
 const centuryPage = (name: string, street: string, city: string, zip: string, geo: { latitude: number; longitude: number }) => page([{ "@context": "https://schema.org", "@type": "Organization", name: "Century Communities" }, { "@context": "https://schema.org", "@type": "HomeAndConstructionBusiness", name, telephone: "+1 210-555-0500", address: { "@type": "PostalAddress", streetAddress: street, addressLocality: city, addressRegion: "TX", postalCode: zip, addressCountry: "US" }, geo: { "@type": "GeoCoordinates", ...geo } }, { "@type": "ProductGroup", name, hasVariant: [] }]);
 
@@ -99,6 +101,9 @@ const site: Record<string, { status?: number; body: string; type?: string; locat
   [`${HH}/sitemap.xml`]: { body: urlset([`${HH}/san-antonio`, `${HH}/san-antonio/san-antonio/fixture-ranch`, `${HH}/san-antonio/san-antonio/fixture-ranch/760-026`, `${HH}/san-antonio/san-antonio/new-home-concierge`, `${HH}/san-antonio/san-marcos/far-fixture`, `${HH}/dallas/frisco/other-fixture`]), type: "application/xml" },
   [`${HH}/san-antonio/san-antonio/fixture-ranch`]: { body: highlandPage("Fixture Ranch", "13316 Fixture Acacia", "San Antonio", "78245", { lat: 29.3931, lng: -98.7605 }) },
   [`${HH}/san-antonio/san-marcos/far-fixture`]: { body: highlandPage("Far Fixture", "1 Far Rd", "San Marcos", "78666", { lat: 29.88, lng: -97.94 }) },
+  [`${KB}/sitemap.xml`]: { body: urlset([`${KB}/new-homes-san-antonio`, `${KB}/new-homes-san-antonio/fixture-heights`, `${KB}/new-homes-san-antonio/fixture-heights/plan-2246`, `${KB}/new-homes-austin/far-fixture`, `${KB}/new-homes-san-antonio/far-fixture`]), type: "application/xml" },
+  [`${KB}/new-homes-san-antonio/fixture-heights`]: { body: kbPage("Fixture Heights - Heritage Collection", "1308 Fixture Ave.", "New Braunfels", "78130", { latitude: 29.638, longitude: -98.112 }) },
+  [`${KB}/new-homes-san-antonio/far-fixture`]: { body: kbPage("Far Fixture", "1 Far Rd.", "Kyle", "78640", { latitude: 29.99, longitude: -97.87 }) },
   [`${CC}/sitemap.xml`]: { body: urlset([`${CC}/find-your-new-home/texas/san-antonio-metro/`, `${CC}/find-your-new-home/texas/san-antonio-metro/san-antonio/fixture-grove/`, `${CC}/find-your-new-home/texas/san-antonio-metro/san-antonio/fixture-grove/lots/15177a-9122-fixture-rdg/`, `${CC}/find-your-new-home/texas/houston-metro/katy/far-fixture/`]), type: "application/xml" },
   [`${CC}/find-your-new-home/texas/san-antonio-metro/san-antonio/fixture-grove/`]: { body: centuryPage("Fixture Grove", "9106 Fixture Rdg", "San Antonio", "78222", { latitude: 29.33, longitude: -98.4 }) },
   [pulteListingUrl("www.delwebb.com", "Del Webb")]: { body: pulteListing.replaceAll("\"pageURL\":\"/homes/", `"pageURL":"${PULTE}/homes/`).replace(`${DELWEBB}/homes/texas/san-antonio/kyle/fixture-webb-211338`, "/homes/texas/san-antonio/kyle/fixture-webb-211338"), type: "application/json; charset=utf-8" },
@@ -218,6 +223,13 @@ describe("discovery", () => {
     expect(highland.skipped).toEqual([{ url: `${HH}/san-antonio/san-marcos/far-fixture`, reason: "outside_area" }]);
     expect(requested.filter((url) => /concierge|760-026|dallas/.test(url))).toEqual([]);
 
+    // KB Home: the sitemap's San Antonio market community pages, never a plan page or another market; the Place record places them.
+    requested.length = 0;
+    const kb = await discoverBuilderCommunities(reader("KB Home"), fetcher);
+    expect(kb.communities.map((community) => [community.name, community.address, community.salesPhone])).toEqual([["Fixture Heights - Heritage Collection", "1308 Fixture Ave., New Braunfels, TX 78130", "8305550066"]]);
+    expect(kb.skipped).toEqual([{ url: `${KB}/new-homes-san-antonio/far-fixture`, reason: "outside_area" }]);
+    expect(requested.filter((url) => /plan-|new-homes-austin/.test(url))).toEqual([]);
+
     // Century: the sitemap's San Antonio metro community pages, never a lot page or another metro.
     requested.length = 0;
     const century = await discoverBuilderCommunities(reader("Century Communities"), fetcher);
@@ -238,14 +250,14 @@ describe("discovery", () => {
   it("adds new communities hidden, leaves the ones already there alone, and emails what it found", async () => {
     db.seed(dealCommunities, { builder: "Chesmar", privateName: "Sienna Lakes", sourceUrl: `${CH}/texas/san-antonio-new-homes/san-antonio/sienna-lakes`, privateAddress: "9010 Arroyo Grove, San Antonio, TX 78263", publicLabel: "Southeast San Antonio | Half-Acre Lots and Lakes", areaLabel: "Southeast San Antonio", amenities: "[]", reelCode: "sl1", scrubList: "{}", active: true, paused: false, manualMode: false });
     const run = await runCommunityDiscovery(fetcher);
-    expect(run).toMatchObject({ created: 10, builders: [{ builder: "Chesmar", ok: true, found: 2, created: 1, existing: 1 }, { builder: "M/I Homes", ok: true, found: 1, created: 1 }, { builder: "D.R. Horton", ok: true, found: 1, created: 1 }, { builder: "First America Homes", ok: true, found: 1, created: 1 }, { builder: "Coventry Homes", ok: true, found: 1, created: 1 }, { builder: "Davidson Homes", ok: true, found: 1, created: 1 }, { builder: "Highland Homes", ok: true, found: 1, created: 1 }, { builder: "Century Communities", ok: true, found: 1, created: 1 }, { builder: "Pulte", ok: true, found: 1, created: 1 }, { builder: "Centex", ok: true, found: 1, created: 1 }, { builder: "Del Webb", ok: true, found: 0, created: 0 }] });
+    expect(run).toMatchObject({ created: 11, builders: [{ builder: "Chesmar", ok: true, found: 2, created: 1, existing: 1 }, { builder: "M/I Homes", ok: true, found: 1, created: 1 }, { builder: "D.R. Horton", ok: true, found: 1, created: 1 }, { builder: "First America Homes", ok: true, found: 1, created: 1 }, { builder: "Coventry Homes", ok: true, found: 1, created: 1 }, { builder: "Davidson Homes", ok: true, found: 1, created: 1 }, { builder: "Highland Homes", ok: true, found: 1, created: 1 }, { builder: "KB Home", ok: true, found: 1, created: 1 }, { builder: "Century Communities", ok: true, found: 1, created: 1 }, { builder: "Pulte", ok: true, found: 1, created: 1 }, { builder: "Centex", ok: true, found: 1, created: 1 }, { builder: "Del Webb", ok: true, found: 0, created: 0 }] });
     const added = db.rows(dealCommunities).filter((row) => row.awaitingFirstSync);
-    expect(added.map((row) => [row.privateName, row.active, row.areaLabel])).toEqual([["Esperanza 60's", false, "Boerne"], ["Paloma Park", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Meadows", false, "Greater San Antonio"], ["Buffalo Fixture", false, "Greater San Antonio"], ["Fixture Meadows", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Grove", false, "Greater San Antonio"], ["Fixture Ridge", false, "Greater San Antonio"], ["Fixture Ridge", false, "Greater San Antonio"]]);
+    expect(added.map((row) => [row.privateName, row.active, row.areaLabel])).toEqual([["Esperanza 60's", false, "Boerne"], ["Paloma Park", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Meadows", false, "Greater San Antonio"], ["Buffalo Fixture", false, "Greater San Antonio"], ["Fixture Meadows", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Heights - Heritage Collection", false, "New Braunfels"], ["Fixture Grove", false, "Greater San Antonio"], ["Fixture Ridge", false, "Greater San Antonio"], ["Fixture Ridge", false, "Greater San Antonio"]]);
     // The exact coordinates on the builder's page are never stored.
     expect(JSON.stringify(db.rows(dealCommunities))).not.toMatch(/29\.79|98\.73|29\.52/);
     expect(mocks.sendBuilderDealsEmail).toHaveBeenCalledTimes(1);
     const email = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { subject: string; content: string };
-    expect(email.subject).toBe("Builder Deals: 10 new communities found");
+    expect(email.subject).toBe("Builder Deals: 11 new communities found");
     expect(email.content).toContain("Esperanza 60's (Chesmar)");
     expect(email.content).toContain("Paloma Park (M/I Homes)");
     expect(email.content).toContain("Fixture Ranch (D.R. Horton)");
@@ -258,16 +270,16 @@ describe("discovery", () => {
   it("adds nothing for a builder whose sitemap cannot be read, says so, and carries on with the rest", async () => {
     const broken = vi.fn(async (input: string) => input.startsWith(CH) ? new Response("<html>maintenance</html>", { status: 200, headers: { "content-type": "text/html" } }) : fetcher(input));
     const run = await runCommunityDiscovery(broken);
-    expect(run).toMatchObject({ created: 9, builders: [{ builder: "Chesmar", ok: false, reason: "sitemap_unreadable", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "First America Homes", ok: true, created: 1 }, { builder: "Coventry Homes", ok: true, created: 1 }, { builder: "Davidson Homes", ok: true, created: 1 }, { builder: "Highland Homes", ok: true, created: 1 }, { builder: "Century Communities", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
+    expect(run).toMatchObject({ created: 10, builders: [{ builder: "Chesmar", ok: false, reason: "sitemap_unreadable", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "First America Homes", ok: true, created: 1 }, { builder: "Coventry Homes", ok: true, created: 1 }, { builder: "Davidson Homes", ok: true, created: 1 }, { builder: "Highland Homes", ok: true, created: 1 }, { builder: "KB Home", ok: true, created: 1 }, { builder: "Century Communities", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
     const email = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { content: string };
     expect(email.content).toContain("Could not read Chesmar's site list this time");
   });
 
   it("reads each builder under its lease, so a lane or Refresh now never reads the same site at the same time, and releases it after", async () => {
     const run = await runCommunityDiscovery(fetcher);
-    expect(run).toMatchObject({ created: 11 });
+    expect(run).toMatchObject({ created: 12 });
     const leases = db.rows(dealJobRuns).filter((row) => row.jobName.startsWith("builder-deals-lane-"));
-    expect(leases.map((row) => [row.jobName, row.status]).sort()).toEqual([["builder-deals-lane-Centex", "ok"], ["builder-deals-lane-Century Communities", "ok"], ["builder-deals-lane-Chesmar", "ok"], ["builder-deals-lane-Coventry Homes", "ok"], ["builder-deals-lane-D.R. Horton", "ok"], ["builder-deals-lane-Davidson Homes", "ok"], ["builder-deals-lane-Del Webb", "ok"], ["builder-deals-lane-First America Homes", "ok"], ["builder-deals-lane-Highland Homes", "ok"], ["builder-deals-lane-M/I Homes", "ok"], ["builder-deals-lane-Pulte", "ok"]]);
+    expect(leases.map((row) => [row.jobName, row.status]).sort()).toEqual([["builder-deals-lane-Centex", "ok"], ["builder-deals-lane-Century Communities", "ok"], ["builder-deals-lane-Chesmar", "ok"], ["builder-deals-lane-Coventry Homes", "ok"], ["builder-deals-lane-D.R. Horton", "ok"], ["builder-deals-lane-Davidson Homes", "ok"], ["builder-deals-lane-Del Webb", "ok"], ["builder-deals-lane-First America Homes", "ok"], ["builder-deals-lane-Highland Homes", "ok"], ["builder-deals-lane-KB Home", "ok"], ["builder-deals-lane-M/I Homes", "ok"], ["builder-deals-lane-Pulte", "ok"]]);
     // Leases were released: another holder gets them right away.
     const lease = await leaseBuilder("Chesmar");
     expect(lease).not.toBeNull();
@@ -280,7 +292,7 @@ describe("discovery", () => {
     // The lease was taken a moment ago, so the wait (twenty minutes, advanced by the fake sleep) ends well inside its two-hour life.
     let clock = Date.now();
     const run = await runCommunityDiscovery(fetcher, { now: () => clock, sleep: async (ms) => { clock += ms; } });
-    expect(run).toMatchObject({ created: 9, builders: [{ builder: "Chesmar", ok: false, reason: "builder_busy", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "First America Homes", ok: true, created: 1 }, { builder: "Coventry Homes", ok: true, created: 1 }, { builder: "Davidson Homes", ok: true, created: 1 }, { builder: "Highland Homes", ok: true, created: 1 }, { builder: "Century Communities", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
+    expect(run).toMatchObject({ created: 10, builders: [{ builder: "Chesmar", ok: false, reason: "builder_busy", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "First America Homes", ok: true, created: 1 }, { builder: "Coventry Homes", ok: true, created: 1 }, { builder: "Davidson Homes", ok: true, created: 1 }, { builder: "Highland Homes", ok: true, created: 1 }, { builder: "KB Home", ok: true, created: 1 }, { builder: "Century Communities", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
     expect(requested.some((url) => url.startsWith(CH))).toBe(false);
     await held!.release();
   });
@@ -288,7 +300,7 @@ describe("discovery", () => {
   it("reports a builder whose onboarding throws and still finishes the others and the email", async () => {
     mocks.onboardFailure = "Chesmar";
     const run = await runCommunityDiscovery(fetcher);
-    expect(run).toMatchObject({ created: 9, builders: [{ builder: "Chesmar", ok: false, reason: "onboarding_failed", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "First America Homes", ok: true, created: 1 }, { builder: "Coventry Homes", ok: true, created: 1 }, { builder: "Davidson Homes", ok: true, created: 1 }, { builder: "Highland Homes", ok: true, created: 1 }, { builder: "Century Communities", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
+    expect(run).toMatchObject({ created: 10, builders: [{ builder: "Chesmar", ok: false, reason: "onboarding_failed", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "First America Homes", ok: true, created: 1 }, { builder: "Coventry Homes", ok: true, created: 1 }, { builder: "Davidson Homes", ok: true, created: 1 }, { builder: "Highland Homes", ok: true, created: 1 }, { builder: "KB Home", ok: true, created: 1 }, { builder: "Century Communities", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
     expect(mocks.sendBuilderDealsEmail).toHaveBeenCalledTimes(1);
     // The failed builder's lease was released despite the error.
     const lease = await leaseBuilder("Chesmar");
@@ -304,7 +316,7 @@ describe("discovery", () => {
     expect(await runCommunityDiscovery(fetcher, { now: () => started.getTime() + 60_000 })).toEqual({ skipped: "already_running" });
     expect(requested).toEqual([]);
     const later = await runCommunityDiscovery(fetcher, { now: () => started.getTime() + 4 * 60 * 60_000 });
-    expect(later).toMatchObject({ created: 11 });
+    expect(later).toMatchObject({ created: 12 });
     expect(db.rows(dealJobRuns).filter((row) => row.jobName === "builder-deals-discovery-run")).toHaveLength(1);
     expect(db.rows(dealJobRuns).find((row) => row.jobName === "builder-deals-discovery-run")).toMatchObject({ status: "ok" });
 

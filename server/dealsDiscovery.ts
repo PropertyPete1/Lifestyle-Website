@@ -7,11 +7,12 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { CENTURY_HOST, DAVIDSON_HOST, HIGHLAND_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { CENTURY_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
 import { highlandRecord } from "./dealsAdapters.highland";
+import { kbRecord } from "./dealsAdapters.kbhome";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -113,6 +114,12 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "Highland Homes", host: HIGHLAND_HOST, index: { kind: "sitemap", url: `https://${HIGHLAND_HOST}/sitemap.xml` },
     communityPath: /^\/san-antonio\/[a-z0-9-]+\/(?!new-home-concierge$|homesites$)[a-z0-9-]+$/i,
     record: (html) => highlandRecord(html),
+  },
+  {
+    // KB Home: the sitemap names the San Antonio market's community pages (plan pages sit a segment deeper); each page carries a Place record with the office address and coordinates.
+    builder: "KB Home", host: KBHOME_HOST, index: { kind: "sitemap", url: `https://${KBHOME_HOST}/sitemap.xml` },
+    communityPath: /^\/new-homes-san-antonio\/[a-z0-9-]+\/?$/i,
+    record: (html) => kbRecord(html),
   },
   { builder: "Century Communities", host: CENTURY_HOST, index: { kind: "sitemap", url: `https://${CENTURY_HOST}/sitemap.xml` }, communityPath: /^\/find-your-new-home\/texas\/san-antonio-metro\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({

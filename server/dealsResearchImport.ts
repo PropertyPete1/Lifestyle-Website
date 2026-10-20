@@ -11,7 +11,7 @@ import { onboardDiscoveredCommunities, type DiscoveredCommunity, type Onboarding
 export const RESEARCH_COMMUNITIES_CSV = path.resolve(process.cwd(), "research", "sa-communities.csv");
 
 /** Builder names as the research spells them, mapped to the names the readers use. */
-const BUILDER_ALIASES: Record<string, string> = { "chesmar homes": "Chesmar", "m/i homes": "M/I Homes", "mi homes": "M/I Homes", "dr horton": "D.R. Horton", "d r horton": "D.R. Horton", "d. r. horton": "D.R. Horton", "drhorton": "D.R. Horton", "d.r. horton homes": "D.R. Horton", "pulte homes": "Pulte", "pultegroup": "Pulte", "centex homes": "Centex", "del webb homes": "Del Webb", "first america": "First America Homes", "coventry": "Coventry Homes", "davidson": "Davidson Homes", "highland": "Highland Homes", "century": "Century Communities" };
+const BUILDER_ALIASES: Record<string, string> = { "chesmar homes": "Chesmar", "m/i homes": "M/I Homes", "mi homes": "M/I Homes", "dr horton": "D.R. Horton", "d r horton": "D.R. Horton", "d. r. horton": "D.R. Horton", "drhorton": "D.R. Horton", "d.r. horton homes": "D.R. Horton", "pulte homes": "Pulte", "pultegroup": "Pulte", "centex homes": "Centex", "del webb homes": "Del Webb", "first america": "First America Homes", "coventry": "Coventry Homes", "davidson": "Davidson Homes", "highland": "Highland Homes", "century": "Century Communities", "kb homes": "KB Home", "kb": "KB Home", "kbhome": "KB Home" };
 
 export function builderNameFor(raw: string): string {
   const name = raw.replace(/\s+/g, " ").trim();

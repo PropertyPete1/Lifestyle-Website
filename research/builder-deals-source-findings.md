@@ -103,6 +103,14 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Incentives:** a header line ("Flexible Tours | Below-Market Rates | Made-for-You Financing Options") with no terms; not read.
 - **Scrub:** Century Communities, Century Complete, Century; lender Inspire Home Loans.
 
+## KB Home reader (added 2026-10-20)
+
+- **Community source:** `https://www.kbhome.com/new-homes-san-antonio/<slug>` (the market page lists 19 communities, New Braunfels included; the sitemap names each with its plan pages a segment deeper).
+- **Site shape:** server-rendered (about 1 MB). The inventory is three inline JavaScript arrays in one script: `FloorPlanList` (plans: `name` "Plan 2246", `pricedFrom` "224995" or null, `bedroomsMin`, `bathroomsMin`, `garagesMin`, `size`, `thumbnailImage.image`, `pageUrl`), `LocalQMIs` (move-in ready homes: `address`, `price`, `bedrooms`, `bathrooms`, `garages`, `size`, `homesite`, `floorPlanLink` = plan id, `moveInDateCopy` "Available Now", `moveInDate`, `websitePhotos[].image`, `pageUrl` ".../mir?homesite=<id>", `mlsNumber`) and `LocalMIR` (a copy of the plans). Numbers are strings. The reader parses the arrays by bracket matching and holds when either is missing; an empty `LocalQMIs` is a community with plans only. Only "Available Now" was seen as `moveInDateCopy`; a month-year form is read as a month, other wording has no status (held). Photos sit on `www.kbhome.com/globalassets/...`; exterior photos live in a "floor-plan" folder, so drawings are judged by file name.
+- **Community record:** schema.org `Place` with `@id` ending `#community` in a JSON-LD graph (single-quoted `type` attribute): address, phone, geo, nearby schools. Discovery reads it through a reader hook (the generic reader wants a business type).
+- **Incentives:** a monthly-payment disclaimer template (KBHS Home Loans, NMLS id) and site-wide banners; no community offer terms on the page. Not read.
+- **Scrub:** KB Home, KB Homes, KB; lender KBHS Home Loans, KBHS.
+
 ## Live checks before launch (fail-safe holds the fixtures cannot settle)
 
 - D.R. Horton: a community with zero quick move-in homes may omit the `#relatedmovein` block; the reader then holds `expected_community_container_not_found` and its plans never publish. Check one such community live; if the block is omitted, relax the hold to "block absent, `#floorplans` present with counts, LocalBusiness record present and no `available-home-card` anywhere" (still holds when the cards are merely renamed).

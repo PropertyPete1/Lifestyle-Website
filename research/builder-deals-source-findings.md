@@ -128,6 +128,14 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Scrub:** David Weekley Homes, David Weekley, Weekley Homes, Weekley; lender Priority Home Mortgage.
 - **Live check:** `Ready` false and `LostReadyStatus` were never seen set; the reader gives such a home no status (holds). `Stage` below 10 with "Ready Now" was seen once (4203 Blackhaw Bend) and is read as the label says.
 
+## Ashton Woods reader (added 2026-10-20)
+
+- **Community source:** `https://www.ashtonwoods.com/san-antonio/<slug>` (the division map lists 13 parent communities; a parent's page shows its child communities' homes — Hennersby Hollow shows The Preserve at Hennersby Hollow's — so discovery adds parents only).
+- **Site shape:** server-rendered (600-990 KB). One `.js-property-card` per plan (`.property-card--is-series`: title = plan name, `.property-card__price` "From $358,240", link) and per quick move-in home (`data-property-id`, `.property-card__body-title` "Available Now" / "Available Nov 2026", `.property-card__title a` "7419 Hound Crossing<br>San Antonio, TX 78252" linking to the home page under the child's slug, `.property-card__price` with `--strike` and `--red` spans when the price dropped, a feature list with the plan link `/san-antonio/all-home-plans/<plan>-<sqft>`, "4 Beds", "3 Baths", "2165 sq. ft.", "1 Story", "2 Car Garage", photos on `awh.widen.net`). The reader holds when fewer homes read than `data-property-id` cards; a card without its link or with unknown status wording has no status. Community record: JSON-LD `HomeAndConstructionBusiness` with the sales address ("By Appointment Only" is no street) and no coordinates; the division map endpoint `GET /ashton-woods/get-division-community-map/13` (JSON, no key) gives each parent's pin and phone.
+- **Incentives:** a seasonal banner ("Fall Savings that Feel Right at Home") opening a form; no terms on the page. Not read.
+- **Scrub:** Ashton Woods Homes, Ashton Woods, Starlight Homes (the sister brand); lender Velocio Mortgage, Velocio.
+- **Live check:** a sold-out parent page's shape is unknown; with no property card at all the reader holds.
+
 ## Meritage Homes: deferred
 
 - `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.

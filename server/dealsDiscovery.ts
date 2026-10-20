@@ -7,7 +7,7 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { CENTURY_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { ASHTON_HOST, CENTURY_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
@@ -15,6 +15,7 @@ import { highlandRecord } from "./dealsAdapters.highland";
 import { kbRecord } from "./dealsAdapters.kbhome";
 import { tollListingEntries, tollListingUrl } from "./dealsAdapters.toll";
 import { weekleyListingEntries, weekleyListingUrl, weekleyRecord } from "./dealsAdapters.weekley";
+import { ashtonListingEntries, ashtonListingUrl, ashtonRecord } from "./dealsAdapters.ashton";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -135,6 +136,13 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     index: { kind: "listing", url: weekleyListingUrl(), accept: "application/json", entries: (body, host) => weekleyListingEntries(body, host) },
     communityPath: /^\/new-homes\/tx\/san-antonio\/[a-z-]+\/(?!build-on-your-lot)[a-z0-9-]+\/?$/i,
     record: weekleyRecord,
+  },
+  {
+    // Ashton Woods: the division map lists the parent communities with coordinates and phone (a parent's page shows its children's homes); each page gives the sales address.
+    builder: "Ashton Woods", host: ASHTON_HOST,
+    index: { kind: "listing", url: ashtonListingUrl(), accept: "application/json", entries: (body, host) => ashtonListingEntries(body, host) },
+    communityPath: /^\/san-antonio\/(?!all-home-plans$|quick-move-ins$)[a-z0-9'%-]+\/?$/i,
+    record: (html) => ashtonRecord(html),
   },
   { builder: "Century Communities", host: CENTURY_HOST, index: { kind: "sitemap", url: `https://${CENTURY_HOST}/sitemap.xml` }, communityPath: /^\/find-your-new-home\/texas\/san-antonio-metro\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({
@@ -296,10 +304,12 @@ export async function discoverBuilderCommunities(reader: DiscoveryReader, fetche
   }
   for (const { url, record: listed } of Array.from(pages.values())) {
     let record = listed;
-    if (!record) {
+    // A listing record without the sales address (a map pin) still needs the page; the page's record takes the pin's coordinates and phone where it has none.
+    if (!record || (reader.record && !record.street)) {
       const page = await getDocument(url, fetcher, "text/html,application/xhtml+xml", reader.host);
       if (!page.ok) { result.skipped.push({ url, reason: "page_unreadable" }); continue; }
-      record = reader.record ? reader.record(page.text, url) : communityRecordFromHtml(page.text);
+      const fromPage = reader.record ? reader.record(page.text, url) : communityRecordFromHtml(page.text);
+      record = fromPage ? { ...fromPage, city: fromPage.city ?? listed?.city ?? null, geo: fromPage.geo ?? listed?.geo ?? null, phone: fromPage.phone ?? listed?.phone ?? null, priceFrom: fromPage.priceFrom ?? listed?.priceFrom ?? null } : null;
     }
     if (!record) { result.skipped.push({ url, reason: "no_community_record" }); continue; }
     // Every record must place the community: one without coordinates cannot pass the area check and is not added on faith.

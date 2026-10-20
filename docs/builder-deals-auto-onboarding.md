@@ -35,9 +35,10 @@ name, sales address and phone (and a price range when there is one).
 
 Builders with discovery today: Chesmar, M/I Homes, D.R. Horton, Pulte, Centex,
 Del Webb, First America Homes, Coventry Homes, Davidson Homes, Highland Homes,
-Century Communities, KB Home, Toll Brothers and David Weekley Homes
+Century Communities, KB Home, Toll Brothers, David Weekley Homes and Ashton Woods
 (Perry Homes has a reader; its communities come from the research list). A builder whose listing carries the community's record (PulteGroup, Toll Brothers) is
-added without reading a page. Each new builder
+added without reading a page; one whose listing is a map of pins (Ashton Woods) has
+each page read for its address, and the page's record takes the pin's coordinates. Each new builder
 gets a reader (its community page format) and a discovery entry (its sitemap,
 or its own market listing when the sitemap is unusable, plus the community URL
 pattern).

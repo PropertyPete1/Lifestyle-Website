@@ -53,6 +53,7 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "cdn.tollbrothers.com",
   "www.davidweekleyhomes.com",
   "assetcontentdeliveryapi.davidweekleyhomes.com",
+  "awh.widen.net",
 ]);
 const ACCEPTED_IMAGE_FORMATS = new Set(["jpeg", "png", "webp", "avif", "gif", "heif"]);
 

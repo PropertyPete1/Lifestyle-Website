@@ -23,8 +23,10 @@ name, sales address and phone (and a price range when there is one).
   streams of requests at once. Discovery waits up to 20 minutes for a busy
   lease, then skips that builder for the run ("builder_busy" in the email).
 - The run goes to the background and holds one claim across every server (a
-  `deal_job_runs` row, `builder-deals-discovery-run`); a second start while it
-  is in flight is refused, and a run that died is taken over after three hours.
+  `deal_job_runs` row, `builder-deals-discovery-run`, carrying the run's token);
+  a second start while it is in flight is refused, a run that died is taken
+  over after three hours, and a run that was taken over cannot close the
+  taker's row.
 - Discovery never removes a community.
 - When something new is added, the sync recipients get one email listing it.
 
@@ -106,8 +108,9 @@ The scheduled check runs every 10 minutes from 4 AM to 10 PM Central
   each community before checking it (re-reading it, so a community paused or
   archived since the call started is left alone), and does not retry a failed
   one for 90 minutes. A lease carries a token: only the holder releases it, it
-  is renewed while the lane works, and only a lease untouched for two hours is
-  treated as dead and taken over.
+  is renewed as pages are read (at most once a minute, so a 150-page community
+  never looks dead), and only a lease untouched for two hours is treated as
+  dead and taken over.
 - records a community whose check itself failed (a network error, a page the
   reader could not parse) as a `refresh_failed` catalog hold, so Admin sees it
   and the digest names it, instead of the failure passing unnoticed.
@@ -148,7 +151,7 @@ With every community on the page, both lists change shape once they are long:
 ## The research list
 
 `research/sa-communities.csv` is the master list of every builder community in
-the San Antonio metro (536 rows, 77 builders, read from the builders' own sites
+the San Antonio metro (536 rows, 51 builders, read from the builders' own sites
 on 2026-10-19). Admin, Communities, "Load research list" imports it through the
 same onboarding as discovery: every community not already in the table is
 added hidden. Running it again adds only what is new. A community whose builder

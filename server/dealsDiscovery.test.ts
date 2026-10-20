@@ -224,6 +224,23 @@ describe("discovery", () => {
     expect(later).toMatchObject({ created: 6 });
     expect(db.rows(dealJobRuns).filter((row) => row.jobName === "builder-deals-discovery-run")).toHaveLength(1);
     expect(db.rows(dealJobRuns).find((row) => row.jobName === "builder-deals-discovery-run")).toMatchObject({ status: "ok" });
+
+    // A run taken over while still working cannot close the taker's row: the row carries the taker's token.
+    const row = db.rows(dealJobRuns).find((entry) => entry.jobName === "builder-deals-discovery-run")!;
+    row.status = "running"; row.startedAt = new Date(Date.now() - 4 * 60 * 60_000); row.detail = "run:stale-token"; row.completedAt = null;
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const slow = vi.fn(async (input: string) => { if (input.startsWith(CH)) await gate; return fetcher(input); });
+    const stale = runCommunityDiscovery(slow, { now: () => Date.now() });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The stale run is mid-read when a fresh start takes the row over...
+    const taker = await runCommunityDiscovery(fetcher, { now: () => Date.now() + 4 * 60 * 60_000 });
+    expect(taker).toMatchObject({ created: 0 });
+    const takerToken = db.rows(dealJobRuns).find((entry) => entry.jobName === "builder-deals-discovery-run")!.detail;
+    // ...and when the stale run finishes, the taker's row stands as the taker left it.
+    release!();
+    await stale;
+    expect(db.rows(dealJobRuns).find((entry) => entry.jobName === "builder-deals-discovery-run")).toMatchObject({ status: "ok", detail: takerToken });
   });
 
   it("never follows a sitemap or page to another host", async () => {

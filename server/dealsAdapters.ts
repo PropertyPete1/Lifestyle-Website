@@ -1020,11 +1020,25 @@ export function looksLikeStreetAddress(value: string | null | undefined): value 
   return typeof value === "string" && STREET_ADDRESS_PATTERN.test(value.trim());
 }
 
+/**
+ * The builder's own names and its lender's, kept out of every public text. One
+ * table for the sync (stored scrub lists), onboarding, Admin and the readers.
+ */
+export function builderScrubConfig(builder: string): DealScrubConfig {
+  const config = emptyDealScrubConfig();
+  if (builder === "M/I Homes") { config.builder.push("M/I Homes", "M/I"); config.lender.push("M/I Financial, LLC", "M/I Financial"); }
+  if (builder === "Chesmar") { config.builder.push("Chesmar Homes", "Chesmar"); config.lender.push("HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HomeAmerican", "HMC"); }
+  if (builder === "Perry Homes") { config.builder.push("Perry Homes", "Perry"); config.lender.push("Parkstone Mortgage", "Parkstone", "Crestmark Mortgage", "Crestmark"); }
+  if (builder === "Pulte" || builder === "Centex" || builder === "Del Webb") { config.builder.push("PulteGroup", "Pulte Homes", "Pulte", "Centex Homes", "Centex", "Del Webb"); config.lender.push("Pulte Mortgage LLC", "Pulte Mortgage"); }
+  // D.R. Horton's product lines name the builder as surely as the builder does.
+  if (builder === "D.R. Horton") { config.builder.push("D.R. Horton", "DR Horton", "D. R. Horton", "Horton", "Express Series", "Express Homes", "Emerald Homes", "Freedom Homes", "Tradition Series"); config.lender.push("DHI Mortgage", "DHI Title", "DHI"); }
+  return config;
+}
+
 export function categorizedPrivateTerms(config: Pick<CommunitySourceConfig, "builder" | "privateCommunityName" | "scrubList" | "scrubConfig" | "excludedTerms">, discovered?: PrivateDealSnapshot): DealScrubConfig {
   const result = parseDealScrubConfig(config.scrubConfig ?? emptyDealScrubConfig());
-  const builder = config.builder === "M/I Homes" ? ["M/I Homes", "M/I"] : config.builder === "Chesmar" ? ["Chesmar Homes", "Chesmar"] : [];
-  const lender = config.builder === "M/I Homes" ? ["M/I Financial, LLC", "M/I Financial"] : config.builder === "Chesmar" ? ["HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HomeAmerican", "HMC"] : [];
-  result.builder.push(...builder); result.lender.push(...lender); result.community.push(config.privateCommunityName);
+  const builderNames = builderScrubConfig(config.builder);
+  result.builder.push(...builderNames.builder); result.lender.push(...builderNames.lender); result.community.push(config.privateCommunityName);
   const known = new Set(dealScrubTerms(result).map((term) => term.toLowerCase()));
   result.other.push(...config.scrubList.filter((term) => !known.has(term.toLowerCase())));
   for (const item of [...(discovered?.plans ?? []), ...(discovered?.homes ?? [])]) {

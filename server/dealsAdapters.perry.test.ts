@@ -106,6 +106,24 @@ describe("Perry Homes reader: page shapes", () => {
     expect(parsePerryDetail(pages[`${COLLECTION}/119-fixture-trail`]!, `${COLLECTION}/999-nowhere-lane`)).toBeNull();
     expect(decodeFlightPayload('<script>self.__next_f.push([1,"a\\"b\\u0026c"])</script><script>self.__next_f.push([1,"d"])</script>')).toBe("a\"b&cd");
   });
+
+  it("reads only the home's own object: no neighbour's badge, a zero or quoted price kept rather than holding the community", () => {
+    // The fixture's Flight payload, edited in the clear and wrapped again the way Next serves it.
+    const flight = decodeFlightPayload(pages[`${COLLECTION}/143-fixture-trail`]!);
+    const own = (edited: string) => flightHtml("<title>t</title>", "body", edited);
+    // A related-homes list after this home's object carries another home's "Move-In Ready": without a badge of its own this home has no status.
+    const related = `,["$","$L31",null,{"relatedHomes":[{"home_title":"200 Other Way","home_url":"${COLLECTION}/200-other-way","badge":"Move-In Ready","design_id":"3000X"}]}]`;
+    const noBadge = flight.replace(/"badge":"[^"]*",/, "").replace(/\]\}\]\]\}\]$/, `]}]${related}]}]`);
+    expect(noBadge).toContain("relatedHomes");
+    expect(noBadge).not.toMatch(/"badge":"[^"]*","className"/);
+    const home = parsePerryDetail(own(noBadge), `${COLLECTION}/143-fixture-trail`);
+    expect(home).not.toBeNull();
+    expect(home).toMatchObject({ status: null, readyNow: false, moveInDate: null });
+    // "Call for pricing": the object is present, so the home stays, with no price.
+    expect(parsePerryDetail(own(flight.replace(/"price":\d+,"price_discounted":\d+/, "\"price\":0,\"price_discounted\":0")), `${COLLECTION}/143-fixture-trail`)).toMatchObject({ price: null, previousPrice: null, bedrooms: 5 });
+    // A price written as a figure string is still a price.
+    expect(parsePerryDetail(own(flight.replace(/"price":(\d+),/, "\"price\":\"$$1\",")), `${COLLECTION}/143-fixture-trail`)?.price).toBeGreaterThan(100_000);
+  });
 });
 
 describe("Perry Homes reader: a community", () => {
@@ -124,7 +142,7 @@ describe("Perry Homes reader: a community", () => {
     expect(requested.filter((url) => url === "https://www.perryhomes.com/sitemap.xml")).toHaveLength(1);
     // Public output carries figures only.
     const json = JSON.stringify(result.public);
-    for (const secret of ["Fixture Trail", "Fixture Heights", "Cibolo", "78108", "3330M", "perryhomes.com"]) expect(json).not.toContain(secret);
+    for (const secret of ["Fixture Trail", "Fixture Heights", "Cibolo", "78108", "3330M", "perryhomes.com", "Perry"]) expect(json).not.toContain(secret);
     expect(result.public.homes).toHaveLength(2);
   });
 

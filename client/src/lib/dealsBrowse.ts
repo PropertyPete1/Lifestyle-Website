@@ -1,4 +1,4 @@
-import { BIG_LOT_ACRES, lotAcres } from "@shared/dealsFeatured";
+import { BIG_LOT_ACRES, homeLotAcres, lotAcres } from "@shared/dealsFeatured";
 
 /**
  * Browsing every community in the area: filters shared by the landing page and
@@ -82,7 +82,7 @@ export function homesMatching<Home extends GatedBrowseHome>(community: GatedBrow
     if (filters.maxPrice !== null && !(home.price && home.price <= filters.maxPrice)) return false;
     if (filters.minBeds !== null && (bedsFrom(home.beds) ?? 0) < filters.minBeds) return false;
     if (filters.moveInReady && home.kind !== "quick_move_in") return false;
-    if (filters.bigLots && (lotAcres(home.lotSize, { field: true }) ?? communityLot ?? 0) < BIG_LOT_ACRES) return false;
+    if (filters.bigLots && (homeLotAcres(home.lotSize, communityLot) ?? 0) < BIG_LOT_ACRES) return false;
     return true;
   });
 }

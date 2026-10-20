@@ -66,7 +66,20 @@ function acreMentions(text: string): AcreMention[] {
   for (const match of Array.from(text.matchAll(/(\d+)\s*\/\s*(\d+)\s*-?\s*acres?\b/gi))) push(Number(match[1]) / Number(match[2]), match);
   for (const match of Array.from(text.matchAll(/(?<![\d/])(\d*\.?\d+)\s*\+?\s*-?\s*acres?\b/gi))) push(Number(match[1]), match);
   for (const [pattern, value] of WORD_ACRES) for (const match of Array.from(text.matchAll(pattern))) push(value, match);
+  // A lot given in square feet: "6,500 sq ft", "7200 sqft", "0.15 ac" is 6,534 sq ft.
+  for (const match of Array.from(text.matchAll(/(?<![\d.])(\d{1,3}(?:,\d{3})+|\d{3,6})\s*(?:sq\.?\s*\.?\s*f(?:ee)?t\.?|square\s+feet|sf)\b/gi))) push(Number(match[1]!.replace(/,/g, "")) / 43_560, match);
   return found;
+}
+
+/**
+ * A home's own lot, when it has a lot-size field: the acreage it states, or
+ * null when the field is empty. A field that is filled but reads as nothing
+ * ("corner", "TBD") is still the home's own answer, so the caller must not fall
+ * back to the community's lots; `own` says whether to.
+ */
+export function homeLotAcres(lotSize: string | null | undefined, communityAcres: number | null): number | null {
+  if (!lotSize || !lotSize.trim()) return communityAcres;
+  return lotAcres(lotSize, { field: true });
 }
 
 /** The largest acreage a text mentions: "Half-Acre Lots" -> 0.5, "0.75 acre" -> 0.75, "1/2 acre" -> 0.5. */

@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
-import { eq } from "drizzle-orm";
+import crypto from "node:crypto";
+import { and, eq } from "drizzle-orm";
 import { dealCommunities } from "../drizzle/schema";
 import { clientIpKey } from "../shared/deals";
 import { ENV } from "./_core/env";
@@ -188,7 +189,7 @@ export function communityAreaMap(row: Pick<typeof dealCommunities.$inferSelect, 
   const radiusMiles = options.radiusMiles ?? (variant === "public" ? PUBLIC_AREA_MAP_RADIUS_MILES : AREA_MAP_RADIUS_MILES);
   const geometry = areaMapGeometry(row, variant, radiusMiles);
   if (!geometry) return null;
-  if (variant === "public") return { radiusMiles, radiusPixels: geometry.radiusPixels, imageUrl: `/deals/maps/${row.id}.webp`, attribution: PUBLIC_AREA_MAP_ATTRIBUTION };
+  if (variant === "public") return { radiusMiles, radiusPixels: geometry.radiusPixels, imageUrl: `/deals/maps/${publicMapHandle(row.id)}.webp`, attribution: PUBLIC_AREA_MAP_ATTRIBUTION };
   return { lat: geometry.center.lat, lng: geometry.center.lng, zoom: geometry.zoom, radiusMiles, radiusPixels: geometry.radiusPixels, imageUrl: `/deals/mine/maps/${row.id}.webp`, attribution: AREA_MAP_ATTRIBUTION };
 }
 
@@ -196,6 +197,28 @@ export function mapCommunityIdFromPath(raw: string | undefined): number | null {
   const match = /^(\d{1,9})(?:\.(?:png|webp))?$/.exec(raw ?? "");
   const id = match ? Number(match[1]) : NaN;
   return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * The landing card's map handle: a keyed hash of the community id, so the
+ * public JSON carries no row id (every other public handle is opaque too). The
+ * key is the server's cookie secret; without one the handle is still not the id.
+ */
+export function publicMapHandle(communityId: number): string {
+  return crypto.createHmac("sha256", process.env.JWT_SECRET || "deals-map").update(`deals-map:${communityId}`).digest("base64url").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 16);
+}
+
+export function publicMapHandleFromPath(raw: string | undefined): string | null {
+  const match = /^([A-Za-z0-9_-]{16})(?:\.(?:png|webp))?$/.exec(raw ?? "");
+  return match ? match[1]! : null;
+}
+
+/** The landing community behind a public map handle: the handles are not stored, so the live communities are hashed and compared. */
+async function communityForPublicMapHandle(handle: string): Promise<typeof dealCommunities.$inferSelect | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)));
+  return rows.find((row) => publicMapHandle(row.id) === handle) ?? null;
 }
 
 const imageCache = new Map<string, { bytes: Buffer; expiresAt: number; centroidKey: string }>();
@@ -328,12 +351,15 @@ export async function dealsMapImageHandler(req: Request, res: Response, variant:
   } else if (!publicMapAllowed(req.ip || req.socket?.remoteAddress || "unknown")) {
     return res.status(429).end();
   }
-  const communityId = mapCommunityIdFromPath(String(req.params.communityId ?? ""));
-  if (!communityId) return res.status(404).end();
   const db = await getDb();
   if (!db) return res.status(503).end();
-  const community = (await db.select().from(dealCommunities).where(eq(dealCommunities.id, communityId)).limit(1))[0];
+  const param = String(req.params.communityId ?? "");
+  // The private list's URL carries the row id behind the session; the landing card's carries an opaque handle.
+  const community = variant === "public"
+    ? await (async () => { const handle = publicMapHandleFromPath(param); return handle ? communityForPublicMapHandle(handle) : null; })()
+    : await (async () => { const id = mapCommunityIdFromPath(param); return id ? (await db.select().from(dealCommunities).where(eq(dealCommunities.id, id)).limit(1))[0] ?? null : null; })();
   if (!community || !community.active || community.paused) return res.status(404).end();
+  const communityId = community.id;
   // The public map exists only for a community the landing page shows (its label passed the residue check).
   if (variant === "public" && !publicNoPrivateNames({ label: community.publicLabel, area: community.areaLabel }, communityScrubConfig(community))) return res.status(404).end();
   const geometry = areaMapGeometry(community, variant, areaMapRadius(await getDealSettings(), variant));

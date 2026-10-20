@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { dealCommunities, dealJobRuns } from "../drizzle/schema";
 import { DOWNTOWN_SAN_ANTONIO, milesBetween } from "../shared/dealsArea";
@@ -285,7 +286,13 @@ export async function discoverAndOnboardAll(fetcher: HtmlFetcher = fetch, reader
     if (!lease) { failed("builder_busy"); continue; }
     let found: BuilderDiscovery;
     try {
-      found = await discoverBuilderCommunities(reader, fetcher);
+      // The lease is renewed as pages are read (one slow builder can take an hour); the passed fetcher is wrapped, not replaced.
+      let renewed = now();
+      found = await discoverBuilderCommunities(reader, async (input, init) => {
+        const response = await fetcher(input, init);
+        if (now() - renewed >= 60_000) { renewed = now(); await lease!.heartbeat().catch(() => undefined); }
+        return response;
+      });
     } catch (error) {
       console.error(`[deals-discovery] ${reader.builder} failed`, error instanceof Error ? error.message : error);
       failed("discovery_failed");
@@ -343,18 +350,21 @@ export async function runCommunityDiscovery(fetcher: HtmlFetcher = fetch, option
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const now = new Date(options.now?.() ?? Date.now());
+  // The claim carries a token: a run that was taken over after three hours cannot later close the taker's row.
+  const token = `run:${randomUUID()}`;
   const existing = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, DISCOVERY_JOB), eq(dealJobRuns.chicagoDay, "run"))).limit(1))[0];
   if (existing) {
     if (existing.status === "running" && existing.startedAt.getTime() > now.getTime() - DISCOVERY_STALE_MS) return { skipped: "already_running" };
-    const taken = await db.update(dealJobRuns).set({ status: "running", startedAt: now, completedAt: null, detail: null }).where(and(eq(dealJobRuns.id, existing.id), eq(dealJobRuns.status, existing.status), eq(dealJobRuns.startedAt, existing.startedAt)));
+    const taken = await db.update(dealJobRuns).set({ status: "running", startedAt: now, completedAt: null, detail: token }).where(and(eq(dealJobRuns.id, existing.id), eq(dealJobRuns.status, existing.status), eq(dealJobRuns.startedAt, existing.startedAt)));
     if (Number((taken as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) !== 1) return { skipped: "already_running" };
   } else {
-    try { await db.insert(dealJobRuns).values({ jobName: DISCOVERY_JOB, chicagoDay: "run", status: "running", startedAt: now }); } catch { return { skipped: "already_running" }; }
+    try { await db.insert(dealJobRuns).values({ jobName: DISCOVERY_JOB, chicagoDay: "run", status: "running", startedAt: now, detail: token }); } catch { return { skipped: "already_running" }; }
   }
+  const mine = and(eq(dealJobRuns.jobName, DISCOVERY_JOB), eq(dealJobRuns.chicagoDay, "run"), eq(dealJobRuns.status, "running"), eq(dealJobRuns.detail, token));
   const finish = async (status: "ok" | "failed", detail: string) => {
     const connection = await getDb();
     if (!connection) return;
-    await connection.update(dealJobRuns).set({ status, detail: detail.slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, DISCOVERY_JOB), eq(dealJobRuns.chicagoDay, "run"))).catch(() => undefined);
+    await connection.update(dealJobRuns).set({ status, detail: detail.slice(0, 10_000), completedAt: new Date() }).where(mine).catch(() => undefined);
   };
   try {
     const createdIds: number[] = [];

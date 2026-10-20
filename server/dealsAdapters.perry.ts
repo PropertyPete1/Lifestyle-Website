@@ -41,7 +41,27 @@ export function decodeFlightPayload(html: string): string {
 const unquote = (value: string) => value.replace(/\\"/g, "\"").replace(/\\u0026/g, "&").replace(/\\u003c/g, "<").replace(/\\u003e/g, ">").replace(/\\\\/g, "\\");
 /** A string field; Flight writes an absent value as "$undefined", which is no value. */
 const str = (source: string, key: string): string | null => { const match = new RegExp(`"${key}":"((?:[^"\\\\]|\\\\.)*)"`).exec(source); const value = match ? unquote(match[1]!) : null; return value === null || value.startsWith("$undefined") ? null : value; };
-const int = (source: string, key: string): number | null => { const match = new RegExp(`"${key}":(-?\\d+(?:\\.\\d+)?)`).exec(source); return match ? Number(match[1]) : null; };
+/** A number field, written bare (650000) or as a quoted figure ("$650,000"). */
+const int = (source: string, key: string): number | null => {
+  const match = new RegExp(`"${key}":(?:(-?\\d+(?:\\.\\d+)?)|"\\$?\\s*(\\d[\\d,]*(?:\\.\\d+)?)")`).exec(source);
+  if (!match) return null;
+  const value = Number((match[1] ?? match[2]!).replace(/,/g, ""));
+  return Number.isFinite(value) ? value : null;
+};
+
+/** The end of the object that starts (or continues) at `from`: the first closing brace not matched by an opening one, ignoring braces inside strings. */
+function objectEnd(source: string, from: number, limit: number): number {
+  let depth = 0;
+  let inString = false;
+  for (let index = from; index < Math.min(source.length, from + limit); index++) {
+    const char = source[index]!;
+    if (inString) { if (char === "\\") index += 1; else if (char === "\"") inString = false; continue; }
+    if (char === "\"") inString = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}") { if (depth === 0) return index; depth -= 1; }
+  }
+  return Math.min(source.length, from + limit);
+}
 
 const titleCase = (value: string) => value.toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
 
@@ -81,7 +101,8 @@ export function parsePerryDetail(html: string, pageUrl: string): PerryHome | nul
   const detailsStart = flight.lastIndexOf("\"home_details\":{", anchor);
   if (detailsStart < 0 || anchor - detailsStart > 60_000) return null;
   const before = flight.slice(detailsStart, anchor);
-  const after = flight.slice(anchor, anchor + 3_000);
+  // Only this home's own object is read after the anchor: a related-homes list further on carries other homes' badges.
+  const after = flight.slice(anchor, objectEnd(flight, anchor, 3_000));
   const addressBlockStart = flight.lastIndexOf("\"address\":{", detailsStart);
   const addressBlock = addressBlockStart >= 0 && detailsStart - addressBlockStart < 400 ? flight.slice(addressBlockStart, detailsStart) : "";
   const price = int(before, "price");
@@ -98,7 +119,7 @@ export function parsePerryDetail(html: string, pageUrl: string): PerryHome | nul
   const city = str(addressBlock, "city");
   const zip = str(addressBlock, "zip");
   const kind: "home" | "plan" = street ? "home" : "plan";
-  if (!price && !discounted) return null;
+  // The object is present: a missing or zero price ("call for pricing") keeps the home with no price, as the other readers do.
   const listPrice = price && price > 0 ? price : null;
   const salePrice = discounted && discounted > 0 ? discounted : listPrice;
   const moveIn = badge ? /^(?:[A-Z][a-z]+|[A-Z]+)\s+move[- ]?in$/i.exec(badge.trim()) : null;
@@ -116,7 +137,7 @@ export function parsePerryDetail(html: string, pageUrl: string): PerryHome | nul
     privateAddress: kind === "home" && street ? [street, [city, zip ? `TX ${zip}` : "TX"].filter(Boolean).join(", ")].filter(Boolean).join(", ") : null,
     privatePlanName: designId ? `Design ${designId}` : null,
     status,
-    price: salePrice,
+    price: salePrice ?? null,
     previousPrice: listPrice && salePrice && listPrice > salePrice ? listPrice : null,
     priceDrop: listPrice && salePrice && listPrice > salePrice ? listPrice - salePrice : null,
     bedrooms: beds,

@@ -16,7 +16,7 @@ const env = vi.hoisted(() => ({ ENV: { forgeApiUrl: "https://forge.example", for
 vi.mock("./_core/env", () => env);
 vi.mock("./dealsService", async (importOriginal) => ({ ...(await importOriginal<typeof import("./dealsService")>()), isLiveDealSession: (...args: unknown[]) => mocks.isLiveDealSession(...args) }));
 
-import { PUBLIC_MAP_REQUESTS_PER_WINDOW, areaMapRadius, communityAreaMap, publicMapCenter, zoomForRadius, dealsMapImageHandler, driveTimeChips, mapCommunityIdFromPath, refreshCommunityGeography, resetAreaMapCache, roundToFiveMinutes, zipFromAddress } from "./dealsMap";
+import { PUBLIC_MAP_REQUESTS_PER_WINDOW, areaMapRadius, communityAreaMap, publicMapCenter, publicMapHandle, zoomForRadius, dealsMapImageHandler, driveTimeChips, mapCommunityIdFromPath, refreshCommunityGeography, resetAreaMapCache, roundToFiveMinutes, zipFromAddress } from "./dealsMap";
 import { gatedDealsCatalog } from "./dealsService";
 
 /** Synthetic points: a ZIP centroid and a home about 1.6 miles away from it. */
@@ -115,7 +115,11 @@ describe("area map geography", () => {
     expect(communityAreaMap({ id: 7, zipCentroidLat: "29.3", zipCentroidLng: "-98.3" })).toMatchObject({ imageUrl: "/deals/mine/maps/7.webp", radiusMiles: 5, zoom: 11 });
     // The public card: a wider circle on its own session-free route, with no coordinates or zoom at all.
     const publicMap = communityAreaMap({ id: 7, zipCentroidLat: "29.3", zipCentroidLng: "-98.3" }, { variant: "public", radiusMiles: 8 });
-    expect(publicMap).toEqual({ imageUrl: "/deals/maps/7.webp", radiusMiles: 8, radiusPixels: expect.any(Number), attribution: "Map data and imagery from Google. General area only." });
+    // The public URL carries an opaque handle, never the row id.
+    expect(publicMap).toEqual({ imageUrl: `/deals/maps/${publicMapHandle(7)}.webp`, radiusMiles: 8, radiusPixels: expect.any(Number), attribution: "Map data and imagery from Google. General area only." });
+    expect(publicMapHandle(7)).toMatch(/^[A-Za-z0-9_-]{16}$/);
+    expect(publicMapHandle(7)).not.toBe(publicMapHandle(8));
+    expect(publicMap!.imageUrl).not.toMatch(/\/7\./);
     expect(publicMap!.radiusPixels).toBeGreaterThan(50);
     expect(publicMap!.radiusPixels).toBeLessThanOrEqual(150);
     expect(JSON.stringify(publicMap)).not.toMatch(/ZIP|29\.3|98\.3/);
@@ -204,7 +208,12 @@ describe("area map image route", () => {
     vi.stubGlobal("fetch", fetcher);
     try {
       const { response, raw, headers } = responseRecorder();
-      await dealsMapImageHandler({ params: { communityId: `${communityId}.png` }, headers: {} } as unknown as Request, response, "public");
+      // The row id is not a public handle: that path serves nothing.
+      const byId = responseRecorder();
+      await dealsMapImageHandler({ params: { communityId: `${communityId}.png` }, headers: {} } as unknown as Request, byId.response, "public");
+      expect(byId.raw.status).toHaveBeenCalledWith(404);
+      expect(fetcher).not.toHaveBeenCalled();
+      await dealsMapImageHandler({ params: { communityId: `${publicMapHandle(communityId)}.png` }, headers: {} } as unknown as Request, response, "public");
       expect(raw.status).not.toHaveBeenCalledWith(401);
       expect(headers["cache-control"]).toBe("public, max-age=3600");
       const request = new URL(fetcher.mock.calls[0]![0] as unknown as string);
@@ -227,7 +236,7 @@ describe("area map image route", () => {
     const fetcher = vi.fn(async () => new Response("nope", { status: 500, headers: { "content-type": "text/plain" } }));
     vi.stubGlobal("fetch", fetcher);
     try {
-      const request = { params: { communityId: `${communityId}.webp` }, headers: {}, ip: "203.0.113.5" } as unknown as Request;
+      const request = { params: { communityId: `${publicMapHandle(communityId)}.webp` }, headers: {}, ip: "203.0.113.5" } as unknown as Request;
       for (let attempt = 0; attempt < 5; attempt++) {
         const { response, raw } = responseRecorder();
         await dealsMapImageHandler(request, response, "public");

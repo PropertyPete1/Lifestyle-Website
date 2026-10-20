@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dealCommunities, dealHomes, dealIncentives, dealSettings } from "../drizzle/schema";
-import { acresFromText, builderExcluded, downPaymentPercentFrom, loanTypeLabel, lotAcres, monthlyPrincipalAndInterest, mortgageRateFrom, percentFrom, priceBandLabel, rankFeatured, type FeaturedCandidate } from "../shared/dealsFeatured";
+import { acresFromText, builderExcluded, downPaymentPercentFrom, homeLotAcres, loanTypeLabel, lotAcres, monthlyPrincipalAndInterest, mortgageRateFrom, percentFrom, priceBandLabel, rankFeatured, type FeaturedCandidate } from "../shared/dealsFeatured";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 
 /**
@@ -61,6 +61,14 @@ describe("the payment math", () => {
     expect(lotAcres("Lots from 0.25 up to 1 acre")).toBe(0.25);
     expect(lotAcres("0.52 acres", { field: true })).toBe(0.52);
     expect(lotAcres("40 acres", { field: true })).toBeNull();
+    // A lot given in square feet is read in acres; a home's own lot field answers for the home, even when it says nothing usable.
+    expect(lotAcres("6,500 sq ft", { field: true })).toBeCloseTo(0.149, 3);
+    expect(lotAcres("21780 sqft", { field: true })).toBe(0.5);
+    expect(lotAcres("Homesites of 7,200 square feet")).toBeCloseTo(0.165, 3);
+    expect(homeLotAcres("6,500 sq ft", 0.5)).toBeCloseTo(0.149, 3);
+    expect(homeLotAcres("corner homesite", 0.5)).toBeNull();
+    expect(homeLotAcres("", 0.5)).toBe(0.5);
+    expect(homeLotAcres(null, 0.5)).toBe(0.5);
   });
 
   it("reads down payments and keeps the loan program to a fixed list", () => {

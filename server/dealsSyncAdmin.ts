@@ -124,7 +124,7 @@ export async function refreshCommunityInBackground(communityId: number): Promise
       for (let attempt = 0; ; attempt++) {
         const lease = await leaseBuilder(community.builder);
         if (lease) {
-          try { return await refreshOfficialDeals({ communityId }); } finally { await lease.release(); }
+          try { return await refreshOfficialDeals({ communityId, heartbeat: lease.heartbeat }); } finally { await lease.release(); }
         }
         if (attempt >= 20) throw new Error("builder busy: another check of this builder's pages is still running");
         await new Promise((resolve) => setTimeout(resolve, 15_000));

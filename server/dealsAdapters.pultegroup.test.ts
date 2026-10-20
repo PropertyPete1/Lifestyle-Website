@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PulteGroupAdapter, parsePulteListing, parsePulteOffers, parsePulteQmi, pulteCommunityId, pulteMoveIn, resetPulteGroupCaches } from "./dealsAdapters.pultegroup";
 import { DEAL_ADAPTERS, loadOfficialDeals, type CommunitySourceConfig } from "./dealsAdapters";
-import { emptyDealScrubConfig } from "../shared/deals";
 
 /**
  * Synthetic PulteGroup responses in the shape the live platform served in
@@ -55,9 +54,8 @@ const fetcher = vi.fn(async (input: string) => {
   return new Response(entry.body, { status: 200, headers: { "content-type": entry.type } });
 });
 
-// The sync stores the builder's and lender's names in every community's scrub list (builderScrubConfig); the same categories are given here.
-const scrubConfig = { ...emptyDealScrubConfig(), builder: ["PulteGroup", "Pulte Homes", "Pulte", "Centex Homes", "Centex", "Del Webb"], lender: ["Pulte Mortgage LLC", "Pulte Mortgage"] };
-const config: CommunitySourceConfig = { builder: "Centex", sourceUrl: COMMUNITY, privateCommunityName: "Fixture Ridge", scrubList: ["Fixture Ridge", "Fixture Pass", "Fixture Way"], scrubConfig };
+// No scrub config is passed: the builder's and lender's names come from the shared builder table (builderScrubConfig).
+const config: CommunitySourceConfig = { builder: "Centex", sourceUrl: COMMUNITY, privateCommunityName: "Fixture Ridge", scrubList: ["Fixture Ridge", "Fixture Pass", "Fixture Way"] };
 
 beforeEach(() => { vi.clearAllMocks(); requested.length = 0; resetPulteGroupCaches(); });
 

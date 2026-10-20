@@ -27,7 +27,7 @@ vi.mock("./_core/heartbeat", () => ({
 }));
 
 import { parsePromotionalRate } from "./dealsAdapters";
-import { buildersInFlight, communityRefreshDue, leaseBuilder, refreshDueCommunitiesBatch, refreshOfficialDeals, revalidateDealIncentives, sendSyncDigestIfReady, storedScrubConfig } from "./dealsSync";
+import { buildersInFlight, communityRefreshDue, leaseBuilder, leaseRenewingFetcher, refreshDueCommunitiesBatch, refreshOfficialDeals, revalidateDealIncentives, sendSyncDigestIfReady, storedScrubConfig } from "./dealsSync";
 import { DEALS_JOB_DEFINITIONS, ensureDealsCron } from "./registerCron";
 import { chicagoEndOfDay } from "./dealsService";
 
@@ -534,6 +534,32 @@ describe("scheduling", () => {
     // One lease row per builder, whatever the day: a run across midnight is still one stream.
     expect(await leaseBuilder("Chesmar", new Date("2026-10-22T05:30:00Z"))).not.toBeNull();
     expect(await leaseBuilder("Chesmar", new Date("2026-10-22T05:35:00Z"))).toBeNull();
+  });
+
+  it("renews the builder lease while one community's pages are still being read, so a long community never looks dead", async () => {
+    const at = Date.parse("2026-10-21T11:00:00Z");
+    seedCommunity({ reelCode: "c1", privateName: "C1", builder: "Chesmar", sourceUrl: "https://www.chesmar.com/c1/" });
+    // The reader is handed a fetcher that renews the lease: a batch lane passes its own heartbeat through.
+    let options: { fetcher?: unknown } | undefined;
+    mocks.loadOfficialDeals.mockImplementation(async (_config: unknown, passed?: { fetcher?: unknown }) => { options = passed; return snapshot({ homes: [{ sourceUrl: home("8301-a") }] }); });
+    await refreshDueCommunitiesBatch({ clock: () => at });
+    expect(typeof options?.fetcher).toBe("function");
+    // The fetcher renews at most once a minute, after a page comes back, and swallows a failed renewal.
+    let clock = at;
+    const heartbeat = vi.fn(async () => undefined);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"));
+    const fetcher = leaseRenewingFetcher(heartbeat, () => clock, 60_000);
+    await fetcher("https://www.chesmar.com/a/");
+    expect(heartbeat).not.toHaveBeenCalled();
+    clock += 61_000;
+    await fetcher("https://www.chesmar.com/b/");
+    await fetcher("https://www.chesmar.com/c/");
+    expect(heartbeat).toHaveBeenCalledTimes(1);
+    clock += 61_000;
+    heartbeat.mockRejectedValueOnce(new Error("db away"));
+    await expect(fetcher("https://www.chesmar.com/d/")).resolves.toBeInstanceOf(Response);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    fetchSpy.mockRestore();
   });
 
   it("sends the morning summary once, holds later finds for the 7 PM follow-up, and sends at 10 AM if checks are still running", async () => {

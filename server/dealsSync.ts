@@ -2,7 +2,8 @@ import { and, desc, eq, gte, inArray, isNull, lt, ne, or } from "drizzle-orm";
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealJobRuns, dealPhotos, dealSyncDigestEntries } from "../drizzle/schema";
 import { getDb } from "./db";
 import { chicagoClock, chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
-import { MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts } from "./dealsAdapters";
+import { builderScrubConfig, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher } from "./dealsAdapters";
+export { builderScrubConfig };
 import { dealScrubTerms, emptyDealScrubConfig, mergeDealScrubConfig, normalizedDealSourceKey, normalizedText, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
 import { applyScrubExclusions, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
 import { processPendingDealPhotos } from "./dealsPhotos";
@@ -49,16 +50,6 @@ export const LAUNCH_DEALS = [
 ] as const;
 
 /** Builder and lender aliases that every community of that builder must scrub. */
-export function builderScrubConfig(builder: string): DealScrubConfig {
-  const config = emptyDealScrubConfig();
-  if (builder === "M/I Homes") { config.builder.push("M/I Homes", "M/I"); config.lender.push("M/I Financial, LLC", "M/I Financial"); }
-  if (builder === "Chesmar") { config.builder.push("Chesmar Homes", "Chesmar"); config.lender.push("HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HomeAmerican", "HMC"); }
-  if (builder === "Perry Homes") { config.builder.push("Perry Homes", "Perry"); config.lender.push("Parkstone Mortgage", "Parkstone", "Crestmark Mortgage", "Crestmark"); }
-  // D.R. Horton's product lines name the builder as surely as the builder does.
-  if (builder === "Pulte" || builder === "Centex" || builder === "Del Webb") { config.builder.push("PulteGroup", "Pulte Homes", "Pulte", "Centex Homes", "Centex", "Del Webb"); config.lender.push("Pulte Mortgage LLC", "Pulte Mortgage"); }
-  if (builder === "D.R. Horton") { config.builder.push("D.R. Horton", "DR Horton", "D. R. Horton", "Horton", "Express Series", "Express Homes", "Emerald Homes", "Freedom Homes", "Tradition Series"); config.lender.push("DHI Mortgage", "DHI Title", "DHI"); }
-  return config;
-}
 
 /**
  * Categorized private names for one community; a legacy flat array lands in
@@ -458,7 +449,21 @@ async function refreshFailed(community: CommunityRow, now: Date, holds: HoldNoti
   return { communityId: community.id, reelCode: community.reelCode, ok: false, reason: REFRESH_FAILED };
 }
 
-async function refreshCommunity(community: CommunityRow, now: Date, summaries: CommunityChangeSummary[], holds: HoldNotice[]): Promise<RefreshResult> {
+/**
+ * A fetcher that renews the builder lease as pages are read, so a long
+ * community (150 Perry pages, each allowed 45 s and a retry) never looks dead
+ * to another lane. At most one renewal a minute: the renewal is a DB write.
+ */
+export function leaseRenewingFetcher(heartbeat: (() => Promise<void>) | undefined, clock: () => number = Date.now, everyMs = 60_000): HtmlFetcher {
+  let last = clock();
+  return async (input, init) => {
+    const response = await fetch(input, init);
+    if (heartbeat && clock() - last >= everyMs) { last = clock(); await heartbeat().catch(() => undefined); }
+    return response;
+  };
+}
+
+async function refreshCommunity(community: CommunityRow, now: Date, summaries: CommunityChangeSummary[], holds: HoldNotice[], heartbeat?: () => Promise<void>): Promise<RefreshResult> {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const base = { communityId: community.id, reelCode: community.reelCode };
@@ -475,7 +480,7 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     await recordCatalogHold(community, "invalid_source_url", now, holds);
     return { ...base, ok: false, reason: "invalid_source_url" };
   }
-  const snapshot = await loadOfficialDeals(sourceConfig);
+  const snapshot = await loadOfficialDeals(sourceConfig, heartbeat ? { fetcher: leaseRenewingFetcher(heartbeat) } : {});
   if (!snapshot.catalogOk) {
     const reason = snapshot.holdReasons.join(", ");
     await recordCatalogHold(community, reason, now, holds);
@@ -616,7 +621,7 @@ function composeRunEmails(summaries: readonly CommunityChangeSummary[], holds: r
  * are never erased on a parser error; the community is placed on hold for admin
  * review while the last good presentation stays intact.
  */
-export async function refreshOfficialDeals(options: { communityId?: number; communityIds?: readonly number[]; now?: Date } = {}): Promise<RefreshResult[]> {
+export async function refreshOfficialDeals(options: { communityId?: number; communityIds?: readonly number[]; now?: Date; heartbeat?: () => Promise<void> } = {}): Promise<RefreshResult[]> {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const now = options.now ?? new Date();
@@ -633,7 +638,7 @@ export async function refreshOfficialDeals(options: { communityId?: number; comm
   const holds: HoldNotice[] = [];
   for (const community of communities) {
     try {
-      results.push(await refreshCommunity(community, now, summaries, holds));
+      results.push(await refreshCommunity(community, now, summaries, holds, options.heartbeat));
     } catch (error) {
       results.push(await refreshFailed(community, now, holds, error));
     }
@@ -830,7 +835,7 @@ export async function refreshDueCommunitiesBatch(options: { clock?: () => number
           const summaries: CommunityChangeSummary[] = [];
           const holds: HoldNotice[] = [];
           try {
-            results.push(await refreshCommunity(fresh, at, summaries, holds));
+            results.push(await refreshCommunity(fresh, at, summaries, holds, heartbeat));
           } catch (error) {
             results.push(await refreshFailed(fresh, at, holds, error));
           }

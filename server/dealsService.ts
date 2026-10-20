@@ -38,6 +38,7 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { effectiveScrubConfig } from "./dealsScrub";
 import { loanTypeLabel, priceBandFloor, priceBandLabel } from "../shared/dealsFeatured";
+import { incentiveTeaser } from "../shared/dealsTeaser";
 import { checkTwilioVerify } from "./dealsVerification";
 
 export type DealSettings = {
@@ -628,12 +629,10 @@ export async function publicDealsCatalog(src?: string | null) {
  * (`full`) sees what the admin typed.
  */
 function publicIncentive(row: typeof dealIncentives.$inferSelect, scrub: (value: string) => string = (value) => value, full = false) {
-  // The landing can show the builder's rate wording, period, and APR without
-  // exposing the full gated catalog narrative. Detailed terms remain present
-  // in `text` for the verified personal list.
-  const teaser = row.publicText.includes("Selected Quick Move-In homes:")
-    ? row.publicText.split("Selected Quick Move-In homes:")[0].trim()
-    : row.publicText;
+  // The landing shows the sentence that names the rate, without its dates;
+  // the full wording, the homes it names and the deadlines stay in `text` for
+  // the verified personal list.
+  const teaser = incentiveTeaser(row.publicText);
   return {
     text: row.publicText,
     teaser,

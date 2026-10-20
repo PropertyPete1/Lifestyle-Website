@@ -38,8 +38,10 @@ describe("the research CSV", () => {
     const result = await importResearchCommunities();
     expect(result.rows).toBeGreaterThan(500);
     expect(result.created.length).toBeGreaterThan(450);
-    expect(result.existing).toBeGreaterThanOrEqual(1);
+    // The one row listed twice is one community, so nothing is "existing" on a first import but the seeded Sienna Lakes.
+    expect(result.existing).toBe(1);
     expect(result.builders).toBeGreaterThan(40);
+    expect(result.builders).toBeLessThanOrEqual(51);
     const added = db.rows(dealCommunities).filter((row) => row.awaitingFirstSync);
     expect(added.length).toBe(result.created.length);
     expect(added.every((row) => !row.active)).toBe(true);

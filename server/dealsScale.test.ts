@@ -80,16 +80,18 @@ describe("catalog reads at the scale of every community", () => {
   it("gives the landing page an offer's teaser and figures only; the full wording, the exact homes and the deadlines wait for sign-up", async () => {
     seedCommunities(1);
     const offer = db.rows(dealIncentives)[0]!;
-    offer.publicText = "Rates as low as 4.99% (6.2% APR) with the builder's lender. Selected Quick Move-In homes: 118 Sienna Lakes Blvd $349,990, 122 Sienna Lakes Blvd $364,990.";
+    // What the M/I reader stores: a headline with a closing date, the body, and fine print with both deadlines.
+    offer.publicText = "Fall Into Savings: first-year rates as low as 4.99% (6.2% APR) on selected quick move-in homes closing by 11/30, plus up to $10,000 paid closing costs. Selected Quick Move-In homes in this community receive a 1/0 buydown on a 30-year fixed FHA loan. Valid on full priced contracts written between 10/12/2026 and 11/8/2026. Buyer must close by 11/30/2026.";
     offer.headlineRate = "4.99%";
     offer.contractBy = new Date("2026-11-08T06:00:00Z");
     offer.closeBy = new Date("2026-12-20T06:00:00Z");
     const pub = await publicDealsCatalog();
-    expect(pub[0]!.incentive).toMatchObject({ text: "Rates as low as 4.99% (6.2% APR) with the builder's lender.", teaser: "Rates as low as 4.99% (6.2% APR) with the builder's lender.", headlineRate: "4.99%", contractBy: null, closeBy: null });
-    expect(JSON.stringify(pub)).not.toMatch(/Selected Quick Move-In|349,990|Sienna Lakes|2026-11-08|2026-12-20/);
+    const teaser = "Fall Into Savings: first-year rates as low as 4.99% (6.2% APR) on selected quick move-in homes, plus up to $10,000 paid closing costs.";
+    expect(pub[0]!.incentive).toMatchObject({ text: teaser, teaser, headlineRate: "4.99%", contractBy: null, closeBy: null });
+    expect(JSON.stringify(pub)).not.toMatch(/Selected Quick Move-In|11\/30|10\/12\/2026|11\/8\/2026|2026-11-08|2026-12-20|buydown/);
     const leadId = db.seed(dealLeads, { phoneE164: "+12105550125", status: "verified", expiresAt: new Date(Date.now() + 3_600_000), deviceHash: "f".repeat(64), consentText: "c", flags: "[]", sourceCode: "r0" });
     const gated = await gatedDealsCatalog(leadId) as Array<{ incentive: { text: string; contractBy: unknown } }>;
-    expect(gated[0]!.incentive.text).toContain("Selected Quick Move-In homes:");
+    expect(gated[0]!.incentive.text).toContain("Buyer must close by 11/30/2026");
     expect(gated[0]!.incentive.contractBy).not.toBeNull();
   });
 });

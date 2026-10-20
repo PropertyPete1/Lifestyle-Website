@@ -87,7 +87,12 @@ export type ResearchImportResult = OnboardingResult & { rows: number; unusable: 
 
 export async function importResearchCommunities(csvPath = RESEARCH_COMMUNITIES_CSV): Promise<ResearchImportResult> {
   const rows = parseCsv(await readFile(csvPath, "utf8"));
-  const discovered = rows.map(discoveredFromResearchRow).filter((community): community is DiscoveredCommunity => community !== null && community.builder.trim().length > 0);
+  const usable = rows.map(discoveredFromResearchRow).filter((community): community is DiscoveredCommunity => community !== null && community.builder.trim().length > 0);
+  // The same community page listed twice is one community.
+  const seen = new Set<string>();
+  const discovered = usable.filter((community) => { const key = community.sourceUrl.replace(/\/+$/, "").toLowerCase(); if (seen.has(key)) return false; seen.add(key); return true; });
   const result = await onboardDiscoveredCommunities(discovered);
-  return { ...result, rows: rows.length, unusable: rows.length - discovered.length, builders: new Set(discovered.map((community) => community.builder)).size };
+  // Builders counted on the rows actually offered: close-outs are skipped by onboarding, so a builder with only those is not one.
+  const offered = discovered.filter((community) => community.status !== "closeout");
+  return { ...result, rows: rows.length, unusable: rows.length - usable.length, builders: new Set(offered.map((community) => community.builder)).size };
 }

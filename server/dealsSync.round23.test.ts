@@ -440,7 +440,7 @@ describe("round 31: composite buydown APRs, assistance wordings, unlabelled peri
     for (const text of ["Up to 5% down payment and closing cost assistance! 4.99% (5.62% APR) 30-year fixed FHA with 3.5% down payment.", "Up to 5% Down Payment & Closing Cost Assistance. 4.99% (5.62% APR) 30-year fixed FHA loan, 3.5% down payment.", "5% Down-Payment Assistance + 4.99% (5.62% APR) 30-year fixed FHA financing with 3.5% down payment.", "5% down payment incentive plus 4.99% (5.62% APR) 30-year fixed FHA financing with 3.5% down payment."]) {
       expect(parsePromotionalRate(text).downPaymentPercent, text).toBe(3.5);
     }
-    expect(parsePromotionalRate("Builder covers 5% down payment toward your home! 4.99% (5.62% APR) 30-year fixed FHA with 3.5% down payment.").publishable).toBe(false);
+    expect(parsePromotionalRate("Builder covers 5% down payment toward your home! 4.99% (5.62% APR) 30-year fixed FHA with 3.5% down payment.").downPaymentPercent).toBe(3.5);
   });
 
   it("a follow-on rate with an unrecognised first period holds; 1st year and year one forms read", () => {
@@ -449,6 +449,26 @@ describe("round 31: composite buydown APRs, assistance wordings, unlabelled peri
       expect(parsePromotionalRate(text), text).toMatchObject({ promotionalRatePercent: 3.99, followOnRatePercent: 4.99, holdReasons: [] });
     }
     expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA with 3.5% down payment. Rate locked for 60 days; 0.25% thereafter.").followOnRatePercent).toBeNull();
+  });
+});
+
+describe("round 32: assistance verbs and nouns, label-first loan down payment, label-first comparison APRs", () => {
+  it("assistance in any form never publishes as the loan's down payment", () => {
+    for (const text of ["Get 5% down payment matched! 4.99% (5.62% APR) 30-year fixed FHA loan with a down payment of 3.5%.", "Builder covers 5% down payment toward your home! 4.99% (5.62% APR) 30-year fixed FHA loan with a down payment of 3.5%.", "Up to 5% down payment savings on select homes! 4.99% (5.62% APR) on a 30-year fixed FHA loan. Down Payment: 3.5%.", "Builder pays 5% down payment! 4.99% (5.62% APR) 30-year fixed FHA loan, down payment as low as 3.5%."]) {
+      expect(parsePromotionalRate(text).downPaymentPercent, text).toBe(3.5);
+    }
+    for (const text of ["Up to 5% down payment savings on select homes! 4.99% (5.62% APR) 30-year fixed FHA loan.", "5% Down Payment Covered! 4.99% (5.62% APR) 30-year fixed conventional."]) {
+      expect(parsePromotionalRate(text).holdReasons, text).toContain("missing_down_payment");
+    }
+  });
+
+  it("a rate card keeps its label-first down payment; a comparison APR in any layout holds", () => {
+    expect(parsePromotionalRate("Rate 4.99% APR 5.62% Down Payment 3.5% Term 30-year fixed FHA")).toMatchObject({ aprPercent: 5.62, downPaymentPercent: 3.5, holdReasons: [] });
+    expect(parsePromotionalRate("Interest Rate 4.75% APR 5% Down Payment 10% 30-Year Fixed Conventional")).toMatchObject({ aprPercent: 5, downPaymentPercent: 10, holdReasons: [] });
+    expect(parsePromotionalRate("5.62% APR 4.99% interest rate on a 30-year fixed FHA loan with 3.5% down payment.")).toMatchObject({ aprPercent: 5.62, holdReasons: [] });
+    for (const text of ["Market APR: 6.71% | Our Rate: 4.99% | APR: 5.62% | 30-Year Fixed FHA | 3.5% Down", "Typical APR 6.92%. Builder APR 5.62%. Fixed rate 4.99% on a 30-year FHA loan with 3.5% down payment."]) {
+      expect(parsePromotionalRate(text).holdReasons, text).toContain("apr_check");
+    }
   });
 });
 

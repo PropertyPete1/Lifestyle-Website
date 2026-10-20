@@ -631,6 +631,17 @@ function findClosingDeadline(text: string): DeadlineFact | null {
 const MONTH_DAY = "(?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{1,2}";
 const DEADLINE_DATE = "(?:\\d{1,2}/\\d{1,2}/(?:\\d{4}|\\d{2})(?!\\d)|(?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{1,2},?\\s+\\d{4})";
 
+/** The first figure disclosed beside its APR that is a rate: "a down payment of 3.5% (5.62% APR)" is a down payment. */
+function aprPairedRate(text: string): number | null {
+  for (const match of Array.from(text.matchAll(new RegExp(APR_PAIRED_RATE.source, "gi")))) {
+    const at = match.index ?? 0;
+    const before = text.slice(Math.max(0, at - 60), at);
+    if (NOT_A_RATE_BEFORE.test(before) || /\bdown\s+payment\s+(?:of\s+|is\s+|:\s*)?(?:just\s+|only\s+)?$/i.test(before)) continue;
+    return numericValue(match[1]);
+  }
+  return null;
+}
+
 function rateNear(text: string, pattern: RegExp): number | null {
   const match = pattern.exec(text);
   return match ? numericValue(match[1]) : null;
@@ -651,7 +662,7 @@ const RATE_FROM_FIGURE = /\b(?:(?<!\b(?:tax|commission|co-?op|MUD|PID|millage|va
 /** Words after a percentage that make it something other than a loan rate: a down payment, closing costs, a credit, a discount, a share of the price. */
 const NOT_A_RATE_AFTER = /^\*?\s*(?:\([^)]{0,40}\)\s*)?(?:minimum\s+|required\s+)?(?:down\b|of\b|off\b|toward|towards|in\s+(?:[A-Za-z-]+\s+){0,2}?(?:closing|seller|flex|lender|cash|credits?|incentives?|savings|upgrades|options)|closing|seller(?![- ]paid\s+(?:interest\s+)?rate)|lender[- ](?:credit|paid)(?!\s+(?:interest\s+)?rate)|credit\b|commission|bonus\b(?!\s+(?:interest\s+)?rate)|discount\b(?!(?:ed)?\s+(?:interest\s+)?rate)|cash\s+back|deposit|earnest|flex\s+cash|financing\b(?=[^.]*\b(?:USDA|VA|no\s+down|zero\s+down)))/i;
 /** Words just before a percentage that make it something other than a loan rate ("down payment of 3.5%", "assistance up to 5%", "taxes about 2.3%"). */
-const NOT_A_RATE_BEFORE = /(?:\b(?:down\s+payments?|assistance|closing\s+costs?|taxes|tax\s+rate|insurance|credit|flex\s+cash|commission|deposit|earnest\s+money|discount|savings|off)\s+(?:of\s+|up\s+to\s+|about\s+|around\s+|approximately\s+|as\s+low\s+as\s+|is\s+|at\s+|from\s+|equal\s+to\s+)?(?:\$[\d,]+\s+or\s+)?)$/i;
+const NOT_A_RATE_BEFORE = /(?:\b(?:down\s+payments?|assistance|closing\s+costs?|taxes|(?:tax|co-?op|commission|MUD|PID|millage)\s+rate|insurance|credit|flex\s+cash|commission|deposit|earnest\s+money|discount|savings|off)\s+(?:of\s+|up\s+to\s+|about\s+|around\s+|approximately\s+|as\s+low\s+as\s+|is\s+|at\s+|from\s+|equal\s+to\s+)?(?:\$[\d,]+\s+or\s+)?)$/i;
 /** "Save up to 3%", "receive 2%", "earn 1%" are amounts, unless loan wording follows the figure ("receive 4.99% financing", "earn a 4.99% FHA rate"). */
 const NOT_A_RATE_BEFORE_AMOUNT = /\b(?:up\s+to|save|saves|saving|receive|earn)\s+(?:an?\s+(?:extra\s+|additional\s+)?)?$/i;
 const LOAN_WORDING_AFTER = /^\*?\s*(?:\([^)]{0,40}\)\s*)?(?:\d{1,2}[- ]?(?:year|yr)s?\.?\s+)?(?:fixed|financing|FHA|VA|USDA|conventional|jumbo|rate|interest|APR|mortgage|loan)\b/i;
@@ -661,8 +672,12 @@ function notARate(before: string, after: string, figure: string): boolean {
   if (!NOT_A_RATE_BEFORE_AMOUNT.test(before) || LOAN_WORDING_AFTER.test(after)) return false;
   // After an amount word, a whole figure is an amount ("save 3%", "receive 2% when …"); a figure with decimals is a rate
   // ("receive 3.99% through our preferred lender") unless the words after it name a non-loan use ("earn 2.5% back").
+  if (NOT_A_RATE_SHARE.test(after) || /^\*?\s*(?:back|bonus|commission|co-?op|cash|of\s+the|in\s+closing|on\s+(?:your\s+)?(?:closing|rate)|off|more|from\s+the\s+(?:builder|seller))\b/i.test(after)) return true;
+  // A rate figure is written with decimals and is at least 2.5% ("receive 3.99% through our preferred lender"); a smaller
+  // figure ("receive up to 1.5% when you finance") is an amount unless loan wording follows in the same clause.
   if (!figure.includes(".")) return true;
-  return /^\*?\s*(?:back|bonus|commission|co-?op|cash|of\s+the|in\s+closing|on\s+(?:your\s+)?closing|towards?)\b/i.test(after);
+  if (Number(figure) >= 2.5) return false;
+  return !/^[^.;!?]*\b(?:fixed|FHA|VA|USDA|conventional|jumbo|mortgage|loan|APR|interest\s+rate)\b/i.test(after);
 }
 /**
  * Fail-safe rate mention: a percentage below 20 in a sentence that names a
@@ -680,12 +695,32 @@ export function mentionsRate(text: string): boolean {
       const value = Number(match[1]);
       if (!Number.isFinite(value) || value <= 0 || value >= 20) continue;
       const at = match.index ?? 0;
-      if (NOT_A_RATE_AFTER.test(sentence.slice(at + match[0].length))) continue;
+      if (NOT_A_RATE_AFTER.test(sentence.slice(at + match[0].length)) || NOT_A_RATE_SHARE.test(sentence.slice(at + match[0].length))) continue;
       if (notARate(sentence.slice(Math.max(0, at - 60), at), sentence.slice(at + match[0].length), match[1]!)) continue;
       return true;
     }
   }
   return false;
+}
+
+/**
+ * "Rates starting at 4.99% in Austin and 5.25% in San Antonio", "as low as 4.99% in Austin, 5.25% in San Antonio": a second
+ * starting rate after "and", "or", a comma or "&". Not an APR, a down payment, a credit, an incentive or a co-op.
+ */
+function secondStartingRates(text: string): number[] {
+  const out: number[] = [];
+  for (const intro of Array.from(text.matchAll(/\b(?:(?:interest\s+)?rates?\s+(?:starting\s+)?(?:at|from)|(?:interest\s+)?rates?\s+as\s+low\s+as|as\s+low\s+as|starting\s+(?:at|from))\s+\d+(?:\.\d+)?%/gi))) {
+    const start = (intro.index ?? 0) + intro[0].length;
+    const window = text.slice(start, start + 80).split(/[;!?]|\.(?!\d)/)[0]!;
+    for (const match of Array.from(window.matchAll(/(?:\band\b|\bor\b|,|&)\s*(?:from\s+|at\s+)?(\d+(?:\.\d+)?)%/gi))) {
+      const after = window.slice((match.index ?? 0) + match[0].length);
+      const before = text.slice(0, start) + window.slice(0, (match.index ?? 0) + match[0].length - match[1]!.length - 1);
+      if (/^\s*(?:APR|annual)/i.test(after) || NOT_A_RATE_AFTER.test(after) || NOT_A_RATE_SHARE.test(after) || notARate(before.slice(-60), after, match[1]!)) continue;
+      const value = numericValue(match[1]);
+      if (value !== null && value > 0 && value < 20) out.push(value);
+    }
+  }
+  return out;
 }
 
 /**
@@ -696,13 +731,11 @@ function statedRateFigures(text: string): number[] {
   const patterns = [
     /(?:rates?\s+as\s+low\s+as|as\s+low\s+as|reduced\s+to)\s+(\d+(?:\.\d+)?)%/gi,
     new RegExp(RATE_FROM_FIGURE.source, "gi"),
-    // "Rates starting at 4.99% in Austin and 5.25% in San Antonio": the second starting rate.
-    /\brates?\s+(?:starting\s+)?(?:at|from)\s+\d+(?:\.\d+)?%[^.;]{0,60}?\b(?:and|or)\s+(?:from\s+|at\s+)?(\d+(?:\.\d+)?)%(?!\s*(?:APR|annual|down))/gi,
     new RegExp(APR_PAIRED_RATE.source, "gi"),
     /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:interest\s+)?rate\b(?!\s*(?:reduction|discount|buy))/gi,
     /(\d+(?:\.\d+)?)%\s+(?:\d{1,2}[- ]?(?:year|yr)s?\.?\s+)?(?:fixed|financing|FHA|VA|USDA|conventional)\b/gi,
   ];
-  const out: number[] = [];
+  const out: number[] = [...secondStartingRates(text)];
   // A figure of 20% or more is never a loan rate ("100% financing" is no down payment).
   for (const pattern of patterns) for (const match of Array.from(text.matchAll(pattern))) { const value = numericValue(match[1]); if (value !== null && value > 0 && value < 20) out.push(value); }
   return out;
@@ -714,7 +747,7 @@ function statedRateFigures(text: string): number[] {
  */
 const FIGURE_BEFORE_FIRST_YEAR = /(?<!\b(?:save|saves|saving|savings\s+of|up\s+to|lowers?(?:\s+\w+){0,3}\s+by|reduces?(?:\s+\w+){0,3}\s+by)\s+(?:an?\s+)?)(?<![\d.])(\d+(?:\.\d+)?)%\*?\s*(?:\([^)]{0,40}\)\s*)?(?:for\s+(?:the\s+)?)?(?:first[- ]year|year\s*(?:1|one))\b(?!\s+(?:interest\s+)?(?:rate\s+)?(?:savings?|saving|off|lower|less|below|reduction|discount|buy[- ]?down|credit))/i;
 /** Words after a percentage that make it an incentive, a co-op or a minimum down payment rather than a rate. */
-const NOT_A_RATE_SHARE = /^\*?\s*(?:(?:builder|seller|realtor|agent|broker)\s+)?(?:incentives?|co-?op|contribution|commission|bonus)\b|^\*?\s*min(?:imum|\.)?\s+down\b/i;
+const NOT_A_RATE_SHARE = /^\*?\s*(?:(?:builder|seller|buyer|realtor|agent|broker)\s+)?(?:incentives?|co-?op|contribution|commission|bonus(?!\s+(?:interest\s+)?rate))\b|^\*?\s*min(?:imum|\.)?\s+down\b/i;
 
 /** The first percentage under 20 the text states as a rate: not an APR, a down payment, a credit or a discount. */
 function firstRateFigure(text: string): number | null {
@@ -735,6 +768,19 @@ function firstRateFigure(text: string): number | null {
   return null;
 }
 
+/** Figures a clause about a rate states as a change of rate ("1% interest rate reduction", "rate 2% lower", "lowers your rate by 1%"). */
+function relativeRateFigures(text: string): number[] {
+  const out: number[] = [];
+  for (const clause of text.split(/[;!?:,]|\.(?!\d)/)) {
+    if (!/\b(?:rates?|interest|first[- ]year|year\s*(?:1|one)|buy[- ]?down)\b/i.test(clause)) continue;
+    for (const match of Array.from(clause.matchAll(/(\d+(?:\.\d+)?)%\*?\s+(?:\S+\s+){0,3}?(?:lower|less|below|off|decrease|reduction|discount|savings?|buy[- ]?down|cut)\b|\b(?:lowers?|lowered|reduces?|reduced|cuts?|buys?\s+down)\b(?:\s+\S+){0,4}?\s+by\s+(\d+(?:\.\d+)?)%/gi))) {
+      const value = numericValue(match[1] ?? match[2]);
+      if (value !== null) out.push(value);
+    }
+  }
+  return out;
+}
+
 export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const text = normalizeIncentiveText(input);
   // "2/1 Program … year one … year two" is a temporary buydown as surely as "buydown" is.
@@ -746,14 +792,14 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
     // "3.99% first-year rate", "3.75% Year 1 rate", "3.99% (5.40% APR) first year": the figure written right before its label.
     rateNear(text, FIGURE_BEFORE_FIRST_YEAR) ??
     // "First-year rate of 3.99%", "Year 1: 3.99%": the first figure after the label, before any comma, slash or other figure.
-    rateNear(text, /(?:first[- ]year|year\s*1)\b(?:(?![,;/]|\d)[\s\S]){0,60}?(\d+(?:\.\d+)?)%(?!\s*(?:APR|annual|lower|less|below|off|decrease|reduction|discount|under))/i) ??
+    rateNear(text, /(?:first[- ]year|year\s*1)\b(?:(?![,;/]|\d|\b(?:discount|savings?|off|lower|less|reduction|buy[- ]?down|credit)\b)[\s\S]){0,60}?(\d+(?:\.\d+)?)%(?!\s*(?:APR|annual|lower|less|below|off|decrease|reduction|discount|under))/i) ??
     // The figure the APR is disclosed beside comes before an "as low as" figure: the APR belongs to it.
     // "4.25% (6.051% APR)", "2.99% (APR 6.81%)", "4.99% [6.62% APR]", "4.990% (6.619% Annual Percentage Rate)", "5% Fixed / 5.805% APR".
-    rateNear(text, APR_PAIRED_RATE) ??
+    aprPairedRate(text) ??
     rateNear(text, /(?:rates?\s+as\s+low\s+as|as\s+low\s+as|reduced\s+to)\s+(\d+(?:\.\d+)?)%/i) ??
     rateNear(text, RATE_FROM_FIGURE) ??
     // "4.99% interest rate".
-    rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:interest\s+)?rate\b/i);
+    rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:interest\s+)?rate\b(?!\s*(?:reduction|discount|buy[- ]?down|savings?|credit|cut|decrease))/i);
   const rateMentioned = headline !== null || mentionsRate(text);
   const rateKind = !rateMentioned ? "none" : hasTemporaryRate ? "promotional" : "fixed";
   const promotionalRatePercent = headline;
@@ -796,10 +842,17 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
     }
   }
   // Two different rate figures in one fixed-rate offer ("as low as 3.99%" and "4.99% fixed"): which one the APR belongs to is the admin's call.
-  if (rateKind === "fixed") {
-    const figures = new Set(statedRateFigures(text).filter((value) => value !== aprPercent && value !== downPaymentPercent).map((value) => value.toFixed(3)));
-    if (figures.size > 1) holdReasons.push("ambiguous_rate");
+  // A headline that is the down payment, or (for a fixed offer) one the text does not state as a rate while it states another, is held.
+  if (rateKind === "fixed" && promotionalRatePercent !== null) {
+    const stated = statedRateFigures(text).filter((value) => value !== aprPercent && value !== downPaymentPercent);
+    const figures = new Set(stated.map((value) => value.toFixed(3)));
+    if (figures.size > 1 || (figures.size > 0 && !figures.has(promotionalRatePercent.toFixed(3)))) holdReasons.push("ambiguous_rate");
   }
+  if (rateKind !== "none" && promotionalRatePercent !== null && downPaymentPercent !== null && promotionalRatePercent === downPaymentPercent) holdReasons.push("ambiguous_rate");
+  // A rate read from a figure the text states as a change of rate ("1% interest rate reduction", "2% lower the first year",
+  // "lowers your rate by 1%") is not the rate the buyer gets.
+  const relative = relativeRateFigures(text);
+  if (rateKind !== "none" && [promotionalRatePercent, followOnRatePercent].some((value) => value !== null && relative.includes(value))) holdReasons.push("ambiguous_rate");
   // A buydown whose first-year figure is not the first rate figure the text states, or whose rate is the APR while the text
   // states another rate, was read out of order: which figure is which is the admin's call.
   if (rateKind === "promotional" && promotionalRatePercent !== null) {
@@ -807,7 +860,7 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
     const figures = new Set(statedRateFigures(text).filter((value) => value !== aprPercent).map((value) => value.toFixed(3)));
     const isApr = (value: number | null) => value !== null && aprPercent !== null && value === aprPercent;
     // A buydown's later rate is never below its first-year rate, and rarely more than three points above it.
-    const outOfShape = followOnRatePercent !== null && (followOnRatePercent < promotionalRatePercent || followOnRatePercent - promotionalRatePercent > 3);
+    const outOfShape = followOnRatePercent !== null && (followOnRatePercent <= promotionalRatePercent || followOnRatePercent - promotionalRatePercent > 3);
     if ((first !== null && first !== promotionalRatePercent) || ((isApr(promotionalRatePercent) || isApr(followOnRatePercent)) && figures.size > 0) || outOfShape) holdReasons.push("ambiguous_rate");
   }
   if (namesContractDeadline && !contractDeadline?.isoDate) holdReasons.push("missing_contract_deadline");
@@ -1428,7 +1481,8 @@ function upperCaseWebAddress(text: string): boolean {
     const label = match[1]!.split(".").pop() ?? "";
     const tld = match[2]!;
     if (/^(?:us|co|io)$/i.test(tld) && (label.replace(/-/g, "").length < 4 || /^\d+$/.test(label) || /^(?:i-\d+|hwy\w*|fm-?\d+|sh-?\d+|us-?\d+|loop-?\d+)$/i.test(label))) continue;
-    if (match[3] && /^(?:[a-z]+|[A-Z][a-z]+)$/.test(label)) continue;
+    // A glued sentence is skipped only before a TLD that is also a word or a code (US, HOMES, BANK); .COM/.NET/.ORG/.BIZ are always addresses.
+    if (match[3] && !/^(?:com|net|org|biz)$/i.test(tld) && (/^(?:[a-z]+|[A-Z][a-z]+)$/.test(label) || (/^[A-Z]+$/.test(label) && !/^(?:us|co|io)$/i.test(tld)))) continue;
     return true;
   }
   return false;

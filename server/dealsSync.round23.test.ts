@@ -221,28 +221,69 @@ describe("round 24: savings amounts, amount words, residue and labelled legacy f
     for (const text of ["Offer valid on select homes.HOMES MUST CLOSE BY 12/31/2026.", "Ask about financing in San Antonio.US Bank is our preferred lender.", "Proud to serve Fort Sam Houston.US Army families save more.", "Realtors welcome.Co-op paid at closing.", "10/31.US 281"]) expect(publicTextResidue(text), text).toBeNull();
   });
 
-  it("a legacy Accept of a figure the text states beside its label (one the parser cannot read) is adopted; a guess is not", async () => {
-    const TEXT = "4.99% (5.62% Annual Pct. Rate) 30-year fixed FHA loan with 3.5% down payment on select homes.";
-    const blind: PromotionalRateFacts = { ...parsePromotionalRate(TEXT), aprPercent: null, holdReasons: ["missing_apr"], publishable: false };
-    const id = seedCommunity();
-    await run({ text: TEXT, facts: blind }, 0, id);
-    await acceptIncentiveHold({ id: heldRows()[0]!.id, apr: "5.62%" });
-    (live()[0] as { acceptedAt: Date | null }).acceptedAt = null;
-    // "5.62%" sits beside no "APR" label the check knows, so this is not evidence: held again.
-    await run({ text: TEXT, facts: blind }, 1, id);
-    expect(live()).toHaveLength(0);
-
-    db = new FakeDealsDb(); mocks.getDb.mockResolvedValue(db); mocks.sendBuilderDealsEmail.mockClear();
+  it("a legacy Accept of a figure the text states is held once more, never kept on a stored value alone", async () => {
     const LABELLED = "4.99% fixed rate; APR: 5.62% on a 30-year fixed FHA loan with 3.5% down payment on select homes.";
-    const blind2: PromotionalRateFacts = { ...parsePromotionalRate(LABELLED), aprPercent: null, holdReasons: ["missing_apr"], publishable: false };
-    const other = seedCommunity();
-    await run({ text: LABELLED, facts: blind2 }, 0, other);
+    const blind: PromotionalRateFacts = { ...parsePromotionalRate(LABELLED), aprPercent: null, holdReasons: ["missing_apr"], publishable: false };
+    const id = seedCommunity();
+    await run({ text: LABELLED, facts: blind }, 0, id);
     await acceptIncentiveHold({ id: heldRows()[0]!.id, apr: "5.62%" });
     (live()[0] as { acceptedAt: Date | null }).acceptedAt = null;
-    await run({ text: LABELLED, facts: blind2 }, 1, other);
-    expect(live()).toHaveLength(1);
-    expect(live()[0]!.acceptedAt).not.toBeNull();
-    expect(holdEmails()).toHaveLength(1);
+    await run({ text: LABELLED, facts: blind }, 1, id);
+    expect(live()).toHaveLength(0);
+    expect(heldRows()).toHaveLength(1);
+    // An older parser's guess beside the word "rate" is not kept either.
+    db = new FakeDealsDb(); mocks.getDb.mockResolvedValue(db); mocks.sendBuilderDealsEmail.mockClear();
+    const TAX = "Low tax rate of 2.1%. 5.62% APR on a 30-year fixed FHA loan with 3.5% down payment.";
+    const older: PromotionalRateFacts = { ...parsePromotionalRate(TAX), rateKind: "fixed", promotionalRatePercent: 2.1, holdReasons: [], publishable: true };
+    const other = seedCommunity();
+    await run({ text: TAX, facts: older }, 0, other);
+    await run(TAX, 1, other);
+    expect(live()).toHaveLength(0);
+    expect(heldRows()[0]!.acceptedAt).toBeNull();
+  });
+});
+
+describe("round 25: relative rates, down payments beside an APR, amounts, regional rates, residue", () => {
+  it("a first-year discount or buydown never publishes the follow-on as the first-year rate", () => {
+    for (const text of ["1% first year discount: 5.99% for years 2-30 (6.10% APR) on a 30-year fixed FHA loan with 3.5% down payment.", "Enjoy a 1% first year buydown. 5.99% for years 2-30 (6.10% APR), 30-year fixed FHA loan, 3.5% down payment.", "Get 1% off your first-year rate: 5.99% for years 2-30 (6.10% APR) on a 30-year fixed FHA loan with 3.5% down payment.", "A 1% lower rate the first year! 5.99% for years 2-30 (6.10% APR) on a 30-year fixed FHA loan with 3.5% down payment."]) {
+      expect(parsePromotionalRate(text).publishable, text).toBe(false);
+    }
+  });
+
+  it("a down payment disclosed beside the APR is not the rate", () => {
+    for (const text of ["4.99% fixed rate with a down payment of 3.5% (5.62% APR) on a 30-year FHA loan.", "4.99% fixed rate on a 30-year conventional loan with a down payment of 5% (5.62% APR).", "Get a 4.99% 30-year fixed conventional rate with a down payment of 10% (5.21% APR)."]) {
+      const facts = parsePromotionalRate(text);
+      expect(facts.promotionalRatePercent === facts.downPaymentPercent && facts.publishable, text).toBe(false);
+      expect(facts.promotionalRatePercent, text).not.toBe(facts.downPaymentPercent);
+    }
+  });
+
+  it("a rate reduction is never the rate", () => {
+    for (const text of ["Get a 1% interest rate reduction when you finance with our preferred lender. 5.99% 30-year fixed FHA (6.1% APR) with 3.5% down payment.", "Receive a 0.5% rate discount with our preferred lender. 5.99% 30-year fixed FHA, 6.1% APR, 3.5% down payment."]) {
+      const facts = parsePromotionalRate(text);
+      expect(facts.promotionalRatePercent === null || facts.promotionalRatePercent >= 5 || !facts.publishable, text).toBe(true);
+    }
+  });
+
+  it("small amounts after an amount word, and shares, are not rates", () => {
+    for (const text of ["Receive 1.5% from the builder when you finance with our preferred lender.", "Up to 1.5% buyer incentive with our preferred lender.", "Up to 1.5% builder contribution when you finance with our preferred lender.", "Use our preferred lender and save 0.25% on your rate.", "Save 1.25% with our preferred lender on select homes.", "Receive up to 1.5% when you finance with our preferred lender.", "Commission rate of 3% to cooperating brokers.", "Co-op rate of 3% to Realtors on all quick move-in homes.", "Low MUD rate of 0.9% and PID rate of 0.2%."]) {
+      expect(parsePromotionalRate(text), text).toMatchObject({ rateKind: "none", holdReasons: [] });
+    }
+    expect(parsePromotionalRate("A 3.99% bonus rate for VA buyers this month.").holdReasons).toContain("missing_apr");
+  });
+
+  it("a second starting figure is a rate only when it is one", () => {
+    for (const text of ["Rates starting at 4.99% and 2% toward closing costs with our preferred lender; 5.62% APR on a 30-year fixed FHA loan with 3.5% down payment.", "Rates from 4.99% and 1% lender credit, 5.62% APR on a 30-year fixed FHA loan with 3.5% down payment.", "Rates starting at 4.99% and 6% builder incentive, 5.62% APR on a 30-year fixed FHA loan with 3.5% down payment."]) {
+      expect(parsePromotionalRate(text).holdReasons, text).not.toContain("ambiguous_rate");
+    }
+    for (const text of ["Rates as low as 4.99% in Austin and 5.25% in San Antonio, 5.62% APR.", "Rates starting at 4.99% in Austin, 5.25% in San Antonio, 5.62% APR.", "Rates starting at 4.99% in Austin & 5.25% in San Antonio, 5.62% APR."]) {
+      expect(parsePromotionalRate(text).holdReasons, text).toContain("ambiguous_rate");
+    }
+  });
+
+  it("a name before .COM/.NET/.ORG is always an address", () => {
+    for (const text of ["Apply at Guild.COM Today.", "Visit Chase.COM Today for details.", "See Fairway.Com For details.", "Visit lennar.COM Today.", "See Perry.Net For terms."]) expect(publicTextResidue(text), text).toBe("web address");
+    expect(publicTextResidue("OFFER VALID ON SELECT HOMES.HOMES MUST CLOSE BY 12/31/2026.")).toBeNull();
   });
 });
 

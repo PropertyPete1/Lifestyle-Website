@@ -954,3 +954,12 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Deploy note:** a legacy Accept of an `ambiguous_rate`, `adjustable_rate` or "no deadline" hold carries nothing that shows the admin's Accept, so it is re-held once after deploy (one e-mail each).
 - **Residue:** the four-character minimum and the road/state names apply only before .US/.CO/.IO; any name before .COM/.NET/.ORG is an address. An upper-case TLD after a plain lower- or title-case word and before a capitalised word is two glued sentences, and a TLD followed by a hyphen ("Co-op") is a word.
 - **Texas Homes:** an unparsed home page is remembered as a hold for two minutes so the batch does not fetch it again.
+
+## Round 25 corrections
+
+- **Legacy acceptance:** the round-24 "labelled figure" evidence is gone. It adopted older parsers' guesses that sat beside the word "rate" (a tax rate, a first-year savings amount). A row is adopted only when its text was edited by an admin or every reason is answered by a figure the builder's text never states. Every other legacy Accept is held once more after deploy, with one e-mail.
+- **Relative rates:** a first-year or follow-on rate that equals a figure the text states as a change of rate ("1% first year discount", "1% interest rate reduction", "lowers your rate by 1%") holds `ambiguous_rate`. A buydown whose follow-on rate equals its first-year rate is out of shape. The label-first look stops at discount and savings words.
+- **APR beside a down payment:** "a down payment of 3.5% (5.62% APR)" is not an APR-paired rate. A headline equal to the down payment holds `ambiguous_rate`. A fixed headline the text does not state as a rate, while it states another, holds.
+- **Amount words:** after "save", "up to", "receive" or "earn", a figure is a rate only with loan wording right after it, or with decimals and at least 2.5%, or with loan wording later in the clause. Incentives, contributions, co-ops and "from the builder" are amounts. "Commission rate", "co-op rate", MUD, PID and millage rates are not loan rates.
+- **Regional rates:** a second starting figure after "and", "or", a comma or "&" counts only when it is itself a rate (not a credit, closing costs, an incentive or a co-op), including after "as low as".
+- **Residue:** any name before .COM, .NET, .ORG or .BIZ is an address. The glued-sentence skip applies only before TLDs that are also words or codes.

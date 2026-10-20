@@ -53,6 +53,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   const config = emptyDealScrubConfig();
   if (builder === "M/I Homes") { config.builder.push("M/I Homes", "M/I"); config.lender.push("M/I Financial, LLC", "M/I Financial"); }
   if (builder === "Chesmar") { config.builder.push("Chesmar Homes", "Chesmar"); config.lender.push("HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HomeAmerican", "HMC"); }
+  if (builder === "Perry Homes") { config.builder.push("Perry Homes", "Perry"); config.lender.push("Parkstone Mortgage", "Parkstone", "Crestmark Mortgage", "Crestmark"); }
   return config;
 }
 

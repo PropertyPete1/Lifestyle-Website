@@ -132,6 +132,7 @@ describe("onboarding discovered communities", () => {
     expect(streetFromAddress("9010 Arroyo Grove, San Antonio, TX 78263")).toBe("Arroyo Grove");
     expect(streetFromAddress("8106 Onion Patch Dr., San Antonio, TX 78263")).toBe("Onion Patch");
     expect(streetFromAddress("San Antonio, TX 78263")).toBeNull();
-    expect(initialScrubConfig({ builder: "Perry Homes", name: "Kallison Ranch", address: "123 Ranch View Trl, San Antonio, TX" })).toMatchObject({ builder: ["Perry Homes"], community: ["Kallison Ranch"], street: ["Ranch View"] });
+    expect(initialScrubConfig({ builder: "Perry Homes", name: "Kallison Ranch", address: "123 Ranch View Trl, San Antonio, TX" })).toMatchObject({ builder: expect.arrayContaining(["Perry Homes", "Perry"]), lender: expect.arrayContaining(["Parkstone Mortgage"]), community: ["Kallison Ranch"], street: ["Ranch View"] });
+    expect(initialScrubConfig({ builder: "Highland Homes", name: "Kallison Ranch", address: "123 Ranch View Trl, San Antonio, TX" })).toMatchObject({ builder: ["Highland Homes"], community: ["Kallison Ranch"], street: ["Ranch View"] });
   });
 });

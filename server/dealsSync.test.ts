@@ -445,7 +445,7 @@ describe("scheduling", () => {
   });
 
   it("leaves a discovered community alone until its builder has a reader: no hold, no email, no attempt", async () => {
-    const waiting = seedCommunity({ reelCode: "auto-p", privateName: "Perry Place", builder: "Perry Homes", sourceUrl: "https://www.perryhomes.com/x", active: false, awaitingFirstSync: true });
+    const waiting = seedCommunity({ reelCode: "auto-p", privateName: "Highland Place", builder: "Highland Homes", sourceUrl: "https://www.highlandhomes.com/x", active: false, awaitingFirstSync: true });
     db.rows(dealCommunities)[0].lastSuccessfulSyncAt = new Date("2026-10-21T10:00:00Z");
     const batch = await refreshDueCommunitiesBatch({ clock: () => Date.parse("2026-10-21T11:00:00Z") });
     expect(batch).toMatchObject({ checked: 0, results: [] });

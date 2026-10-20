@@ -1,11 +1,12 @@
 import { dealScrubTerms, emptyDealScrubConfig, hasPrivateTerm, normalizedText, parseDealScrubConfig, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
 import { applyScrubExclusions } from "./dealsScrub";
+import { PerryHomesAdapter } from "./dealsAdapters.perry";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -209,14 +210,15 @@ export interface DealAdapter {
 
 const CHESMAR_HOST = "www.chesmar.com";
 const MI_HOST = "www.mihomes.com";
+export const PERRY_HOST = "www.perryhomes.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
 }
 export function officialHostFor(builder: string): string | null {
-  return builder === "Chesmar" ? CHESMAR_HOST : builder === "M/I Homes" ? MI_HOST : null;
+  return hasBuilderReader(builder) ? OFFICIAL_BUILDER_HOSTS[builder] : null;
 }
 const CHESMAR_SITEMAP_INDEX = "https://www.chesmar.com/sitemap.xml";
 const DEFAULT_DETAIL_LIMIT = 24;
@@ -238,7 +240,7 @@ const EMPTY_PUBLIC: PublicDealSnapshot = {
   holdReasons: [],
 };
 
-function emptyPrivate(config: CommunitySourceConfig): PrivateDealSnapshot {
+export function emptyPrivate(config: CommunitySourceConfig): PrivateDealSnapshot {
   return {
     builder: config.builder,
     sourceUrl: config.sourceUrl,
@@ -254,7 +256,7 @@ function uniqueReasons(reasons: readonly DealHoldReason[]): DealHoldReason[] {
   return Array.from(new Set(reasons));
 }
 
-function failedResult(
+export function failedResult(
   config: CommunitySourceConfig,
   fetchedAt: string,
   privateSnapshot: PrivateDealSnapshot,
@@ -272,7 +274,7 @@ function failedResult(
   };
 }
 
-function successfulResult(
+export function successfulResult(
   fetchedAt: string,
   privateSnapshot: PrivateDealSnapshot,
   converted: { snapshot: PublicDealSnapshot; catalogHolds: DealHoldReason[]; incentiveHolds: DealHoldReason[] },
@@ -316,7 +318,7 @@ function absoluteUrl(href: string, base: URL): URL | null {
   }
 }
 
-function sourcePage(kind: PrivateSourcePage["kind"], sourceUrl: string, privateName: string | null): PrivateSourcePage {
+export function sourcePage(kind: PrivateSourcePage["kind"], sourceUrl: string, privateName: string | null): PrivateSourcePage {
   return { kind, sourceUrl, privateName };
 }
 
@@ -1089,7 +1091,7 @@ function publicIncentive(
   };
 }
 
-function makePublicSnapshot(privateSnapshot: PrivateDealSnapshot, config: CommunitySourceConfig, incentiveHolds: readonly DealHoldReason[] = []): { snapshot: PublicDealSnapshot; catalogHolds: DealHoldReason[]; incentiveHolds: DealHoldReason[] } {
+export function makePublicSnapshot(privateSnapshot: PrivateDealSnapshot, config: CommunitySourceConfig, incentiveHolds: readonly DealHoldReason[] = []): { snapshot: PublicDealSnapshot; catalogHolds: DealHoldReason[]; incentiveHolds: DealHoldReason[] } {
   // An admin-excluded false positive is not private, however often a page repeats it.
   const excluded = new Set((config.excludedTerms ?? []).map((term) => term.trim().toLowerCase()));
   const discoveredNames = [...privateSnapshot.plans, ...privateSnapshot.homes].flatMap((item) => [item.privateName, item.privateAddress, item.privatePlanName].filter((name): name is string => Boolean(name) && !excluded.has(String(name).trim().toLowerCase())));
@@ -1632,9 +1634,12 @@ class ManualAdapter implements DealAdapter {
 }
 
 /** Generic registry. Callers select only by config.builder; no builder-specific network logic is exposed. */
+let perryAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
+  // Readers in their own modules import this one's helpers, so they are made on first use, after every module has loaded.
+  get "Perry Homes"() { return (perryAdapter ??= new PerryHomesAdapter()); },
   Manual: new ManualAdapter(),
 };
 

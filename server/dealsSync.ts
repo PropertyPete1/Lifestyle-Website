@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealPhotos } from "../drizzle/schema";
 import { getDb } from "./db";
 import { chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
@@ -449,7 +449,8 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const base = { communityId: community.id, reelCode: community.reelCode };
-  if (!community.active) return { ...base, ok: false, skipped: "inactive" };
+  // A community discovery added is inactive until this first clean sync turns it on.
+  if (!community.active && !community.awaitingFirstSync) return { ...base, ok: false, skipped: "inactive" };
   if (community.paused) return { ...base, ok: false, skipped: "paused" };
   if (community.manualMode || community.builder === "Manual") return { ...base, ok: false, skipped: "manual_mode" };
   await db.update(dealCommunities).set({ lastAttemptAt: now }).where(eq(dealCommunities.id, community.id));
@@ -509,7 +510,19 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
   await applyScrapedIncentive(community, snapshot, sourceConfig, now, summary, holds);
   await mergeDiscoveredNames(community, snapshot);
   const incentiveHold = community.incentiveHoldReason;
-  await db.update(dealCommunities).set({ lastSuccessfulSyncAt: now, catalogUpdatedAt: now, catalogHoldReason: null, catalogHoldSeenAt: null, holdReason: summarizeHolds(null, incentiveHold) }).where(eq(dealCommunities.id, community.id));
+  if (community.awaitingFirstSync) {
+    // First clean pull of a discovered community: its headline now uses what the pull found, then it goes live.
+    const facts = snapshot.private.communityFacts;
+    const { relabelFromCentroid } = await import("./dealsOnboarding");
+    const { acresFromText } = await import("../shared/dealsFeatured");
+    await relabelFromCentroid(community.id, {
+      acres: acresFromText(facts?.lotSizes ?? null),
+      fromPrice: facts?.fromPrice ?? community.fromPrice,
+      amenities: facts?.amenities ?? [],
+      moveInReadyCount: snapshot.private.homes.filter((home) => /quick\s+move|available\s+now/i.test(home.status ?? "")).length,
+    });
+  }
+  await db.update(dealCommunities).set({ lastSuccessfulSyncAt: now, catalogUpdatedAt: now, catalogHoldReason: null, catalogHoldSeenAt: null, holdReason: summarizeHolds(null, incentiveHold), ...(community.awaitingFirstSync ? { active: true, awaitingFirstSync: false } : {}) }).where(eq(dealCommunities.id, community.id));
   if (hasChanges(summary)) summaries.push(summary);
   return { ...base, ok: true };
 }
@@ -560,7 +573,7 @@ export async function refreshOfficialDeals(options: { communityId?: number; comm
   if (wanted && !wanted.length) return [];
   const communities = wanted
     ? await db.select().from(dealCommunities).where(inArray(dealCommunities.id, wanted))
-    : await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
+    : await db.select().from(dealCommunities).where(and(or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
   const results: RefreshResult[] = [];
   const summaries: CommunityChangeSummary[] = [];
   const holds: HoldNotice[] = [];
@@ -595,10 +608,15 @@ function chicagoDayNumber(day: string): number {
   return Math.round(Date.UTC(year, month - 1, date) / 86_400_000);
 }
 
-/** Calendar-day distance in America/Chicago, so a 06:04 finish on day 0 is due at 06:00 on day 3. */
-export function communityRefreshDue(lastSuccessfulSyncAt: Date | null, now = new Date()): boolean {
+/**
+ * Calendar-day distance in America/Chicago: with the default of one day, a
+ * community last pulled yesterday is due this morning (Admin: "Builder check
+ * every N days"; 3 keeps the earlier every-third-day pace).
+ */
+export function communityRefreshDue(lastSuccessfulSyncAt: Date | null, now = new Date(), everyDays = 1): boolean {
   if (!lastSuccessfulSyncAt) return true;
-  return chicagoDayNumber(chicagoDay(now)) - chicagoDayNumber(chicagoDay(lastSuccessfulSyncAt)) >= 3;
+  const days = Number.isInteger(everyDays) && everyDays >= 1 && everyDays <= 30 ? everyDays : 1;
+  return chicagoDayNumber(chicagoDay(now)) - chicagoDayNumber(chicagoDay(lastSuccessfulSyncAt)) >= days;
 }
 
 /**
@@ -609,9 +627,10 @@ export function communityRefreshDue(lastSuccessfulSyncAt: Date | null, now = new
 export async function refreshOfficialDealsIfDue(now = new Date()): Promise<RefreshResult[]> {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
-  const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
-  const due = communities.filter((community) => community.builder !== "Manual" && communityRefreshDue(community.lastSuccessfulSyncAt, now));
-  if (!due.length) return [{ communityId: 0, reelCode: "scheduled", ok: true, skipped: "fresh_within_three_days" }];
+  const communities = await db.select().from(dealCommunities).where(and(or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
+  const { catalogRefreshDays } = await getDealSettings();
+  const due = communities.filter((community) => community.builder !== "Manual" && communityRefreshDue(community.lastSuccessfulSyncAt, now, catalogRefreshDays));
+  if (!due.length) return [{ communityId: 0, reelCode: "scheduled", ok: true, skipped: "fresh_within_refresh_window" }];
   return refreshOfficialDeals({ communityIds: due.map((community) => community.id), now });
 }
 

@@ -213,4 +213,21 @@ describe("diagnostics and scrub storage", () => {
     expect(excluded.excludedTerms).toEqual(["New Homes in San Antonio"]);
     expect(excluded.scrubConfig.street).toEqual(["Fixture Street"]);
   });
+
+  it("keeps each community's counts, incentive and latest refresh run to itself when read for the whole list at once", async () => {
+    const other = db.seed(dealCommunities, { ...db.rows(dealCommunities)[0], id: undefined, privateName: "Other Place", sourceUrl: `${COMMUNITY_URL}-other`, reelCode: "auto-other", active: false, awaitingFirstSync: true });
+    db.seed(dealHomes, { communityId: other, sourceKey: "o1", sourceUrl: "https://www.mihomes.com/o1", kind: "quick_move_in", status: "available", origin: "official" });
+    db.seed(dealHomes, { communityId: other, sourceKey: "o2", sourceUrl: "https://www.mihomes.com/o2", kind: "quick_move_in", status: "available", origin: "official" });
+    db.seed(dealHomes, { communityId, sourceKey: "m1", sourceUrl: "https://www.mihomes.com/m1", kind: "to_be_built", status: "available", origin: "official" });
+    db.seed(dealIncentives, { communityId: other, normalizedText: "other", publicText: "Other offer", active: true, held: false, confirmedAt: new Date() });
+    const day = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000);
+    db.seed(dealJobRuns, { jobName: `deals-refresh-community-${other}`, chicagoDay: "2026-10-01", status: "failed", startedAt: day(3) });
+    db.seed(dealJobRuns, { jobName: `deals-refresh-community-${other}`, chicagoDay: "2026-10-03", status: "ok", startedAt: day(1) });
+    db.seed(dealJobRuns, { jobName: `deals-refresh-community-${communityId}`, chicagoDay: "2026-09-01", status: "ok", startedAt: day(40) });
+    const list = await listCommunityDiagnostics();
+    const mine = list.find((row) => row.id === communityId)!;
+    const theirs = list.find((row) => row.id === other)!;
+    expect(mine).toMatchObject({ awaitingFirstSync: false, homes: { quickMoveIn: 0, toBeBuilt: 1 }, incentive: null, lastRefreshRun: null });
+    expect(theirs).toMatchObject({ awaitingFirstSync: true, homes: { quickMoveIn: 2, toBeBuilt: 0 }, incentive: { publicText: "Other offer" }, lastRefreshRun: { status: "ok" } });
+  });
 });

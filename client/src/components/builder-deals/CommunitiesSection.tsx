@@ -301,7 +301,7 @@ function CommunityCard({ community, diagnostics, activeIncentive, builders }: { 
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="break-words font-medium">{community.publicLabel}</p>
-            {!community.active && <Badge variant="secondary">Archived</Badge>}
+            {community.awaitingFirstSync ? <Badge variant="outline">Added automatically, goes live after its first clean update</Badge> : !community.active && <Badge variant="secondary">Archived</Badge>}
             {community.paused && <Badge variant="destructive">Paused (hidden from public)</Badge>}
             {manual && <Badge className="bg-gold text-primary-foreground">Manual mode, no auto-update</Badge>}
             {diagnostics?.refreshDue && !manual && <Badge variant="outline">Refresh due</Badge>}
@@ -313,13 +313,13 @@ function CommunityCard({ community, diagnostics, activeIncentive, builders }: { 
           {diagnostics?.dismissedCatalogHold && !diagnostics.catalogHold && <p className="text-xs text-muted-foreground">Dismissed hold: {diagnostics.dismissedCatalogHold.replaceAll("_", " ")} (no repeat email until the parse result changes).</p>}
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-          {!manual && community.active && <Button type="button" variant="outline" className={TAP} disabled={refreshNow.isPending} onClick={() => refreshNow.mutate({ id: community.id })}><RefreshCw className={`mr-1 h-4 w-4 ${refreshNow.isPending ? "animate-spin" : ""}`} /> Refresh now</Button>}
+          {!manual && (community.active || community.awaitingFirstSync) && <Button type="button" variant="outline" className={TAP} disabled={refreshNow.isPending} onClick={() => refreshNow.mutate({ id: community.id })}><RefreshCw className={`mr-1 h-4 w-4 ${refreshNow.isPending ? "animate-spin" : ""}`} /> Refresh now</Button>}
           {!manual && <Button type="button" variant="outline" className={TAP} disabled={testSource.isPending} onClick={() => testSource.mutate({ id: community.id })}>{testSource.isPending ? "Testing..." : "Test source"}</Button>}
           <Button type="button" variant="outline" className={TAP} disabled={saveState.isPending} onClick={() => saveState.mutate({ id: community.id, paused: !community.paused })}>{community.paused ? "Resume" : "Pause"}</Button>
           {community.builder !== MANUAL_BUILDER && <Button type="button" variant="outline" className={TAP} disabled={saveState.isPending} onClick={() => saveState.mutate({ id: community.id, manualMode: !community.manualMode })}>{community.manualMode ? "Manual off" : "Manual on"}</Button>}
           <Button type="button" variant="outline" className={TAP} onClick={() => setEditing((value) => !value)}>{editing ? "Close edit" : "Edit"}</Button>
           <Button type="button" variant="outline" className={TAP} onClick={() => setShowIncentive((value) => !value)}>{showIncentive ? "Close incentive" : "Incentive"}</Button>
-          {community.active ? <Button type="button" variant="destructive" className={TAP} onClick={() => setConfirmRemove(true)}>Remove</Button> : <Button type="button" className={`${TAP} ${GOLD_BUTTON}`} disabled={saveState.isPending} onClick={() => saveState.mutate({ id: community.id, active: true, paused: false })}>Restore</Button>}
+          {community.active || community.awaitingFirstSync ? <Button type="button" variant="destructive" className={TAP} onClick={() => setConfirmRemove(true)}>Remove</Button> : <Button type="button" className={`${TAP} ${GOLD_BUTTON}`} disabled={saveState.isPending} onClick={() => saveState.mutate({ id: community.id, active: true, paused: false })}>Restore</Button>}
         </div>
       </div>
       {diagnostics && <HoldBanner community={community} diagnostics={diagnostics} />}

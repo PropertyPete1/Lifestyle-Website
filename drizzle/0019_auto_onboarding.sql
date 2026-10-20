@@ -1,0 +1,1 @@
+ALTER TABLE `deal_communities` ADD `awaiting_first_sync` boolean DEFAULT false NOT NULL;

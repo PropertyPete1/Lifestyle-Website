@@ -82,6 +82,8 @@ export type DealSettings = {
   areaMapRadiusMiles: number;
   /** Area map circle on the public landing card (wider, zoomed out). */
   publicAreaMapRadiusMiles: number;
+  /** How often each community's builder page is pulled again, in Chicago calendar days. */
+  catalogRefreshDays: number;
 };
 
 const DEFAULT_SETTINGS: DealSettings = {
@@ -118,6 +120,7 @@ const DEFAULT_SETTINGS: DealSettings = {
   featuredExcludedBuilders: ["Lennar"],
   areaMapRadiusMiles: 5,
   publicAreaMapRadiusMiles: 8,
+  catalogRefreshDays: 1,
 };
 
 /** Operational owner alerts go through the one Builder Deals email transport (owner notification is its fallback). */

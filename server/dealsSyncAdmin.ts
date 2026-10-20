@@ -1,8 +1,8 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealIncentives, dealJobRuns } from "../drizzle/schema";
 import { getDb } from "./db";
 import { officialHostFor, type DealHoldReason } from "./dealsAdapters";
-import { chicagoDay, chicagoEndOfDay } from "./dealsService";
+import { chicagoDay, chicagoEndOfDay, getDealSettings } from "./dealsService";
 import { normalizeExcludedTerms, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
 import { activeCatalogHold, builderScrubConfig, communityRefreshDue, refreshOfficialDeals, storedExcludedScrubTerms, storedScrubConfig, summarizeHolds } from "./dealsSync";
 import { communityAreaMap, refreshCommunityGeography } from "./dealsMap";
@@ -99,7 +99,7 @@ export async function refreshCommunityInBackground(communityId: number): Promise
   const db = await requireDb();
   const community = await requireCommunity(communityId);
   if (community.builder === "Manual" || community.manualMode) throw new DealsAdminError("PRECONDITION_FAILED", "This community is in manual mode, no auto-update.");
-  if (!community.active) throw new DealsAdminError("PRECONDITION_FAILED", "This community is archived.");
+  if (!community.active && !community.awaitingFirstSync) throw new DealsAdminError("PRECONDITION_FAILED", "This community is archived.");
   const jobName = `${REFRESH_JOB_PREFIX}${communityId}`;
   const day = chicagoDay();
   const existing = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).limit(1))[0];
@@ -366,14 +366,27 @@ export async function testCommunitySource(communityId: number, fetcher: typeof f
 /** Admin-only operational view of every community: holds, sync times, inventory counts and the incentive state. */
 export async function listCommunityDiagnostics(now = new Date()) {
   const db = await requireDb();
-  const communities = await db.select().from(dealCommunities).orderBy(dealCommunities.id);
+  // Three reads for the whole list, not three per community: the list grows to every community in the area.
+  const [communities, allHomes, allIncentives, recentRuns, settings] = await Promise.all([
+    db.select().from(dealCommunities).orderBy(dealCommunities.id),
+    db.select({ communityId: dealHomes.communityId, kind: dealHomes.kind, status: dealHomes.status, origin: dealHomes.origin }).from(dealHomes),
+    db.select().from(dealIncentives).orderBy(desc(dealIncentives.confirmedAt), desc(dealIncentives.id)),
+    db.select().from(dealJobRuns).where(gte(dealJobRuns.startedAt, new Date(now.getTime() - 14 * 86_400_000))).orderBy(desc(dealJobRuns.startedAt)),
+    getDealSettings().catch(() => null),
+  ]);
+  const group = <T extends { communityId: number }>(rows: readonly T[]) => {
+    const byCommunity = new Map<number, T[]>();
+    for (const row of rows) byCommunity.set(row.communityId, [...(byCommunity.get(row.communityId) ?? []), row]);
+    return byCommunity;
+  };
+  const homesBy = group(allHomes);
+  const incentivesBy = group(allIncentives);
+  const refreshEvery = settings?.catalogRefreshDays ?? 1;
   const result = [];
   for (const community of communities) {
-    const [homes, incentives, runs] = await Promise.all([
-      db.select({ kind: dealHomes.kind, status: dealHomes.status, origin: dealHomes.origin }).from(dealHomes).where(eq(dealHomes.communityId, community.id)),
-      db.select().from(dealIncentives).where(eq(dealIncentives.communityId, community.id)).orderBy(desc(dealIncentives.confirmedAt), desc(dealIncentives.id)),
-      db.select().from(dealJobRuns).where(eq(dealJobRuns.jobName, `${REFRESH_JOB_PREFIX}${community.id}`)).orderBy(desc(dealJobRuns.startedAt)).limit(1),
-    ]);
+    const homes = homesBy.get(community.id) ?? [];
+    const incentives = incentivesBy.get(community.id) ?? [];
+    const runs = recentRuns.filter((run) => run.jobName === `${REFRESH_JOB_PREFIX}${community.id}`).slice(0, 1);
     const active = incentives.find((row) => row.active) ?? null;
     const held = incentives.filter((row) => row.held);
     const categories = storedScrubConfig(community);
@@ -388,7 +401,8 @@ export async function listCommunityDiagnostics(now = new Date()) {
       manualMode: community.manualMode || community.builder === "Manual",
       lastAttemptAt: community.lastAttemptAt?.toISOString() ?? null,
       lastSuccessfulSyncAt: community.lastSuccessfulSyncAt?.toISOString() ?? null,
-      refreshDue: community.builder !== "Manual" && !community.manualMode && communityRefreshDue(community.lastSuccessfulSyncAt, now),
+      awaitingFirstSync: community.awaitingFirstSync,
+      refreshDue: community.builder !== "Manual" && !community.manualMode && communityRefreshDue(community.lastSuccessfulSyncAt, now, refreshEvery),
       catalogHold: catalogHold ? { reason: catalogHold, help: describeCatalogHold(catalogHold), since: community.catalogHoldSeenAt?.toISOString() ?? null, ageHours: community.catalogHoldSeenAt ? Math.round((now.getTime() - community.catalogHoldSeenAt.getTime()) / 36e5) : null } : null,
       dismissedCatalogHold: community.catalogHoldReason?.startsWith("dismissed:") ? community.catalogHoldReason.slice("dismissed:".length) : null,
       incentiveHold: community.incentiveHoldReason ? { reason: community.incentiveHoldReason, since: community.incentiveHoldSeenAt?.toISOString() ?? null, ageHours: community.incentiveHoldSeenAt ? Math.round((now.getTime() - community.incentiveHoldSeenAt.getTime()) / 36e5) : null } : null,

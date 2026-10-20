@@ -276,6 +276,12 @@ export const dealCommunities = mysqlTable(
     active: boolean("active").default(true).notNull(),
     paused: boolean("paused").default(false).notNull(),
     manualMode: boolean("manual_mode").default(false).notNull(),
+    /**
+     * Added by builder discovery and not yet shown to anyone: the row stays
+     * inactive until its first clean sync, which turns it on (an admin's own
+     * "inactive" never has this flag, so it is never turned back on).
+     */
+    awaitingFirstSync: boolean("awaiting_first_sync").default(false).notNull(),
     /** Explicit buyer-visible content time, never an incidental admin edit time. */
     catalogUpdatedAt: timestamp("catalog_updated_at"),
     zipCentroidLat: varchar("zip_centroid_lat", { length: 32 }),

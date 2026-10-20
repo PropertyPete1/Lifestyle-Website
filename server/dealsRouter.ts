@@ -613,7 +613,7 @@ export const dealsRouter = router({
     removeCommunity: adminProcedure.input(z.object({ id: z.number().int().positive(), confirm: z.literal(true) })).mutation(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       // Archive the mapping so historical lead views, tours, and private photos retain their meaning.
-      await db.update(dealCommunities).set({ active: false, paused: true }).where(eq(dealCommunities.id, input.id));
+      await db.update(dealCommunities).set({ active: false, paused: true, awaitingFirstSync: false }).where(eq(dealCommunities.id, input.id));
       return { ok: true as const, archived: true as const };
     }),
     /** Manual incentive save: categorised scrubbing, required-field check, publish now; saving re-confirms and dates are sticky. */
@@ -712,7 +712,7 @@ export const dealsRouter = router({
       syncEmailRecipients: z.array(z.string().email()).min(1).max(20).optional(), driveDestinations: z.array(z.string().trim().min(2).max(80)).min(1).max(8).optional(),
       clientLinkExpiryHours: z.number().int().min(1).max(24 * 90).optional(), clientLinkDays: z.number().int().min(1).max(365).optional(),
       paymentMarketRate: z.number().min(1).max(15).optional(), paymentDownPercent: z.number().min(0).max(100).optional(), featuredExcludedBuilders: z.array(z.string().trim().max(80)).max(50).optional(),
-      areaMapRadiusMiles: z.number().min(1).max(20).optional(), publicAreaMapRadiusMiles: z.number().min(1).max(20).optional(),
+      areaMapRadiusMiles: z.number().min(1).max(20).optional(), publicAreaMapRadiusMiles: z.number().min(1).max(20).optional(), catalogRefreshDays: z.number().int().min(1).max(30).optional(),
     })).mutation(async ({ input }) => {
       const { saveDealSettings } = await import("./dealsService");
       return saveDealSettings(input);
@@ -730,7 +730,8 @@ export const dealsRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const { id, ...patch } = input;
-      await db.update(dealCommunities).set(patch).where(eq(dealCommunities.id, id));
+      // Turning a discovered community on or off by hand is final: the first sync no longer decides it.
+      await db.update(dealCommunities).set({ ...patch, ...(patch.active !== undefined ? { awaitingFirstSync: false } : {}) }).where(eq(dealCommunities.id, id));
       return { ok: true as const };
     }),
     addBlock: adminProcedure.input(z.object({ phone: z.string().max(60).optional(), email: z.string().trim().max(320).optional(), deviceHash: z.string().max(64).optional(), reason: z.string().trim().min(3).max(255) })).mutation(async ({ input }) => {

@@ -636,6 +636,22 @@ describe("admin: photo procedures", () => {
   });
 });
 
+describe("admin.saveCommunityState", () => {
+  it("ends a discovered community's wait for its first sync when an admin turns it on or off by hand", async () => {
+    const seed = (privateName: string) => db.seed(dealCommunities, { builder: "Chesmar", privateName, sourceUrl: `https://www.chesmar.com/${privateName}/`, privateAddress: "1 Main St", publicLabel: "Southeast San Antonio | New Homes", areaLabel: "Southeast San Antonio", amenities: "[]", reelCode: `auto-${privateName}`, scrubList: "{}", active: false, paused: false, manualMode: false, awaitingFirstSync: true });
+    const off = seed("off");
+    const on = seed("on");
+    const untouched = seed("untouched");
+    await admin().saveCommunityState({ id: off, active: false });
+    await admin().saveCommunityState({ id: on, active: true });
+    await admin().saveCommunityState({ id: untouched, reelUrl: null });
+    const byId = (id: number) => db.rows(dealCommunities).find((row) => row.id === id);
+    expect(byId(off)).toMatchObject({ active: false, awaitingFirstSync: false });
+    expect(byId(on)).toMatchObject({ active: true, awaitingFirstSync: false });
+    expect(byId(untouched)).toMatchObject({ active: false, awaitingFirstSync: true });
+  });
+});
+
 describe("admin.unblock", () => {
   const phone = "+12105550177";
 

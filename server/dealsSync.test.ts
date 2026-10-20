@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives } from "../drizzle/schema";
+import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealSettings } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 import type { DealAdapterResult, DealHoldReason, PrivatePlanOrHome } from "./dealsAdapters";
 
@@ -346,11 +346,17 @@ describe("official refresh: incentive lifecycle", () => {
 });
 
 describe("scheduling", () => {
-  it("is due after three Chicago calendar days regardless of the finish time, and refreshes only the due communities", async () => {
+  it("is due daily by default (or every N days from Admin) regardless of the finish time, and refreshes only the due communities", async () => {
     expect(communityRefreshDue(null, T0)).toBe(true);
-    expect(communityRefreshDue(T0, new Date("2026-10-21T11:00:00Z"))).toBe(true); // 06:04 day 0 -> 06:00 day 3
-    expect(communityRefreshDue(T0, new Date("2026-10-20T11:30:00Z"))).toBe(false);
-    expect(communityRefreshDue(new Date("2026-10-31T23:30:00Z"), new Date("2026-11-03T12:00:00Z"))).toBe(true); // across the DST change
+    // Daily by default: yesterday's pull is due this morning, today's is not.
+    expect(communityRefreshDue(T0, new Date("2026-10-19T11:00:00Z"))).toBe(true);
+    expect(communityRefreshDue(T0, new Date("2026-10-18T23:00:00Z"))).toBe(false);
+    // Admin can slow it to every third day, the earlier pace.
+    expect(communityRefreshDue(T0, new Date("2026-10-21T11:00:00Z"), 3)).toBe(true); // 06:04 day 0 -> 06:00 day 3
+    expect(communityRefreshDue(T0, new Date("2026-10-20T11:30:00Z"), 3)).toBe(false);
+    expect(communityRefreshDue(new Date("2026-10-31T23:30:00Z"), new Date("2026-11-03T12:00:00Z"), 3)).toBe(true); // across the DST change
+    expect(communityRefreshDue(T0, new Date("2026-10-19T11:00:00Z"), 0)).toBe(true); // a nonsense setting falls back to daily
+    db.seed(dealSettings, { key: "builder_deals", value: JSON.stringify({ catalogRefreshDays: 3 }) });
     db.rows(dealCommunities)[0].lastSuccessfulSyncAt = T0;
     const freshId = seedCommunity({ reelCode: "fresh", privateName: "Fresh Fixture", lastSuccessfulSyncAt: new Date("2026-10-20T12:00:00Z") });
     const dueId = seedCommunity({ reelCode: "due", privateName: "Due Fixture", lastSuccessfulSyncAt: null });
@@ -361,7 +367,7 @@ describe("scheduling", () => {
     expect(mocks.loadOfficialDeals).toHaveBeenCalledTimes(2);
     expect(db.rows(dealCommunities).find((row) => row.id === freshId)?.lastAttemptAt).toBeNull();
     mocks.loadOfficialDeals.mockClear();
-    expect(await refreshOfficialDealsIfDue(new Date("2026-10-21T12:00:00Z"))).toEqual([{ communityId: 0, reelCode: "scheduled", ok: true, skipped: "fresh_within_three_days" }]);
+    expect(await refreshOfficialDealsIfDue(new Date("2026-10-21T12:00:00Z"))).toEqual([{ communityId: 0, reelCode: "scheduled", ok: true, skipped: "fresh_within_refresh_window" }]);
     expect(mocks.loadOfficialDeals).not.toHaveBeenCalled();
   });
 

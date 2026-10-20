@@ -124,9 +124,10 @@ describe("Toll Brothers reader: page data", () => {
 describe("Toll Brothers reader: a community", () => {
   it("reads the page once and publishes homes, plans and the offer scrubbed", async () => {
     const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
-    // The rate banner names a contract window without a parseable deadline, so the offer waits for an admin look; the catalog publishes.
+    // The rate banner's contract clause names a start ("on or after 10/8/26"), not a deadline; the closing deadline carries the offer's end, so it publishes with its disclosures.
     expect(result.catalogOk).toBe(true);
-    expect(result.incentiveHoldReasons).toEqual(["missing_contract_deadline"]);
+    expect(result.incentiveHoldReasons).toEqual([]);
+    expect(result.private.incentive?.facts).toMatchObject({ contractDeadline: null, closingDeadline: { isoDate: "2026-12-18" }, publishable: true });
     expect(requested).toEqual([COMMUNITY]);
     expect(result.private.homes).toHaveLength(3);
     expect(result.private.plans).toHaveLength(2);

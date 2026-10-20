@@ -18,12 +18,13 @@ import { DrbHomesAdapter } from "./dealsAdapters.drb";
 import { StarlightAdapter } from "./dealsAdapters.starlight";
 import { LegendHomesAdapter } from "./dealsAdapters.legend";
 import { DreesAdapter } from "./dealsAdapters.drees";
+import { ViewHomesAdapter } from "./dealsAdapters.viewhomes";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "DRB Homes" | "Starlight Homes" | "Legend Homes" | "Drees Custom Homes" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "DRB Homes" | "Starlight Homes" | "Legend Homes" | "Drees Custom Homes" | "View Homes" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -251,8 +252,10 @@ export const DRB_HOST = "www.drbhomes.com";
 export const STARLIGHT_HOST = "www.starlighthomes.com";
 export const LEGEND_HOST = "www.livelegendhomes.com";
 export const DREES_HOST = "www.dreeshomes.com";
+/** View Homes serves its site from the apex host (www redirects to it). */
+export const VIEWHOMES_HOST = "yourviewhome.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST, "DRB Homes": DRB_HOST, "Starlight Homes": STARLIGHT_HOST, "Legend Homes": LEGEND_HOST, "Drees Custom Homes": DREES_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST, "DRB Homes": DRB_HOST, "Starlight Homes": STARLIGHT_HOST, "Legend Homes": LEGEND_HOST, "Drees Custom Homes": DREES_HOST, "View Homes": VIEWHOMES_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -593,7 +596,8 @@ function findContractDeadline(text: string): DeadlineFact | null {
 }
 
 function findClosingDeadline(text: string): DeadlineFact | null {
-  const pattern = new RegExp(`\\b(?:must\\s+)?close(?:\\s+on)?\\s+(?:by|(?:or\\s+)?before|no\\s+later\\s+than)\\s+(${DEADLINE_DATE})`, "gi");
+  // "close by", "must close on or before", "closing by 11/30/2026".
+  const pattern = new RegExp(`\\b(?:must\\s+)?clos(?:e|ing)(?:\\s+on)?\\s+(?:by|(?:on\\s+or\\s+)?before|no\\s+later\\s+than)\\s+(${DEADLINE_DATE})`, "gi");
   const matches = Array.from(text.matchAll(pattern));
   // Prefer the fully dated fine print over a shortened banner date when both exist.
   const match = matches.find((item) => /\b\d{4}$/.test(item[1])) ?? matches[0];
@@ -615,7 +619,8 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const text = normalizeIncentiveText(input);
   // "2/1 Program … year one … year two" is a temporary buydown as surely as "buydown" is.
   // "year one/two" counts only as rate wording ("rate … for year one", "year one is N%"), not in an HOA-dues or warranty sentence.
-  const hasTemporaryRate = /\b(?:buy[- ]?down|first[- ]year|year\s*1|temporarily|introductory|\d\/\d\s+(?:program|rate\s+program))\b/i.test(text) || /\brate[^.]{0,60}\byear\s+(?:one|two)\b|\byear\s+(?:one|two)\s+is\s+\d+(?:\.\d+)?%/i.test(text);
+  // Cash "applied toward a rate buydown" is a use of the cash, not a temporary rate.
+  const hasTemporaryRate = /\b(?:(?<!\btowards?\s(?:an?\s)?(?:interest\s)?(?:rate\s)?)buy[- ]?down|first[- ]year|year\s*1|temporarily|introductory|\d\/\d\s+(?:program|rate\s+program))\b/i.test(text) || /\brate[^.]{0,60}\byear\s+(?:one|two)\b|\byear\s+(?:one|two)\s+is\s+\d+(?:\.\d+)?%/i.test(text);
   // "the rate for year one is 2% lower" names a discount, not a rate.
   const headline = rateNear(text, /\brate\s+(?:that\s+applies\s+)?(?:for|to|in|during)\s+(?:the\s+)?(?:first[- ]year|year\s*(?:1|one))\s+(?:is|of|:)?\s*(\d+(?:\.\d+)?)%(?!\s*(?:lower|less|below|off|decrease|reduction|discount|under))/i) ??
     rateNear(text, /(?:first[- ]year|year\s*1)[\s\S]{0,100}?(\d+(?:\.\d+)?)%(?!\s*(?:lower|less|below|off|decrease|reduction|discount|under))/i) ??
@@ -643,7 +648,8 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   // an N-year or N yr term, payments, or a down payment. "first-year" alone is a
   // promotional period, not a repayment term.
   const triggersTerms = /\b(?:\d+[- ]year|\d+\s*yr|payments?|down\s+payment)\b/i.test(text);
-  const namesContractDeadline = /\b(?:contracts?|purchase\s+agreements?|contract\s+sales?|sign(?:ed|ing)?)\b[^.]{0,100}\b(?:by|through|until|between|from|written)\b/i.test(text);
+  // The span must not run into the closing clause (as in the finder): "contracts … closing by 11/30" names a closing deadline only.
+  const namesContractDeadline = /\b(?:contracts?|purchase\s+agreements?|contract\s+sales?|sign(?:ed|ing)?)\b(?:(?!\bclos)[^.]){0,100}\b(?:by|through|until|between|from|written)\b/i.test(text);
   const namesClosingDeadline = /\b(?:clos(?:e|ing))\b[^.]{0,35}\b(?:by|before|than|through)\b/i.test(text);
   const holdReasons: DealHoldReason[] = [];
   if (rateKind !== "none") {
@@ -1220,6 +1226,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "Drees Custom Homes") { config.builder.push("Drees Custom Homes", "Drees Homes", "The Drees Company", "Drees"); config.lender.push("First Equity Mortgage", "First Equity"); }
   if (builder === "Legend Homes") { config.builder.push("Legend Homes", "Legend Home", "Camillo Companies", "Camillo"); }
   if (builder === "DRB Homes") { config.builder.push("DRB Homes", "DRB Group", "DRB Elevate", "DRB"); }
+  if (builder === "View Homes") { config.builder.push("View Homes", "Your View Home", "Thoughtful Collection"); config.lender.push("View Homes Lending"); }
   if (builder === "Scott Felder Homes") { config.builder.push("Scott Felder Homes", "Scott Felder"); config.lender.push("Southern Lending", "First Continental Mortgage", "First Continental"); }
   if (builder === "Highland Homes") { config.builder.push("Highland Homes", "Highland"); config.lender.push("Highland HomeLoans", "Highland Home Loans"); }
   if (builder === "Davidson Homes") { config.builder.push("Davidson Homes", "Davidson"); config.lender.push("NorthStar Mortgage Advisors", "NorthStar Mortgage", "NorthStar"); }
@@ -1874,6 +1881,7 @@ let drbAdapter: DealAdapter | null = null;
 let starlightAdapter: DealAdapter | null = null;
 let legendAdapter: DealAdapter | null = null;
 let dreesAdapter: DealAdapter | null = null;
+let viewHomesAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
@@ -1899,6 +1907,7 @@ export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   get "Starlight Homes"() { return (starlightAdapter ??= new StarlightAdapter()); },
   get "Legend Homes"() { return (legendAdapter ??= new LegendHomesAdapter()); },
   get "Drees Custom Homes"() { return (dreesAdapter ??= new DreesAdapter()); },
+  get "View Homes"() { return (viewHomesAdapter ??= new ViewHomesAdapter()); },
   Manual: new ManualAdapter(),
 };
 

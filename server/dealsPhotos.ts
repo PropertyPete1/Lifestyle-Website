@@ -59,6 +59,8 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "s3.amazonaws.com",
   "assets.drbhomes.com",
   "assets.livelegendhomes.com",
+  // View Homes serves its photos from its WordPress uploads (…/wp-content/uploads/…); the path is checked below.
+  "yourviewhome.com",
   // LGI Homes serves its photos from Sitecore's edge CDN (…/lgihomesinc…/…); the path is checked below.
   "edge.sitecorecloud.io",
 ]);
@@ -286,6 +288,7 @@ export function safeDealImageUrl(raw: string): URL {
   if (url.hostname.toLowerCase() === "res.cloudinary.com" && !url.pathname.startsWith("/perryhomes/")) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "edge.sitecorecloud.io" && !/^\/lgihomes/i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "s3.amazonaws.com" && !/^\/buildercloud\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
+  if (url.hostname.toLowerCase() === "yourviewhome.com" && !/^\/wp-content\/uploads\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   return url;
 }
 

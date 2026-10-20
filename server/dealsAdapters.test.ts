@@ -135,7 +135,7 @@ function miDocuments(total = 15): Record<string, string> {
 
 describe("deals adapters", () => {
   it("registers the required generic builder adapters", () => {
-    expect(Object.keys(DEAL_ADAPTERS).sort()).toEqual(["Ashton Woods", "Centex", "Century Communities", "Chesmar", "Coventry Homes", "D.R. Horton", "DRB Homes", "David Weekley Homes", "Davidson Homes", "Del Webb", "Drees Custom Homes", "First America Homes", "Highland Homes", "KB Home", "LGI Homes", "Legend Homes", "M/I Homes", "Manual", "Perry Homes", "Pulte", "Scott Felder Homes", "Sitterle Homes", "Starlight Homes", "Toll Brothers"]);
+    expect(Object.keys(DEAL_ADAPTERS).sort()).toEqual(["Ashton Woods", "Centex", "Century Communities", "Chesmar", "Coventry Homes", "D.R. Horton", "DRB Homes", "David Weekley Homes", "Davidson Homes", "Del Webb", "Drees Custom Homes", "First America Homes", "Highland Homes", "KB Home", "LGI Homes", "Legend Homes", "M/I Homes", "Manual", "Perry Homes", "Pulte", "Scott Felder Homes", "Sitterle Homes", "Starlight Homes", "Toll Brothers", "View Homes"]);
     expect(DEAL_ADAPTERS["Perry Homes"].builder).toBe("Perry Homes");
   });
 
@@ -553,6 +553,10 @@ describe("deals adapters", () => {
     const invalidDate = parsePromotionalRate(`${base} Contract by 2/30/26; close by 12/31/26.`);
     expect(invalidDate.contractDeadline?.isoDate).toBeNull();
     expect(invalidDate.publishable).toBe(false);
+    // "closing by 11/30/2026" is a closing deadline; "contracts … closing by" names no contract deadline; cash "toward rate buydown" is not a buydown rate.
+    const closing = parsePromotionalRate("Purchase a quick move-in home closing by 11/30 and choose a 5.25% Fixed-Rate or up to $55,000 in flex cash! FHA – 5.25% (5.993% APR) based on 3.5% down payment. Below-market interest rates valid on new home contracts for eligible properties entered into as of 10/30/2026 closing by 11/30/2026. Flex cash can be applied toward rate buydown, appliances or closing costs. 30-year fixed.");
+    expect(closing).toMatchObject({ rateKind: "fixed", promotionalRatePercent: 5.25, aprPercent: 5.993, loanType: "FHA", downPaymentPercent: 3.5, repaymentTermYears: 30, contractDeadline: null, closingDeadline: { raw: "11/30/2026", isoDate: "2026-11-30" }, holdReasons: [] });
+    expect(parsePromotionalRate("5.25% (5.993% APR) FHA 30-year. A 2/1 buydown applies; must close on or before 12/31/2026.")).toMatchObject({ rateKind: "promotional", closingDeadline: { isoDate: "2026-12-31" } });
   });
 
   it("fails closed without leaking a private source URL when official community GET fails", async () => {

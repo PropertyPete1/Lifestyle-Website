@@ -378,6 +378,65 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - Scrub: Drees Custom Homes, Drees Homes, The Drees Company, Drees; lender
   First Equity Mortgage.
 
+## View Homes reader (added 2026-10-20)
+
+- Site: `yourviewhome.com` (apex; a WordPress site, server-rendered). The
+  community page `/communities/<slug>/` has a hero (status badge "Now
+  Selling" / "Coming Soon" / "Final Opportunity", `tel:` link, the sales
+  address as the text of a Google Maps link, "Starting Price" / "Sq. Ft." /
+  "Beds" / "Baths" meta) and the `#floorplans` module
+  (`module-community-floorplans-homes`) with one `.home-preview` card per
+  home for sale (street title, "Plan: X", `.home-preview__status` "Ready
+  Now!" or "Est. Completion- October", `.home-preview__move_in` "Move In:
+  Oct 2026", price, Sq. Ft./Beds/Baths/Garage, a link to
+  `/communities/<slug>/homes/<street slug>/`, a lazy `data-breeze` photo)
+  and one `.floorplan-preview` card per plan ("Starting From $369,990",
+  specs, a status label such as "Model", "Inventory Only", "Now Selling",
+  "Final Opportunity", "New Floor Plan!", "The Grove Series"). A community
+  with no homes for sale has no "Available Homes" tab title
+  (`.js-tabs-title[data-slug="homes"]`) and no `#homes` slide at all
+  (Weltner Farms 50's in October 2026); a coming-soon page (Ladera, Enclave
+  35) has no module cards and Enclave 35 shows only "San Antonio, TX 78240".
+- Roster: the region page `/region/texas/` embeds every Texas community as
+  JSON (`oceanFloorModules.communitiesMapList.push({ …, regions: [{ …,
+  communities: [...], regions: [...] }] })`): `permalink`, `post_title`,
+  `status.status.{value,label}` (`now`, `soon`, `final`), `address`
+  (`street`, `city`, `zip`, `lat`, `lng`), `phone`, `price_range.PriceLow`
+  (0 when unpublished), `specs` and `homes[]` (`permalink`, `post_title`
+  street, `plan.name`, `status.text`, `move_in` "Oct 2026", `price`,
+  `specs`, `full`/`thumbnail` photo). Horizon City's communities repeat under
+  El Paso (nested `regions`); the reader keeps one row per page. The roster
+  is the discovery listing (every record; the 45-mile rule leaves El Paso
+  and Horizon City out) and the source of the homes; the community page
+  corroborates it: the cards' home links and the roster's must be the same
+  set (`incomplete_inventory` otherwise), a tab with no cards is a changed
+  page. The roster and the promo page are read once per run (10 minutes).
+- Statuses: "Ready Now!" is ready; "Est. Completion- <Month>" takes the
+  year from the "Move In: Mon YYYY" line (every dated card had one in
+  October 2026); without the line the month is this year's and a passed
+  month is an undated quick move-in. Other wording holds.
+- Offers: the site-wide promotion is an image banner (`.banner-ad__link`)
+  to a promo page (`/promo-autumnatic-san-antonio/` in October 2026) whose
+  `.promo-overview` states the offer ("Purchase a quick move-in home closing
+  by 11/30 and choose a 5.25%* Fixed-Rate or up to $55,000** in flex cash!")
+  with the APR footnotes and terms in `.PromoFooter__disclaimer` ("*FHA –
+  5.25% (5.993% APR) based on 3.5% down payment", "VA – 5.25% (5.465% APR)
+  …", "**… flex cash UP TO 10% of the home's sales price … applied toward
+  rate buydown, appliances, closing costs …"); `.promo-info__communities`
+  links the participating communities (8 of 11 in October 2026) and the
+  offer applies only to a community it links. The page names no repayment
+  term, so the offer holds `missing_repayment_term` until accepted. The
+  rate parser now reads "closing by 11/30/2026" as the closing deadline,
+  does not read "contracts … closing by" as a contract deadline, and does
+  not take cash "toward rate buydown" for a buydown rate.
+- Photos: `yourviewhome.com/wp-content/uploads/…` only; a card's sized copy
+  (`-400x267`) stands for the original.
+- Scrub: View Homes, Your View Home, Thoughtful Collection; lender View
+  Homes Lending.
+- Research list: "View Homes" rows; Weltner Farms is one row (the 50's URL)
+  while the site has two pages (50's and 60's, one address) — discovery adds
+  the 60's as its own community.
+
 ## Meritage Homes: deferred
 
 - `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.
@@ -396,4 +455,5 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - DRB / Legend: if the API's `moveInNowHomesCount` counts hidden (`displayInventory: false`) rows the community holds `incomplete_inventory` every run; a home row with `status` other than "active" and `salesStatus` "available" would publish (row-level `status` is not read); `availabilityDate` is compared in UTC (a one-day skew around midnight is possible for the ready-now label).
 - Starlight: the footer's "**Monthly payment" note and `&copy;` line follow the terms paragraph; the reader now reads the paragraph's own element, so neither matters. A sold-out community's count wording ("0 Available Homes" with no table) is a live check.
 - KB Home: a community heading "Move-in Ready (0)" beside the market's count corroborates an empty list; "(0)" beside a list with homes says nothing.
+- View Homes: if the roster's `homes[]` ever omits a home the page shows (or shows one the page hides) every run holds `incomplete_inventory`; a badge wording other than "Ready Now!" / "Est. Completion- <Month>" (e.g. a sold label) holds through the sync's status rule. The promo banner changes per campaign: a page without `.promo-overview` holds the offer only (`expected_incentive_container_not_found`).
 - Century: if the live page renders the card list twice (mobile and desktop) or shows sold or model cards with `.street-number-text`, the card count exceeds the records and every run holds. The sitemap is one 2 MB urlset (8,205 URLs, no index) today.

@@ -2,7 +2,7 @@ import { and, desc, eq, gte, inArray, isNull, lt, ne, or } from "drizzle-orm";
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealJobRuns, dealPhotos, dealSyncDigestEntries } from "../drizzle/schema";
 import { getDb } from "./db";
 import { chicagoClock, chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
-import { builderScrubConfig, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher } from "./dealsAdapters";
+import { builderScrubConfig, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, publicTextResidue, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher } from "./dealsAdapters";
 export { builderScrubConfig };
 import { dealScrubTerms, emptyDealScrubConfig, mergeDealScrubConfig, normalizedDealSourceKey, normalizedText, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
 import { applyScrubExclusions, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
@@ -303,6 +303,43 @@ function manualDatesOf(row: IncentiveRow): string[] {
 }
 
 /**
+ * Whether a record that carries no acceptedAt was accepted by an admin before acceptance was recorded (migration 0021).
+ * Only evidence the parser cannot produce counts, so a row an older parser published is never adopted with its guesses:
+ * - text the admin edited: the published text is not the builder's text it is filed under, and carries no residue; or
+ * - every reason this scrape gives is answered by a value the builder's text never states (an APR, a rate, a term the
+ *   admin typed). A parser reads figures only from the text, so a figure the text does not state was typed.
+ */
+export function acceptedBeforeRecorded(row: Pick<IncentiveRow, "publicText" | "normalizedText" | "apr" | "headlineRate" | "followOnRate" | "followOnPeriod" | "downPayment" | "repaymentTerms" | "loanType" | "contractBy" | "closeBy" | "contractByManual" | "closeByManual">, reasons: readonly string[]): boolean {
+  const builderText = row.normalizedText;
+  const edited = normalizedText(row.publicText) !== builderText && publicTextResidue(row.publicText) === null;
+  const stated = new Set((builderText.match(/\d+(?:\.\d+)?/g) ?? []).map((figure) => String(Number(figure))));
+  const typed = (value: string | null | undefined) => {
+    const text = value?.trim();
+    if (!text) return false;
+    const figures = text.match(/\d+(?:\.\d+)?/g);
+    if (figures) return figures.every((figure) => !stated.has(String(Number(figure))));
+    return !` ${builderText} `.includes(` ${normalizedText(text)} `);
+  };
+  const answered = (reason: string): boolean => {
+    switch (reason) {
+      case "private_text_remaining": return edited;
+      case "missing_apr": return typed(row.apr);
+      case "missing_promotional_rate": return typed(row.headlineRate);
+      case "missing_follow_on_rate": return typed(row.followOnRate);
+      case "missing_follow_on_period": case "missing_promotional_period": return typed(row.followOnPeriod);
+      case "missing_down_payment": return typed(row.downPayment);
+      case "missing_repayment_term": return typed(row.repaymentTerms);
+      case "missing_loan_type": return typed(row.loanType);
+      case "missing_contract_deadline": return Boolean(row.contractBy && row.contractByManual);
+      case "missing_closing_deadline": return Boolean(row.closeBy && row.closeByManual);
+      default: return false;
+    }
+  };
+  if (!reasons.length) return edited;
+  return reasons.every(answered);
+}
+
+/**
  * INCENTIVE EXPIRY rules for one scrape. Same normalized text only re-confirms
  * (dates, manual fields and acceptance stay sticky); new text starts a new
  * record; unpublishable facts produce a held record that admin can accept; a
@@ -324,7 +361,8 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
     if (snapshot.incentiveHoldReasons.length) { await recordIncentiveHold(community, snapshot.incentiveHoldReasons.join(", "), now, holds, "The official incentive page could not be read; the last good incentive stays until it lapses."); return; }
     // A reader that did not read the builder's offer source this run (one that never reads offers, a cached brand offer,
     // a closeout with no page) says nothing about the promo: the last one stays to the lapse rule.
-    if (!snapshot.private.offerRead) { await recordIncentiveHold(community, null, now, holds); return; }
+    // The community's hold line is left as it is: a text held for Accept stays visible, and a fetch hold is not e-mailed again.
+    if (!snapshot.private.offerRead) return;
     // The offer source was read and shows no incentive: the builder took the promo down. Scraped records come off at once
     // and a held one is retired; a manual override stays.
     const takenOff = rows.filter((row) => row.active && !row.manual);
@@ -366,29 +404,26 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
       summary.incentive.push(`${message} (${unique.join(", ")}): "${publicText.slice(0, 160)}"`);
       await recordIncentiveHold(community, holdString(unique), now, holds, `Held text: "${publicText.slice(0, 400)}"`, notify);
     };
+    /** A record an admin accepted before acceptance was recorded is marked accepted now and goes (back) live as the admin left it. */
+    const adoptAccepted = async () => {
+      await db.transaction(async (tx) => {
+        await takeOffOthers(tx, same.id);
+        await retireOtherHeld(tx, same.id);
+        await tx.update(dealIncentives).set({ acceptedAt: same.updatedAt ?? now, active: true, held: false, holdReason: null, confirmedAt: now }).where(eq(dealIncentives.id, same.id));
+      });
+      if (!same.active) summary.incentive.push(`Incentive returned as the admin accepted it: "${same.publicText.slice(0, 160)}"`);
+      await recordIncentiveHold(community, null, now, holds);
+    };
     if (!same.active && (same.holdReason === "expired" || same.holdReason === "dismissed")) {
       // Stays off until the scraped TEXT changes; the same promo never returns by itself. The builder shows it, so any other scraped promo is not live.
       const tookOff = activeRows.filter((row) => !row.manual);
       await db.transaction(async (tx) => { await takeOffOthers(tx, same.id); await retireOtherHeld(tx, same.id); });
-      if (tookOff.length) summary.incentive.push(`The builder shows a ${same.holdReason} incentive again, so the live one came off and none shows: "${tookOff[0]!.publicText.slice(0, 160)}"`);
+      if (tookOff.length) summary.incentive.push(`The builder shows again an incentive that was ${same.holdReason}, so the live one came off and none shows: "${tookOff[0]!.publicText.slice(0, 160)}"`);
       await recordIncentiveHold(community, null, now, holds);
       return;
     }
     if (same.active) {
-      // A live record whose stored values already answer every reason this scrape gives (an APR, a date, a term the admin
-      // typed) was accepted before acceptance was recorded: it is adopted as accepted, not held again.
-      const answered = (reason: string) => ({
-        missing_apr: Boolean(same.apr), missing_promotional_rate: Boolean(same.headlineRate), missing_follow_on_rate: Boolean(same.followOnRate),
-        missing_follow_on_period: Boolean(same.followOnPeriod), missing_promotional_period: Boolean(same.followOnPeriod), missing_down_payment: Boolean(same.downPayment),
-        missing_repayment_term: Boolean(same.repaymentTerms), missing_loan_type: Boolean(same.loanType), missing_contract_deadline: Boolean(same.contractBy), missing_closing_deadline: Boolean(same.closeBy),
-      } as Record<string, boolean>)[reason] ?? false;
-      const scrapedValues = scrapedIncentiveValues(facts);
-      const adminFilled = unique.length > 0 && unique.every(answered) && (["apr", "headlineRate", "followOnRate", "downPayment", "repaymentTerms", "loanType"] as const).some((field) => same[field] && !scrapedValues[field]);
-      if (!adminOwned && adminFilled) {
-        await db.update(dealIncentives).set({ acceptedAt: same.updatedAt ?? now, confirmedAt: now }).where(eq(dealIncentives.id, same.id));
-        await recordIncentiveHold(community, null, now, holds);
-        return;
-      }
+      if (!adminOwned && acceptedBeforeRecorded(same, unique)) { await adoptAccepted(); return; }
       // A scraped record published under earlier rules is judged again on every run: what this scrape cannot publish comes off and is held.
       if (!adminOwned && unique.length) { await holdSame("Live incentive no longer passes the publication rules and is held", true); return; }
       // Same promo re-confirmed: confirmedAt moves; a scraped (not admin-owned) record takes this scrape's figures. Dates and admin values are sticky.
@@ -427,6 +462,7 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
     }
     // A superseded record was never published, and a lapsed or replaced scraped one was published under the rules of its
     // day: this scrape judges it again. An accepted one returns as the admin left it.
+    if (!adminOwned && same.holdReason !== "superseded" && acceptedBeforeRecorded(same, unique)) { await adoptAccepted(); return; }
     if (!adminOwned && unique.length) { await holdSame("Incentive text returned and is held", same.holdReason !== "superseded"); return; }
     // A lapsed (or replaced) record returns when a successful scrape confirms its text again.
     await db.transaction(async (tx) => {

@@ -57,7 +57,7 @@ const num = (value: string | null | undefined): number | null => {
 };
 const positive = (value: string | null | undefined): number | null => { const parsed = num(value); return parsed && parsed > 0 ? parsed : null; };
 
-let homeCache: { fetchedAt: number; page: TexasHomesHomePage | null } | null = null;
+let homeCache: { fetchedAt: number; page: TexasHomesHomePage } | null = null;
 let promoCache: { fetchedAt: number; url: string; text: string | null } | null = null;
 export function resetTexasHomesCaches(): void { homeCache = null; promoCache = null; }
 
@@ -393,11 +393,13 @@ export function parseTexasHomesPromo(html: string): string | null {
 }
 
 /** The home page, read once per run. */
-async function homePage(fetcher: HtmlFetcher, now: number): Promise<{ page: TexasHomesHomePage | null } | { hold: DealHoldReason }> {
+async function homePage(fetcher: HtmlFetcher, now: number): Promise<{ page: TexasHomesHomePage } | { hold: DealHoldReason }> {
   if (homeCache && now - homeCache.fetchedAt < CACHE_MS) return { page: homeCache.page };
   const page = await getDocument(texasHomesListingUrl(), fetcher, "text/html,application/xhtml+xml", TEXASHOMES_HOST);
   if (!page.ok) return { hold: page.redirectedOffOfficialHost ? "unsupported_official_host" : "incentive_fetch_failed" };
   const parsed = parseTexasHomesHomePage(page.text, TEXASHOMES_HOST);
+  // A page that answered but did not parse (a bot check, maintenance, a redesign) says nothing about the promo: a hold, not cached.
+  if (!parsed) return { hold: "expected_incentive_container_not_found" };
   homeCache = { fetchedAt: now, page: parsed };
   return { page: parsed };
 }
@@ -461,7 +463,7 @@ export class TexasHomesAdapter implements DealAdapter {
     const incentiveHolds: DealHoldReason[] = [];
     const home = await homePage(fetcher, now().getTime());
     if ("hold" in home) incentiveHolds.push(home.hold);
-    else if (!home.page?.promoUrl) privateSnapshot.offerRead = true;
+    else if (!home.page.promoUrl) privateSnapshot.offerRead = true;
     else {
       const promo = await promotion(home.page.promoUrl, fetcher, now().getTime());
       if ("hold" in promo) incentiveHolds.push(promo.hold);

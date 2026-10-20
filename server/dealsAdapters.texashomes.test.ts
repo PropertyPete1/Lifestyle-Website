@@ -158,6 +158,23 @@ describe("Texas Homes reader: home page and promotion", () => {
   });
 });
 
+describe("Texas Homes reader: a home page that did not parse", () => {
+  it("is a hold, not a read that shows no offer, and is not cached for the batch", async () => {
+    const challenge = "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body><h1>Checking your browser</h1></body></html>";
+    const challenged = await load(communityPage(), { [texasHomesListingUrl()]: challenge });
+    expect(challenged.catalogOk).toBe(true);
+    expect(challenged.private.incentive).toBeNull();
+    expect(challenged.incentiveHoldReasons).toEqual(["expected_incentive_container_not_found"]);
+    expect(challenged.private.offerRead).toBeFalsy();
+    const down = await load(communityPage(), { [texasHomesListingUrl()]: null });
+    expect(down.incentiveHoldReasons).toEqual(["incentive_fetch_failed"]);
+    expect(down.private.offerRead).toBeFalsy();
+    const none = await load(communityPage(), { [texasHomesListingUrl()]: homePage(false) });
+    expect(none.incentiveHoldReasons).toEqual([]);
+    expect(none.private.offerRead).toBe(true);
+  });
+});
+
 describe("Texas Homes reader: adapter", () => {
   it("is registered under its builder id", () => {
     expect(DEAL_ADAPTERS["Texas Homes"]).toBeInstanceOf(TexasHomesAdapter);

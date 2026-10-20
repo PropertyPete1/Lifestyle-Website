@@ -317,7 +317,11 @@ export class PulteGroupAdapter implements DealAdapter {
     // A community with nothing listed has no page of its own to read; the brand's offer read within the hour still applies to it.
     if (!candidates.length) {
       const cached = offersCache.get(this.host);
-      if (cached && now().getTime() - cached.fetchedAt < CACHE_MS && cached.offer) privateSnapshot.incentive = { sourceUrl: cached.offer.sourceUrl, text: cached.offer.text, facts: parsePromotionalRate(cached.offer.text) };
+      // The brand's page read within the hour is a read of the offer, whether it showed one or showed none.
+      if (cached && now().getTime() - cached.fetchedAt < CACHE_MS) {
+        privateSnapshot.offerRead = true;
+        if (cached.offer) privateSnapshot.incentive = { sourceUrl: cached.offer.sourceUrl, text: cached.offer.text, facts: parsePromotionalRate(cached.offer.text) };
+      }
     }
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));
   }

@@ -84,7 +84,7 @@ export const CATALOG_HOLD_REASON_HELP: Partial<Record<DealHoldReason, string>> =
   refresh_failed: "The reader hit an unexpected error on this community's pages; nothing was published or marked sold.",
   private_text_remaining: "A private name, link, web address, e-mail, phone number or NMLS id survived scrubbing; edit the text (or add the name to the names to hide, or exclude a false positive).",
   adjustable_rate: "The offer is an adjustable-rate loan (ARM): the headline rate is a starting rate. Read the terms, then accept or edit the wording.",
-  ambiguous_rate: "The offer names two different rates (for example \"as low as 3.99%\" and \"4.99% fixed\"). Set the headline rate to the one the APR belongs to, or edit the wording.",
+  ambiguous_rate: "The offer names more than one rate (for example \"as low as 3.99%\" and \"4.99% fixed\", or a buydown whose figures were read out of order). Check the headline rate (and, for a buydown, the follow-on rate) against the wording before accepting.",
 };
 
 /** One line per stored reason (the sync joins several with ", "); unknown reasons fall back to the raw code. */

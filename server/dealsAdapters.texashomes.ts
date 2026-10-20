@@ -59,7 +59,10 @@ const positive = (value: string | null | undefined): number | null => { const pa
 
 let homeCache: { fetchedAt: number; page: TexasHomesHomePage } | null = null;
 let promoCache: { fetchedAt: number; url: string; text: string | null } | null = null;
-export function resetTexasHomesCaches(): void { homeCache = null; promoCache = null; }
+/** A home page that answered but did not parse is not fetched again for two minutes. */
+const HOLD_CACHE_MS = 2 * 60_000;
+let homeHoldUntil = 0;
+export function resetTexasHomesCaches(): void { homeCache = null; promoCache = null; homeHoldUntil = 0; }
 
 const pagePath = (url: URL): string => comparablePath(url.pathname.replace(/\/+$/, "")) || "/";
 const pageUrlOf = (url: URL): string => `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
@@ -395,11 +398,13 @@ export function parseTexasHomesPromo(html: string): string | null {
 /** The home page, read once per run. */
 async function homePage(fetcher: HtmlFetcher, now: number): Promise<{ page: TexasHomesHomePage } | { hold: DealHoldReason }> {
   if (homeCache && now - homeCache.fetchedAt < CACHE_MS) return { page: homeCache.page };
+  if (now < homeHoldUntil) return { hold: "expected_incentive_container_not_found" };
   const page = await getDocument(texasHomesListingUrl(), fetcher, "text/html,application/xhtml+xml", TEXASHOMES_HOST);
   if (!page.ok) return { hold: page.redirectedOffOfficialHost ? "unsupported_official_host" : "incentive_fetch_failed" };
   const parsed = parseTexasHomesHomePage(page.text, TEXASHOMES_HOST);
-  // A page that answered but did not parse (a bot check, maintenance, a redesign) says nothing about the promo: a hold, not cached.
-  if (!parsed) return { hold: "expected_incentive_container_not_found" };
+  // A page that answered but did not parse (a bot check, maintenance, a redesign) says nothing about the promo: a hold,
+  // remembered briefly so the rest of the batch does not fetch it again.
+  if (!parsed) { homeHoldUntil = now + HOLD_CACHE_MS; return { hold: "expected_incentive_container_not_found" }; }
   homeCache = { fetchedAt: now, page: parsed };
   return { page: parsed };
 }

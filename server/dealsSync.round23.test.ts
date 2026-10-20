@@ -188,6 +188,64 @@ describe("rows accepted before acceptance was recorded", () => {
   });
 });
 
+describe("round 24: savings amounts, amount words, residue and labelled legacy figures", () => {
+  it("a first-year savings amount is never the first-year rate", () => {
+    for (const text of ["1% first-year savings with a 1-0 buydown: 5.99% for years 2-30 (6.10% APR) on a 30-year fixed FHA loan with 3.5% down payment.", "Enjoy 1% first year rate savings on a 1-0 buydown. 5.99% years 2-30, 6.1% APR, 30-year fixed FHA loan, 3.5% down payment."]) {
+      expect(parsePromotionalRate(text), text).toMatchObject({ promotionalRatePercent: null, publishable: false });
+      expect(parsePromotionalRate(text).holdReasons, text).toContain("missing_promotional_rate");
+    }
+    expect(parsePromotionalRate("2% year 1 / 1% year 2 rate buydown on a 6.25% (6.4% APR) 30-year fixed conventional loan with 5% down payment.").holdReasons).toContain("ambiguous_rate");
+  });
+
+  it("an amount word hides a whole figure, not a rate written with decimals", () => {
+    for (const text of ["Receive 4.99% on a 30-year fixed FHA loan with 3.5% down payment.", "Receive 3.99% through our preferred lender on select homes.", "Earn 3.99% when you finance with our preferred lender.", "Receive 4.99%* on select homes when you finance with our preferred lender."]) {
+      expect(parsePromotionalRate(text).holdReasons, text).toEqual(expect.arrayContaining(["missing_promotional_rate", "missing_apr"]));
+    }
+    for (const text of ["Earn 2.5% back at closing.", "Low tax rate of 2.1% in this community.", "Agent co-op rate of 3% of base price."]) expect(parsePromotionalRate(text), text).toMatchObject({ rateKind: "none", holdReasons: [] });
+  });
+
+  it("a leading incentive, co-op, minimum down or APR does not make a correct buydown ambiguous", () => {
+    for (const text of ["Get 6% builder incentive plus a 3.99% first-year rate, 4.99% years 2-30 (5.40% APR).", "The Annual Percentage Rate (APR) is 6.12% with a first-year rate of 3.99%, 4.99% for years 2-30.", "FHA 3.5% min. down. 3.99% first-year rate, 4.99% years 2-30 (5.40% APR) on a 30-year fixed FHA loan."]) {
+      expect(parsePromotionalRate(text), text).toMatchObject({ promotionalRatePercent: 3.99, followOnRatePercent: 4.99, holdReasons: [] });
+    }
+    expect(parsePromotionalRate("Rates starting at 4.99% in Austin and 5.25% in San Antonio, 5.62% APR.").holdReasons).toContain("ambiguous_rate");
+  });
+
+  it("reads 'APR of N%' and 'a down payment of N%'", () => {
+    expect(parsePromotionalRate("4.99% fixed rate, APR of 5.62%, 30-year FHA loan with 3.5% down payment on select homes.")).toMatchObject({ aprPercent: 5.62, holdReasons: [] });
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA loan with a down payment of 3.5% on select homes.")).toMatchObject({ downPaymentPercent: 3.5, holdReasons: [] });
+  });
+
+  it("short names before .COM are addresses; glued sentences are not", () => {
+    for (const text of ["Apply with UWM.COM today.", "Visit PNC.COM for details.", "Visit DRB.COM for details."]) expect(publicTextResidue(text), text).toBe("web address");
+    for (const text of ["Offer valid on select homes.HOMES MUST CLOSE BY 12/31/2026.", "Ask about financing in San Antonio.US Bank is our preferred lender.", "Proud to serve Fort Sam Houston.US Army families save more.", "Realtors welcome.Co-op paid at closing.", "10/31.US 281"]) expect(publicTextResidue(text), text).toBeNull();
+  });
+
+  it("a legacy Accept of a figure the text states beside its label (one the parser cannot read) is adopted; a guess is not", async () => {
+    const TEXT = "4.99% (5.62% Annual Pct. Rate) 30-year fixed FHA loan with 3.5% down payment on select homes.";
+    const blind: PromotionalRateFacts = { ...parsePromotionalRate(TEXT), aprPercent: null, holdReasons: ["missing_apr"], publishable: false };
+    const id = seedCommunity();
+    await run({ text: TEXT, facts: blind }, 0, id);
+    await acceptIncentiveHold({ id: heldRows()[0]!.id, apr: "5.62%" });
+    (live()[0] as { acceptedAt: Date | null }).acceptedAt = null;
+    // "5.62%" sits beside no "APR" label the check knows, so this is not evidence: held again.
+    await run({ text: TEXT, facts: blind }, 1, id);
+    expect(live()).toHaveLength(0);
+
+    db = new FakeDealsDb(); mocks.getDb.mockResolvedValue(db); mocks.sendBuilderDealsEmail.mockClear();
+    const LABELLED = "4.99% fixed rate; APR: 5.62% on a 30-year fixed FHA loan with 3.5% down payment on select homes.";
+    const blind2: PromotionalRateFacts = { ...parsePromotionalRate(LABELLED), aprPercent: null, holdReasons: ["missing_apr"], publishable: false };
+    const other = seedCommunity();
+    await run({ text: LABELLED, facts: blind2 }, 0, other);
+    await acceptIncentiveHold({ id: heldRows()[0]!.id, apr: "5.62%" });
+    (live()[0] as { acceptedAt: Date | null }).acceptedAt = null;
+    await run({ text: LABELLED, facts: blind2 }, 1, other);
+    expect(live()).toHaveLength(1);
+    expect(live()[0]!.acceptedAt).not.toBeNull();
+    expect(holdEmails()).toHaveLength(1);
+  });
+});
+
 describe("a run that did not read the offer source", () => {
   it("leaves the community's hold line as it was", async () => {
     const id = seedCommunity();

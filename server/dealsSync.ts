@@ -307,7 +307,9 @@ function manualDatesOf(row: IncentiveRow): string[] {
  * Only evidence the parser cannot produce counts, so a row an older parser published is never adopted with its guesses:
  * - text the admin edited: the published text is not the builder's text it is filed under, and carries no residue; or
  * - every reason this scrape gives is answered by a value the builder's text never states (an APR, a rate, a term the
- *   admin typed). A parser reads figures only from the text, so a figure the text does not state was typed.
+ *   admin typed). A parser reads figures only from the text, so a figure the text does not state was typed; or by a
+ *   figure the text states beside that field's own label ("APR of 5.62%", "a down payment of 3.5%"), which is right
+ *   whoever wrote it. "3% down" stored as the rate is neither, so an older parser's guess is judged again.
  */
 export function acceptedBeforeRecorded(row: Pick<IncentiveRow, "publicText" | "normalizedText" | "apr" | "headlineRate" | "followOnRate" | "followOnPeriod" | "downPayment" | "repaymentTerms" | "loanType" | "contractBy" | "closeBy" | "contractByManual" | "closeByManual">, reasons: readonly string[]): boolean {
   const builderText = row.normalizedText;
@@ -320,15 +322,31 @@ export function acceptedBeforeRecorded(row: Pick<IncentiveRow, "publicText" | "n
     if (figures) return figures.every((figure) => !stated.has(String(Number(figure))));
     return !` ${builderText} `.includes(` ${normalizedText(text)} `);
   };
+  /** The figure as the builder's text could write it: "5.62" also as "5.620", "3" also as "3.0". */
+  const figureSource = (figure: string) => { const value = String(Number(figure)); return `(?<![\\d.])${value.includes(".") ? `${value.replace(".", "\\.")}0*` : `${value}(?:\\.0+)?`}`; };
+  // Labels are looked for in the builder's text as written (a parser row's published text is the scrubbed builder text), so a
+  // comma, a slash or a bracket ends the phrase: in "3.99% first-year rate, 4.99% for years 2-30" the 4.99% is no "rate".
+  const labelText = edited ? builderText : htmlToText(row.publicText);
+  const word = "[^\\s,;:/()\\[\\]]+";
+  const labelPatterns: Record<"apr" | "rate" | "down" | "term", (f: string) => RegExp> = {
+    apr: (f) => new RegExp(`(?:\\b(?:apr|annual percentage rate)(?: \\(apr\\))?(?: of| is|:)? ${f}%|${f}% (?:apr|annual percentage rate)\\b)`, "i"),
+    rate: (f) => new RegExp(`(?:${f}%\\*?(?! (?:minimum |required )?(?:down|closing|credit|toward|towards|off|of|apr|annual)\\b)(?: ${word}){0,3}? (?:rate|interest|fixed|financing)\\b|\\b(?:rate|interest)(?: (?:of|is|at))? ${f}%(?! ?(?:apr|annual|down)\\b))`, "i"),
+    down: (f) => new RegExp(`(?:${f}% (?:minimum )?down\\b|\\bdown payment(?: of| is|:)?(?: just| only)? ${f}%)`, "i"),
+    term: (f) => new RegExp(`(?:${f}[- ]?(?:year|yr)s?\\b|\\b(?:term|over|amortized over)(?: of)? ${f} years?\\b)`, "i"),
+  };
+  const labelled = (value: string | null | undefined, label: keyof typeof labelPatterns) => {
+    const figures = value?.match(/\d+(?:\.\d+)?/g);
+    return Boolean(figures?.length) && figures!.every((figure) => labelPatterns[label](figureSource(figure)).test(labelText));
+  };
   const answered = (reason: string): boolean => {
     switch (reason) {
       case "private_text_remaining": return edited;
-      case "missing_apr": return typed(row.apr);
-      case "missing_promotional_rate": return typed(row.headlineRate);
-      case "missing_follow_on_rate": return typed(row.followOnRate);
+      case "missing_apr": return typed(row.apr) || labelled(row.apr, "apr");
+      case "missing_promotional_rate": return typed(row.headlineRate) || labelled(row.headlineRate, "rate");
+      case "missing_follow_on_rate": return typed(row.followOnRate) || labelled(row.followOnRate, "rate");
       case "missing_follow_on_period": case "missing_promotional_period": return typed(row.followOnPeriod);
-      case "missing_down_payment": return typed(row.downPayment);
-      case "missing_repayment_term": return typed(row.repaymentTerms);
+      case "missing_down_payment": return typed(row.downPayment) || labelled(row.downPayment, "down");
+      case "missing_repayment_term": return typed(row.repaymentTerms) || labelled(row.repaymentTerms, "term");
       case "missing_loan_type": return typed(row.loanType);
       case "missing_contract_deadline": return Boolean(row.contractBy && row.contractByManual);
       case "missing_closing_deadline": return Boolean(row.closeBy && row.closeByManual);

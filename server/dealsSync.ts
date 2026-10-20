@@ -319,8 +319,10 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
     else await recordIncentiveHold(community, null, now, holds);
     return;
   }
-  const categories = config.scrubConfig ?? storedScrubConfig(community);
-  const safeText = toPublicSafeText(scraped.text, config);
+  // The names this very run discovered (plan and street names from the pages) scrub the offer too: an offer that names a
+  // home listed for the first time must not reach a buyer with that address on the run that first sees it.
+  const categories = applyScrubExclusions(mergeDealScrubConfig(config.scrubConfig ?? storedScrubConfig(community), snapshot.private.discoveredScrubConfig ?? null), storedExcludedScrubTerms(community));
+  const safeText = snapshot.incentiveHoldReasons.includes("private_text_remaining") ? null : toPublicSafeText(scraped.text, { ...config, scrubConfig: categories });
   // A held record needs reviewable text; residue is listed as a hold reason and
   // acceptance re-checks it, so this best-effort text never reaches a buyer.
   const publicText = safeText ?? scrubPrivateNames(htmlToText(scraped.text), categories);
@@ -527,8 +529,9 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     summary.sold.push(missing.privateAddress ?? missing.privatePlanName ?? `home ${missing.id}`);
   }
   await writeCommunityFacts(community, snapshot, sourceConfig);
-  await applyScrapedIncentive(community, snapshot, sourceConfig, now, summary, holds);
+  // The discovered names are stored before the offer is judged, so the stored list is the one the offer was scrubbed with.
   await mergeDiscoveredNames(community, snapshot);
+  await applyScrapedIncentive(community, snapshot, sourceConfig, now, summary, holds);
   const incentiveHold = community.incentiveHoldReason;
   if (community.awaitingFirstSync) {
     // First clean pull of a discovered community: its headline now uses what the pull found, then it goes live.

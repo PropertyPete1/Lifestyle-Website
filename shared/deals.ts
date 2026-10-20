@@ -107,7 +107,10 @@ export function normalizedDealSourceKey(input: string): string {
     url.password = "";
     url.hash = "";
     url.search = "";
-    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    // The same path spelled with an apostrophe and with %27 (or any percent-encoded character) is one key.
+    let path = url.pathname.replace(/\/+$/, "") || "/";
+    try { path = decodeURIComponent(path); } catch { /* a malformed escape stays as written */ }
+    url.pathname = path;
     return url.toString();
   } catch {
     return `invalid:${normalizedText(trimmed)}`;
@@ -170,14 +173,17 @@ export function scrubPrivateNames(
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const boundary = `(?<![a-z0-9])${escaped}(?![a-z0-9])`;
     // "the Magnolia", "Magnolia plan" and "the Magnolia plan" each become one "this plan".
+    // A street name takes its house number with it: "4106 Hawthorn Oak" is one address, "this street" its public form.
     const pattern = category === "plan" && !options.planField
       ? new RegExp(`(?<![a-z0-9])(?:the\\s+${escaped}(?:\\s+plans?)?(?![a-z0-9])|${escaped}\\s+plans?(?![a-z0-9]))`, "gi")
-      : new RegExp(boundary, "gi");
+      : category === "street"
+        ? new RegExp(`(?<![a-z0-9])(?:\\d{1,6}[a-z]?\\s+)?${escaped}(?![a-z0-9])`, "gi")
+        : new RegExp(boundary, "gi");
     // "select Centex homes" reads as "select homes", not "select the builder"; "a Centex home" as "a home"; "by Centex" keeps "by the builder".
     // "of" is not a lead: "the quality of Davidson Homes" names the builder, and keeps "the builder".
     if (category === "builder") {
       const base = escaped.replace(/\\s\+homes$/i, "").replace(/ homes$/i, "");
-      out = out.replace(new RegExp(`(?<=(?:^|[^a-z0-9])(?:select|new|a|our|all|any|these|those|every|each)\\s+)${base}(?:\\s+homes)?(?:®|™)?\\s+(homes?|communit(?:y|ies)|neighborhoods?)(?![a-z0-9])`, "gi"), (_match, noun: string) => noun);
+      out = out.replace(new RegExp(`(?<=(?:^|[^a-z0-9])(?:select|new|a|our|all|any|these|those|every|each)\\s+)${base}(?:\\s+homes)?(?:®|™)?\\s+((?:quick[- ]move[- ]in\\s+|move[- ]in[- ]ready\\s+|inventory\\s+|model\\s+)?(?:homes?|communit(?:y|ies)|neighborhoods?))(?![a-z0-9])`, "gi"), (_match, noun: string) => noun);
     }
     out = out.replace(pattern, replacements[category]);
   }

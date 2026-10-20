@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { KbHomeAdapter, kbRecord, kbStatus, parseKbArray, parseKbCommunity } from "./dealsAdapters.kbhome";
+import { KbHomeAdapter, kbMoveInCount, kbRecord, kbStatus, parseKbArray, parseKbCommunity } from "./dealsAdapters.kbhome";
+const NOW = new Date("2026-10-20T12:00:00Z");
 import { DEAL_ADAPTERS, loadOfficialDeals, type CommunitySourceConfig } from "./dealsAdapters";
 
 /**
@@ -58,7 +59,13 @@ describe("KB Home reader: page data", () => {
     expect(parseKbArray("LocalQMIs = [1, 2", "LocalQMIs")).toBeNull();
     expect(parseKbArray("var Homes = \"\";", "LocalQMIs")).toBeNull();
     expect(parseKbArray("LocalQMIs = [1]; FloorPlanList = {}", "FloorPlanList")).toBeNull();
-    const parsed = parseKbCommunity(communityPage(), COMMUNITY)!;
+    // An empty initialiser before the real list does not win; two different lists are no list.
+    expect(parseKbArray("var LocalQMIs = []; LocalQMIs = [{\"a\":1}];", "LocalQMIs")).toEqual([{ a: 1 }]);
+    expect(parseKbArray("LocalQMIs = [{\"a\":1}]; LocalQMIs = [];", "LocalQMIs")).toEqual([{ a: 1 }]);
+    expect(parseKbArray("LocalQMIs = [{\"a\":1}]; LocalQMIs = [{\"a\":2}];", "LocalQMIs")).toBeNull();
+    expect(kbMoveInCount("<h2>Move-in Ready (3)</h2>")).toBe(3);
+    expect(kbMoveInCount("<h2>Move-in ready homes to get you moving.</h2>")).toBeNull();
+    const parsed = parseKbCommunity(communityPage(), COMMUNITY, NOW)!;
     expect(parsed.homes.map((entry) => [entry.privateAddress, entry.privatePlanName, entry.status, entry.price, entry.bedrooms, entry.bathrooms, entry.squareFeet, entry.garage, entry.homesite, entry.readyNow, entry.moveInDate, entry.gallery?.length])).toEqual([
       ["4229 Fixture Lee Ln., New Braunfels, TX 78130", "Plan 2246", "Quick Move-In (Move-In Ready)", 281_002, 4, 3, 2_246, 2, "Lot 246", true, null, 1],
       ["4206 Fixture Lee Ln., New Braunfels, TX 78130", "Plan 1243 Modeled", "Quick Move-In (November 2026)", 279_741, 3, 2, 1_243, 2, "Lot 45", false, "November 2026", 0],
@@ -71,14 +78,19 @@ describe("KB Home reader: page data", () => {
     expect(kbRecord("<html><body>new layout</body></html>")).toBeNull();
     expect(parseKbCommunity("<html><body>new layout</body></html>", COMMUNITY)).toBeNull();
     // Status words: ready, a month, sold; anything else or none is no status.
-    expect(kbStatus("Available Now")).toEqual({ status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null });
-    expect(kbStatus("Est. Completion Dec 2026")).toEqual({ status: "Quick Move-In (December 2026)", readyNow: false, moveInDate: "December 2026" });
-    expect(kbStatus("Sold")).toEqual({ status: "Sold", readyNow: false, moveInDate: null });
-    for (const word of ["Coming Soon", "Call for details", "", null]) expect(kbStatus(word)).toEqual({ status: null, readyNow: false, moveInDate: null });
+    expect(kbStatus("Available Now", NOW)).toEqual({ status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null });
+    expect(kbStatus("Est. Completion Dec 2026", NOW)).toEqual({ status: "Quick Move-In (December 2026)", readyNow: false, moveInDate: "December 2026" });
+    expect(kbStatus("Sold", NOW)).toEqual({ status: "Sold", readyNow: false, moveInDate: null });
+    // A past month is a stale estimate (no date); "pending" in a date copy is an unknown date, not a sale.
+    expect(kbStatus("Sep 2026", NOW)).toEqual({ status: "Quick Move-In", readyNow: false, moveInDate: null });
+    for (const word of ["Coming Soon", "Call for details", "Date Pending", "", null]) expect(kbStatus(word, NOW)).toEqual({ status: null, readyNow: false, moveInDate: null });
+    // The record reads an array @type too.
+    expect(kbRecord(communityPage().replace('"@type":"Place"', '"@type":["Place","LocalBusiness"]'))).toMatchObject({ street: "1308 Fixture Ave." });
     // An entry without an address or link, or with wording the reader does not know, stays in the list with no status.
-    const odd = parseKbCommunity(communityPage({ homes: [{ ...HOMES[0]!, address: "" }, { ...HOMES[1]!, moveInDateCopy: "Call for details" }] }), COMMUNITY)!;
+    const odd = parseKbCommunity(communityPage({ homes: [{ ...HOMES[0]!, address: "" }, { ...HOMES[1]!, moveInDateCopy: "Call for details" }] }), COMMUNITY, NOW)!;
     expect(odd.homes.map((entry) => entry.status)).toEqual([null, null]);
     expect(odd.homes).toHaveLength(2);
+    expect(odd.foreignHome).toBe(false);
   });
 });
 
@@ -108,6 +120,12 @@ describe("KB Home reader: a community", () => {
     const held = await loadOfficialDeals(config, { fetcher: noQmis });
     expect(held.holdReasons).toEqual(["expected_community_container_not_found"]);
     expect(held.public.homes).toEqual([]);
+    // An empty list while the page still renders home links or counts homes is a changed shape, never a sale.
+    const emptyButLinked = vi.fn(async () => new Response(communityPage({ homes: [] }).replace("<h2>Move-in ready homes to get you moving.</h2>", `<h2>Move-in Ready (2)</h2><a href="/new-homes-san-antonio/fixture-heights/mir?homesite=1373580">4229 Fixture Lee Ln.</a>`), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: emptyButLinked })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    // A home whose page lives under another community's slug is not this community's inventory.
+    const foreign = vi.fn(async () => new Response(communityPage().replace("/new-homes-san-antonio/fixture-heights/mir?homesite=1384289", "/new-homes-san-antonio/other-grove/mir?homesite=1384289"), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: foreign })).holdReasons).toEqual(["invalid_inventory_response"]);
     const noPlace = vi.fn(async () => new Response(communityPage({ place: false }), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: noPlace })).holdReasons).toEqual(["expected_community_container_not_found"]);
     expect((await loadOfficialDeals({ ...config, sourceUrl: "https://kbhome.com/new-homes-san-antonio/fixture-heights" }, { fetcher })).holdReasons).toEqual(["unsupported_official_host"]);

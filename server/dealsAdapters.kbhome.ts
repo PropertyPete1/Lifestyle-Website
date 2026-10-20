@@ -40,48 +40,70 @@ const MONTHS: Record<string, string> = { jan: "January", feb: "February", mar: "
 /**
  * One of the page's inline arrays (`LocalQMIs = [...]`), read by matching
  * brackets outside strings and parsing the slice as JSON; null when the page
- * does not carry it or it is not JSON.
+ * does not carry it or it is not JSON. The array may be assigned more than
+ * once (an empty initialiser before the real list): the fullest assignment is
+ * the list, and two non-empty assignments that disagree are no list at all.
  */
 export function parseKbArray(html: string, name: string): unknown[] | null {
-  const match = new RegExp(`\\b${name}\\s*=\\s*\\[`).exec(html);
-  if (!match) return null;
-  const start = match.index + match[0].length - 1;
-  let depth = 0;
-  for (let index = start; index < html.length; index++) {
-    const char = html[index];
-    if (char === '"') {
-      index++;
-      while (index < html.length && html[index] !== '"') { if (html[index] === "\\") index++; index++; }
-      continue;
-    }
-    if (char === "[" || char === "{") depth++;
-    else if (char === "]" || char === "}") {
-      depth--;
-      if (depth === 0) {
-        try { const parsed: unknown = JSON.parse(html.slice(start, index + 1)); return Array.isArray(parsed) ? parsed : null; } catch { return null; }
+  const assignments: unknown[][] = [];
+  for (const match of Array.from(html.matchAll(new RegExp(`\\b${name}\\s*=\\s*\\[`, "g")))) {
+    const start = match.index! + match[0].length - 1;
+    let depth = 0;
+    for (let index = start; index < html.length; index++) {
+      const char = html[index];
+      if (char === '"') {
+        index++;
+        while (index < html.length && html[index] !== '"') { if (html[index] === "\\") index++; index++; }
+        continue;
+      }
+      if (char === "[" || char === "{") depth++;
+      else if (char === "]" || char === "}") {
+        depth--;
+        if (depth === 0) {
+          try { const parsed: unknown = JSON.parse(html.slice(start, index + 1)); if (Array.isArray(parsed)) assignments.push(parsed); } catch { return null; }
+          break;
+        }
       }
     }
   }
-  return null;
+  if (!assignments.length) return null;
+  const filled = assignments.filter((list) => list.length);
+  if (filled.length > 1 && filled.some((list) => JSON.stringify(list) !== JSON.stringify(filled[0]))) return null;
+  return filled[0] ?? assignments[0]!;
 }
 
-/** "Available Now" is ready; "Nov 2026" or "Est. completion November" names a month; other wording gives no status (the run is held). */
-export function kbStatus(copy: string | null): { status: string | null; readyNow: boolean; moveInDate: string | null } {
+/** "Move-in Ready (3)" on the page: how many homes the page says it shows; null when the page does not say. */
+export function kbMoveInCount(html: string): number | null {
+  const match = /Move-?in\s+Ready\s*\((\d+)\)/i.exec(html);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * "Available Now" is ready; "Nov 2026" or "Est. completion November 2026"
+ * names a month (a past one is a stale estimate: no date); only sale words
+ * sell ("pending" in a date field is an unknown date); other wording gives no
+ * status (the run is held).
+ */
+export function kbStatus(copy: string | null, now: Date = new Date()): { status: string | null; readyNow: boolean; moveInDate: string | null } {
   const text = (copy ?? "").replace(/\s+/g, " ").trim();
   if (!text) return { status: null, readyNow: false, moveInDate: null };
-  if (/sold|under\s+contract|pending/i.test(text)) return { status: "Sold", readyNow: false, moveInDate: null };
+  if (/\bsold\b|under\s+contract/i.test(text)) return { status: "Sold", readyNow: false, moveInDate: null };
   if (/^(?:available\s+now|move[- ]?in\s+ready|ready\s+now)!?$/i.test(text)) return { status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null };
   const month = /^(?:est\.?\s*(?:completion)?\s*|available\s+|move[- ]?in\s+)?([A-Za-z]{3,9})\.?\s+(20\d{2})$/i.exec(text);
-  const name = month ? MONTHS[month[1]!.toLowerCase().slice(0, 3)] : undefined;
-  if (month && name) return { status: `Quick Move-In (${name} ${month[2]})`, readyNow: false, moveInDate: `${name} ${month[2]}` };
-  return { status: null, readyNow: false, moveInDate: null };
+  const key = month ? month[1]!.toLowerCase().slice(0, 3) : "";
+  const name = MONTHS[key];
+  if (!month || !name) return { status: null, readyNow: false, moveInDate: null };
+  const year = Number(month[2]);
+  const index = Object.keys(MONTHS).indexOf(key);
+  if (year < now.getUTCFullYear() || (year === now.getUTCFullYear() && index < now.getUTCMonth())) return { status: "Quick Move-In", readyNow: false, moveInDate: null };
+  return { status: `Quick Move-In (${name} ${year})`, readyNow: false, moveInDate: `${name} ${year}` };
 }
 
 export type KbCommunityRecord = { name: string; street: string | null; city: string | null; zip: string | null; phone: string | null; priceFrom: number | null; geo: { lat: number; lng: number } | null };
 
 /** The community's `Place` record (`@id` ending "#community") from the page's JSON-LD graph, for discovery and addresses. */
 export function kbRecord(html: string): KbCommunityRecord | null {
-  const place = jsonLdRecords(html).find((record) => record["@type"] === "Place" && typeof record["@id"] === "string" && /#community$/.test(record["@id"] as string));
+  const place = jsonLdRecords(html).find((record) => (Array.isArray(record["@type"]) ? record["@type"] : [record["@type"]]).includes("Place") && typeof record["@id"] === "string" && /#community$/.test(record["@id"] as string));
   const name = place ? str(place.name) : null;
   if (!place || !name) return null;
   const address = obj(place.address);
@@ -99,7 +121,16 @@ export function kbRecord(html: string): KbCommunityRecord | null {
   };
 }
 
-export type KbPage = { record: KbCommunityRecord | null; homes: PrivatePlanOrHome[]; plans: PrivatePlanOrHome[] };
+export type KbPage = {
+  record: KbCommunityRecord | null;
+  homes: PrivatePlanOrHome[];
+  plans: PrivatePlanOrHome[];
+  /** True when a home's page sits under another community's path on the host: not this community's inventory. */
+  foreignHome: boolean;
+  /** Home links the page renders (".../<slug>/mir?homesite=") and the "Move-in Ready (N)" count, to corroborate an empty list. */
+  renderedHomeLinks: number;
+  moveInCount: number | null;
+};
 
 function gallery(photos: unknown, host: string, representative: boolean): PrivateGalleryImage[] {
   const out: PrivateGalleryImage[] = [];
@@ -128,12 +159,14 @@ function gallery(photos: unknown, host: string, representative: boolean): Privat
  * with nothing move-in ready. An entry without an address or link stays in the
  * list with no status, so the sync holds instead of sweeping it to sold.
  */
-export function parseKbCommunity(html: string, pageUrl: string): KbPage | null {
+export function parseKbCommunity(html: string, pageUrl: string, now: Date = new Date()): KbPage | null {
   const community = asUrl(pageUrl);
   const qmis = parseKbArray(html, "LocalQMIs");
   const planList = parseKbArray(html, "FloorPlanList");
   if (!community || !qmis || !planList) return null;
   const host = community.hostname;
+  const base = `${community.pathname.replace(/\/+$/, "")}/`.toLowerCase();
+  let foreignHome = false;
   const record = kbRecord(html);
   const cityLine = record?.city ? `${record.city}, ${record.zip ? `TX ${record.zip}` : "TX"}` : null;
   const planNames = new Map<string, string>();
@@ -169,9 +202,12 @@ export function parseKbCommunity(html: string, pageUrl: string): KbPage | null {
     const street = str(home.address);
     const link = str(home.pageUrl);
     const page = link ? asUrl(new URL(link, community).toString()) : null;
-    const readable = Boolean(street && page && sameOfficialHost(page, host));
+    // The home's page must sit under this community's own path.
+    const underCommunity = Boolean(page && sameOfficialHost(page, host) && page.pathname.toLowerCase().startsWith(base));
+    if (page && sameOfficialHost(page, host) && !underCommunity) foreignHome = true;
+    const readable = Boolean(street && underCommunity);
     const price = num(home.price);
-    const status = kbStatus(str(home.moveInDateCopy));
+    const status = kbStatus(str(home.moveInDateCopy), now);
     const planId = str(home.floorPlanLink) ?? (typeof home.floorPlanLink === "number" ? String(home.floorPlanLink) : null);
     const lot = str(home.homesite);
     homes.push({
@@ -191,7 +227,8 @@ export function parseKbCommunity(html: string, pageUrl: string): KbPage | null {
       gallery: gallery(home.websitePhotos, host, false),
     });
   }
-  return { record, homes, plans };
+  const renderedHomeLinks = new Set(Array.from(html.matchAll(/href="([^"]*\/mir\?homesite=(\d+))"/gi)).map((match) => match[2]!)).size;
+  return { record, homes, plans, foreignHome, renderedHomeLinks, moveInCount: kbMoveInCount(html) };
 }
 
 export class KbHomeAdapter implements DealAdapter {
@@ -208,9 +245,12 @@ export class KbHomeAdapter implements DealAdapter {
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", KBHOME_HOST);
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
-    const parsed = parseKbCommunity(page.text, community.toString());
+    const parsed = parseKbCommunity(page.text, community.toString(), now());
     // Without the inventory arrays or the community's own record this is not a community page.
     if (!parsed || !parsed.record?.street) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // An empty list is a community with nothing move-in ready only when the page shows no home links and counts none; a home under another community's path is never this one's.
+    if (parsed.homes.length < parsed.renderedHomeLinks || (parsed.moveInCount !== null && parsed.homes.length < parsed.moveInCount)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    if (parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     if (parsed.homes.length > KBHOME_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     const facts = parseCommunityFacts(page.text);
     const planPrices = parsed.plans.map((plan) => plan.price).filter((price): price is number => price !== null);

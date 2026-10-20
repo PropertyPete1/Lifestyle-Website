@@ -1139,7 +1139,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "Perry Homes") { config.builder.push("Perry Homes", "Perry"); config.lender.push("Parkstone Mortgage", "Parkstone", "Crestmark Mortgage", "Crestmark"); }
   if (builder === "Century Communities") { config.builder.push("Century Communities", "Century Complete", "Century"); config.lender.push("Inspire Home Loans"); }
   if (builder === "KB Home") { config.builder.push("KB Home", "KB Homes", "KB"); config.lender.push("KBHS Home Loans", "KBHS"); }
-  if (builder === "Toll Brothers") { config.builder.push("Toll Brothers", "Toll Brothers Inc"); config.lender.push("Toll Brothers Mortgage Company", "Toll Brothers Mortgage", "TBI Mortgage"); }
+  if (builder === "Toll Brothers") { config.builder.push("Toll Brothers", "Toll Brothers Inc"); config.lender.push("Toll Brothers Mortgage Company", "Toll Brothers Mortgage", "TBI Mortgage", "TBI"); }
   if (builder === "David Weekley Homes") { config.builder.push("David Weekley Homes", "David Weekley", "Weekley Homes", "Weekley"); config.lender.push("Priority Home Mortgage"); }
   if (builder === "Ashton Woods") { config.builder.push("Ashton Woods Homes", "Ashton Woods", "Starlight Homes"); config.lender.push("Velocio Mortgage", "Velocio"); }
   if (builder === "LGI Homes") { config.builder.push("LGI Homes", "LGI", "Terrata Homes", "CompleteHome"); config.lender.push("LGI Mortgage Solutions", "CalCon Mutual Mortgage", "One Trust Home Loans", "OneTrust Home Loans"); }
@@ -1181,7 +1181,8 @@ export function toPublicSafeText(
   const known = new Set(dealScrubTerms(categories));
   categories.other.push(...extraPrivateTerms.filter((term) => !known.has(term)));
   const scrubbed = scrubPrivateNames(htmlToText(input), categories, { planField });
-  if (!scrubbed || /\b(?:https?:\/\/|www\.)\S+/i.test(scrubbed)) return null;
+  // A link, a bare domain ("TollBrothersMortgage.com") or a ten-digit phone number written without separators is residue.
+  if (!scrubbed || /\b(?:https?:\/\/|www\.)\S+/i.test(scrubbed) || /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|us|io|info|biz)\b/i.test(scrubbed) || /(?<![\d.$,])\d{10}(?![\d.])/.test(scrubbed)) return null;
   // A lender's NMLS number names the lender as surely as its name does.
   if (NMLS_ID_PATTERN.test(scrubbed)) return null;
   // Residue is judged per category: a bare plan word such as "Magnolia trees"

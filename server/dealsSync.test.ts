@@ -164,6 +164,23 @@ describe("official refresh: homes", () => {
 });
 
 describe("official refresh: holds", () => {
+  it("scrubs the offer with the names this very run discovered, so a first pull never publishes a home's plan or street; the adapter's own residue hold counts", async () => {
+    // The stored list knows nothing of "Aberforth" or "Fixture Oak" yet; the pull discovers both and the offer names them.
+    mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({
+      homes: [{ sourceUrl: home("8301-a") }],
+      incentiveText: "4.999% (5.737% APR) FHA 30-year fixed-rate financing with 3.5% down on the Aberforth at 4106 Fixture Oak.",
+      discovered: { builder: [], lender: [], community: [], plan: ["Aberforth"], street: ["Fixture Oak"], other: [] },
+    }));
+    await refreshOfficialDeals({ communityId, now: T0 });
+    expect(activeIncentives().map((row) => row.publicText)).toEqual(["4.999% (5.737% APR) FHA 30-year fixed-rate financing with 3.5% down on this plan at this street."]);
+    expect(JSON.stringify(db.rows(dealIncentives))).not.toMatch(/Aberforth|Fixture Oak/);
+    // A text the adapter itself could not scrub is held however the sync's own pass goes.
+    mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: NO_DATE_TEXT, incentiveHoldReasons: ["private_text_remaining"] }));
+    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + DAY) });
+    expect(activeIncentives()).toEqual([]);
+    expect(JSON.parse(String(db.rows(dealIncentives).find((row) => row.held)!.holdReason))).toContain("private_text_remaining");
+  });
+
   it("records a catalog hold once, keeps the last good data, and stays quiet after Dismiss until the parse result changes", async () => {
     mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));
     await refreshOfficialDeals({ communityId, now: T0 });

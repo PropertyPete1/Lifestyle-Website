@@ -195,6 +195,10 @@ describe("deals adapters", () => {
     // A lender's NMLS id in any spelling names the lender.
     for (const id of ["NMLS 1791", "NMLS #1791", "NMLS ID No. 1791", "NMLSR ID 1791", "NMLS Unique Identifier 1791", "N.M.L.S. 1791", "NMLS Consumer Access 1791"]) expect(toPublicSafeText(`Financing through our lender (${id}).`, config)).toBeNull();
     expect(toPublicSafeText("Financing through our lender.", config)).toBe("Financing through our lender.");
+    // A bare domain and a ten-digit phone number are residue like a link is; prices and ZIP codes are not.
+    expect(toPublicSafeText("See TollBrothersMortgage.com for details.", config)).toBeNull();
+    expect(toPublicSafeText("Call 8775000508 today.", config)).toBeNull();
+    expect(toPublicSafeText("Homes from $1,234,567 in the 78255 area.", config)).toBe("Homes from $1,234,567 in the 78255 area.");
   });
 
   it("scrubs plan names only in plan fields or in the 'the X' / 'X plan' forms and keeps other words verbatim", () => {

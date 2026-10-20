@@ -94,3 +94,14 @@ A buyer's session cookie is kept 30 days past their access (it unlocks nothing),
 so a bookmark or history visit lands on that screen. A visit through a DM link
 (`?src=`) still opens the gate. Agent clients go back through their agent's
 link instead. Team sessions end with their access.
+
+## Offer text and this run's names
+
+The sync scrubs an offer with the stored list *and* the plan and street names
+the same pull discovered, and stores those names before the offer is judged,
+so an offer that names a home listed for the first time never reaches a buyer
+with that address. A street name takes its house number with it ("4106
+Hawthorn Oak" becomes "this street"). A text the reader itself could not
+scrub is held however the sync's own pass goes. Residue also covers a bare
+domain ("TollBrothersMortgage.com") and a ten-digit phone number written
+without separators.

@@ -140,12 +140,12 @@ describe("David Weekley reader: a community", () => {
     // A second community within the hour reuses the promotion list.
     requested.length = 0;
     const other = `${HOST}/new-homes/tx/san-antonio/san-antonio/fixture-ranch-60`;
-    site[other] = { body: communityPage().replace(/communities\/22915/g, "communities/22916") };
+    site[other] = { body: communityPage().replace(/communities\/22915/g, "communities/22916").replace(/fixture-ranch-45/g, "fixture-ranch-60") };
     const second = await loadOfficialDeals({ ...config, sourceUrl: other }, { fetcher, now: () => new Date("2026-10-20T12:30:00Z") });
     expect(requested).toEqual([other]);
     expect(second.private.incentive).not.toBeNull();
     // A community no promotion names gets none.
-    site[other] = { body: communityPage().replace(/communities\/22915/g, "communities/555") };
+    site[other] = { body: communityPage().replace(/communities\/22915/g, "communities/555").replace(/fixture-ranch-45/g, "fixture-ranch-60") };
     const third = await loadOfficialDeals({ ...config, sourceUrl: other }, { fetcher, now: () => new Date("2026-10-20T12:40:00Z") });
     expect(third.private.incentive).toBeNull();
     delete site[other];
@@ -165,6 +165,9 @@ describe("David Weekley reader: a community", () => {
     expect(held.public.homes).toEqual([]);
     const noOffice = vi.fn(async () => new Response(communityPage({ office: false }), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: noOffice })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    // A home whose page lives under another community's slug is not this community's inventory.
+    const foreign = vi.fn(async () => new Response(communityPage().replace("/homes-ready-soon/tx/san-antonio/san-antonio/fixture-ranch-45/24230008", "/homes-ready-soon/tx/san-antonio/san-antonio/other-ranch-60/24230008"), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: foreign, now: () => NOW })).holdReasons).toEqual(["invalid_inventory_response"]);
     const oddAvailability = vi.fn(async () => new Response(communityPage({ availability: "Sold Out" }), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: oddAvailability })).holdReasons).toEqual(["expected_community_container_not_found"]);
     expect((await loadOfficialDeals({ ...config, sourceUrl: "https://davidweekleyhomes.com/new-homes/tx/san-antonio/san-antonio/fixture-ranch-45" }, { fetcher })).holdReasons).toEqual(["unsupported_official_host"]);

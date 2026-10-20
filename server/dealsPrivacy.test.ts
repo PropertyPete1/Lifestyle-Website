@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasPrivateTerm, normalizeUsPhone, sanitizeInstagramHandle, scrubPrivateNames } from "../shared/deals";
+import { hasPrivateTerm, normalizeUsPhone, normalizedDealSourceKey, sanitizeInstagramHandle, scrubPrivateNames } from "../shared/deals";
 import { DEALS_OG_DESCRIPTION, DEALS_OG_TITLE, DEALS_OG_IMAGE } from "./ogMeta";
 
 const privateTerms = ["Sienna Lakes", "Vista Gardens", "Chesmar", "M/I Homes", "Rio Grande", "7711 Hanging Basket"];
@@ -20,6 +20,11 @@ describe("Builder Deals privacy boundary", () => {
     expect(sanitizeInstagramHandle("@property.pete_tx")).toBe("property.pete_tx");
   });
 
+  it("keys a source URL the same however its path is spelled: case of the host, a trailing slash, a query, an apostrophe or its percent escape", () => {
+    expect(normalizedDealSourceKey("https://WWW.tollbrothers.com/luxury-homes-for-sale/Texas/Toll-Brothers-at-George%27s-Ranch/?utm=x#top")).toBe(normalizedDealSourceKey("https://www.tollbrothers.com/luxury-homes-for-sale/Texas/Toll-Brothers-at-George's-Ranch"));
+    expect(normalizedDealSourceKey("not a url")).toMatch(/^invalid:/);
+  });
+
   it("replaces configured private names and detects residual terms", () => {
     const scrubbed = scrubPrivateNames("Sienna Lakes by Chesmar", privateTerms);
     expect(hasPrivateTerm(scrubbed, privateTerms)).toBe(false);
@@ -32,6 +37,8 @@ describe("Builder Deals privacy boundary", () => {
     const davidson = { builder: ["Davidson Homes", "Davidson"], lender: ["NorthStar Mortgage"], community: [], plan: [], street: [], other: [] };
     expect(scrubPrivateNames("Experience the quality of Davidson Homes. NorthStar Mortgage is an Equal Opportunity Lender.", davidson)).toBe("Experience the quality of the builder. The builder's lender is an Equal Opportunity Lender.");
     expect(scrubPrivateNames("Davidson Homes builds here.", davidson)).toBe("The builder builds here.");
+    // "a new Toll Brothers quick move-in home" reads as "a new quick move-in home".
+    expect(scrubPrivateNames("Choose a beautiful new Toll Brothers quick move-in home now.", { builder: ["Toll Brothers"], lender: [], community: [], plan: [], street: [], other: [] })).toBe("Choose a beautiful new quick move-in home now.");
   });
 
   it("keeps the only shareable Deals metadata generic and landing-only", () => {

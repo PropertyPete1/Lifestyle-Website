@@ -28,6 +28,8 @@ describe("the landing page's offer teaser", () => {
     expect(incentiveTeaser("Get 4.99% (6.1% APR) if you sign by 11/15.")).toBe("Get 4.99% (6.1% APR) if you sign.");
     expect(incentiveTeaser("4.99% (6.1% APR) on homes that close by 12/31.")).toBe("4.99% (6.1% APR) on homes.");
     expect(incentiveTeaser("4.99% (6.1% APR) on 4/5 homes in the community.")).toBe("4.99% (6.1% APR) on 4/5 homes in the community.");
+    expect(incentiveTeaser("4.99% (6.1% APR) on 3/2 and 4/3 homes.")).toBe("4.99% (6.1% APR) on 3/2 and 4/3 homes.");
+    expect(incentiveTeaser("4.99% (6.1% APR) on lots between 1/2 and 1 acre.")).toBe("4.99% (6.1% APR) on lots between 1/2 and 1 acre.");
     // "May 1 day" is a count, not a date.
     expect(incentiveTeaser("At 4.99% (6.1% APR) you may 1 day regret waiting.")).toBe("At 4.99% (6.1% APR) you may 1 day regret waiting.");
     // An adjustable-rate offer says so on the card even when the chosen sentence does not.

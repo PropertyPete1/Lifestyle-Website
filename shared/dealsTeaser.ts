@@ -26,8 +26,10 @@ const LEAD = "(?:(?:must\\s+)?clos(?:e|ing)(?:\\s+on)?|(?:written|signed|accepte
 const CONNECTOR = "(?:by|through|thru|until|till|before|on\\s+or\\s+before|no\\s+later\\s+than|between|from|starting|beginning|on|in)";
 /** After a preposition the noun "contracts" stays when its date clause goes ("on contracts through 10.31.26" -> "on contracts"); leading it off, it goes too ("Contracts written by 11/8 get 5.5%" -> "Get 5.5%"). */
 /** A bare day/month after a connector is a date when the clause ends there ("purchase by 10/31.", "through 11/30 on select homes"), not mid-phrase ("on 4/5 homes"). */
-const CLAUSE_END = "(?=\\s*(?:[.,;:!?)]|$)|\\s+(?:on|for|and|to|with|in)\\b)";
-const DATE_CLAUSE = new RegExp(`(\\s*(?:,\\s*)?)((?:contracts?\\s+)?)(?:${LEAD}\\s+(?:${CONNECTOR}\\s+)?(?:${DATE}|${SHORT_DATE})|${CONNECTOR}\\s+${DATE}|(?<=contracts?\\s)${CONNECTOR}\\s+${SHORT_DATE}|${CONNECTOR}\\s+${SHORT_DATE}${CLAUSE_END})(?:\\s*(?:and|to|through|-|–)\\s*(?:${DATE}|${SHORT_DATE}))?`, "gi");
+const CLAUSE_END = "(?=\\s*(?:[.,;:!?)]|$)|\\s+(?:on|for|with|in)\\b)";
+/** A range tail ("and 11/8/2026") follows a lead word's clause or a full date; a connector-ended bare day/month takes no tail ("3/2 and 4/3 homes" are plan figures). */
+const RANGE_TAIL = `(?:\\s*(?:and|to|through|-|–)\\s*(?:${DATE}|${SHORT_DATE}))?`;
+const DATE_CLAUSE = new RegExp(`(\\s*(?:,\\s*)?)((?:contracts?\\s+)?)(?:${LEAD}\\s+(?:${CONNECTOR}\\s+)?(?:${DATE}|${SHORT_DATE})${RANGE_TAIL}|${CONNECTOR}\\s+${DATE}${RANGE_TAIL}|(?<=contracts?\\s)${CONNECTOR}\\s+${SHORT_DATE}${RANGE_TAIL}|${CONNECTOR}\\s+${SHORT_DATE}${CLAUSE_END})`, "gi");
 const BARE_DATE = new RegExp(`\\s*\\(?(?<![\\d.$])${DATE}\\)?`, "gi");
 /** An adjustable-rate offer says so on the card even when the chosen sentence does not. */
 const ADJUSTABLE = (text: string) => /\bARM\b/.test(text) || /\b\d{1,2}\/\d\s+arm\b|\badjustable[- ]rate|\brate\s+adjusts|\binitial\s+(?:interest\s+)?rate\b/i.test(text);

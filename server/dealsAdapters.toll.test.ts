@@ -87,10 +87,14 @@ describe("Toll Brothers reader: page data", () => {
     expect(parsed.sitePlanHomes).toBe(3);
     expect(parsed.facts).toEqual({ schoolDistrict: "Medina Valley Independent School District", amenities: ["Resort-style pool", "Walking trails"] });
     // The rate banner is the offer, with the lender's NMLS id, links and phone number stripped.
-    expect(parsed.offer).toMatch(/^5\.49% \(6\.27% APR\)\* FHA 30-Year Fixed Choose a beautiful new Toll Brothers quick move-in home/);
-    expect(parsed.offer).not.toMatch(/18154|NMLS|www\.|877-500|nmlsconsumeraccess/i);
-    expect(tollOfferText([EVENTS[0]])).toMatch(/^Up to \$45,000 to Use Your Way on Build to Order Homes Extended Through October 25 Offer, if any/);
-    expect(tollOfferText([])).toBeNull();
+    expect(parsed.offer).toMatch(/^5\.49% \(6\.27% APR\)\* FHA 30-Year Fixed\. Choose a beautiful new Toll Brothers quick move-in home/);
+    expect(parsed.offer).not.toMatch(/18154|NMLS|www\.|877-500|nmlsconsumeraccess|\( See|licensing/i);
+    expect(tollOfferText([EVENTS[0]], NOW)).toMatch(/^Up to \$45,000 to Use Your Way on Build to Order Homes\. Extended Through October 25\. Offer, if any/);
+    expect(tollOfferText([], NOW)).toBeNull();
+    // An event that has ended or not begun is not the offer; a lender's domain without "www.", a phone without separators and a loan officer's sentence are stripped.
+    expect(tollOfferText([{ ...EVENTS[0], endDate: "2026-10-19" }], NOW)).toBeNull();
+    expect(tollOfferText([{ ...EVENTS[0], startDate: "2026-11-01", endDate: "2026-12-01" }], NOW)).toBeNull();
+    expect(tollOfferText([{ headline: { text: "Rate 5.49% (6.27% APR)" }, disclaimer: "Visit TollBrothersMortgage.com or call 8775000508 today. Loan officer Jane Q. Lender, TBI. See www.TollBrothersMortgage.com for state licensing information." }], NOW)).toBe("Rate 5.49% (6.27% APR).");
     expect(parseTollCommunity("<html><body>new layout</body></html>", COMMUNITY)).toBeNull();
     expect(parseTollCommunity(communityPage({ models: false }), COMMUNITY, NOW)).toBeNull();
     // Status: a move-in date on or before today is ready, a later one names its month, coming soon is not for sale, no date is no status.
@@ -99,9 +103,11 @@ describe("Toll Brothers reader: page data", () => {
     expect(tollStatus("2026-12-04", true, NOW)).toEqual({ status: "Coming Soon", readyNow: false, moveInDate: null });
     expect(tollStatus(null, false, NOW)).toEqual({ status: null, readyNow: false, moveInDate: null });
     expect(tollStatus("TBD", false, NOW)).toEqual({ status: null, readyNow: false, moveInDate: null });
-    // A home of another community, or one without a street or link, stays in the list with no status.
+    // A home of another community id, or one without a street or link, stays in the list with no status.
     const odd = parseTollCommunity(communityPage({ homes: [qmi({ ...HOMES[0]!, id: 1, street: "", price: 1, moveInDate: "2026-11-30", beds: 3, baths: 2, half: 0, sqft: 1, lot: "1", plan: "Aberforth" }), qmi({ id: 2, street: "9 Other St", price: 400_000, moveInDate: "2026-11-30", beds: 3, baths: 2, half: 0, sqft: 1_900, lot: "2", plan: "Aberforth", communityId: 99 })] }), COMMUNITY, NOW)!;
     expect(odd.homes.map((home) => home.status)).toEqual([null, null]);
+    expect(odd.shapeIntact).toBe(true);
+    expect(odd.foreignHome).toBe(false);
   });
 
   it("lists the metro's communities from the search page, collections of a master community included, never another host", () => {
@@ -149,6 +155,16 @@ describe("Toll Brothers reader: a community", () => {
     const held = await loadOfficialDeals(config, { fetcher: fewer, now: () => NOW });
     expect(held.holdReasons).toEqual(["expected_community_container_not_found"]);
     expect(held.public.homes).toEqual([]);
+    // The home lists gone from every model while the site plan says nothing: a changed shape, never a sale; so is a home listed as a top-level model.
+    const noLists = vi.fn(async () => new Response(communityPage({ homes: [], sitePlanHomes: null }).replace(/"qmis":\[\]/g, "\"homesForSale\":[]"), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: noLists, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    const topLevel = vi.fn(async () => new Response(communityPage({ homes: [], sitePlanHomes: null }).replace("\"isQMI\":false,\"isComingSoon\":false,\"communityId\":14973,\"headShot\"", "\"isQMI\":true,\"isComingSoon\":false,\"communityId\":14973,\"headShot\""), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: topLevel, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    // A home under another community's path, or data describing another community page, is not this community's inventory.
+    const foreign = vi.fn(async () => new Response(communityPage({ homes: [qmi({ id: 999, street: "1 Other Way", price: 400_000, moveInDate: "2026-11-30", beds: 3, baths: 2, half: 0, sqft: 1_900, lot: "9", plan: "Aberforth" })] }).replace(`${COMMUNITY}/Quick-Move-In/999`, `${HOST}/luxury-homes-for-sale/Texas/Other-Community/Quick-Move-In/999`), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: foreign, now: () => NOW })).holdReasons).toEqual(["invalid_inventory_response"]);
+    const redirected = vi.fn(async () => new Response(communityPage().replace(`"pricedFromInt":414995,"url":"${COMMUNITY}"`, `"pricedFromInt":414995,"url":"${HOST}/luxury-homes-for-sale/Texas/Other-Community"`), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: redirected, now: () => NOW })).holdReasons).toEqual(["invalid_inventory_response"]);
     // No homes and a site plan that agrees: a community with plans only.
     const none = vi.fn(async () => new Response(communityPage({ homes: [], sitePlanHomes: 0 }), { status: 200, headers: { "content-type": "text/html" } }));
     const plansOnly = await loadOfficialDeals(config, { fetcher: none, now: () => NOW });

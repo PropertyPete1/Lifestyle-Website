@@ -126,6 +126,8 @@ export type WeekleyPage = {
   record: WeekleyCommunityRecord | null;
   communityId: string | null;
   availability: string | null;
+  /** True when a home's page sits under another community's slug on the host: not this community's inventory. */
+  foreignHome: boolean;
   homes: PrivatePlanOrHome[];
   plans: PrivatePlanOrHome[];
   facts: { schoolDistrict: string | null; amenities: string[] };
@@ -185,6 +187,8 @@ export function parseWeekleyCommunity(html: string, pageUrl: string, now: Date =
     });
   }
   const homes: PrivatePlanOrHome[] = [];
+  const slug = community.pathname.split("/").filter(Boolean).at(-1)?.toLowerCase() ?? "";
+  let foreignHome = false;
   for (const raw of data.quickMoveIns) {
     const home = obj(raw);
     if (!home) continue;
@@ -194,8 +198,11 @@ export function parseWeekleyCommunity(html: string, pageUrl: string, now: Date =
     const street = str(address?.Line1);
     const token = str(home.Token) ?? str(home.CanonicalUrl);
     const page = token ? asUrl(new URL(token, community).toString()) : null;
-    const ownCommunity = communityId === null || home.CommunityId === undefined || str(home.CommunityId) === communityId;
-    const readable = Boolean(street && page && sameOfficialHost(page, host) && ownCommunity);
+    // The home's page carries this community's slug ("/homes-ready-soon/…/<slug>/<job>") and its id when given.
+    const underCommunity = Boolean(page && sameOfficialHost(page, host) && page.pathname.toLowerCase().split("/").includes(slug));
+    if (page && sameOfficialHost(page, host) && !underCommunity) foreignHome = true;
+    const ownCommunity = (communityId === null || home.CommunityId === undefined || str(home.CommunityId) === communityId) && underCommunity;
+    const readable = Boolean(street && ownCommunity);
     const price = num(home.Price);
     const shown = !hideHomePrices && home.HideQmiPrice !== true;
     const status = weekleyStatus(str(home.ReadyLabel), str(home.ReadyDate), now);
@@ -224,6 +231,7 @@ export function parseWeekleyCommunity(html: string, pageUrl: string, now: Date =
     record,
     communityId,
     availability: str(data.communityAvailability),
+    foreignHome,
     homes,
     plans,
     facts: { schoolDistrict: districts[0] ?? null, amenities: (str(data.amenities) ?? "").split(",").map((item) => item.trim()).filter(Boolean) },
@@ -301,6 +309,8 @@ export class DavidWeekleyAdapter implements DealAdapter {
     // The page says how the community is selling; wording the reader does not know is not read as a sold-out community.
     if (parsed.availability && !/^(?:active|close\s*out|coming\s+soon|call\s+for\s+pricing)$/i.test(parsed.availability)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (parsed.homes.length > WEEKLEY_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+    // A home under another community's slug is never this community's inventory.
+    if (parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     privateSnapshot.communityFacts = { fromPrice: parsed.record.priceFrom && parsed.record.priceFrom >= 50_000 ? parsed.record.priceFrom : null, schoolDistrict: parsed.facts.schoolDistrict, lotSizes: null, amenities: parsed.facts.amenities };
     for (const home of parsed.homes) { privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }
     for (const plan of parsed.plans) { privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }

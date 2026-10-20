@@ -98,6 +98,12 @@ function gallery(...sources: unknown[]): PrivateGalleryImage[] {
 export type TollPage = {
   record: TollCommunityRecord | null;
   communityId: string | null;
+  /** The community page's own URL in the data, compared with the one configured. */
+  pageUrl: string | null;
+  /** False when a model has no `qmis` array or a quick move-in home is listed as a top-level model: the home list changed shape. */
+  shapeIntact: boolean;
+  /** True when a home's page sits under another community's path on the host: not this community's inventory. */
+  foreignHome: boolean;
   homes: PrivatePlanOrHome[];
   plans: PrivatePlanOrHome[];
   /** The site plan's count of homes for sale, when the page says. */
@@ -107,21 +113,39 @@ export type TollPage = {
   offer: string | null;
 };
 
-/** The event texts on the page, the one naming a rate first; links, phone numbers and NMLS ids stripped. */
-export function tollOfferText(events: unknown): string | null {
+/** A date-only field ("2026-10-26") compared with today's date. */
+const dayOf = (value: unknown): string | null => /^(\d{4}-\d{2}-\d{2})/.exec(str(value) ?? "")?.[1] ?? null;
+
+/**
+ * The current event texts on the page, the one naming a rate first; an event
+ * whose dates say it has ended or not begun is left out. Links (with or
+ * without a scheme), phone numbers (with or without separators), NMLS ids and
+ * a sentence naming a loan officer are stripped; parts are joined as sentences.
+ */
+export function tollOfferText(events: unknown, now: Date = new Date()): string | null {
+  const today = now.toISOString().slice(0, 10);
   const texts: string[] = [];
   for (const raw of arr(events)) {
     const event = obj(raw);
     if (!event) continue;
+    const start = dayOf(event.startDate);
+    const end = dayOf(event.endDate);
+    if ((end && end < today) || (start && start > today)) continue;
     const headline = obj(event.headline);
     const parts = [headline ? str(headline.text) : null, ...arr(event.paragraphs).map((paragraph) => str(obj(paragraph)?.text)), str(event.disclaimer) ?? (headline ? str(headline.disclaimer) : null)];
-    const text = parts.filter((part): part is string => Boolean(part)).join(" ")
+    const text = parts.filter((part): part is string => Boolean(part)).map((part) => part.replace(/\s+/g, " ").trim()).map((part) => /[.!?]$/.test(part) ? part : `${part}.`).join(" ")
       .replace(/\b(?:https?:\/\/|www\.)\S+/gi, " ")
-      .replace(/\(\s*\)/g, " ")
-      .replace(/\(?\b\d{3}\)?[-. ]\d{3}[-. ]\d{4}\b/g, " ")
+      .replace(/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|us|io|info|biz)\b(?:\/\S*)?/gi, " ")
+      .replace(/\(?\b\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b/g, " ")
       .replace(NMLS_ID_PATTERN_ALL, " ")
-      .replace(/\s+([,.;:!?])/g, "$1").replace(/\s+/g, " ").trim();
-    if (text) texts.push(text);
+      // A sentence naming a loan officer ends at a sentence end after a word, never at an initial ("Jane Q.").
+      .replace(/\b(?:Loan\s+officer|Mortgage\s+(?:loan\s+)?(?:officer|consultant|advisor))\b.*?(?:(?<=[A-Za-z]{2}|\d)[.!?](?=\s|$)|$)/gi, " ")
+      .replace(/(?<=(?:^|[.!?(])\s*)(?:See|Visit|Call|Click)(?:\s+(?:us|here))?(?:\s+or\s+(?:see|visit|call|click)(?:\s+(?:us|here))?)?(?:\s+(?:today|now))?\s*(?:for\s+(?:state\s+licensing\s+)?(?:details|information)|to\s+learn\s+more)?\s*\.?(?=\s|$)/g, " ")
+      .replace(/\(\s*\)/g, " ")
+      // A parenthesis left open when what it held was stripped.
+      .replace(/\(\s*(?=[^()]*(?:[.!?](?:\s|$)|$))(?![^()]*\))/g, " ")
+      .replace(/\s+([,.;:!?])/g, "$1").replace(/([.!?])\s*\1+/g, "$1").replace(/\s+/g, " ").trim();
+    if (/[A-Za-z]/.test(text)) texts.push(text);
   }
   return texts.find((text) => /\d+(?:\.\d+)?\s*%/.test(text)) ?? texts[0] ?? null;
 }
@@ -152,9 +176,14 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
   const cityLine = city ? `${city}, ${zip ? `TX ${zip}` : "TX"}` : null;
   const plans: PrivatePlanOrHome[] = [];
   const homes: PrivatePlanOrHome[] = [];
+  let shapeIntact = true;
+  let foreignHome = false;
+  const base = `${community.pathname.replace(/\/+$/, "")}/`.toLowerCase();
   for (const raw of models) {
     const model = obj(raw);
     if (!model) continue;
+    // Every model carries its `qmis` list (empty when none); a model without one, or a quick move-in home listed at the top level, is a changed shape.
+    if (!Array.isArray(model.qmis) || model.isQMI === true) shapeIntact = false;
     const planName = str(model.name) ?? str(model.modelName);
     const link = str(model.url);
     const page = link ? asUrl(link) : null;
@@ -180,7 +209,10 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
       const street = str(home.street) ?? str(home.address);
       const homeLink = str(home.url);
       const homePage = homeLink ? asUrl(homeLink) : null;
-      const ownCommunity = communityId === null || home.communityId === undefined || String(home.communityId) === communityId;
+      // The home must belong here: the community id when given, and a page under this community's own path.
+      const underCommunity = Boolean(homePage && sameOfficialHost(homePage, host) && homePage.pathname.toLowerCase().startsWith(base));
+      if (homePage && sameOfficialHost(homePage, host) && !underCommunity) foreignHome = true;
+      const ownCommunity = (communityId === null || home.communityId === undefined || String(home.communityId) === communityId) && underCommunity;
       const readable = Boolean(street && homePage && sameOfficialHost(homePage, host) && ownCommunity);
       const price = num(home.pricedFrom);
       const status = tollStatus(str(home.moveInDate), home.isComingSoon === true, now);
@@ -207,11 +239,14 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
   return {
     record,
     communityId,
+    pageUrl: str(component.url),
+    shapeIntact,
+    foreignHome,
     homes,
     plans,
     sitePlanHomes: num(component.qmiSitePlanLots),
     facts: { schoolDistrict: str(obj(component.schoolInfo)?.schoolDistrict), amenities },
-    offer: tollOfferText(component.events),
+    offer: tollOfferText(component.events, now),
   };
 }
 
@@ -259,8 +294,14 @@ export class TollBrothersAdapter implements DealAdapter {
     const parsed = parseTollCommunity(page.text, community.toString(), now());
     // Without the community component, its plan list or its sales office this is not a community page.
     if (!parsed || !parsed.record?.street) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // The data must describe this community (a same-host redirect to another page does not), with every model's home list in place.
+    const ownPage = parsed.pageUrl ? asUrl(parsed.pageUrl) : null;
+    if (ownPage && ownPage.pathname.replace(/\/+$/, "").toLowerCase() !== community.pathname.replace(/\/+$/, "").toLowerCase()) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+    if (!parsed.shapeIntact) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The site plan counts the homes for sale; fewer homes in the data than that means the home list changed shape, not that homes sold.
     if (parsed.sitePlanHomes !== null && parsed.homes.length < parsed.sitePlanHomes) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // A home listed under another community's path is never this community's inventory.
+    if (parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     if (parsed.homes.length > TOLL_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     privateSnapshot.communityFacts = { fromPrice: parsed.record.priceFrom && parsed.record.priceFrom >= 50_000 ? parsed.record.priceFrom : null, schoolDistrict: parsed.facts.schoolDistrict, lotSizes: null, amenities: parsed.facts.amenities };
     for (const home of parsed.homes) { privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }

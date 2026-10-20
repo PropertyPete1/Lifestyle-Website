@@ -67,6 +67,7 @@ describe("KB Home reader: page data", () => {
     expect(kbMoveInCount("<h2>Move-in ready homes to get you moving.</h2>")).toBeNull();
     // The market navigation counts the whole market; the smaller count is the community's.
     expect(kbMoveInCount("<nav>Move-in Ready (57)</nav><h2>Move-in Ready (3)</h2>")).toBe(3);
+    expect(kbMoveInCount("<nav>Move-in Ready (0)</nav><h2>Move-in Ready (5)</h2>")).toBe(5);
     // A nearby-homes strip links other communities' homes; they are not this page's cards.
     expect(parseKbCommunity(communityPage({ homes: [] }).replace("<h2>Move-in ready homes to get you moving.</h2>", `<a href="/new-homes-san-antonio/other-grove/mir?homesite=99">Nearby</a>`), COMMUNITY, NOW)!.renderedHomeLinks).toBe(0);
     const parsed = parseKbCommunity(communityPage(), COMMUNITY, NOW)!;

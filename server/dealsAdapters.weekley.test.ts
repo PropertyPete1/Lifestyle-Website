@@ -180,6 +180,11 @@ describe("David Weekley reader: a community", () => {
     const communityRate = { ...ratePromotion, Description: "5.25% (5.6% APR) 30-year fixed conventional rate with 5% down.", IsSiteWide: false, ShowOnCommunityIds: ["communities/22915"] };
     const both = vi.fn(async (input: string) => input === weekleyPromotionsUrl() ? new Response(JSON.stringify([ratePromotion, ...JSON.parse(promotionsBody), communityRate]), { status: 200, headers: { "content-type": "application/json" } }) : fetcher(input));
     expect((await loadOfficialDeals(config, { fetcher: both, now: () => NOW })).private.incentive?.text).toBe("5.25% (5.6% APR) 30-year fixed conventional rate with 5% down.");
+    // A percentage that is not a rate ("3% toward closing costs") does not beat the rate offer.
+    resetWeekleyCaches();
+    const closing = { ...ratePromotion, Description: "Up to 3% toward closing costs on select quick move-in homes.", IsSiteWide: false, ShowOnCommunityIds: ["communities/22915"] };
+    const mixed = vi.fn(async (input: string) => input === weekleyPromotionsUrl() ? new Response(JSON.stringify([closing, ratePromotion]), { status: 200, headers: { "content-type": "application/json" } }) : fetcher(input));
+    expect((await loadOfficialDeals(config, { fetcher: mixed, now: () => NOW })).private.incentive?.text).toBe("4.99% (5.42% APR) 30-year fixed FHA rate with 3.5% down on select homes.");
   });
 
   it("holds the run when the page is not a community page, when the home array is gone, when the availability wording is unknown, when the site is not Weekley's, or when it cannot be read; a missing promotion list holds the offer only", async () => {
@@ -208,6 +213,9 @@ describe("David Weekley reader: a community", () => {
     expect((await loadOfficialDeals(config, { fetcher: noListing, now: () => NOW })).holdReasons).toEqual(["incomplete_inventory"]);
     const noListingFull = vi.fn(async (input: string) => input === weekleyListingUrl() ? new Response("gone", { status: 404, headers: { "content-type": "text/html" } }) : fetcher(input));
     expect((await loadOfficialDeals(config, { fetcher: noListingFull, now: () => NOW })).holdReasons).toEqual([]);
+    // Without the community's id nothing ties the homes or the market count to this community.
+    const noId = vi.fn(async () => new Response(communityPage().replace(`"communityId":"communities/22915"`, `"communityId":null`), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: noId, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
     resetWeekleyCaches();
     const oddAvailability = vi.fn(async () => new Response(communityPage({ availability: "Sold Out" }), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: oddAvailability })).holdReasons).toEqual(["expected_community_container_not_found"]);

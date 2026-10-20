@@ -198,6 +198,7 @@ describe("deals adapters", () => {
     // A bare domain and a ten-digit phone number are residue like a link is; prices and ZIP codes are not.
     expect(toPublicSafeText("See TollBrothersMortgage.com for details.", config)).toBeNull();
     expect(toPublicSafeText("Call 8775000508 today.", config)).toBeNull();
+    for (const phone of ["(210) 555-0142", "210-555-0142", "210.555.0142", "210 555 0142"]) expect(toPublicSafeText(`Call ${phone} to book.`, config)).toBeNull();
     expect(toPublicSafeText("Homes from $1,234,567 in the 78255 area.", config)).toBe("Homes from $1,234,567 in the 78255 area.");
   });
 

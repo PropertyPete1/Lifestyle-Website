@@ -347,6 +347,8 @@ export class DavidWeekleyAdapter implements DealAdapter {
     // The page says how the community is selling; wording the reader does not know is not read as a sold-out community.
     if (parsed.availability && !/^(?:active|close\s*out|coming\s+soon|call\s+for\s+pricing)$/i.test(parsed.availability)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (parsed.homes.length > WEEKLEY_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+    // The data has always carried the community's id; without it neither the homes nor the market count can be tied to this community.
+    if (parsed.communityId === null) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The data must describe this community (a same-host redirect to another page does not); a home or plan under another community's slug is never this community's.
     if (parsed.foreignPage || parsed.foreignPlan || parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     // The market list counts each community's homes for sale; fewer homes on the page than that is a changed page, not homes sold. With the list unreachable, an empty page is not trusted.
@@ -392,6 +394,7 @@ async function promotions(fetcher: HtmlFetcher, now: number, snapshot: PrivateDe
   const today = new Date(now).toISOString().slice(0, 10);
   const current = list.filter((promotion) => (promotion.siteWide || (communityId !== null && promotion.communityIds.includes(communityId))) && (!promotion.end || promotion.end.slice(0, 10) >= today) && (!promotion.start || promotion.start.slice(0, 10) <= today));
   // One promotion only: joining two would publish one's deadline or down payment as a term of the other's rate.
-  const chosen = current.find((promotion) => !promotion.siteWide && /\d+(?:\.\d+)?\s*%/.test(promotion.text)) ?? current.find((promotion) => /\d+(?:\.\d+)?\s*%/.test(promotion.text)) ?? current.find((promotion) => !promotion.siteWide) ?? current[0];
+  const namesRate = (promotion: WeekleyPromotion) => parsePromotionalRate(promotion.text).rateKind !== "none";
+  const chosen = current.find((promotion) => !promotion.siteWide && namesRate(promotion)) ?? current.find(namesRate) ?? current.find((promotion) => !promotion.siteWide) ?? current[0];
   return { text: chosen?.text ?? null };
 }

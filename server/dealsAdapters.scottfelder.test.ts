@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ScottFelderAdapter, parseScottFelderCommunity, parseScottFelderState, scottFelderListingEntries, scottFelderRecord, scottFelderSlug, scottFelderStatus } from "./dealsAdapters.scottfelder";
+import { ScottFelderAdapter, parseScottFelderCommunity, parseScottFelderState, scottFelderAreaSlug, scottFelderListingEntries, scottFelderRecord, scottFelderSlug, scottFelderStatus } from "./dealsAdapters.scottfelder";
 import { DEAL_ADAPTERS, loadOfficialDeals, type CommunitySourceConfig } from "./dealsAdapters";
 
 /**
@@ -149,7 +149,24 @@ describe("Scott Felder reader: page data", () => {
       ["/plan/fixture-vine/hamilton", "Hamilton", 445_990, 4, 3.5, 2_408, 2, ["/p-plan-ham-1.jpeg"]],
       ["/plan/fixture-vine/quiet", "Quiet", null, 4, 3.5, 2_408, 2, ["/p-plan-hid-a.jpeg", "/p-plan-hid-1.jpeg"]],
     ]);
-    expect(parsed.offer).toBe("Rates as Low As 3.99%. Low Fixed Rates + Closing Cost Assistance. On select homes: Rates as low as 4.99% + $10,000 in Closing Cost.");
+    // One banner is the offer; the per-home labels never join it.
+    expect(parsed.offer).toBe("Rates as Low As 3.99%.");
+    expect(parseScottFelderCommunity(page({ stateJson: state({ communities: COMMUNITIES.map((row) => row._id === "c-vine" ? { ...row, headline: null, custom_banner: "  ", card_feature_headline: "$10,000 Closing Cost Assistance! Call (210) 555-0142 to book." } : row) }) }), COMMUNITY, NOW)!.offer).toBe("$10,000 Closing Cost Assistance! Call to book.");
+    // The site marks a model home only in its label: not for sale.
+    const model = parseScottFelderCommunity(page({ stateJson: state({ homes: [...HOMES, home({ id: "h11", in: "c-vine", street: "6023 Fixture Park", price: 500_000, special: "Model Home Available" })] }) }), COMMUNITY, NOW)!;
+    expect(model.homes.at(-1)).toMatchObject({ status: "Model", readyNow: false, moveInDate: null });
+    expect(model.offer).toBe("Rates as Low As 3.99%.");
+    // The builder's homes and plans collections must be there as arrays; a missing one is a changed page, never zero homes.
+    const noHomes = JSON.parse(state()); delete noHomes.cloudData.homes;
+    expect(parseScottFelderCommunity(page({ cards: "", count: "", stateJson: JSON.stringify(noHomes) }), COMMUNITY, NOW)).toMatchObject({ shapeIntact: false, homes: [] });
+    const noPlans = JSON.parse(state()); noPlans.cloudData.plans = { [BUILDER]: { data: "x" } };
+    expect(parseScottFelderCommunity(page({ stateJson: JSON.stringify(noPlans) }), COMMUNITY, NOW)!.shapeIntact).toBe(false);
+    const emptyHomes = JSON.parse(state()); emptyHomes.cloudData.homes = { [BUILDER]: { data: [] } };
+    expect(parseScottFelderCommunity(page({ cards: "", count: "0 Quick Move-In Homes", stateJson: JSON.stringify(emptyHomes) }), COMMUNITY, NOW)).toMatchObject({ shapeIntact: true, homes: [] });
+    // A rendered card for a lot is neither a changed page nor another community's.
+    expect(parseScottFelderCommunity(page({ cards: card("/homes/san-antonio-area/schertzcibolo/fixture-vine/lot-12", "Lot 12", "Ready Now!") }), COMMUNITY, NOW)).toMatchObject({ shapeIntact: true, foreignHome: false });
+    expect(scottFelderAreaSlug("Schertz/Cibolo")).toBe("schertzcibolo");
+    expect(scottFelderAreaSlug("New Braunfels")).toBe("new-braunfels");
     expect(parsed.facts).toEqual({ fromPrice: 404_990, schoolDistrict: "Schertz-Cibolo-Universal City ISD", amenities: ["Resort style pool", "Events pavilion"] });
   });
 
@@ -158,7 +175,10 @@ describe("Scott Felder reader: page data", () => {
     expect(parsed.record?.name).toBe("Fixture Point");
     expect(parsed.homes.map((entry) => [entry.sourceUrl.replace(HOST, ""), entry.status])).toEqual([["/homes/san-antonio-area/san-antonio/fixture-point-55/2130-fixture-point", "Quick Move-In (March 2027)"]]);
     expect(parsed.plans.map((entry) => entry.sourceUrl.replace(HOST, ""))).toEqual(["/plan/fixture-point-55/hamilton"]);
-    expect(parsed.offer).toBe("Grand Opening Savings. On select homes: Rates as low as 4.99% + $10,000 in Closing Cost.");
+    expect(parsed.offer).toBe("Grand Opening Savings.");
+    // A sub-community in another sub-market keeps its own sub-market in its homes' URLs.
+    const elsewhere = parseScottFelderCommunity(page({ heading: "Fixture Point", cards: "", count: "1 Quick Move-In Homes", stateJson: state({ communities: COMMUNITIES.map((row) => row._id === "c-point-55" ? { ...row, area: "Boerne" } : row) }) }), PARENT, NOW)!;
+    expect(elsewhere.homes.map((entry) => entry.sourceUrl.replace(HOST, ""))).toEqual(["/homes/san-antonio-area/boerne/fixture-point-55/2130-fixture-point"]);
   });
 
   it("keeps an unreadable home with no status, and tells a changed page, a foreign card and the market page apart", () => {
@@ -175,6 +195,8 @@ describe("Scott Felder reader: page data", () => {
     // An unknown path renders the market page with the same state: the heading gives it away.
     expect(parseScottFelderCommunity(page({ heading: "San Antonio AreaCommunities" }), COMMUNITY, NOW)!.record).toBeNull();
     expect(parseScottFelderCommunity(page(), `${HOST}/communities/san-antonio-area/schertzcibolo/not-a-fixture`, NOW)!.record).toBeNull();
+    // The same slug under another sub-market is another community's page, or none.
+    expect(parseScottFelderCommunity(page(), `${HOST}/communities/san-antonio-area/boerne/fixture-vine`, NOW)!.record).toBeNull();
     expect(parseScottFelderCommunity(page(), `${HOST}/communities/san-antonio-area/san-antonio/hidden-fixture`, NOW)!.record).toBeNull();
     expect(parseScottFelderCommunity("<html><body>new layout</body></html>", COMMUNITY, NOW)).toBeNull();
     expect(scottFelderRecord(page(), COMMUNITY)).toMatchObject({ street: "12372 Fixture Petal" });
@@ -182,8 +204,10 @@ describe("Scott Felder reader: page data", () => {
     expect(scottFelderRecord(page({ heading: "Fixture Manor" }), `${HOST}/communities/san-antonio-area/san-antonio/fixture-manor`)).toMatchObject({ name: "Fixture Manor", street: null, geo: { lat: 29.506923, lng: -98.237159 } });
   });
 
-  it("lists the market page's communities with their records from the state, never another host, an unknown slug or an unpublished community", () => {
-    const entries = scottFelderListingEntries(marketPage, "www.scottfelderhomes.com")!;
+  it("lists the market page's communities with their records from the state, never another host, an unknown slug, an unpublished community or a sub-community", () => {
+    const withChild = marketPage.replace("</div>\n<a href=\"https://evil.example", `<a href="/communities/san-antonio-area/san-antonio/fixture-point-55">Fixture Point 55'</a></div>\n<a href="https://evil.example`);
+    expect(withChild).not.toBe(marketPage);
+    const entries = scottFelderListingEntries(withChild, "www.scottfelderhomes.com")!;
     expect(entries.map((entry) => [entry.url.replace(HOST, ""), entry.record?.name, entry.record?.street, entry.record?.city, entry.record?.phone, entry.record?.priceFrom, entry.record?.geo])).toEqual([
       ["/communities/san-antonio-area/schertzcibolo/fixture-vine", "Fixture Vine", "12372 Fixture Petal", "Schertz", "2105550142", 404_990, { lat: 29.506923, lng: -98.237159 }],
       ["/communities/san-antonio-area/san-antonio/fixture-point", "Fixture Point", "2110 Fixture Point", "San Antonio", "2105550142", 404_990, { lat: 29.506923, lng: -98.237159 }],
@@ -202,7 +226,7 @@ describe("Scott Felder reader: a community", () => {
     expect(result.private.homes).toHaveLength(5);
     expect(result.private.plans).toHaveLength(3);
     expect(result.private.communityFacts).toMatchObject({ fromPrice: 404_990, schoolDistrict: "Schertz-Cibolo-Universal City ISD", amenities: ["Resort style pool", "Events pavilion"] });
-    expect(result.private.incentive?.text).toBe("Rates as Low As 3.99%. Low Fixed Rates + Closing Cost Assistance. On select homes: Rates as low as 4.99% + $10,000 in Closing Cost.");
+    expect(result.private.incentive?.text).toBe("Rates as Low As 3.99%.");
     expect(result.private.incentive?.facts).toMatchObject({ promotionalRatePercent: 3.99, aprPercent: null });
     expect(result.incentiveHoldReasons).toContain("missing_apr");
     const json = JSON.stringify(result.public);
@@ -226,6 +250,11 @@ describe("Scott Felder reader: a community", () => {
     expect(none.private.incentive).toBeNull();
     const odd = vi.fn(async () => html(page({ stateJson: state({ communities: COMMUNITIES.map((row) => row._id === "c-vine" ? { ...row, status: "Paused" } : row) }) })));
     expect((await loadOfficialDeals(config, { fetcher: odd, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    const blank = vi.fn(async () => html(page({ stateJson: state({ communities: COMMUNITIES.map((row) => row._id === "c-vine" ? { ...row, status: null } : row) }) })));
+    expect((await loadOfficialDeals(config, { fetcher: blank, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    const noHomes = JSON.parse(state()); delete noHomes.cloudData.homes;
+    const missing = vi.fn(async () => html(page({ cards: "", count: "", stateJson: JSON.stringify(noHomes) })));
+    expect((await loadOfficialDeals(config, { fetcher: missing, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
   });
 
   it("holds the run when the page is not this community's, when a card is not in the state, when a card is another community's, when the page states more homes than the state has, when the site is not Scott Felder's, or when it cannot be read", async () => {

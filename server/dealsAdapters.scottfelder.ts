@@ -90,6 +90,23 @@ function collection(state: Json | null, name: string): Json[] {
   return Object.values(byBuilder).flatMap((entry) => arr(obj(entry)?.data)).map(obj).filter((row): row is Json => row !== null);
 }
 
+/** True when the builder's rows of a collection are there as an array (an empty one included); a missing collection is a changed page, not zero rows. */
+function hasCollection(state: Json | null, name: string, builderId: string | null): boolean {
+  if (!builderId) return false;
+  return Array.isArray(obj(obj(obj(state?.cloudData)?.[name])?.[builderId])?.data);
+}
+
+/** The site's URL segment for a sub-market ("Schertz/Cibolo" is "schertzcibolo", "New Braunfels" "new-braunfels"). */
+export function scottFelderAreaSlug(area: string): string {
+  return area.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+}
+
+/** A page's own `cloudData` rows of a collection, by the page's builder id. */
+function builderRows(state: Json | null, name: string, builderId: string | null): Json[] {
+  if (!builderId) return [];
+  return arr(obj(obj(obj(obj(state?.cloudData)?.[name])?.[builderId]))?.data).map(obj).filter((row): row is Json => row !== null);
+}
+
 /**
  * "Active" with a move-in date that has passed (or none) is ready now, as the
  * site's "Ready Now!" says; a future date names its month. "Under
@@ -169,7 +186,7 @@ function offerText(parts: Array<string | null>): string | null {
   const seen = new Set<string>();
   const sentences: string[] = [];
   for (const part of parts) {
-    const text = (part ?? "").replace(/\*+/g, "").replace(/\s+/g, " ").trim();
+    const text = (part ?? "").replace(/\*+/g, "").replace(/\(?\b\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b/g, " ").replace(/\s+([,.;:!?])/g, "$1").replace(/\s+/g, " ").trim();
     if (!text || seen.has(text.toLowerCase())) continue;
     seen.add(text.toLowerCase());
     sentences.push(/[.!?]$/.test(text) ? text : `${text}.`);
@@ -183,7 +200,7 @@ export type ScottFelderPage = {
   communityStatus: string | null;
   /** True when a rendered home link is not one of this community's (or its sub-communities') homes. */
   foreignHome: boolean;
-  /** False when a rendered home card does not match the state (the page changed shape). */
+  /** False when a rendered home card does not match the state, or the builder's homes or plans collection is missing (the page changed shape). */
   shapeIntact: boolean;
   /** The page's "N Quick Move-In Homes" line, when stated. */
   statedHomeCount: number | null;
@@ -204,29 +221,39 @@ export function parseScottFelderCommunity(html: string, pageUrl: string, now: Da
   if (!communities.length) return null;
   const segments = community.pathname.split("/").filter(Boolean);
   const slug = segments.at(-1)?.toLowerCase() ?? "";
-  const own = communities.find((row) => str(row.sharedName)?.toLowerCase() === slug && row.published !== false) ?? null;
+  const subMarket = (segments.at(-2) ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  // The state holds every market and sister brand: the community is the row with this slug whose sub-market is the URL's.
+  const own = communities.find((row) => str(row.sharedName)?.toLowerCase() === slug && row.published !== false && scottFelderAreaSlug(str(row.area) ?? "").replace(/[^a-z0-9]/g, "") === subMarket) ?? null;
   const record = own ? recordOf(own) : null;
   // An unknown path renders the market page with the same state; only the heading tells the community page apart.
   const heading = htmlToText(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " "))?.[1] ?? "");
   if (!own || !record || !heading.toLowerCase().startsWith(record.name.toLowerCase())) return { record: null, communityId: null, communityStatus: null, foreignHome: false, shapeIntact: true, statedHomeCount: null, homes: [], plans: [], offer: null, facts: { fromPrice: null, schoolDistrict: null, amenities: [] } };
   const communityId = str(own._id);
-  const members = new Map<string, string>();
-  if (communityId) members.set(communityId, slug);
+  const builderId = str(own.builder) ?? str(own.builder_id);
+  // The builder's homes and plans must be in the state as arrays; a missing collection is a changed page, never zero homes.
+  const collectionsIntact = hasCollection(state, "homes", builderId) && hasCollection(state, "plans", builderId);
+  const members = new Map<string, { slug: string; subMarket: string }>();
+  const metro = (segments.at(-3) ?? "").toLowerCase();
+  if (communityId) members.set(communityId, { slug, subMarket: (segments.at(-2) ?? "").toLowerCase() });
   for (const row of communities) {
     const id = str(row._id);
     const shared = str(row.sharedName)?.toLowerCase();
-    if (id && shared && communityId && str(row.parent_community) === communityId && row.published !== false) members.set(id, shared);
+    // A sub-community's homes are shown on the parent's page, under the sub-community's own sub-market and slug.
+    if (id && shared && communityId && str(row.parent_community) === communityId && row.published !== false) members.set(id, { slug: shared, subMarket: scottFelderAreaSlug(str(row.area) ?? "") || (segments.at(-2) ?? "").toLowerCase() });
   }
   const planNames = new Map<string, string>();
   for (const plan of allPlans) { const id = str(plan._id); const name = str(plan.name); if (id && name) planNames.set(id, name); }
   // "/communities/<metro>/<sub-market>/<slug>" -> "/homes/<metro>/<sub-market>/<community slug>/<street slug>".
-  const homesBase = `${community.origin}/homes/${segments.slice(1, -1).join("/")}`.replace(/\/+$/, "");
+  const homeUrlFor = (member: { slug: string; subMarket: string }, street: string) => `${community.origin}/homes/${metro}/${member.subMarket}/${member.slug}/${scottFelderSlug(street)}`;
   const homes: PrivatePlanOrHome[] = [];
   const homeUrls = new Set<string>();
+  const lotUrls = new Set<string>();
   for (const home of allHomes) {
     const container = str(home.containedIn);
-    const shared = container ? members.get(container) : undefined;
-    if (!shared || home.isLot === true || home.published === false) continue;
+    const member = container ? members.get(container) : undefined;
+    if (!member || home.published === false) continue;
+    // A lot is not a home; its card, if the page renders one, is neither a changed page nor another community's.
+    if (home.isLot === true) { const lotStreet = str(obj(home.address)?.streetAddress); if (lotStreet) lotUrls.add(homeUrlFor(member, lotStreet)); continue; }
     const address = obj(home.address);
     const street = str(address?.streetAddress);
     const readable = looksLikeStreetAddress(street);
@@ -237,14 +264,16 @@ export function parseScottFelderCommunity(html: string, pageUrl: string, now: Da
     const original = num(home.originalPrice);
     const full = num(home.bathsFull);
     const geo = geoOf(home.geoIndexed);
-    const sourceUrl = readable ? `${homesBase}/${shared}/${scottFelderSlug(street)}` : `${community.origin}${community.pathname.replace(/\/+$/, "")}/unreadable-${homes.length}`;
+    const sourceUrl = readable ? homeUrlFor(member, street) : `${community.origin}${community.pathname.replace(/\/+$/, "")}/unreadable-${homes.length}`;
     if (readable) homeUrls.add(sourceUrl);
+    // The site marks a model only in its label ("Model Home Available"); a model is not for sale (the sync leaves a "Model" home out).
+    const model = /\bmodel\s+home\b/i.test(str(home.special_feature_headline) ?? "");
     homes.push({
       sourceUrl,
       privateName: street,
       privateAddress: street ? `${street}, ${city ? `${city}, ${zip ? `TX ${zip}` : "TX"}` : "TX"}` : null,
       privatePlanName: planNames.get(str(home.plan) ?? "") ?? null,
-      status: readable ? status.status : null,
+      status: !readable ? null : model ? "Model" : status.status,
       price: price && price > 0 ? price : null,
       previousPrice: original && price && original > price ? original : null,
       priceDrop: original && price && original > price ? original - price : null,
@@ -252,23 +281,24 @@ export function parseScottFelderCommunity(html: string, pageUrl: string, now: Da
       bathrooms: full === null ? null : full + (num(home.bathsHalf) ?? 0) * 0.5,
       squareFeet: num(home.sqft),
       garage: num(home.garages),
-      readyNow: status.readyNow,
-      moveInDate: status.moveInDate,
+      readyNow: model ? false : status.readyNow,
+      moveInDate: model ? null : status.moveInDate,
       geo: geo ? { latitude: geo.lat, longitude: geo.lng } : null,
       gallery: gallery(container, null, home.photos, home.elevationPhotos),
     });
   }
   // The rendered cards (at most six) must each be one of the state's homes; a card under another community is not this community's inventory.
-  let shapeIntact = true;
+  let shapeIntact = collectionsIntact;
   let foreignHome = false;
   const body = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ");
+  const memberSlugs = new Set(Array.from(members.values()).map((member) => member.slug));
   for (const match of Array.from(body.matchAll(/href="(\/homes\/[^"#?]+)"/g))) {
     const link = decodeHtmlEntities(match[1]!);
     const parts = link.split("/").filter(Boolean);
     if (parts.length < 5) continue;
     const linked = `${community.origin}${link.replace(/\/+$/, "")}`;
-    if (homeUrls.has(linked)) continue;
-    if (Array.from(members.values()).includes(parts[parts.length - 2]!.toLowerCase())) shapeIntact = false;
+    if (homeUrls.has(linked) || lotUrls.has(linked)) continue;
+    if (memberSlugs.has(parts[parts.length - 2]!.toLowerCase())) shapeIntact = false;
     else foreignHome = true;
   }
   const statedHomeCount = (() => { const match = /(\d{1,3})\s+Quick\s+Move-In\s+Homes?\b/i.exec(htmlToText(body)); return match ? Number(match[1]) : null; })();
@@ -279,12 +309,13 @@ export function parseScottFelderCommunity(html: string, pageUrl: string, now: Da
     const placement = arr(plan.communities).map(obj).find((entry) => entry && members.has(str(entry.community) ?? ""));
     if (!placement) continue;
     const placedIn = str(placement.community)!;
+    const member = members.get(placedIn)!;
     const localPrice = num(obj(placement.communityModelProperties)?.price);
     const price = localPrice && localPrice > 0 ? localPrice : num(plan.price);
     const shown = plan.hide_price !== true && plan.dont_show_price_on_detail !== true;
     const full = num(plan.bathsFull);
     plans.push({
-      sourceUrl: `${community.origin}/plan/${members.get(placedIn)}/${scottFelderSlug(name)}`,
+      sourceUrl: `${community.origin}/plan/${member.slug}/${scottFelderSlug(name)}`,
       privateName: name,
       privatePlanName: name,
       status: null,
@@ -297,8 +328,8 @@ export function parseScottFelderCommunity(html: string, pageUrl: string, now: Da
       gallery: gallery(placedIn, "Representative image", plan.elevationPhotos, plan.photos),
     });
   }
-  const selectHomes = Array.from(new Set(allHomes.filter((home) => members.has(str(home.containedIn) ?? "") && home.isLot !== true && home.published !== false).map((home) => (str(home.special_feature_headline) ?? "").replace(/\*+/g, "").trim()).filter(Boolean)));
-  const offer = offerText([str(own.headline), str(own.custom_banner), str(own.card_feature_headline), ...selectHomes.map((text) => `On select homes: ${text}`)]);
+  // One banner is the offer (the three fields carry the same banner on the live pages); the per-home labels are never joined into it.
+  const offer = offerText([str(own.headline) ?? str(own.custom_banner) ?? str(own.card_feature_headline)]);
   const amenities = arr(own.featured_info).flatMap((item) => htmlToText(String(obj(item)?.copy ?? "").replace(/<\/(?:li|p)>/gi, " | ")).split("|").map((part) => part.trim()).filter(Boolean));
   return {
     record,
@@ -333,7 +364,8 @@ export function scottFelderListingEntries(html: string, host: string): Array<{ u
     if (out.has(key)) continue;
     const slug = key.split("/").at(-1)!.toLowerCase();
     const row = communities.find((item) => str(item.sharedName)?.toLowerCase() === slug && item.published !== false);
-    if (!row) continue;
+    // A sub-community's homes are published by its parent; onboarding both would move the same homes between them.
+    if (!row || str(row.parent_community)) continue;
     out.set(key, { url: key, record: recordOf(row) });
   }
   return out.size ? Array.from(out.values()) : null;
@@ -357,7 +389,7 @@ export class ScottFelderAdapter implements DealAdapter {
     // Without the state, a community under the URL's slug and a heading naming it, this is not the community's page.
     if (!parsed || !parsed.record) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The state says how the community is selling; wording the reader does not know is not read as a selling community.
-    if (parsed.communityStatus && !/^(?:active|now\s+selling|coming\s+soon|close[- ]?out|sold\s+out|grand\s+opening|final\s+opportunit(?:y|ies))$/i.test(parsed.communityStatus)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    if (!parsed.communityStatus || !/^(?:active|now\s+selling|coming\s+soon|close[- ]?out|sold\s+out|grand\s+opening|final\s+opportunit(?:y|ies))$/i.test(parsed.communityStatus)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (!parsed.shapeIntact) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // A home card under another community is never this community's inventory.
     if (parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);

@@ -1200,8 +1200,8 @@ export function toPublicSafeText(
   const known = new Set(dealScrubTerms(categories));
   categories.other.push(...extraPrivateTerms.filter((term) => !known.has(term)));
   const scrubbed = scrubPrivateNames(htmlToText(input), categories, { planField });
-  // A link, a bare domain ("TollBrothersMortgage.com") or a ten-digit phone number written without separators is residue.
-  if (!scrubbed || /\b(?:https?:\/\/|www\.)\S+/i.test(scrubbed) || /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|us|io|info|biz)\b/i.test(scrubbed) || /(?<![\d.$,])\d{10}(?![\d.])/.test(scrubbed)) return null;
+  // A link, a bare domain ("TollBrothersMortgage.com") or a phone number, with or without separators, is residue.
+  if (!scrubbed || /\b(?:https?:\/\/|www\.)\S+/i.test(scrubbed) || /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|us|io|info|biz)\b/i.test(scrubbed) || /(?<![\d.$,])\d{10}(?![\d.])/.test(scrubbed) || /(?<![\d.$,])\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}(?![\d.])/.test(scrubbed)) return null;
   // A lender's NMLS number names the lender as surely as its name does.
   if (NMLS_ID_PATTERN.test(scrubbed)) return null;
   // Residue is judged per category: a bare plan word such as "Magnolia trees"

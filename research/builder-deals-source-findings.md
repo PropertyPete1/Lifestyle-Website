@@ -192,7 +192,26 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   (`cloudData.agents`) are private names and never read.
 - Discovery: the market page's links with the state's records (sales
   address, pin, phone, price); "BOOK BY APPOINTMENT" (Crown Ridge Manor) is
-  not an address, so that page is read and its pin keeps it.
+  not an address, so that page is read and its pin keeps it. Sub-communities
+  (`parent_community` set) are never onboarded: the parent publishes their
+  homes under their own sub-market and slug.
+- Round 13: the builder's `homes` and `plans` collections must be in the
+  state as arrays (a missing one holds, never zero homes); the community row
+  must match the URL's sub-market as well as its slug; one banner is the
+  offer (`headline`, else `custom_banner`, else `card_feature_headline`) and
+  the per-home `special_feature_headline` labels are never joined into it; a
+  home labelled "Model Home …" is a Model (left out); a blank community
+  status holds; a rendered card for a lot is ignored.
+- Live checks: the first `<h1>` on the page must be the community's (a site
+  header heading before it would hold every run); the first "N Quick Move-In
+  Homes" line must be the community's (a market-wide count above it would
+  hold every run); the market page's community links must be relative
+  (`found: 0` otherwise); S3 must serve `s3.amazonaws.com/buildercloud/…`
+  without a cross-host redirect (photos would be `unapproved_source`); a
+  plan with no `communityModelProperties.price` falls back to the plan's
+  builder-wide price — confirm the page shows that; the state is ~3.9 MB
+  against the 8 MB page cap; Avondale's 6023 Calgary Park is labelled "Model
+  Home Available" and should sync as a Model.
 
 ## DRB Homes reader (added 2026-10-20)
 

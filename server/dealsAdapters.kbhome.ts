@@ -75,7 +75,8 @@ export function parseKbArray(html: string, name: string): unknown[] | null {
 /** "Move-in Ready (3)" on the page: how many homes the page says it shows; null when the page does not say. */
 export function kbMoveInCount(html: string): number | null {
   // The page may count twice ("Move-in Ready (57)" in the market navigation, "(3)" over the community's own list); the smaller is the community's.
-  const counts = Array.from(html.matchAll(/Move-?in\s+Ready\s*\((\d+)\)/gi)).map((match) => Number(match[1]));
+  // A zero count elsewhere on the page (another market's navigation) says nothing about this community.
+  const counts = Array.from(html.matchAll(/Move-?in\s+Ready\s*\((\d+)\)/gi)).map((match) => Number(match[1])).filter((count) => count > 0);
   return counts.length ? Math.min(...counts) : null;
 }
 

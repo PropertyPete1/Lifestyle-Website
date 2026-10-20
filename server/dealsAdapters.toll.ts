@@ -3,7 +3,6 @@ import {
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 import { parseNextData } from "./dealsAdapters.davidson";
-import { normalizedDealSourceKey } from "../shared/deals";
 
 /**
  * TOLL BROTHERS reader. The community page is Next.js (pages router); its
@@ -298,7 +297,7 @@ export class TollBrothersAdapter implements DealAdapter {
     // The data must describe this community (a same-host redirect to another page does not), with every model's home list in place.
     // The two spellings of an apostrophe ("'" and "%27") are one page, as they are one source key.
     const ownPage = parsed.pageUrl ? asUrl(parsed.pageUrl) : null;
-    if (ownPage && normalizedDealSourceKey(`${ownPage.origin}${ownPage.pathname}`) !== normalizedDealSourceKey(`${community.origin}${community.pathname}`)) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+    if (ownPage && (ownPage.origin.toLowerCase() !== community.origin.toLowerCase() || comparablePath(ownPage.pathname.replace(/\/+$/, "")) !== comparablePath(community.pathname.replace(/\/+$/, "")))) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     if (!parsed.shapeIntact) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The site plan counts the homes for sale; fewer homes in the data than that means the home list changed shape, not that homes sold.
     if (parsed.sitePlanHomes !== null && parsed.homes.length < parsed.sitePlanHomes) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

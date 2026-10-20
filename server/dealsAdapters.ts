@@ -901,6 +901,7 @@ function downPaymentFigure(text: string, aprIndex: number | null, rate: number |
   const found: number[] = [];
   const foundAt = new Set<number>();
   const allAt = new Set<number>();
+  const softSkipped: number[] = [];
   for (const match of Array.from(text.matchAll(/(?<![\d.])(\d+(?:\.\d+)?)%\*?\s+(?:min(?:imum|\.)?\s+)?down(?:[- ]payment)?\b/gi))) {
     const at = match.index ?? 0;
     const before = text.slice(Math.max(0, at - 30), at);
@@ -912,14 +913,25 @@ function downPaymentFigure(text: string, aprIndex: number | null, rate: number |
     allAt.add(at);
     // "5% down payment (and closing cost) assistance", "5% down-payment grant", "5% down payment incentive": help toward a
     // down payment, not the loan's down payment.
-    if (/^\s*(?:(?:and|&|or|\/)\s*closing\s+costs?\s*)?(?:assistance|grants?|gifts?|match|matched|matching|program|help|support|incentives?|credits?|savings?|reimbursements?|contributions?|rebates?|bonus|allowance|paid|covered|not\s+required)\b/i.test(after) || (/\b(?:pay|pays|paying|paid|cover|covers|covering|covered|match|matches|matching|reimburse|reimburses|contribute|contributes)[- ]+(?:up\s+to\s+)?(?:your\s+|the\s+|a\s+)?$/i.test(before) && !/(?:^|[.!?;:|]\s*|\b(?:you|buyers?|homebuyers?|purchasers?|only|just|(?:need|have)\s+to)\s+)(?:pay|pays|cover|covers)\s+(?:just\s+|only\s+)?$/i.test(before)) || /^\s*(?:and|&|or|\/)\s*closing\s+costs?\b/i.test(after) || /^\s*\S*\s*(?:assistance|grants?|gift)\b/i.test(clause.slice(0, 30))) continue;
+    // Assistance after the figure ("… on us", "… from the builder"); a giving verb before it, through a few filler words
+    // ("pay for your", "cover your full", "gift you", "fund"); a payer's participle ("Seller-paid", "Builder paid"), not a bare
+    // "Closing Costs Paid" tile label; "Free N% down". The buyer as subject ("you'll pay", "borrowers pay", "and pay") is the
+    // loan's own down payment. A figure skipped for a subject that is not a definite third party ("Pulte pays", "Client pays")
+    // still conflicts with any other down payment the text states.
+    const afterAssist = /^\s*(?:(?:and|&|or|\/)\s*closing\s+costs?\s*)?(?:assistance|grants?|gifts?|match|matched|matching|program|help|support|incentives?|credits?|savings?|reimbursements?|contributions?|rebates?|bonus|allowance|paid|covered|not\s+required)\b/i.test(after) || /^\s*[-\u2013\u2014,]?\s*(?:is\s+)?(?:on\s+us|on\s+the\s+(?:builder|seller|house)|from\s+(?:the\s+|your\s+)?(?:builder|seller|lender|us)|courtesy\s+of)\b/i.test(after) || /^\s*(?:and|&|or|\/)\s*closing\s+costs?\b/i.test(after) || /^\s*\S*\s*(?:assistance|grants?|gift)\b/i.test(clause.slice(0, 30));
+    const verbBefore = /\b(?:pay|pays|paying|paid|cover|covers|covering|covered|match|matches|matching|reimburse|reimburses|contribute|contributes|gift|gifts|give|gives|giving|provide|provides|providing|fund|funds|funding)[- ]+(?:(?:for|toward|towards|up\s+to|your|you|the|a|an|entire|full|whole|all\s+of|all)\s+){0,3}$/i.test(before);
+    const bareParticiple = /\b(?:paid|covered)[- ]+$/i.test(before) && !/(?:-|\b(?:builder|seller|lender|program|grant|employer)[- ]+)(?:paid|covered)[- ]+$/i.test(before);
+    const buyerSubject = /(?:^|[.!?;:|,(&\-\u2013\u2014]\s*|\b(?:you(?:'ll|'d)?|(?:home)?buyers?|borrowers?|purchasers?|veterans?|only|just|(?:need|have)\s+to|and|or|when|if|who)\s+)(?:(?:will|can|could|would|must|may|only|just)\s+)?(?:pay|pays|paying|cover|covers)\s+(?:just\s+|only\s+)?$/i.test(before);
+    const definitePayer = /\b(?:we(?:'ll|'re)?|us|builder|seller|lender|they|homes|program|grant|employer)\b[^.!?;]{0,30}$/i.test(before) || /-(?:paid|covered|funded)\s+$/i.test(before);
+    if (/\bfree\s+$/i.test(before) || afterAssist) continue;
+    if (verbBefore && !bareParticiple && !buyerSubject) { if (!definitePayer && value !== null) softSkipped.push(value); continue; }
     if (/\brate\s*[:=]?\s*$/i.test(before) && value !== null && value === rate) continue;
     if (value !== null) { found.push(value); foundAt.add(at); }
   }
   // The label-first down payment ("with a down payment of 3.5%", "Down Payment: 3.5%"), unless that label is the trailing label of
   // a value-first tile ("10% Down Payment 3% Seller Credit": the 3% belongs to the next tile).
   let labelFirstValue: number | null = null;
-  for (const match of Array.from(text.matchAll(/\b(?:min(?:imum|\.)?\s+)?down(?:[- ]payment)?\s*(?:of\s+|is\s+|as\s+low\s+as\s+|[:=]\s*)?(?:just\s+|only\s+)?(\d+(?:\.\d+)?)%(?!\s*(?:assistance|grants?|gifts?|paid|covered|matched|reimbursed)\b)/gi))) {
+  for (const match of Array.from(text.matchAll(/\b(?:min(?:imum|\.)?\s+)?down(?:[- ]payment)?\s*(?:of\s+|is\s+|as\s+low\s+as\s+|[:=]\s*)?(?:just\s+|only\s+)?(\d+(?:\.\d+)?)%(?!\s*(?:assistance|grants?|gifts?|paid|covered|matched|reimbursed)\b|\s*(?:credits?|incentives?|savings?|contributions?|rebates?|bonus|allowance)\b(?!\s*(?:score|[:$\d(]|up\s+to|of\s+(?:up\s+to\s+)?\$))|\s*[-\u2013\u2014,]?\s*(?:is\s+)?(?:on\s+us|from\s+(?:the\s+)?(?:builder|seller|lender))\b)/gi))) {
     const start = match.index ?? 0;
     const sliceStart = Math.max(0, start - 14);
     const lead = /(\d+(?:\.\d+)?)%\*?\s*(?:min(?:imum|\.)?\s+)?$/i.exec(text.slice(sliceStart, start));
@@ -928,12 +940,13 @@ function downPaymentFigure(text: string, aprIndex: number | null, rate: number |
     labelFirstValue = numericValue(match[1]);
     break;
   }
+  const softConflict = (value: number) => softSkipped.some((other) => other !== value);
   if (found.length) {
     const values = new Set(found.map((value) => value.toFixed(3)));
     if (labelFirstValue !== null) values.add(labelFirstValue.toFixed(3));
-    return { value: found[0]!, conflict: values.size > 1 };
+    return { value: found[0]!, conflict: values.size > 1 || softConflict(found[0]!) };
   }
-  if (labelFirstValue !== null) return { value: labelFirstValue, conflict: false };
+  if (labelFirstValue !== null) return { value: labelFirstValue, conflict: softConflict(labelFirstValue) };
   return { value: /\bno\s+down\s+payment\b/i.test(text) ? 0 : null, conflict: false };
 }
 

@@ -515,6 +515,21 @@ describe("round 34: a named payer, separated card tiles, the primary counted, ti
   });
 });
 
+describe("round 35: 'on us', giving verbs, the buyer as subject, label-first assistance nouns", () => {
+  it("assistance worded 'on us', 'from the builder', 'free' or with a giving verb is never the loan's down payment", () => {
+    for (const text of ["5% down payment on us! 4.99% (5.62% APR) 30-year fixed conventional loan.", "We'll cover the full 3.5% down payment! 4.99% (5.62% APR) 30-year fixed FHA loan.", "Free 5% down payment! 4.99% (5.62% APR) 30-year fixed conventional loan.", "Builder gives 5% down payment! 4.99% (5.62% APR) 30-year fixed conventional loan.", "Down payment of 5% on us! 4.99% (5.62% APR) 30-year fixed conventional loan.", "Down Payment: 5% contribution from the builder! 4.99% (5.62% APR) 30-year fixed conventional loan."]) {
+      expect(parsePromotionalRate(text).downPaymentPercent, text).toBeNull();
+    }
+  });
+
+  it("the buyer's own payment is the down payment; an unknown payer beside another figure holds", () => {
+    for (const [text, dp] of [["You'll pay 3.5% down on a 4.99% (5.62% APR) 30-year fixed FHA loan.", 3.5], ["*Rate of 4.99% (5.62% APR) assumes a $400,000 sales price, borrower pays 5% down, 30-year fixed conventional loan.", 5], ["Closing Costs Paid 3.5% Down 4.99% Rate 5.62% APR 30-Year Fixed FHA", 3.5]] as const) {
+      expect(parsePromotionalRate(text).downPaymentPercent, text).toBe(dp);
+    }
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA loan: you'll pay 3.5% down. Conventional loans require 5% down.").holdReasons).toContain("ambiguous_rate");
+  });
+});
+
 describe("a run that did not read the offer source", () => {
   it("leaves the community's hold line as it was", async () => {
     const id = seedCommunity();

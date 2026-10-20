@@ -166,6 +166,10 @@ describe("Homefiniti reader: a community", () => {
     const withStrip = await loadOfficialDeals(config, { fetcher: featured });
     expect(withStrip.holdReasons).toEqual([]);
     expect(withStrip.private.homes.map((home) => home.status)).toEqual(["Quick Move-In (Under Construction)", "Quick Move-In (Move-In Ready)", "Sold"]);
+    // One record on the page next to a lingering card of a home no longer listed: the lost badge is never borrowed from the neighbour.
+    const oneRecord = communityPage().replace(homeRecord(HOMES[0]!), "").replace(homeRecord(HOMES[2]!), "").replace(fahCard(HOMES[0]!), "").replace('<div class="status-text"> Move-In Ready </div>', "");
+    const lingering = vi.fn(async () => new Response(oneRecord, { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: lingering })).holdReasons).toEqual(["unlabelled_home_status"]);
     // Two badges next to one home's links that disagree are no status at all: the run is held.
     const disagreeing = vi.fn(async () => new Response(communityPage().replace("<h2>AVAILABLE HOMES</h2>", `${strip('<div class="status-text"> Move-In Ready </div>')}<h2>AVAILABLE HOMES</h2>`), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: disagreeing })).holdReasons).toEqual(["unlabelled_home_status"]);

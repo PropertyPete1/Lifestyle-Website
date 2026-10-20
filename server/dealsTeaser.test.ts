@@ -21,8 +21,15 @@ describe("the landing page's offer teaser", () => {
     expect(incentiveTeaser("Save $20,000 at Lamar 5 Ranch.")).toBe("Save $20,000 at Lamar 5 Ranch.");
     expect(incentiveTeaser("Rate available on contracts through 10.31.26.")).toBe("Rate available on contracts.");
     expect(incentiveTeaser("Must close by 11/30.")).toBe("");
-    // A day/month without a year is a date only after a lead word: "Rated 4/5" is not.
+    // A day/month without a year is a date after a lead word, or after a connector when the clause ends there; "Rated 4/5" and "on 4/5 homes" are figures.
     expect(incentiveTeaser("Rated 4/5 on 2% rate buydowns.")).toBe("Rated 4/5 on 2% rate buydowns.");
+    expect(incentiveTeaser("Rates as low as 4.5% (6.38% APR) when you purchase by 10/31.")).toBe("Rates as low as 4.5% (6.38% APR) when you purchase.");
+    expect(incentiveTeaser("4.99% (6.1% APR) through 11/30 on select homes.")).toBe("4.99% (6.1% APR) on select homes.");
+    expect(incentiveTeaser("Get 4.99% (6.1% APR) if you sign by 11/15.")).toBe("Get 4.99% (6.1% APR) if you sign.");
+    expect(incentiveTeaser("4.99% (6.1% APR) on homes that close by 12/31.")).toBe("4.99% (6.1% APR) on homes.");
+    expect(incentiveTeaser("4.99% (6.1% APR) on 4/5 homes in the community.")).toBe("4.99% (6.1% APR) on 4/5 homes in the community.");
+    // "May 1 day" is a count, not a date.
+    expect(incentiveTeaser("At 4.99% (6.1% APR) you may 1 day regret waiting.")).toBe("At 4.99% (6.1% APR) you may 1 day regret waiting.");
     // An adjustable-rate offer says so on the card even when the chosen sentence does not.
     expect(incentiveTeaser("Rates as low as 4.5% + $10,000 Flex Cash! Financing is a 5/1 ARM through the lender.")).toBe("Rates as low as 4.5% + $10,000 Flex Cash (adjustable rate).");
   });

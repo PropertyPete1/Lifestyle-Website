@@ -101,7 +101,7 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Community source:** `https://www.centurycommunities.com/find-your-new-home/texas/san-antonio-metro/<city>/<community>/` (sitemap lists the metro's community pages and, under each, `lots/<lot>-<address-slug>/` home pages; discovery keeps the community pages only).
 - **Site shape:** server-rendered (about 490 KB). One schema.org `ProductGroup` carries the homes for sale as `hasVariant` Products: `name` "9122 OCOTILLO RDG, San Antonio, TX 78222", `description` "3 beds, 2 baths, 1,388 sq ft", `offers.price`, `sku`, `url`, one `image` on the official host. The community's own record is `HomeAndConstructionBusiness` (address, phone, geo). Each home also has a card (`.street-number-text` link, `.est-complete-date` "Est. Completion: Dec. Move In." / "Move-in Ready!", `.title` plan "Easton - 1388", `.wasPrice` for a drop). The reader reads the records and takes completion, plan and the previous price from the card around the home's link; more cards than records holds the run. A completion month without a year is the next such month. Floor plans are not on the page.
 - **Incentives:** a header line ("Flexible Tours | Below-Market Rates | Made-for-You Financing Options") with no terms; not read.
-- **Scrub:** Century Communities, Century Complete, Century; lender Inspire Home Loans.
+- **Scrub:** Century Communities, Century Complete, Century; lender Inspire Home Loans ("Inspire" alone is an ordinary word and is not an alias).
 
 ## KB Home reader (added 2026-10-20)
 
@@ -126,4 +126,6 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 ## Live checks before launch (fail-safe holds the fixtures cannot settle)
 
 - D.R. Horton: a community with zero quick move-in homes may omit the `#relatedmovein` block; the reader then holds `expected_community_container_not_found` and its plans never publish. Check one such community live; if the block is omitted, relax the hold to "block absent, `#floorplans` present with counts, LocalBusiness record present and no `available-home-card` anywhere" (still holds when the cards are merely renamed).
-- Homefiniti: confirm no `.status`/`.status-text` element sits on plan cards; a plan card with one would count as a home card and hold every run.
+- Homefiniti: confirm no `.status`/`.status-text` element sits on plan cards or in a block that also links to `/available-homes/`; either would count as a home card and hold every run. A lingering "Sold" card without a Product record holds while it is shown. Coventry width collections (`garden-grove-40`): if home URLs live under the base slug, the community-slug check holds every run.
+- Highland: a sold-out community's page shape is unknown; with no `a.homeSpec` card the reader needs the "0 quick move-in homes" sentence, else it holds. Check one live if a community sells out.
+- Century: if the live page renders the card list twice (mobile and desktop) or shows sold or model cards with `.street-number-text`, the card count exceeds the records and every run holds. The sitemap is one 2 MB urlset (8,205 URLs, no index) today.

@@ -37,13 +37,16 @@ const MONTH_INDEX = Object.keys(MONTHS);
 export function centuryStatus(card: string | null, now: Date = new Date()): { status: string | null; readyNow: boolean; moveInDate: string | null } {
   const value = (card ?? "").replace(/\s+/g, " ").replace(/^Est\.?\s*Completion:?\s*/i, "").trim();
   if (!value) return { status: null, readyNow: false, moveInDate: null };
-  if (/sold|under\s+contract|pending/i.test(value)) return { status: "Sold", readyNow: false, moveInDate: null };
+  // A completion field: only sale words sell; "pending" there is an unknown date, not a sale.
+  if (/\bsold\b|under\s+contract/i.test(value)) return { status: "Sold", readyNow: false, moveInDate: null };
   if (/move[- ]?in\s+ready|ready\s+now|available\s+now|complete/i.test(value)) return { status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null };
   const month = /^([A-Za-z]{3,9})\.?(?:\s+(\d{4}))?\s+move[- ]?in/i.exec(value);
   const name = month ? MONTHS[month[1]!.toLowerCase().slice(0, 3)] : undefined;
   if (month && name) {
     const index = MONTH_INDEX.indexOf(month[1]!.toLowerCase().slice(0, 3));
     const year = month[2] ? Number(month[2]) : now.getUTCMonth() <= index ? now.getUTCFullYear() : now.getUTCFullYear() + 1;
+    // An explicit month already past is a stale estimate: still for sale, no date.
+    if (year < now.getUTCFullYear() || (year === now.getUTCFullYear() && index < now.getUTCMonth())) return { status: "Quick Move-In", readyNow: false, moveInDate: null };
     return { status: `Quick Move-In (${name} ${year})`, readyNow: false, moveInDate: `${name} ${year}` };
   }
   return { status: null, readyNow: false, moveInDate: null };
@@ -54,8 +57,9 @@ export type CenturyPage = { community: Json | null; homes: Array<PrivatePlanOrHo
 /** The homes in the page's ProductGroup; null when the page has no ProductGroup at all. */
 export function parseCenturyRecords(html: string, host: string): CenturyPage | null {
   const records = jsonLdRecords(html);
-  const group = records.find((record) => record["@type"] === "ProductGroup");
-  const community = records.find((record) => record["@type"] === "HomeAndConstructionBusiness") ?? null;
+  const typed = (record: Json, type: string) => (Array.isArray(record["@type"]) ? record["@type"] : [record["@type"]]).includes(type);
+  const group = records.find((record) => typed(record, "ProductGroup"));
+  const community = records.find((record) => typed(record, "HomeAndConstructionBusiness")) ?? null;
   if (!group || !Array.isArray(group.hasVariant)) return null;
   const homes: CenturyPage["homes"] = [];
   for (const raw of group.hasVariant) {
@@ -114,6 +118,9 @@ export class CenturyAdapter implements DealAdapter {
     const root = parseHtmlElements(page.text);
     if (!records || !records.community || !root) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (records.homes.length > CENTURY_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+    // A variant of another community on the host (a nearby-homes block) is never this community's inventory.
+    const base = community.pathname.replace(/\/+$/, "").toLowerCase();
+    if (records.homes.some((home) => !home.path.toLowerCase().startsWith(`${base}/`))) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     // More home cards on the page than records means the records changed shape, not that homes sold.
     const cardCount = (page.text.match(/class="[^"]*\bstreet-number-text\b/g) ?? []).length;
     if (cardCount > records.homes.length) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

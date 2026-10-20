@@ -70,6 +70,11 @@ describe("Century Communities reader: records", () => {
     expect(centuryStatus("Est. Completion: Jan. Move In.", NOW)).toEqual({ status: "Quick Move-In (January 2027)", readyNow: false, moveInDate: "January 2027" });
     expect(centuryStatus("Est. Completion: Move-in Ready!", NOW)).toEqual({ status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null });
     expect(centuryStatus("Est. Completion: Sold", NOW)).toEqual({ status: "Sold", readyNow: false, moveInDate: null });
+    // In a completion field "pending" is an unknown date, not a sale; an explicit month already past is no date.
+    expect(centuryStatus("Est. Completion: Pending", NOW)).toEqual({ status: null, readyNow: false, moveInDate: null });
+    expect(centuryStatus("Est. Completion: Dec. 2025 Move In.", NOW)).toEqual({ status: "Quick Move-In", readyNow: false, moveInDate: null });
+    // @type given as an array reads the same.
+    expect(parseCenturyRecords(communityPage().replace('"@type":"ProductGroup"', '"@type":["ProductGroup","Thing"]').replace('"@type":"HomeAndConstructionBusiness"', '"@type":["HomeAndConstructionBusiness","LocalBusiness"]'), "www.centurycommunities.com")!.homes).toHaveLength(3);
     expect(centuryStatus("Est. Completion: TBD", NOW)).toEqual({ status: null, readyNow: false, moveInDate: null });
     expect(centuryStatus(null, NOW)).toEqual({ status: null, readyNow: false, moveInDate: null });
     const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
@@ -95,6 +100,15 @@ describe("Century Communities reader: records", () => {
     const held = await loadOfficialDeals(config, { fetcher: fewerRecords });
     expect(held.holdReasons).toEqual(["expected_community_container_not_found"]);
     expect(held.public.homes).toEqual([]);
+    // A variant of another community on the host is not this community's inventory.
+    const nearby = JSON.stringify(variant({ ...HOMES[0]!, slug: "7a-1-other-way", street: "1 OTHER WAY" })).replace(/fixture-grove\/lots/g, "other-grove/lots");
+    const otherCommunity = vi.fn(async () => new Response(communityPage().replace('"hasVariant":[', `"hasVariant":[${nearby},`), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: otherCommunity })).holdReasons).toEqual(["invalid_inventory_response"]);
+    // The photo linked before the heading: the plan and the previous price still come from the home's own card, never a neighbour's.
+    const photoFirst = communityPage().replace(/<div class="card-img"><img src="([^"]+)" alt="Front"><\/div>/g, (_match, src: string) => `<div class="card-img"><a href="${src.includes("9208") ? "/find-your-new-home/texas/san-antonio-metro/san-antonio/fixture-grove/lots/19177a-9208-fixture-rdg/" : "/x/"}"><img src="${src}" alt="Front"></a></div>`).replace('<span class="title"> Frederick - 2260 </span>', "");
+    const linkedPhoto = vi.fn(async () => new Response(photoFirst, { status: 200, headers: { "content-type": "text/html" } }));
+    const own = await loadOfficialDeals(config, { fetcher: linkedPhoto, now: () => NOW });
+    expect(own.private.homes.map((home) => [home.privatePlanName, home.previousPrice])).toEqual([["Easton", 330_880], [null, null], ["Riley", 350_695]]);
     // A card without its completion: the home has no status, so the sync holds the run.
     const noEst = vi.fn(async () => new Response(communityPage().replace(/<span class="est-complete-date">[\s\S]*?Move In\.<\/span>/, ""), { status: 200, headers: { "content-type": "text/html" } }));
     const unlabelled = await loadOfficialDeals(config, { fetcher: noEst, now: () => NOW });

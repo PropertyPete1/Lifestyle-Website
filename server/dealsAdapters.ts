@@ -740,40 +740,51 @@ export function cardAroundLink(html: string, root: HtmlElement, path: string, op
   const anchors = all.filter((element) => element.tag === "a" && element.attributes.href && decodeHtmlEntities(element.attributes.href).split(/[?#]/)[0]!.replace(/\/+$/, "").endsWith(normalized));
   const maxLength = options.maxStatusLength ?? 40;
   // The walk stops at the first ancestor that also holds another home's link: beyond it lies the list, and a neighbour's status is not this home's.
-  // Readers that know every home's path pass the others; otherwise another page in the same folder counts as a neighbour.
-  const directory = normalized.slice(0, normalized.lastIndexOf("/") + 1);
-  const others = options.otherHomePaths?.map((other) => other.replace(/\/+$/, "")).filter((other) => other && other !== normalized);
+  // Readers that know every home's path pass the others; besides those, another page as deep as this one under the same
+  // community folder (two levels up: ".../community/lots/<home>" or ".../community/<plan>/<home>") counts as a neighbour.
+  const segments = normalized.split("/");
+  const communityFolder = `${segments.slice(0, -2).join("/")}/`;
+  const others = (options.otherHomePaths ?? []).map((other) => other.replace(/\/+$/, "")).filter((other) => other && other !== normalized);
   const siblingLink = (element: HtmlElement) => element.tag === "a" && Boolean(element.attributes.href) && (() => {
     const href = decodeHtmlEntities(element.attributes.href!).split(/[?#]/)[0]!.replace(/\/+$/, "");
     if (href.endsWith(normalized)) return false;
-    if (others) return others.some((other) => href.endsWith(other));
-    return href.includes(directory) && href.slice(href.indexOf(directory) + directory.length).length > 0;
+    if (others.some((other) => href.endsWith(other))) return true;
+    const at = href.indexOf(communityFolder);
+    if (at < 0) return false;
+    const tail = href.slice(at + communityFolder.length).split("/").filter(Boolean);
+    return tail.length === 2;
   })();
+  const isStatus = (element: HtmlElement) => options.statusClasses.some((token) => elementClass(element, token)) && elementText(element, html).length <= maxLength;
+  // The card: from the node holding the status, up while the parent still holds only this home's links and one status.
+  const cardTop = (node: HtmlElement) => {
+    let top = node;
+    for (let up = 0; up < 3; up++) {
+      const parent = parents.get(top);
+      if (!parent) break;
+      const inside = descendants(parent);
+      if (inside.some(siblingLink) || inside.filter(isStatus).length > 1) break;
+      top = parent;
+    }
+    return top;
+  };
   const found: Array<{ status: string | null; previousPrice: number | null; fields: Record<string, string | null>; card: HtmlElement | null }> = [];
   for (const anchor of anchors) {
   let node: HtmlElement | undefined = anchor;
   for (let depth = 0; node && depth < 8; depth++) {
     const inside = descendants(node);
     if (inside.some(siblingLink)) break;
-    const statuses = inside.filter((element) => options.statusClasses.some((token) => elementClass(element, token)) && elementText(element, html).length <= maxLength);
+    const statuses = inside.filter(isStatus);
     // Two status elements under one ancestor means the walk has left the card: this home's status is not among them.
     if (statuses.length > 1) break;
     const status = statuses[0];
     if (status) {
-      let previous: RegExpExecArray | null = null;
-      let card: HtmlElement | undefined = node;
-      for (let up = 0; card && up < 3 && !previous; up++, card = parents.get(card)) {
-        const was = descendants(card).find((element) => /strike|was-?price|previous-price|old-price/i.test(element.attributes.class ?? "") || element.tag === "del" || element.tag === "s");
-        previous = was ? /\$\s*([\d,]{6,})/.exec(elementText(was, html)) : null;
-        if (previous) break;
-      }
-      // Other fields may sit in a sibling block of the same card, like the struck-through price.
+      // The struck-through price and other fields may sit in a sibling block of the same card, never in a neighbour's.
+      const within = descendants(cardTop(node));
+      const was = within.find((element) => /strike|was-?price|previous-price|old-price/i.test(element.attributes.class ?? "") || element.tag === "del" || element.tag === "s");
+      const previous = was ? /\$\s*([\d,]{6,})/.exec(elementText(was, html)) : null;
       const fields: Record<string, string | null> = {};
       for (const [name, classes] of Object.entries(options.fields ?? {})) {
-        let found: HtmlElement | undefined;
-        for (let scope: HtmlElement | undefined = node, up = 0; scope && up < 3 && !found; up++, scope = parents.get(scope)) {
-          found = descendants(scope).find((item) => classes.some((token) => elementClass(item, token)));
-        }
+        const found = within.find((item) => classes.some((token) => elementClass(item, token)));
         fields[name] = found ? elementText(found, html) || null : null;
       }
       found.push({ status: elementText(status, html) || null, previousPrice: previous ? Number(previous[1]!.replace(/,/g, "")) : null, fields, card: node });
@@ -1119,7 +1130,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "M/I Homes") { config.builder.push("M/I Homes", "M/I"); config.lender.push("M/I Financial, LLC", "M/I Financial"); }
   if (builder === "Chesmar") { config.builder.push("Chesmar Homes", "Chesmar"); config.lender.push("HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HomeAmerican", "HMC"); }
   if (builder === "Perry Homes") { config.builder.push("Perry Homes", "Perry"); config.lender.push("Parkstone Mortgage", "Parkstone", "Crestmark Mortgage", "Crestmark"); }
-  if (builder === "Century Communities") { config.builder.push("Century Communities", "Century Complete", "Century"); config.lender.push("Inspire Home Loans", "Inspire"); }
+  if (builder === "Century Communities") { config.builder.push("Century Communities", "Century Complete", "Century"); config.lender.push("Inspire Home Loans"); }
   if (builder === "KB Home") { config.builder.push("KB Home", "KB Homes", "KB"); config.lender.push("KBHS Home Loans", "KBHS"); }
   if (builder === "Toll Brothers") { config.builder.push("Toll Brothers", "Toll Brothers Inc"); config.lender.push("Toll Brothers Mortgage Company", "Toll Brothers Mortgage", "TBI Mortgage"); }
   if (builder === "Highland Homes") { config.builder.push("Highland Homes", "Highland"); config.lender.push("Highland HomeLoans", "Highland Home Loans"); }

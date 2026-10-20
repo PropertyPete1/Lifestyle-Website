@@ -80,6 +80,11 @@ describe("Highland Homes reader: cards", () => {
     // A card without a status tag, or with wording the reader does not know, has no status (the sync holds the run).
     expect(parseHighlandCards(communityPage({ homes: [{ ...HOMES[0]!, tag: null }] }), COMMUNITY)![0]).toMatchObject({ status: null });
     expect(highlandStatus("Last chance!")).toEqual({ status: null, readyNow: false, moveInDate: null });
+    // A completion month already past is a stale estimate: still for sale, no date.
+    expect(highlandStatus("Est. Completion - Sep '26", new Date("2026-10-20T12:00:00Z"))).toEqual({ status: "Quick Move-In", readyNow: false, moveInDate: null });
+    expect(highlandStatus("Est. Completion - Oct '26", new Date("2026-10-20T12:00:00Z"))).toEqual({ status: "Quick Move-In (October 2026)", readyNow: false, moveInDate: "October 2026" });
+    // A card without its link is not read on a guess: no status.
+    expect(parseHighlandCards(communityPage().replace('href="/san-antonio/san-antonio/fixture-ranch/760-026" ', ""), COMMUNITY)![0]).toMatchObject({ status: null });
     expect(highlandStatus("Sold")).toEqual({ status: "Sold", readyNow: false, moveInDate: null });
     expect(highlandBaths("4/1")).toBe(4.5);
     expect(highlandBaths("3")).toBe(3);
@@ -112,6 +117,15 @@ describe("Highland Homes reader: a community", () => {
     const held = await loadOfficialDeals(config, { fetcher: renamed });
     expect(held.holdReasons).toEqual(["expected_community_container_not_found"]);
     expect(held.public.homes).toEqual([]);
+    // The card class renamed and the count sentence reworded: zero cards is not zero homes, so the run is held rather than every home swept to sold.
+    const reworded = vi.fn(async () => new Response(communityPage().replaceAll("homeSpec", "homeCard").replace("3 quick move-in homes", "Quick move-in homes available now"), { status: 200, headers: { "content-type": "text/html" } }));
+    const swept = await loadOfficialDeals(config, { fetcher: reworded });
+    expect(swept.holdReasons).toEqual(["expected_community_container_not_found"]);
+    // A page that counts zero homes is a community with none for sale.
+    const zero = vi.fn(async () => new Response(communityPage({ homes: [], count: 0 }), { status: 200, headers: { "content-type": "text/html" } }));
+    const none = await loadOfficialDeals(config, { fetcher: zero });
+    expect(none.holdReasons).toEqual([]);
+    expect(none.private.homes).toEqual([]);
     // No office line: not a community page either.
     const noOffice = vi.fn(async () => new Response(communityPage({ office: false }), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: noOffice })).holdReasons).toEqual(["expected_community_container_not_found"]);

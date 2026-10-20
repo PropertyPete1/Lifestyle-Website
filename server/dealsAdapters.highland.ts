@@ -30,7 +30,7 @@ export function highlandBaths(value: string): number | null {
 }
 
 /** The status tag's meaning: ready now, a completion month, sold, or unknown wording (no status: the run is held). */
-export function highlandStatus(tag: string | null): { status: string | null; readyNow: boolean; moveInDate: string | null } {
+export function highlandStatus(tag: string | null, now: Date = new Date()): { status: string | null; readyNow: boolean; moveInDate: string | null } {
   const text = (tag ?? "").replace(/\s+/g, " ").trim();
   if (!text) return { status: null, readyNow: false, moveInDate: null };
   if (/sold|under\s+contract|pending/i.test(text)) return { status: "Sold", readyNow: false, moveInDate: null };
@@ -39,6 +39,10 @@ export function highlandStatus(tag: string | null): { status: string | null; rea
   if (completion) {
     const month = MONTHS[completion[1]!.toLowerCase().slice(0, 3)];
     const year = completion[2]!.length === 2 ? `20${completion[2]}` : completion[2]!;
+    // A completion month already past is a stale estimate: the home is still for sale, with no date.
+    const index = Object.keys(MONTHS).indexOf(completion[1]!.toLowerCase().slice(0, 3));
+    const past = Number(year) < now.getUTCFullYear() || (Number(year) === now.getUTCFullYear() && index < now.getUTCMonth());
+    if (month && past) return { status: "Quick Move-In", readyNow: false, moveInDate: null };
     if (month) return { status: `Quick Move-In (${month} ${year})`, readyNow: false, moveInDate: `${month} ${year}` };
   }
   return { status: null, readyNow: false, moveInDate: null };
@@ -69,14 +73,15 @@ export function highlandHomeCount(html: string): number | null {
 }
 
 /** Every home card on the page; null when the page has no home section at all. */
-export function parseHighlandCards(html: string, communityUrl: string): PrivatePlanOrHome[] | null {
+export function parseHighlandCards(html: string, communityUrl: string, now: Date = new Date()): PrivatePlanOrHome[] | null {
   const community = asUrl(communityUrl);
   const root = parseHtmlElements(html);
   if (!community || !root) return null;
   const facts = highlandCommunityFacts(html);
   const cityLine = facts.city ? `${facts.city}, ${facts.zip ? `TX ${facts.zip}` : "TX"}` : null;
   const cards = descendants(root).filter((element) => element.tag === "a" && elementClass(element, "homeSpec"));
-  if (!cards.length && highlandHomeCount(html) === null && !/quick\s+move-?in/i.test(html)) return null;
+  // No cards is proof of nothing unless the page counts its homes ("0 quick move-in homes"): a renamed card class is a layout change.
+  if (!cards.length && highlandHomeCount(html) === null) return null;
   const homes: PrivatePlanOrHome[] = [];
   for (const card of cards) {
     const inner = descendants(card);
@@ -93,7 +98,7 @@ export function parseHighlandCards(html: string, communityUrl: string): PrivateP
     const href = card.attributes.href ? decodeHtmlEntities(card.attributes.href) : null;
     const page = href ? asUrl(new URL(href, community).toString()) : null;
     const tag = read("home-tag");
-    const status = highlandStatus(tag);
+    const status = highlandStatus(tag, now);
     const plan = read("homeUpgrades");
     const planName = plan ? /^(.*?\bPlan)\b/.exec(plan)?.[1] ?? plan.split(/\s+with\s+/)[0] ?? null : null;
     const image = inner.find((element) => element.tag === "img")?.attributes["data-src"] ?? inner.find((element) => element.tag === "img")?.attributes.src ?? null;
@@ -103,7 +108,8 @@ export function parseHighlandCards(html: string, communityUrl: string): PrivateP
       privateName: street,
       privateAddress: street && cityLine ? `${street}, ${cityLine}` : street,
       privatePlanName: planName ? normalize(planName) : null,
-      status: street && price ? status.status : null,
+      // A card without its link, street or price is not read on a guess: no status, so the run is held.
+      status: street && price && page && sameOfficialHost(page, HIGHLAND_HOST) ? status.status : null,
       price,
       bedrooms: details.has("beds") ? Number(details.get("beds")) || null : null,
       bathrooms: details.has("baths") ? highlandBaths(details.get("baths")!) : null,
@@ -131,7 +137,7 @@ export class HighlandAdapter implements DealAdapter {
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", HIGHLAND_HOST);
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
-    const homes = parseHighlandCards(page.text, community.toString());
+    const homes = parseHighlandCards(page.text, community.toString(), now());
     const count = highlandHomeCount(page.text);
     // Without the home section or the office address this is not a community page; fewer cards than the page counts means the card markup changed.
     if (!homes || !highlandCommunityFacts(page.text).street) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

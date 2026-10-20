@@ -31,7 +31,8 @@ name, sales address and phone (and a price range when there is one).
 - When something new is added, the sync recipients get one email listing it.
 
 Builders with discovery today: Chesmar, M/I Homes, D.R. Horton, Pulte, Centex,
-Del Webb, First America Homes, Coventry Homes, Davidson Homes and Highland Homes
+Del Webb, First America Homes, Coventry Homes, Davidson Homes, Highland Homes and
+Century Communities
 (Perry Homes has a reader; its communities come from the research list). A builder whose listing carries the community's record (PulteGroup) is
 added without reading a page. Each new builder
 gets a reader (its community page format) and a discovery entry (its sitemap,

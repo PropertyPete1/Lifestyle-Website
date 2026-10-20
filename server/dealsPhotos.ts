@@ -48,6 +48,7 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "media.firstamericahomes.com",
   "media.coventryhomes.com",
   "media.hhomesltd.com",
+  "www.centurycommunities.com",
 ]);
 const ACCEPTED_IMAGE_FORMATS = new Set(["jpeg", "png", "webp", "avif", "gif", "heif"]);
 

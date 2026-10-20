@@ -95,3 +95,10 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Community line:** `#salesOfficeAddressDirectionsLink` ("13316 Sweet Acacia, San Antonio, TX 78245"), `<h1><strong>Briggs Ranch</strong>`, "O: 210-686-1496", and a `maps.google.com/maps?q=loc:LAT,LNG(` link; no schema.org record. Discovery reads these off the page (reader-specific record).
 - **Incentives:** a promotion overlay ("Rates as Low as 4.99% / Or up to $50,000 in savings!") linking to an outside campaign page with no terms; not read.
 - **Scrub:** Highland Homes, Highland; lender Highland HomeLoans.
+
+## Century Communities reader (added 2026-10-20)
+
+- **Community source:** `https://www.centurycommunities.com/find-your-new-home/texas/san-antonio-metro/<city>/<community>/` (sitemap lists the metro's community pages and, under each, `lots/<lot>-<address-slug>/` home pages; discovery keeps the community pages only).
+- **Site shape:** server-rendered (about 490 KB). One schema.org `ProductGroup` carries the homes for sale as `hasVariant` Products: `name` "9122 OCOTILLO RDG, San Antonio, TX 78222", `description` "3 beds, 2 baths, 1,388 sq ft", `offers.price`, `sku`, `url`, one `image` on the official host. The community's own record is `HomeAndConstructionBusiness` (address, phone, geo). Each home also has a card (`.street-number-text` link, `.est-complete-date` "Est. Completion: Dec. Move In." / "Move-in Ready!", `.title` plan "Easton - 1388", `.wasPrice` for a drop). The reader reads the records and takes completion, plan and the previous price from the card around the home's link; more cards than records holds the run. A completion month without a year is the next such month. Floor plans are not on the page.
+- **Incentives:** a header line ("Flexible Tours | Below-Market Rates | Made-for-You Financing Options") with no terms; not read.
+- **Scrub:** Century Communities, Century Complete, Century; lender Inspire Home Loans.

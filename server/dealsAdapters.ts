@@ -6,12 +6,13 @@ import { PulteGroupAdapter } from "./dealsAdapters.pultegroup";
 import { HomefinitiAdapter } from "./dealsAdapters.homefiniti";
 import { DavidsonAdapter } from "./dealsAdapters.davidson";
 import { HighlandAdapter } from "./dealsAdapters.highland";
+import { CenturyAdapter } from "./dealsAdapters.century";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -227,8 +228,9 @@ export const PULTEGROUP_HOSTS = { Pulte: "www.pulte.com", Centex: "www.centex.co
 export const HOMEFINITI_HOSTS = { "First America Homes": "www.firstamericahomes.com", "Coventry Homes": "www.coventryhomes.com" } as const;
 export const DAVIDSON_HOST = "www.davidsonhomes.com";
 export const HIGHLAND_HOST = "www.highlandhomes.com";
+export const CENTURY_HOST = "www.centurycommunities.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -717,6 +719,59 @@ export function elementText(element: HtmlElement, html: string): string {
   return htmlToText(html.slice(element.contentStart, element.contentEnd));
 }
 
+/**
+ * The card around a home's link on a listing page: the nearest ancestor of the
+ * link that holds a status element (by class token), its text, a struck-through
+ * price in the same card (one or two levels up, where a platform splits badge
+ * and prices), and any other class-named fields asked for. Null status when no
+ * card holds the link.
+ */
+export function cardAroundLink(html: string, root: HtmlElement, path: string, options: { statusClasses: readonly string[]; maxStatusLength?: number; fields?: Readonly<Record<string, readonly string[]>>; otherHomePaths?: readonly string[] }): { status: string | null; previousPrice: number | null; fields: Record<string, string | null>; card: HtmlElement | null } {
+  const all = descendants(root);
+  const parents = new Map<HtmlElement, HtmlElement>();
+  for (const element of all) for (const child of element.children) parents.set(child, element);
+  const normalized = path.replace(/\/+$/, "");
+  const anchor = all.find((element) => element.tag === "a" && element.attributes.href && decodeHtmlEntities(element.attributes.href).split(/[?#]/)[0]!.replace(/\/+$/, "").endsWith(normalized));
+  const maxLength = options.maxStatusLength ?? 40;
+  // The walk stops at the first ancestor that also holds another home's link: beyond it lies the list, and a neighbour's status is not this home's.
+  // Readers that know every home's path pass the others; otherwise another page in the same folder counts as a neighbour.
+  const directory = normalized.slice(0, normalized.lastIndexOf("/") + 1);
+  const others = options.otherHomePaths?.map((other) => other.replace(/\/+$/, "")).filter((other) => other && other !== normalized);
+  const siblingLink = (element: HtmlElement) => element.tag === "a" && Boolean(element.attributes.href) && (() => {
+    const href = decodeHtmlEntities(element.attributes.href!).split(/[?#]/)[0]!.replace(/\/+$/, "");
+    if (href.endsWith(normalized)) return false;
+    if (others) return others.some((other) => href.endsWith(other));
+    return href.includes(directory) && href.slice(href.indexOf(directory) + directory.length).length > 0;
+  })();
+  let node: HtmlElement | undefined = anchor;
+  for (let depth = 0; node && depth < 8; depth++) {
+    const inside = descendants(node);
+    if (inside.some(siblingLink)) break;
+    const status = inside.find((element) => options.statusClasses.some((token) => elementClass(element, token)) && elementText(element, html).length <= maxLength);
+    if (status) {
+      let previous: RegExpExecArray | null = null;
+      let card: HtmlElement | undefined = node;
+      for (let up = 0; card && up < 3 && !previous; up++, card = parents.get(card)) {
+        const was = descendants(card).find((element) => /strike|was-?price|previous-price|old-price/i.test(element.attributes.class ?? "") || element.tag === "del" || element.tag === "s");
+        previous = was ? /\$\s*([\d,]{6,})/.exec(elementText(was, html)) : null;
+        if (previous) break;
+      }
+      // Other fields may sit in a sibling block of the same card, like the struck-through price.
+      const fields: Record<string, string | null> = {};
+      for (const [name, classes] of Object.entries(options.fields ?? {})) {
+        let found: HtmlElement | undefined;
+        for (let scope: HtmlElement | undefined = node, up = 0; scope && up < 3 && !found; up++, scope = parents.get(scope)) {
+          found = descendants(scope).find((item) => classes.some((token) => elementClass(item, token)));
+        }
+        fields[name] = found ? elementText(found, html) || null : null;
+      }
+      return { status: elementText(status, html) || null, previousPrice: previous ? Number(previous[1]!.replace(/,/g, "")) : null, fields, card: node };
+    }
+    node = parents.get(node);
+  }
+  return { status: null, previousPrice: null, fields: {}, card: null };
+}
+
 function classText(elements: readonly HtmlElement[], html: string, token: string): string | null {
   const element = elements.find((item) => elementClass(item, token));
   return element ? elementText(element, html) || null : null;
@@ -1040,6 +1095,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "M/I Homes") { config.builder.push("M/I Homes", "M/I"); config.lender.push("M/I Financial, LLC", "M/I Financial"); }
   if (builder === "Chesmar") { config.builder.push("Chesmar Homes", "Chesmar"); config.lender.push("HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HomeAmerican", "HMC"); }
   if (builder === "Perry Homes") { config.builder.push("Perry Homes", "Perry"); config.lender.push("Parkstone Mortgage", "Parkstone", "Crestmark Mortgage", "Crestmark"); }
+  if (builder === "Century Communities") { config.builder.push("Century Communities", "Century Complete", "Century"); config.lender.push("Inspire Home Loans", "Inspire"); }
   if (builder === "Highland Homes") { config.builder.push("Highland Homes", "Highland"); config.lender.push("Highland HomeLoans", "Highland Home Loans"); }
   if (builder === "Davidson Homes") { config.builder.push("Davidson Homes", "Davidson"); config.lender.push("NorthStar Mortgage Advisors", "NorthStar Mortgage", "NorthStar"); }
   if (builder === "First America Homes") { config.builder.push("First America Homes", "First America"); }
@@ -1680,6 +1736,7 @@ const pulteGroupAdapters: Partial<Record<keyof typeof PULTEGROUP_HOSTS, DealAdap
 const homefinitiAdapters: Partial<Record<keyof typeof HOMEFINITI_HOSTS, DealAdapter>> = {};
 let davidsonAdapter: DealAdapter | null = null;
 let highlandAdapter: DealAdapter | null = null;
+let centuryAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
@@ -1693,6 +1750,7 @@ export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   get "Coventry Homes"() { return (homefinitiAdapters["Coventry Homes"] ??= new HomefinitiAdapter("Coventry Homes")); },
   get "Davidson Homes"() { return (davidsonAdapter ??= new DavidsonAdapter()); },
   get "Highland Homes"() { return (highlandAdapter ??= new HighlandAdapter()); },
+  get "Century Communities"() { return (centuryAdapter ??= new CenturyAdapter()); },
   Manual: new ManualAdapter(),
 };
 

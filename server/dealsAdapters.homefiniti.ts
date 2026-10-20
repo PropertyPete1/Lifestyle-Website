@@ -1,5 +1,5 @@
 import {
-  HOMEFINITI_HOSTS, asUrl, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
+  HOMEFINITI_HOSTS, asUrl, cardAroundLink, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -112,29 +112,10 @@ function planNameFromPath(value: string): string | null {
 
 const STATUS_CLASSES = ["status", "status-text", "spec-status", "home-status"];
 
-/** The card around a home's link: the nearest ancestor that holds a status element. */
-function cardFacts(html: string, root: HtmlElement, path: string): { status: string | null; previousPrice: number | null } {
-  const all = descendants(root);
-  const parents = new Map<HtmlElement, HtmlElement>();
-  for (const element of all) for (const child of element.children) parents.set(child, element);
-  const normalized = path.replace(/\/+$/, "");
-  const anchor = all.find((element) => element.tag === "a" && element.attributes.href && decodeHtmlEntities(element.attributes.href).split(/[?#]/)[0]!.replace(/\/+$/, "").endsWith(normalized));
-  let node: HtmlElement | undefined = anchor;
-  for (let depth = 0; node && depth < 8; depth++) {
-    const inside = descendants(node);
-    const status = inside.find((element) => STATUS_CLASSES.some((token) => elementClass(element, token)) && elementText(element, html).length <= 40);
-    if (status) {
-      // The struck-through price may sit in a sibling block of the same card (Coventry: badge above the photo, prices in the card body).
-      let previous: RegExpExecArray | null = null;
-      for (let card: HtmlElement | undefined = node, up = 0; card && up < 3 && !previous; up++, card = parents.get(card)) {
-        const was = descendants(card).find((element) => /strike|was-price|previous-price|old-price/i.test(element.attributes.class ?? "") || element.tag === "del" || element.tag === "s");
-        previous = was ? /\$\s*([\d,]{6,})/.exec(elementText(was, html)) : null;
-      }
-      return { status: elementText(status, html) || null, previousPrice: previous ? Number(previous[1]!.replace(/,/g, "")) : null };
-    }
-    node = parents.get(node);
-  }
-  return { status: null, previousPrice: null };
+/** The card around a home's link: its status element's text and a struck-through price (shared helper, status classes of this platform). */
+function cardFacts(html: string, root: HtmlElement, path: string, otherHomePaths: readonly string[]): { status: string | null; previousPrice: number | null } {
+  const card = cardAroundLink(html, root, path, { statusClasses: STATUS_CLASSES, otherHomePaths });
+  return { status: card.status, previousPrice: card.previousPrice };
 }
 
 /** The sync publishes a home as a quick move-in only when its status says so; every home on the "available homes" list is one. */
@@ -176,9 +157,10 @@ export class HomefinitiAdapter implements DealAdapter {
     const cardCount = descendants(root).filter((element) => STATUS_CLASSES.some((token) => elementClass(element, token)) && elementText(element, page.text).length <= 40).length;
     if (cardCount > records.homes.length) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     privateSnapshot.communityFacts = parseCommunityFacts(page.text);
+    const homePaths = records.homes.map((home) => new URL(home.sourceUrl).pathname);
     for (const record of records.homes) {
       const { kind: _kind, ...home } = record;
-      const card = cardFacts(page.text, root, new URL(home.sourceUrl).pathname);
+      const card = cardFacts(page.text, root, new URL(home.sourceUrl).pathname, homePaths);
       // A home listed without a card is not on the page the visitor sees: a layout change holds the run rather than publishing a guess.
       if (!card.status) return failedResult(config, fetchedAt, privateSnapshot, ["unlabelled_home_status"]);
       const status = homefinitiStatus(card.status);

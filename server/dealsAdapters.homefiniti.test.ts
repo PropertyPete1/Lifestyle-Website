@@ -152,6 +152,9 @@ describe("Homefiniti reader: a community", () => {
     expect((await loadOfficialDeals(config, { fetcher: noBusiness })).holdReasons).toEqual(["expected_community_container_not_found"]);
     const noCards = vi.fn(async () => new Response(communityPage({ cards: false }), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: noCards })).holdReasons).toEqual(["unlabelled_home_status"]);
+    // One card lost its status: a neighbour's status is never borrowed, so the run is held.
+    const oneUnlabelled = vi.fn(async () => new Response(communityPage().replace('<div class="status-text"> Move-In Ready </div>', ""), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: oneUnlabelled })).holdReasons).toEqual(["unlabelled_home_status"]);
     // The home records gone but the cards still there: a changed record shape, never three sold homes.
     const noRecords = vi.fn(async () => new Response(communityPage().replace(/"@type":\["Product","SingleFamilyResidence"\]/g, "\"@type\":[\"Thing\"]"), { status: 200, headers: { "content-type": "text/html" } }));
     const held = await loadOfficialDeals(config, { fetcher: noRecords });

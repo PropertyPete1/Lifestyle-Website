@@ -88,7 +88,8 @@ export function homesMatching<Home extends GatedBrowseHome>(community: GatedBrow
   const savedOnly = savedFilterOn(filters, saved);
   const communityLot = lotAcres(community.lotSizes, { field: true }) ?? lotAcres(community.label);
   return community.homes.filter((home) => {
-    if (filters.maxPrice !== null && !(home.price && home.price <= filters.maxPrice)) return false;
+    // "Under $200K" means below the cap, as on the landing page (a $200,000 home is not under $200K).
+    if (filters.maxPrice !== null && !(home.price && home.price < filters.maxPrice)) return false;
     if (filters.minBeds !== null && (bedsFrom(home.beds) ?? 0) < filters.minBeds) return false;
     if (filters.moveInReady && home.kind !== "quick_move_in") return false;
     if (filters.bigLots && (homeLotAcres(home.lotSize, communityLot) ?? 0) < BIG_LOT_ACRES) return false;

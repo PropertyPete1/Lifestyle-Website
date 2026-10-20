@@ -197,7 +197,12 @@ export async function saveIncentiveForCommunity(input: AdminIncentiveInput): Pro
   const db = await requireDb();
   const community = await requireCommunity(input.communityId);
   const { id, contractBy: rawContractBy, closeBy: rawCloseBy, communityId, manual, ...fields } = input;
-  if (id && !(await db.select({ id: dealIncentives.id }).from(dealIncentives).where(and(eq(dealIncentives.id, id), eq(dealIncentives.communityId, communityId))).limit(1))[0]) throw new DealsAdminError("NOT_FOUND", "Incentive not found.");
+  const existing = id ? (await db.select({ id: dealIncentives.id, normalizedText: dealIncentives.normalizedText, manual: dealIncentives.manual }).from(dealIncentives).where(and(eq(dealIncentives.id, id), eq(dealIncentives.communityId, communityId))).limit(1))[0] : undefined;
+  if (id && !existing) throw new DealsAdminError("NOT_FOUND", "Incentive not found.");
+  // On a community the sync keeps current, a new non-manual record would be replaced by the builder's own promo on the next
+  // refresh (or taken down when the page shows none): wording the builder's page does not show needs the manual override.
+  const synced = community.builder !== "Manual" && !community.manualMode && hasBuilderReader(community.builder);
+  if (!existing && !manual && synced) throw new DealsAdminError("BAD_REQUEST", "Turn on Manual override to publish wording the builder's page does not show; otherwise the next refresh replaces it.");
   const categories = storedScrubConfig(community);
   const publicText = scrubPrivateNames(fields.publicText.trim(), categories);
   if (hasPrivateTerm(publicText, categories)) throw new DealsAdminError("BAD_REQUEST", "Private names remain in incentive text.");
@@ -214,7 +219,9 @@ export async function saveIncentiveForCommunity(input: AdminIncentiveInput): Pro
   if (required.length) throw new DealsAdminError("BAD_REQUEST", `Required before publication: ${required.join(", ")}`);
   const now = new Date();
   const values = {
-    communityId, publicText, normalizedText: normalizedText(publicText), manual,
+    // A scraped record keeps the builder's text as its identity, so the next sync of that text re-confirms this saved record
+    // (with the admin's wording and values) instead of holding a fresh copy. A manual record is its own wording.
+    communityId, publicText, normalizedText: existing && !existing.manual && !manual ? existing.normalizedText : normalizedText(publicText), manual,
     headlineRate: normalizeRateFigure(fields.headlineRate), followOnRate: normalizeRateFigure(fields.followOnRate), followOnPeriod: fields.followOnPeriod ?? null, apr: normalizeRateFigure(fields.apr),
     loanType: fields.loanType ?? null, downPayment: fields.downPayment ?? null, repaymentTerms: fields.repaymentTerms ?? null,
     contractBy, closeBy, contractByManual: contractBy !== null, closeByManual: closeBy !== null, expiresAt: earliest(contractBy, closeBy),

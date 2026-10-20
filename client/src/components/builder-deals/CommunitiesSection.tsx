@@ -162,10 +162,11 @@ function IncentiveEditor({ community, active }: { community: CommunityRow; activ
   const text = (value: string) => (value.trim() ? value.trim() : null);
   const submit = () => {
     if (draft.publicText.trim().length < 2) { toast.error("Enter the incentive text."); return; }
-    // The same wording is updated in place; new wording starts a new record so a new promo never inherits an old deadline.
+    // The same wording is updated in place, and so is the live builder promo edited without the manual override (it stays tied to
+    // the builder's text); new manual wording starts a new record so a new promo never inherits an old deadline.
     const sameText = active ? active.publicText.replace(/\s+/g, " ").trim().toLowerCase() === draft.publicText.replace(/\s+/g, " ").trim().toLowerCase() : false;
     save.mutate({
-      id: sameText && active ? active.id : undefined, communityId: community.id, publicText: draft.publicText.trim(), manual: draft.manual,
+      id: active && (sameText || (!draft.manual && !active.manual)) ? active.id : undefined, communityId: community.id, publicText: draft.publicText.trim(), manual: draft.manual,
       contractBy: text(draft.contractBy), closeBy: text(draft.closeBy), headlineRate: text(draft.headlineRate), followOnRate: text(draft.followOnRate), followOnPeriod: text(draft.followOnPeriod),
       apr: text(draft.apr), loanType: text(draft.loanType), downPayment: text(draft.downPayment), repaymentTerms: text(draft.repaymentTerms),
     });

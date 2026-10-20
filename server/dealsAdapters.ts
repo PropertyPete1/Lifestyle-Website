@@ -637,12 +637,14 @@ function rateNear(text: string, pattern: RegExp): number | null {
 /** A rate figure with its APR beside it. */
 const APR_PAIRED_RATE = /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:[(\[]\s*\d+(?:\.\d+)?%\s*(?:APR|Annual\s+Percentage\s+Rate)|[(\[]\s*APR\s*\d+(?:\.\d+)?%|\/\s*\d+(?:\.\d+)?%\s*APR)/i;
 /** A figure written as a loan rate: "4.99% fixed", "4.99% 30-year fixed FHA", "4.99% financing", "4.99% FHA/VA". */
-export const RATE_FIGURE_WORDING = /(?<![\d.])(?:1\d|\d)(?:\.\d+)?%\s+(?:\d{1,2}[- ]?(?:year|yr)s?\.?\s+)?(?:fixed|financing|FHA|VA|USDA|conventional)\b/i;
+export const RATE_FIGURE_WORDING = /(?<![\d.])(?:1\d|\d)(?:\.\d+)?%\*?\s+(?:\d{1,2}[- ]?(?:year|yr)s?\.?\s+)?(?:fixed|financing|FHA|VA|USDA|conventional)\b/i;
 
-/** "Rates starting at 3.99%", "mortgage rates from 3.99%", "a rate of 3.99%". */
-const RATE_FROM_FIGURE = /\brates?\s+(?:starting\s+(?:at|from)|from|of|at)\s+(\d+(?:\.\d+)?)%/i;
-/** A percentage that is not a loan rate: a down payment, closing costs, a credit, a discount, a share of the price. */
-const NOT_A_RATE_AFTER = /^\s*(?:minimum\s+)?(?:down|of|off|toward|towards|in\s+closing|closing|seller|lender\s+credit|credit|commission|bonus|discount|cash\s+back|deposit|earnest|financing\b(?=[^.]*\b(?:USDA|VA|no\s+down|zero\s+down)))/i;
+/** "Rates starting at 3.99%", "mortgage rates from 3.99%", "a rate of 3.99%", "Starting at 3.99%*" (a price is written in dollars). */
+const RATE_FROM_FIGURE = /\b(?:rates?\s+(?:starting\s+(?:at|from)|from|of|at)|starting\s+(?:at|from))\s+(\d+(?:\.\d+)?)%/i;
+/** Words after a percentage that make it something other than a loan rate: a down payment, closing costs, a credit, a discount, a share of the price. */
+const NOT_A_RATE_AFTER = /^\*?\s*(?:\([^)]{0,40}\)\s*)?(?:minimum\s+|required\s+)?(?:down\b|of\b|off\b|toward|towards|in\s+(?:[A-Za-z-]+\s+){0,2}?(?:closing|seller|flex|lender|cash|credits?|incentives?|savings|upgrades|options)|closing|seller|lender[- ](?:credit|paid)|credit\b|commission|bonus\b(?!\s+(?:interest\s+)?rate)|discount\b(?!(?:ed)?\s+(?:interest\s+)?rate)|cash\s+back|deposit|earnest|flex\s+cash|financing\b(?=[^.]*\b(?:USDA|VA|no\s+down|zero\s+down)))/i;
+/** Words just before a percentage that make it something other than a loan rate ("down payment of 3.5%", "assistance up to 5%", "taxes about 2.3%"). */
+const NOT_A_RATE_BEFORE = /\b(?:down\s+payments?|assistance|closing\s+costs?|taxes|tax\s+rate|insurance|credit|flex\s+cash|commission|deposit|earnest\s+money|discount|savings|off)\s+(?:of\s+|up\s+to\s+|about\s+|around\s+|approximately\s+|as\s+low\s+as\s+|is\s+|at\s+|from\s+|equal\s+to\s+)?(?:\$[\d,]+\s+or\s+)?$/i;
 /**
  * Fail-safe rate mention: a percentage below 20 in a sentence that names a
  * rate, financing, a loan, a mortgage or a loan program, unless the words after
@@ -650,13 +652,17 @@ const NOT_A_RATE_AFTER = /^\s*(?:minimum\s+)?(?:down|of|off|toward|towards|in\s+
  * loans" is a rate; "3.5% down" and "3% toward closing costs" are not).
  */
 export function mentionsRate(text: string): boolean {
-  if (/\b(?:interest\s+rates?|APR|buy[- ]?down)\b/i.test(text) || RATE_FIGURE_WORDING.test(text) || RATE_FROM_FIGURE.test(text)) return true;
+  if (/\b(?:interest\s+rates?|APR|buy[- ]?down)\b/i.test(text) || RATE_FROM_FIGURE.test(text)) return true;
+  // "4.99% fixed", "4.99% FHA" unless the words before make it a down payment ("down payment of 3.5% FHA").
+  for (const match of Array.from(text.matchAll(new RegExp(RATE_FIGURE_WORDING.source, "gi")))) if (!NOT_A_RATE_BEFORE.test(text.slice(Math.max(0, (match.index ?? 0) - 60), match.index ?? 0))) return true;
   for (const sentence of text.split(/(?<=[.!?])\s+/)) {
-    if (!/\b(?:rates?|financing|loans?|mortgages?|FHA|VA|USDA|conventional)\b/i.test(sentence)) continue;
+    if (!/\b(?:rates?|financing|loans?|mortgages?|FHA|VA|USDA|conventional|fixed|lender|lock)\b/i.test(sentence)) continue;
     for (const match of Array.from(sentence.matchAll(/(\d+(?:\.\d+)?)%/g))) {
       const value = Number(match[1]);
       if (!Number.isFinite(value) || value <= 0 || value >= 20) continue;
-      if (NOT_A_RATE_AFTER.test(sentence.slice((match.index ?? 0) + match[0].length))) continue;
+      const at = match.index ?? 0;
+      if (NOT_A_RATE_AFTER.test(sentence.slice(at + match[0].length))) continue;
+      if (NOT_A_RATE_BEFORE.test(sentence.slice(Math.max(0, at - 60), at))) continue;
       return true;
     }
   }
@@ -1343,9 +1349,12 @@ function remainingPrivateTerm(text: string, terms: readonly string[] | DealScrub
  * address, an e-mail address, a phone number (with or without separators
  * or a leading 1) or an NMLS id; null when there is none.
  */
-const WEB_TLDS = ["com", "net", "org", "us", "io", "info", "biz", "co", "homes", "house", "realty", "realtor", "mortgage", "loans", "bank", "finance", "lending", "tx", "site", "app", "online", "today", "live", "team", "group", "builders", "properties", "estate", "land", "llc", "inc"];
+// Top-level domains that are not ordinary English words, so "homes.live the lifestyle" (two sentences glued) is never an address.
+const WEB_TLDS = ["com", "net", "org", "us", "io", "info", "biz", "co", "homes", "realty", "realtor", "mortgage", "loans", "bank", "lending", "tx", "app", "online", "builders", "properties", "llc"];
+// The domain's own name words never matter; the top-level domain is written in lower case, all upper case, or (for the
+// common ones) title case ("MiHomes.Com") — a glued sentence's next word ("homes.Homes") is title case but no common TLD.
 const WEB_ADDRESS = new RegExp(`\\b[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${WEB_TLDS.join("|")})\\b`);
-const WEB_ADDRESS_UPPER = new RegExp(`\\b[A-Z0-9-]+(?:\\.[A-Z0-9-]+)*\\.(?:${WEB_TLDS.map((tld) => tld.toUpperCase()).join("|")})\\b`);
+const WEB_ADDRESS_UPPER = new RegExp(`\\b[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${WEB_TLDS.map((tld) => tld.toUpperCase()).join("|")}|Com|Net|Org|Us|Co|Io)\\b`);
 
 export function publicTextResidue(text: string): "link" | "web address" | "e-mail address" | "phone number" | "NMLS id" | null {
   if (/\b(?:https?:\/\/|www\.)\S+/i.test(text)) return "link";

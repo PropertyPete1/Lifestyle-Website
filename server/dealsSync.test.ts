@@ -318,11 +318,12 @@ describe("official refresh: incentive lifecycle", () => {
     expect(db.rows(dealIncentives).find((row) => row.id === held.id)).toMatchObject({ held: true, active: false });
     expect(JSON.parse(String(db.rows(dealIncentives).find((row) => row.id === held.id)!.holdReason))).toEqual(["missing_follow_on_rate", "missing_follow_on_period", "missing_contract_deadline"]);
     expect(String(db.rows(dealCommunities)[0].incentiveHoldReason)).toMatch(/^missing_contract_deadline/);
-    expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(1);
-    // Still the same text next run: it waits for Accept, no second e-mail.
+    // This text's hold was e-mailed when it began: its return is shown in Admin, without a second e-mail.
+    expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(0);
+    // Still the same text next run: it waits for Accept, no e-mail.
     await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 15 * DAY) });
     expect(activeIncentives()).toEqual([]);
-    expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(1);
+    expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(0);
   });
 
   it("never leaves a promo the builder no longer shows live while builders alternate a held and a clean banner (A held → B → A → B → A)", async () => {
@@ -341,6 +342,54 @@ describe("official refresh: incentive lifecycle", () => {
     await run(HELD_TEXT, 15);
     expect(activeIncentives()).toEqual([]);
     expect(db.rows(dealIncentives).filter((row) => row.held)).toHaveLength(1);
+  });
+
+  it("takes the other scraped promo off whenever the builder shows a dismissed, expired or held text again, and keeps one held text at a time", async () => {
+    const DATED = "4.999% (5.737% APR) FHA 30-year fixed-rate financing on select homes with 3.5% down payment. Contracts written by 12/31/2026.";
+    const run = async (text: string | null, day: number, incentiveHoldReasons: DealHoldReason[] = []) => { mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: text, incentiveHoldReasons })); await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + day * DAY) }); };
+    // A held, then dismissed; B live; A shown again: B comes off, A stays dismissed.
+    await run(HELD_TEXT, 0);
+    const a = db.rows(dealIncentives).find((row) => row.held)!;
+    Object.assign(a, { held: false, active: false, holdReason: "dismissed" });
+    await run(DATED, 1);
+    expect(activeIncentives().map((row) => row.publicText)).toEqual([DATED]);
+    await run(HELD_TEXT, 2);
+    expect(activeIncentives()).toEqual([]);
+    expect(db.rows(dealIncentives).find((row) => row.id === a.id)?.holdReason).toBe("dismissed");
+    // The same through expiry.
+    Object.assign(a, { holdReason: "expired" });
+    await run(DATED, 3);
+    expect(activeIncentives().map((row) => row.publicText)).toEqual([DATED]);
+    await run(HELD_TEXT, 4);
+    expect(activeIncentives()).toEqual([]);
+    // Two held texts never coexist: holding one retires the other, so a stale one cannot be accepted.
+    Object.assign(a, { holdReason: null });
+    await run(HELD_TEXT, 5);
+    await run(`${HELD_TEXT} Call (210) 555-0142.`, 6);
+    expect(db.rows(dealIncentives).filter((row) => row.held)).toHaveLength(1);
+    await run(HELD_TEXT, 7);
+    expect(db.rows(dealIncentives).filter((row) => row.held).map((row) => row.id)).toEqual([a.id]);
+    expect(String(db.rows(dealCommunities)[0].incentiveHoldReason)).toMatch(/^missing_contract_deadline/);
+  });
+
+  it("takes a promo down, and retires a held one, when the builder's page is read and shows no incentive; a failed read keeps it and names the failure until the held text is read again", async () => {
+    const DATED = "4.999% (5.737% APR) FHA 30-year fixed-rate financing on select homes with 3.5% down payment. Contracts written by 12/31/2026.";
+    const run = async (text: string | null, day: number, incentiveHoldReasons: DealHoldReason[] = []) => { mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: text, incentiveHoldReasons })); await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + day * DAY) }); };
+    await run(DATED, 0);
+    expect(activeIncentives()).toHaveLength(1);
+    await run(null, 1, ["incentive_fetch_failed" as DealHoldReason]);
+    expect(activeIncentives()).toHaveLength(1);
+    await run(null, 2);
+    expect(activeIncentives()).toEqual([]);
+    await run(HELD_TEXT, 3);
+    const held = db.rows(dealIncentives).find((row) => row.held)!;
+    await run(null, 4, ["incentive_fetch_failed" as DealHoldReason]);
+    expect(String(db.rows(dealCommunities)[0].incentiveHoldReason)).toMatch(/incentive_fetch_failed/);
+    await run(HELD_TEXT, 5);
+    expect(String(db.rows(dealCommunities)[0].incentiveHoldReason)).toMatch(/^missing_contract_deadline/);
+    await run(null, 6);
+    expect(db.rows(dealIncentives).find((row) => row.id === held.id)).toMatchObject({ held: false, holdReason: "superseded" });
+    expect(db.rows(dealCommunities)[0].incentiveHoldReason).toBeNull();
   });
 
   it("keeps an accepted (edited) record live across syncs of the same builder text, and revives it as accepted when it returns", async () => {

@@ -146,6 +146,17 @@ describe("incentive admin", () => {
     }
   });
 
+  it("keeps the builder's text as a saved record's identity: re-saving an accepted offer (a date added) keeps it tied to the scrape, and new non-manual wording is refused on a synced community", async () => {
+    const heldId = db.seed(dealIncentives, { communityId, normalizedText: "builder text 4.99% call 210 555 0142", publicText: "4.99% (5.75% APR) FHA 30-year fixed with 3.5% down. Call (210) 555-0142.", headlineRate: "4.99%", apr: "5.75%", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5%", active: false, held: true, holdReason: JSON.stringify(["private_text_remaining"]), confirmedAt: new Date() });
+    await acceptIncentiveHold({ id: heldId, publicText: "4.99% (5.75% APR) FHA 30-year fixed with 3.5% down." });
+    await saveIncentiveForCommunity({ id: heldId, communityId, manual: false, publicText: "4.99% (5.75% APR) FHA 30-year fixed with 3.5% down.", headlineRate: "4.99%", apr: "5.75%", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5%", closeBy: "2026-12-31" });
+    expect(db.rows(dealIncentives).find((row) => row.id === heldId)).toMatchObject({ active: true, normalizedText: "builder text 4.99% call 210 555 0142", acceptedAt: expect.any(Date), closeByManual: true });
+    // Reworded without the manual override: still the builder's promo, so it keeps the builder's identity.
+    await saveIncentiveForCommunity({ id: heldId, communityId, manual: false, publicText: "Ask about 4.99% (5.75% APR) FHA 30-year fixed with 3.5% down.", headlineRate: "4.99%", apr: "5.75%", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5%" });
+    expect(db.rows(dealIncentives).find((row) => row.id === heldId)?.normalizedText).toBe("builder text 4.99% call 210 555 0142");
+    await expect(saveIncentiveForCommunity({ communityId, manual: false, publicText: "Ask about our rate." })).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("Manual override") });
+  });
+
   it("asks for the headline rate before accepting an offer that names two rates, and requires an APR for '4.99% 30-year fixed FHA' wording", async () => {
     const heldId = db.seed(dealIncentives, { communityId, normalizedText: "two rates", publicText: "Interest rates as low as 3.99%. 4.99% (6.62% APR) FHA 30-year fixed with 3.5% down.", headlineRate: "4.99%", apr: "6.62%", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5%", active: false, held: true, holdReason: JSON.stringify(["ambiguous_rate"]), confirmedAt: new Date() });
     const held = db.rows(dealIncentives).find((row) => row.id === heldId)! as typeof dealIncentives.$inferSelect;

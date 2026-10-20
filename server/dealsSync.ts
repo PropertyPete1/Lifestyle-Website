@@ -251,14 +251,15 @@ async function recordCatalogHold(community: CommunityRow, reason: string, now: D
   holds.push({ communityId: community.id, privateName: community.privateName, builder: community.builder, kind: "catalog", reason });
 }
 
-async function recordIncentiveHold(community: CommunityRow, reason: string | null, now: Date, holds: HoldNotice[], detail?: string) {
+/** Sets the community's incentive hold; a new hold is e-mailed unless `notify` is off (a hold that was e-mailed when it began). */
+async function recordIncentiveHold(community: CommunityRow, reason: string | null, now: Date, holds: HoldNotice[], detail?: string, notify = true) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   if ((community.incentiveHoldReason ?? null) === reason) return;
   const catalog = activeCatalogHold(community) ?? community.catalogHoldReason;
   await db.update(dealCommunities).set({ incentiveHoldReason: reason, incentiveHoldSeenAt: reason ? now : null, holdReason: summarizeHolds(catalog, reason) }).where(eq(dealCommunities.id, community.id));
   community.incentiveHoldReason = reason;
-  if (reason) holds.push({ communityId: community.id, privateName: community.privateName, builder: community.builder, kind: "incentive", reason, detail });
+  if (reason && notify) holds.push({ communityId: community.id, privateName: community.privateName, builder: community.builder, kind: "incentive", reason, detail });
 }
 
 function isoDay(value: Date | null | undefined): string | null {
@@ -311,12 +312,24 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const scraped = snapshot.private.incentive;
+  const rows = await db.select().from(dealIncentives).where(eq(dealIncentives.communityId, community.id)).orderBy(desc(dealIncentives.confirmedAt), desc(dealIncentives.id));
+  type Tx = Pick<typeof db, "update">;
+  // The two rules every successful read applies: a scraped promo the builder no longer shows is not live, and a held
+  // text the builder no longer shows is retired (it can no longer be accepted). A manual override is the admin's and stays.
+  const takeOffOthers = async (tx: Tx, keepId: number | null) => { for (const row of rows) if (row.active && !row.manual && row.id !== keepId) { await tx.update(dealIncentives).set({ active: false }).where(eq(dealIncentives.id, row.id)); row.active = false; } };
+  const retireOtherHeld = async (tx: Tx, keepId: number | null) => { for (const row of rows) if (row.held && row.id !== keepId) { await tx.update(dealIncentives).set({ held: false, active: false, holdReason: "superseded" }).where(eq(dealIncentives.id, row.id)); row.held = false; row.holdReason = "superseded"; } };
   if (!scraped) {
     // A failed incentive fetch or a missing container is a hold: keep the last
-    // good incentive (the lapse rule still applies) and say so once. A page that
-    // simply shows no incentive is not a hold; the lapse rule retires the old one.
-    if (snapshot.incentiveHoldReasons.length) await recordIncentiveHold(community, snapshot.incentiveHoldReasons.join(", "), now, holds, "The official incentive page could not be read; the last good incentive stays until it lapses.");
-    else await recordIncentiveHold(community, null, now, holds);
+    // good incentive (the lapse rule still applies) and say so once.
+    if (snapshot.incentiveHoldReasons.length) { await recordIncentiveHold(community, snapshot.incentiveHoldReasons.join(", "), now, holds, "The official incentive page could not be read; the last good incentive stays until it lapses."); return; }
+    // The page was read and shows no incentive: the builder took the promo down. Scraped records come off at once and a
+    // held one is retired; a manual override stays.
+    const takenOff = rows.filter((row) => row.active && !row.manual);
+    if (takenOff.length || rows.some((row) => row.held)) {
+      await db.transaction(async (tx) => { await takeOffOthers(tx, null); await retireOtherHeld(tx, null); });
+      if (takenOff.length) summary.incentive.push(`The builder's page no longer shows the incentive; it came off: "${takenOff[0]!.publicText.slice(0, 160)}"`);
+    }
+    await recordIncentiveHold(community, null, now, holds);
     return;
   }
   // The names this very run discovered (plan and street names from the pages) scrub the offer too: an offer that names a
@@ -331,7 +344,6 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
   const fingerprint = hashSecret(norm).slice(0, 8);
   const reasons: string[] = [...facts.holdReasons];
   if (!safeText) reasons.push("private_text_remaining");
-  const rows = await db.select().from(dealIncentives).where(eq(dealIncentives.communityId, community.id)).orderBy(desc(dealIncentives.confirmedAt), desc(dealIncentives.id));
   const activeRows = rows.filter((row) => row.active);
   const activeManual = activeRows.find((row) => row.manual) ?? null;
   const same = rows.find((row) => row.normalizedText === norm) ?? null;
@@ -341,55 +353,65 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
     // An admin's acceptance (or save) and a manual override are sticky for this builder text: the sync never re-judges them.
     const adminOwned = same.manual || Boolean(same.acceptedAt);
     const unique = Array.from(new Set(reasons));
-    /** This text goes (back) on hold: the builder shows it, so any other scraped promo comes off; a manual override stays. */
-    const holdSame = async (message: string) => {
+    /** This text goes (back) on hold. A text that was held before (and retired when the builder moved on) was e-mailed then: no second e-mail. */
+    const holdSame = async (message: string, notify: boolean) => {
       await db.transaction(async (tx) => {
-        for (const row of activeRows) if (!row.manual && row.id !== same.id) await tx.update(dealIncentives).set({ active: false }).where(eq(dealIncentives.id, row.id));
+        await takeOffOthers(tx, same.id);
+        await retireOtherHeld(tx, same.id);
         await tx.update(dealIncentives).set({ held: true, active: false, holdReason: JSON.stringify(unique), confirmedAt: now }).where(eq(dealIncentives.id, same.id));
       });
       summary.incentive.push(`${message} (${unique.join(", ")}): "${publicText.slice(0, 160)}"`);
-      await recordIncentiveHold(community, holdString(unique), now, holds, `Held text: "${publicText.slice(0, 400)}"`);
+      await recordIncentiveHold(community, holdString(unique), now, holds, `Held text: "${publicText.slice(0, 400)}"`, notify);
     };
-    if (same.active) {
-      // A scraped record published under earlier rules is judged again on every run: what this scrape cannot publish comes off and is held.
-      if (!adminOwned && unique.length) { await holdSame("Live incentive no longer passes the publication rules and is held"); return; }
-      // Same promo re-confirmed: confirmedAt moves; a scraped (not admin-owned) record takes this scrape's figures. Dates and admin values are sticky.
-      const figures = adminOwned ? {} : (({ headlineRate, followOnRate, followOnPeriod, apr, loanType, downPayment, repaymentTerms }) => ({ headlineRate, followOnRate, followOnPeriod, apr, loanType, downPayment, repaymentTerms }))(scrapedIncentiveValues(facts));
-      await db.update(dealIncentives).set({ confirmedAt: now, ...figures }).where(eq(dealIncentives.id, same.id));
+    if (!same.active && (same.holdReason === "expired" || same.holdReason === "dismissed")) {
+      // Stays off until the scraped TEXT changes; the same promo never returns by itself. The builder shows it, so any other scraped promo is not live.
+      await db.transaction(async (tx) => { await takeOffOthers(tx, same.id); await retireOtherHeld(tx, same.id); });
       await recordIncentiveHold(community, null, now, holds);
       return;
     }
-    if (same.holdReason === "expired" || same.holdReason === "dismissed") {
-      // Stays off until the scraped TEXT changes; the same promo never returns by itself.
+    if (same.active) {
+      // A scraped record published under earlier rules is judged again on every run: what this scrape cannot publish comes off and is held.
+      if (!adminOwned && unique.length) { await holdSame("Live incentive no longer passes the publication rules and is held", true); return; }
+      // Same promo re-confirmed: confirmedAt moves; a scraped (not admin-owned) record takes this scrape's figures. Dates and admin values are sticky.
+      const figures = adminOwned ? {} : (({ headlineRate, followOnRate, followOnPeriod, apr, loanType, downPayment, repaymentTerms }) => ({ headlineRate, followOnRate, followOnPeriod, apr, loanType, downPayment, repaymentTerms }))(scrapedIncentiveValues(facts));
+      await db.transaction(async (tx) => {
+        await takeOffOthers(tx, same.id);
+        await retireOtherHeld(tx, same.id);
+        await tx.update(dealIncentives).set({ confirmedAt: now, ...figures }).where(eq(dealIncentives.id, same.id));
+      });
       await recordIncentiveHold(community, null, now, holds);
       return;
     }
     if (same.held) {
-      // Still awaiting "Accept this update". The builder shows this text, so another scraped promo that was live comes off,
-      // and the community carries the hold again if a run in between cleared it (one e-mail per hold, as before).
+      // Still awaiting "Accept this update". The builder shows this text, so another scraped promo that was live comes off and
+      // another held text is retired; the community carries this text's hold (no new e-mail: it went out when the hold began).
       const storedReasons = (() => { try { const parsed: unknown = JSON.parse(same.holdReason ?? "[]"); return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : []; } catch { return [] as string[]; } })();
       const tookOff = activeRows.filter((row) => !row.manual);
       await db.transaction(async (tx) => {
-        for (const row of tookOff) await tx.update(dealIncentives).set({ active: false }).where(eq(dealIncentives.id, row.id));
+        await takeOffOthers(tx, same.id);
+        await retireOtherHeld(tx, same.id);
         await tx.update(dealIncentives).set({ confirmedAt: now }).where(eq(dealIncentives.id, same.id));
       });
       if (tookOff.length) summary.incentive.push(`The builder shows the held incentive again; the live one came off: "${tookOff[0]!.publicText.slice(0, 160)}"`);
-      if (!community.incentiveHoldReason && storedReasons.length) await recordIncentiveHold(community, holdString(storedReasons), now, holds, `Held text: "${same.publicText.slice(0, 400)}"`);
+      if (storedReasons.length) await recordIncentiveHold(community, holdString(storedReasons), now, holds, `Held text: "${same.publicText.slice(0, 400)}"`, false);
       return;
     }
     if (activeManual && activeManual.id !== same.id) {
-      await db.update(dealIncentives).set({ held: true, active: false, holdReason: JSON.stringify(["differs_from_manual_override"]), confirmedAt: now }).where(eq(dealIncentives.id, same.id));
+      await db.transaction(async (tx) => {
+        await retireOtherHeld(tx, same.id);
+        await tx.update(dealIncentives).set({ held: true, active: false, holdReason: JSON.stringify(["differs_from_manual_override"]), confirmedAt: now }).where(eq(dealIncentives.id, same.id));
+      });
       summary.incentive.push(`Scraped incentive differs from the manual override and is held: "${publicText.slice(0, 160)}"`);
       await recordIncentiveHold(community, holdString(["differs_from_manual_override"]), now, holds, `Manual override stays live: "${activeManual.publicText.slice(0, 160)}"`);
       return;
     }
-    // A superseded record was never published, and a lapsed scraped one was published under the rules of its day: this scrape judges it again.
-    // An accepted one returns as the admin left it.
-    if (!adminOwned && unique.length) { await holdSame("Incentive text returned and is held"); return; }
-    // A lapsed (or replaced) record returns when a successful scrape confirms its text again; any other held text is retired, as for new text.
+    // A superseded record was never published, and a lapsed or replaced scraped one was published under the rules of its
+    // day: this scrape judges it again. An accepted one returns as the admin left it.
+    if (!adminOwned && unique.length) { await holdSame("Incentive text returned and is held", same.holdReason !== "superseded"); return; }
+    // A lapsed (or replaced) record returns when a successful scrape confirms its text again.
     await db.transaction(async (tx) => {
-      for (const row of activeRows) await tx.update(dealIncentives).set({ active: false }).where(eq(dealIncentives.id, row.id));
-      for (const row of rows) if (row.held && row.id !== same.id) await tx.update(dealIncentives).set({ held: false, active: false, holdReason: "superseded" }).where(eq(dealIncentives.id, row.id));
+      await takeOffOthers(tx, same.id);
+      await retireOtherHeld(tx, same.id);
       await tx.update(dealIncentives).set({ active: true, held: false, holdReason: null, confirmedAt: now }).where(eq(dealIncentives.id, same.id));
     });
     summary.incentive.push(`Incentive returned after ${same.holdReason === "lapsed_unconfirmed" ? "lapsing" : "being replaced"}: "${publicText.slice(0, 160)}"`);
@@ -397,12 +419,8 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
     return;
   }
 
-  // New normalized text: a NEW record with no inherited dates. A held record
+  // New normalized text: a NEW record with no inherited dates. The previous scraped promo comes off and a held record
   // for text the builder no longer shows is retired rather than left pending.
-  const staleHeld = rows.filter((row) => row.held && row.normalizedText !== norm);
-  const retireStaleHeld = async (tx: Pick<typeof db, "update">) => {
-    for (const row of staleHeld) await tx.update(dealIncentives).set({ held: false, active: false, holdReason: "superseded" }).where(eq(dealIncentives.id, row.id));
-  };
   const droppedManualDates = activeRows.flatMap(manualDatesOf);
   if (droppedManualDates.length) reasons.push("replaces_manual_date");
   if (activeManual) reasons.push("differs_from_manual_override");
@@ -410,10 +428,8 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
   if (reasons.length) {
     const unique = Array.from(new Set(reasons));
     await db.transaction(async (tx) => {
-      // The builder no longer shows the previous promo, so a scraped record comes
-      // off immediately; a manual override is the admin's decision and stays.
-      for (const row of activeRows) if (!row.manual) await tx.update(dealIncentives).set({ active: false }).where(eq(dealIncentives.id, row.id));
-      await retireStaleHeld(tx);
+      await takeOffOthers(tx, null);
+      await retireOtherHeld(tx, null);
       await tx.insert(dealIncentives).values({ ...values, active: false, held: true, holdReason: JSON.stringify(unique) });
     });
     summary.incentive.push(`New incentive text held (${unique.join(", ")}): "${publicText.slice(0, 160)}"`);
@@ -426,8 +442,8 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
     return;
   }
   await db.transaction(async (tx) => {
-    for (const row of activeRows) await tx.update(dealIncentives).set({ active: false }).where(eq(dealIncentives.id, row.id));
-    await retireStaleHeld(tx);
+    await takeOffOthers(tx, null);
+    await retireOtherHeld(tx, null);
     await tx.insert(dealIncentives).values({ ...values, active: true, held: false, holdReason: null });
   });
   summary.incentive.push(`New incentive published: "${publicText.slice(0, 160)}"`);

@@ -706,6 +706,39 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   web addresses on more top-level domains, matched only in lower or all
   upper case so "homes.Homes" (two sentences glued) is not an address.
 
+### Round-21 corrections (2026-10-20)
+
+- Two rules every successful read applies before anything else: a scraped
+  promo the builder no longer shows is not live, and a held text the
+  builder no longer shows is retired (`superseded`, so it can no longer be
+  accepted). They apply on every branch: a dismissed or expired text shown
+  again, a held text shown again, a text re-held or revived. A page read
+  that shows no incentive takes scraped promos down and retires a held one
+  (a fetch failure or missing container still keeps the last good one, as a
+  hold). A manual override always stays.
+- A hold e-mail goes out once per text: a held text that was retired and
+  comes back is held again silently (Admin shows it); the community's hold
+  line is reset to the held text's whenever it is read again (so a stale
+  "page could not be read" line is replaced).
+- A save of the live builder promo (same wording, or new wording without
+  the manual override) keeps the builder's text as its identity, so it is
+  not undone by the next sync; new non-manual wording on a synced community
+  with nothing live is refused ("turn on Manual override"). Migration 0021
+  backfills `accepted_at` for manual rows and rows with an admin-entered
+  date; other live rows are judged once by the current rules on the first
+  sync after deploy.
+- Rate parser: "Lock in 3.99% on a 30-year fixed", "Starting at 3.99%*",
+  "4.99% … with our preferred lender", "discounted rate", "bonus rate" are
+  rates; a percentage after "down payment of", "assistance up to", "closing
+  costs", "taxes about", or before "in seller-paid", "in flex cash",
+  "required down", "lender-paid", "(whichever …) toward" is not.
+- Residue: word-like top-level domains dropped (".live", ".today", …);
+  "MiHomes.Com" is caught.
+- Saved filter: counts only saved homes still on the list, says how many
+  saved homes are gone, turns itself off when none remain, opens the saved
+  communities once (each can still be collapsed). "Under $200K" is below
+  the cap on both lists.
+
 ## Lennar reader (added 2026-10-20)
 
 - Site: `www.lennar.com` (Next.js pages router). The community page

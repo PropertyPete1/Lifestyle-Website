@@ -130,6 +130,12 @@ describe("a long private list", () => {
     expect(html).toContain("Saved (2)");
     expect(html).toContain("Under $200K");
     expect(render(many)).not.toContain('data-deals-filter="saved"');
+    // Saves of homes no longer on the list (sold, or a plan behind quick move-ins) are not counted, and alone they show no toggle.
+    const withGone = renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead, communities: many, now: NOW, saved: [...saved, "gone-sold-home-xxxxx", "gone-plan-xxxxxxxxxx"] })));
+    expect(withGone).toContain("Saved (2)");
+    expect(renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead, communities: [many[3]!], now: NOW, saved: ["gone-sold-home-xxxxx"] })))).not.toContain('data-deals-filter="saved"');
+    // "Under $200K" is below the cap on both lists.
+    expect(homesMatching(community(1, { homes: [home("cap", { price: 200_000 }), home("below", { price: 199_990 })] }), { ...EMPTY_FILTERS, maxPrice: 200_000 }).map((row) => row.card.slice(0, 5))).toEqual(["below"]);
     // A short list with a saved home gets the bar too, so the toggle is there.
     expect(renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead, communities: [many[3]!], now: NOW, saved: [many[3]!.homes[0]!.card] })))).toContain("Saved (1)");
   });

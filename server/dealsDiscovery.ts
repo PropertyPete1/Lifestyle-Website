@@ -1,9 +1,10 @@
-import { inArray } from "drizzle-orm";
-import { dealCommunities } from "../drizzle/schema";
+import { and, eq, inArray } from "drizzle-orm";
+import { dealCommunities, dealJobRuns } from "../drizzle/schema";
 import { DOWNTOWN_SAN_ANTONIO, milesBetween } from "../shared/dealsArea";
 import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
-import { getDealSettings } from "./dealsService";
+import { chicagoDay, getDealSettings } from "./dealsService";
+import { leaseBuilder } from "./dealsSync";
 import { asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
@@ -178,24 +179,45 @@ export async function discoverBuilderCommunities(reader: DiscoveryReader, fetche
 
 export type DiscoveryRun = { builders: Array<{ builder: string; ok: boolean; reason?: string; found: number; skipped: number; created: number; existing: number }>; created: number };
 
+/** How long discovery waits for a builder's lease (a batch lane may be reading its pages) before giving up on that builder this run. */
+const LEASE_WAIT_MS = 20 * 60_000;
+const LEASE_POLL_MS = 15_000;
+
 /**
- * Discovery for every builder with a reader, then onboarding. A builder whose
- * sitemap cannot be read is reported and adds nothing; the others carry on.
+ * Discovery for every builder with a reader, then onboarding. Each builder's
+ * pages are read under the builder's lease (one request stream per builder,
+ * shared with the catalog batches and Refresh now). A builder whose sitemap
+ * cannot be read, whose lease stays busy, or whose onboarding throws is
+ * reported and adds nothing; the others carry on.
  */
-export async function discoverAndOnboardAll(fetcher: HtmlFetcher = fetch, readers: readonly DiscoveryReader[] = DISCOVERY_READERS, createdIds: number[] = []): Promise<DiscoveryRun> {
+export async function discoverAndOnboardAll(fetcher: HtmlFetcher = fetch, readers: readonly DiscoveryReader[] = DISCOVERY_READERS, createdIds: number[] = [], options: { sleep?: (ms: number) => Promise<void>; now?: () => number } = {}): Promise<DiscoveryRun> {
   const run: DiscoveryRun = { builders: [], created: 0 };
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = options.now ?? (() => Date.now());
   for (const reader of readers) {
     if (!hasBuilderReader(reader.builder)) continue;
+    const failed = (reason: string) => { run.builders.push({ builder: reader.builder, ok: false, reason, found: 0, skipped: 0, created: 0, existing: 0 }); };
+    let lease = await leaseBuilder(reader.builder, new Date(now()));
+    for (const started = now(); !lease && now() - started < LEASE_WAIT_MS;) { await sleep(LEASE_POLL_MS); lease = await leaseBuilder(reader.builder, new Date(now())); }
+    if (!lease) { failed("builder_busy"); continue; }
     let found: BuilderDiscovery;
     try {
       found = await discoverBuilderCommunities(reader, fetcher);
     } catch (error) {
       console.error(`[deals-discovery] ${reader.builder} failed`, error instanceof Error ? error.message : error);
-      run.builders.push({ builder: reader.builder, ok: false, reason: "discovery_failed", found: 0, skipped: 0, created: 0, existing: 0 });
+      failed("discovery_failed");
       continue;
+    } finally {
+      await lease.release();
     }
     let onboarded: OnboardingResult = { created: [], existing: 0, skipped: [] };
-    if (found.ok && found.communities.length) onboarded = await onboardDiscoveredCommunities(found.communities);
+    try {
+      if (found.ok && found.communities.length) onboarded = await onboardDiscoveredCommunities(found.communities);
+    } catch (error) {
+      console.error(`[deals-discovery] onboarding ${reader.builder} failed`, error instanceof Error ? error.message : error);
+      failed("onboarding_failed");
+      continue;
+    }
     run.builders.push({ builder: reader.builder, ok: found.ok, reason: found.reason, found: found.communities.length, skipped: found.skipped.length + onboarded.skipped.length, created: onboarded.created.length, existing: onboarded.existing });
     run.created += onboarded.created.length;
     createdIds.push(...onboarded.created);
@@ -203,7 +225,9 @@ export async function discoverAndOnboardAll(fetcher: HtmlFetcher = fetch, reader
   return run;
 }
 
-let discoveryRunning = false;
+const DISCOVERY_JOB = "builder-deals-discovery-run";
+/** A discovery run with no finish for this long is treated as dead and may be started again. */
+const DISCOVERY_STALE_MS = 3 * 60 * 60_000;
 
 /** Tells the sync recipients what was found; only when something new was added. Never fails the run. */
 export async function emailDiscoveryRun(run: DiscoveryRun, createdIds: readonly number[]): Promise<void> {
@@ -227,16 +251,42 @@ export async function emailDiscoveryRun(run: DiscoveryRun, createdIds: readonly 
   }
 }
 
-/** The weekly job and the Admin button: discover, onboard, email. One run at a time per server. */
-export async function runCommunityDiscovery(fetcher: HtmlFetcher = fetch): Promise<DiscoveryRun | { skipped: "already_running" }> {
-  if (discoveryRunning) return { skipped: "already_running" };
-  discoveryRunning = true;
+/**
+ * The weekly job and the Admin button: discover, onboard, email. One run at a
+ * time across every server: a deal_job_runs row ("running") is the claim, and
+ * a run that never finished is taken over after three hours.
+ */
+export async function runCommunityDiscovery(fetcher: HtmlFetcher = fetch, options: Parameters<typeof discoverAndOnboardAll>[3] = {}): Promise<DiscoveryRun | { skipped: "already_running" }> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const now = new Date(options.now?.() ?? Date.now());
+  const existing = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, DISCOVERY_JOB), eq(dealJobRuns.chicagoDay, "run"))).limit(1))[0];
+  if (existing) {
+    if (existing.status === "running" && existing.startedAt.getTime() > now.getTime() - DISCOVERY_STALE_MS) return { skipped: "already_running" };
+    const taken = await db.update(dealJobRuns).set({ status: "running", startedAt: now, completedAt: null, detail: null }).where(and(eq(dealJobRuns.id, existing.id), eq(dealJobRuns.status, existing.status), eq(dealJobRuns.startedAt, existing.startedAt)));
+    if (Number((taken as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) !== 1) return { skipped: "already_running" };
+  } else {
+    try { await db.insert(dealJobRuns).values({ jobName: DISCOVERY_JOB, chicagoDay: "run", status: "running", startedAt: now }); } catch { return { skipped: "already_running" }; }
+  }
+  const finish = async (status: "ok" | "failed", detail: string) => {
+    const connection = await getDb();
+    if (!connection) return;
+    await connection.update(dealJobRuns).set({ status, detail: detail.slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, DISCOVERY_JOB), eq(dealJobRuns.chicagoDay, "run"))).catch(() => undefined);
+  };
   try {
     const createdIds: number[] = [];
-    const run = await discoverAndOnboardAll(fetcher, DISCOVERY_READERS, createdIds);
+    const run = await discoverAndOnboardAll(fetcher, DISCOVERY_READERS, createdIds, options);
     await emailDiscoveryRun(run, createdIds);
+    await finish(run.builders.every((builder) => builder.ok) ? "ok" : "failed", JSON.stringify({ created: run.created, builders: run.builders.map((builder) => [builder.builder, builder.ok, builder.reason ?? null]), day: chicagoDay(now) }));
     return run;
-  } finally {
-    discoveryRunning = false;
+  } catch (error) {
+    await finish("failed", error instanceof Error ? error.message : "discovery failed");
+    throw error;
   }
+}
+
+/** Starts a run in the background (the weekly job and the Admin button); the result arrives by email. */
+export function startCommunityDiscovery(): { started: true } {
+  setImmediate(() => { runCommunityDiscovery().catch((error) => console.error("[deals-discovery] run failed", error instanceof Error ? error.message : error)); });
+  return { started: true };
 }

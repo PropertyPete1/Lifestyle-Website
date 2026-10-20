@@ -609,7 +609,8 @@ export async function publicDealsCatalog(src?: string | null) {
       fromPriceLabel: community.fromPrice ? `From the ${priceBandLabel(community.fromPrice)}` : null,
       reelUrl: community.reelUrl,
       homesAvailable: availableCount.get(community.id) ?? 0,
-      incentive: incentive ? publicIncentive(incentive, (value) => scrubPrivateNames(value, communityScrubConfig(community))) : null,
+      // The landing card shows the teaser and figures; the full wording and the deadlines wait for sign-up.
+      incentive: incentive ? (({ text: _text, contractBy: _contractBy, closeBy: _closeBy, ...teaser }) => ({ ...teaser, text: teaser.teaser, contractBy: null, closeBy: null }))(publicIncentive(incentive, (value) => scrubPrivateNames(value, communityScrubConfig(community)))) : null,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       // A wide circle around the ZIP code centroid: "this side of town", never the community.
       areaMap: communityAreaMap(community, { variant: "public", radiusMiles: publicRadius }),

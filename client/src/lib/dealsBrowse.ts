@@ -58,7 +58,8 @@ export type LandingBrowseCommunity = {
 /** A landing card matches on what it shows: area, starting price, homes ready now, a builder rate, big lots in its label. */
 export function landingMatches(community: LandingBrowseCommunity, filters: BrowseFilters): boolean {
   if (filters.area && community.area !== filters.area) return false;
-  if (filters.maxPrice !== null && !(community.fromPrice && community.fromPrice <= filters.maxPrice)) return false;
+  // The landing card carries a price band's low end ("From the $300s" is 300,000), so "Under $300K" means below the band.
+  if (filters.maxPrice !== null && !(community.fromPrice && community.fromPrice < filters.maxPrice)) return false;
   if (filters.moveInReady && community.homesAvailable <= 0) return false;
   if (filters.builderRate && !community.incentive?.headlineRate) return false;
   if (filters.bigLots && (lotAcres(community.label) ?? 0) < BIG_LOT_ACRES) return false;
@@ -92,4 +93,25 @@ export function gatedCommunityVisible<Home extends GatedBrowseHome>(community: G
   if (filters.builderRate && !community.incentive?.headlineRate) return false;
   const homeFilters = filters.maxPrice !== null || filters.minBeds !== null || filters.moveInReady || filters.bigLots;
   return !homeFilters || homesMatching(community, filters).length > 0;
+}
+
+export type DealSelection = { index: number; clearFilters: boolean; pages: number | null };
+
+/**
+ * What a Best Deals tap has to change before its home can be scrolled to: the
+ * community index (or -1 when the card is not on this list), whether the current
+ * filters hide the community or the home itself and must be cleared, and the
+ * page to turn to (null when the community is already on the page).
+ */
+export function dealSelection<Home extends GatedBrowseHome & { card: string }>(
+  communities: ReadonlyArray<GatedBrowseCommunity<Home>>, card: string, filters: BrowseFilters, state: { many: boolean; pages: number; visibleIndexes: ReadonlyArray<number> },
+): DealSelection {
+  const index = communities.findIndex((community) => community.homes.some((home) => home.card === card));
+  if (index < 0) return { index, clearFilters: false, pages: null };
+  const homeFilters = filters.maxPrice !== null || filters.minBeds !== null || filters.moveInReady || filters.bigLots;
+  const target = state.visibleIndexes.indexOf(index);
+  const cardShown = target >= 0 && (!homeFilters || homesMatching(communities[index]!, filters).some((home) => home.card === card));
+  if (!cardShown) return { index, clearFilters: true, pages: Math.floor(index / BROWSE_PAGE) + 1 };
+  if (state.many && target >= state.pages * BROWSE_PAGE) return { index, clearFilters: false, pages: Math.floor(target / BROWSE_PAGE) + 1 };
+  return { index, clearFilters: false, pages: null };
 }

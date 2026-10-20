@@ -46,7 +46,7 @@ when it is saved.
 
 | Viewer | What a featured deal carries |
 | --- | --- |
-| Landing page (no sign-up) | Public label, area, payment, rate, beds, and rounded figures only: a price band ("$340s"), square feet to the hundred, lot to the tenth of an acre. A community's starting price is a band too ("From the $490s"). Tapping opens the gate. |
+| Landing page (no sign-up) | Public label, area, payment, rate, beds, and rounded figures only: a price band ("$340s"), square feet to the hundred, lot to the tenth of an acre. The payment is figured on the band's low end, not the real price, because the rate, down payment and term are printed next to it and a payment on the real price would give it away. A community's starting price is a band too ("From the $490s"), and the "Under $300K" filter compares against that band. An offer shows its teaser sentence and rate figures only; the full wording, the homes it names and its deadlines wait for sign-up. Each deal carries an opaque key (not a row id) so two communities with the same label and band stay apart. Tapping opens the gate. |
 | Reel buyer's private list | The same, scrubbed like the catalog, plus the card handle: tapping jumps to the home. |
 | Team and agent clients | Plus the community name and the address or plan. |
 

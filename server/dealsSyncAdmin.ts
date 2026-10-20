@@ -81,6 +81,7 @@ export const CATALOG_HOLD_REASON_HELP: Partial<Record<DealHoldReason, string>> =
   expected_community_container_not_found: "The community page layout changed (expected container missing).",
   expected_detail_container_not_found: "A plan or home page layout changed (stat block or gallery missing).",
   unlabelled_home_status: "A home card's status could not be read, so nothing was published or marked sold this run.",
+  refresh_failed: "The reader hit an unexpected error on this community's pages; nothing was published or marked sold.",
   private_text_remaining: "A private name survived scrubbing; add it to the names to hide or exclude a false positive.",
 };
 
@@ -100,6 +101,7 @@ export async function refreshCommunityInBackground(communityId: number): Promise
   const community = await requireCommunity(communityId);
   if (community.builder === "Manual" || community.manualMode) throw new DealsAdminError("PRECONDITION_FAILED", "This community is in manual mode, no auto-update.");
   if (!community.active && !community.awaitingFirstSync) throw new DealsAdminError("PRECONDITION_FAILED", "This community is archived.");
+  if (community.paused) throw new DealsAdminError("PRECONDITION_FAILED", "This community is paused. Resume it first.");
   if (!hasBuilderReader(community.builder)) throw new DealsAdminError("PRECONDITION_FAILED", `There is no reader for ${community.builder} pages yet, so this community cannot be refreshed automatically.`);
   const jobName = `${REFRESH_JOB_PREFIX}${communityId}`;
   const day = chicagoDay();
@@ -120,9 +122,9 @@ export async function refreshCommunityInBackground(communityId: number): Promise
     // One request stream per builder: wait for the builder's lease (a running batch lane) before reading its pages.
     const run = async () => {
       for (let attempt = 0; ; attempt++) {
-        const release = await leaseBuilder(community.builder);
-        if (release) {
-          try { return await refreshOfficialDeals({ communityId }); } finally { await release(); }
+        const lease = await leaseBuilder(community.builder);
+        if (lease) {
+          try { return await refreshOfficialDeals({ communityId }); } finally { await lease.release(); }
         }
         if (attempt >= 20) throw new Error("builder busy: another check of this builder's pages is still running");
         await new Promise((resolve) => setTimeout(resolve, 15_000));

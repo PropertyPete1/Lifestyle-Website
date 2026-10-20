@@ -445,6 +445,15 @@ async function mergeDiscoveredNames(community: CommunityRow, snapshot: DealAdapt
 
 /** Typed against the adapter's reason union so the three hold-reason listings cannot drift apart. */
 const UNLABELLED_HOME_STATUS: DealHoldReason = "unlabelled_home_status";
+const REFRESH_FAILED: DealHoldReason = "refresh_failed";
+
+/** The reader threw: recorded as a catalog hold (one email, no silent retry loop); the last good data stays live. */
+async function refreshFailed(community: CommunityRow, now: Date, holds: HoldNotice[], error: unknown): Promise<RefreshResult> {
+  // Do not log the source URL: it is private metadata.
+  console.error(`[deals-sync] community ${community.id} refresh failed`, error instanceof Error ? error.message : error);
+  await recordCatalogHold(community, REFRESH_FAILED, now, holds).catch(() => undefined);
+  return { communityId: community.id, reelCode: community.reelCode, ok: false, reason: REFRESH_FAILED };
+}
 
 async function refreshCommunity(community: CommunityRow, now: Date, summaries: CommunityChangeSummary[], holds: HoldNotice[]): Promise<RefreshResult> {
   const db = await getDb();
@@ -524,7 +533,11 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
       fromPrice: facts?.fromPrice ?? community.fromPrice,
       amenities: facts?.amenities ?? [],
       moveInReadyCount: snapshot.private.homes.filter((home) => /quick\s+move|available\s+now/i.test(home.status ?? "")).length,
-    }, { labelUntouched: community.publicLabel === generatedLabelFor(community) });
+    }, { labelUntouched: await (async () => {
+      // Judged on the row as it is now, before this pull's facts: an admin may have rewritten the label while the pull ran.
+      const current = (await db.select({ publicLabel: dealCommunities.publicLabel }).from(dealCommunities).where(eq(dealCommunities.id, community.id)).limit(1))[0];
+      return (current?.publicLabel ?? community.publicLabel) === generatedLabelFor(community);
+    })() });
   }
   await db.update(dealCommunities).set({ lastSuccessfulSyncAt: now, catalogUpdatedAt: now, catalogHoldReason: null, catalogHoldSeenAt: null, holdReason: summarizeHolds(null, incentiveHold) }).where(eq(dealCommunities.id, community.id));
   // Goes live only if it is still waiting: an admin who turned it on or off, paused it or
@@ -543,6 +556,24 @@ function money(value: number) {
 
 type RunEmail = { category: string; subject: string; content: string };
 
+function summaryBody(summaries: readonly CommunityChangeSummary[]): string {
+  const lines = summaries.flatMap((summary) => [
+    `${summary.privateName} (${summary.builder})`,
+    ...summary.added.map((name) => `  added: ${name}`),
+    ...summary.sold.map((name) => `  sold: ${name}`),
+    ...summary.reappeared.map((name) => `  back on the market: ${name}`),
+    ...summary.priceChanges.map((change) => `  price ${change.to < change.from ? "drop" : "change"}: ${change.name} ${money(change.from)} to ${money(change.to)}`),
+    ...summary.incentive.map((line) => `  incentive: ${line}`),
+    "",
+  ]);
+  return ["Official builder refresh summary.", "", ...lines, "Review in Admin, Builder Deals: /admin/deals"].join("\n");
+}
+
+function holdBody(holds: readonly HoldNotice[]): string {
+  const lines = holds.flatMap((hold) => [`${hold.privateName} (${hold.builder}), ${hold.kind} hold: ${hold.reason}`, ...(hold.detail ? [`  ${hold.detail}`] : []), ""]);
+  return ["A builder page could not be published. The last good data stays live.", "", ...lines, "Catalog holds offer Dismiss hold or Switch to Manual; incentive holds offer Accept this update in Admin, Builder Deals: /admin/deals"].join("\n");
+}
+
 /** One change-summary email and one hold email per run; a failure never fails the sync, and is reported as false. */
 async function sendRunEmails(summaries: readonly CommunityChangeSummary[], holds: readonly HoldNotice[]): Promise<boolean> {
   const messages = composeRunEmails(summaries, holds);
@@ -560,22 +591,19 @@ async function sendRunEmails(summaries: readonly CommunityChangeSummary[], holds
 function composeRunEmails(summaries: readonly CommunityChangeSummary[], holds: readonly HoldNotice[]): RunEmail[] {
   const messages: RunEmail[] = [];
   const send = (category: string, subject: string, content: string) => { messages.push({ category, subject, content }); };
+  // Changes and holds from one run travel in one email, so a send either happened or did not.
+  if (summaries.length && holds.length) {
+    const changes = summaries.reduce((count, summary) => count + summary.added.length + summary.sold.length + summary.reappeared.length + summary.priceChanges.length + summary.incentive.length, 0);
+    // Filed under the hold category: a hold needs an admin's hand, a change only needs reading.
+    send("deals_sync_hold", `Builder Deals update: ${changes} change${changes === 1 ? "" : "s"}, ${holds.length} hold${holds.length === 1 ? "" : "s"}`, [holdBody(holds), "", "CHANGES", "", summaryBody(summaries)].join("\n"));
+    return messages;
+  }
   if (summaries.length) {
-    const lines = summaries.flatMap((summary) => [
-      `${summary.privateName} (${summary.builder})`,
-      ...summary.added.map((name) => `  added: ${name}`),
-      ...summary.sold.map((name) => `  sold: ${name}`),
-      ...summary.reappeared.map((name) => `  back on the market: ${name}`),
-      ...summary.priceChanges.map((change) => `  price ${change.to < change.from ? "drop" : "change"}: ${change.name} ${money(change.from)} to ${money(change.to)}`),
-      ...summary.incentive.map((line) => `  incentive: ${line}`),
-      "",
-    ]);
     const total = summaries.reduce((count, summary) => count + summary.added.length + summary.sold.length + summary.reappeared.length + summary.priceChanges.length + summary.incentive.length, 0);
-    send("deals_sync_summary", `Builder Deals update: ${total} change${total === 1 ? "" : "s"}`, ["Official builder refresh summary.", "", ...lines, "Review in Admin, Builder Deals: /admin/deals"].join("\n"));
+    send("deals_sync_summary", `Builder Deals update: ${total} change${total === 1 ? "" : "s"}`, summaryBody(summaries));
   }
   if (holds.length) {
-    const lines = holds.flatMap((hold) => [`${hold.privateName} (${hold.builder}), ${hold.kind} hold: ${hold.reason}`, ...(hold.detail ? [`  ${hold.detail}`] : []), ""]);
-    send("deals_sync_hold", `Builder Deals hold: ${holds.map((hold) => hold.privateName).join(", ")}`, ["A builder page could not be published. The last good data stays live.", "", ...lines, "Catalog holds offer Dismiss hold or Switch to Manual; incentive holds offer Accept this update in Admin, Builder Deals: /admin/deals"].join("\n"));
+    send("deals_sync_hold", `Builder Deals hold: ${holds.map((hold) => hold.privateName).join(", ")}`, holdBody(holds));
   }
   return messages;
 }
@@ -604,9 +632,7 @@ export async function refreshOfficialDeals(options: { communityId?: number; comm
     try {
       results.push(await refreshCommunity(community, now, summaries, holds));
     } catch (error) {
-      // Do not log the source URL: it is private metadata.
-      console.error(`[deals-sync] community ${community.id} refresh failed`, error instanceof Error ? error.message : error);
-      results.push({ communityId: community.id, reelCode: community.reelCode, ok: false, reason: "refresh_failed" });
+      results.push(await refreshFailed(community, now, holds, error));
     }
   }
   await sendRunEmails(summaries, holds);
@@ -650,8 +676,8 @@ export const CATALOG_BATCH_LANES = 4;
 export const CATALOG_RETRY_GAP_MS = 90 * 60_000;
 /** The morning summary goes out once nothing is left to check, or at this Chicago hour at the latest. */
 const DIGEST_MORNING_DEADLINE_HOUR = 10;
-/** Anything found after the morning summary goes out in one evening follow-up. */
-const DIGEST_EVENING_HOUR = 18;
+/** Anything found after the morning summary (including what the 6:15 PM incentive job retires) goes out in one 7 PM follow-up. */
+const DIGEST_EVENING_HOUR = 19;
 const DIGEST_KEEP_DAYS = 30;
 
 export type CatalogBatchResult = {
@@ -696,32 +722,47 @@ async function claimCommunity(communityId: number, at: Date): Promise<CommunityR
 }
 
 const BUILDER_LEASE_PREFIX = "builder-deals-lane-";
-/** A lease older than this belongs to a run that died; the next batch may take it. */
-export const BUILDER_LEASE_STALE_MS = 30 * 60_000;
+/** One lease row per builder, whatever the day (a lane may cross midnight). */
+const BUILDER_LEASE_DAY = "lease";
+/** A lease not heartbeaten for this long belongs to a run that died; the next batch may take it. */
+export const BUILDER_LEASE_STALE_MS = 2 * 60 * 60_000;
+
+export type BuilderLease = { release: () => Promise<void>; heartbeat: () => Promise<void> };
 
 /**
- * One request stream per builder: a batch lane or "Refresh now" holds the
- * builder's lease while it reads that builder's pages. The (job, day) unique
- * key on deal_job_runs settles two takers racing for it. Returns a release.
+ * One request stream per builder: a batch lane, "Refresh now" or discovery
+ * holds the builder's lease while it reads that builder's pages. The lease
+ * carries its holder's token, so only the holder can release or extend it, and
+ * the (job, day) unique key on deal_job_runs settles two takers racing for it.
+ * The holder heartbeats between communities; a lease without a heartbeat for
+ * two hours is treated as dead.
  */
-export async function leaseBuilder(builder: string, now = new Date()): Promise<(() => Promise<void>) | null> {
+export async function leaseBuilder(builder: string, now = new Date()): Promise<BuilderLease | null> {
   const db = await getDb();
   if (!db) return null;
   const jobName = `${BUILDER_LEASE_PREFIX}${builder}`;
-  const day = chicagoDay(now);
+  const token = hashSecret(`lease:${builder}:${now.getTime()}:${Math.random()}`).slice(0, 24);
   const stale = new Date(now.getTime() - BUILDER_LEASE_STALE_MS);
-  const existing = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).limit(1))[0];
+  const existing = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, BUILDER_LEASE_DAY))).limit(1))[0];
   if (existing) {
-    const taken = await db.update(dealJobRuns).set({ status: "running", startedAt: now, completedAt: null })
+    const taken = await db.update(dealJobRuns).set({ status: "running", startedAt: now, completedAt: null, detail: token })
       .where(and(eq(dealJobRuns.id, existing.id), or(ne(dealJobRuns.status, "running"), lt(dealJobRuns.startedAt, stale))));
     if (Number((taken as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) !== 1) return null;
   } else {
-    try { await db.insert(dealJobRuns).values({ jobName, chicagoDay: day, status: "running", startedAt: now }); } catch { return null; }
+    try { await db.insert(dealJobRuns).values({ jobName, chicagoDay: BUILDER_LEASE_DAY, status: "running", startedAt: now, detail: token }); } catch { return null; }
   }
-  return async () => {
-    const connection = await getDb();
-    if (!connection) return;
-    await connection.update(dealJobRuns).set({ status: "ok", completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running"))).catch(() => undefined);
+  const mine = and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, BUILDER_LEASE_DAY), eq(dealJobRuns.status, "running"), eq(dealJobRuns.detail, token));
+  return {
+    release: async () => {
+      const connection = await getDb();
+      if (!connection) return;
+      await connection.update(dealJobRuns).set({ status: "ok", completedAt: new Date() }).where(mine).catch(() => undefined);
+    },
+    heartbeat: async () => {
+      const connection = await getDb();
+      if (!connection) return;
+      await connection.update(dealJobRuns).set({ startedAt: new Date() }).where(mine).catch(() => undefined);
+    },
   };
 }
 
@@ -730,7 +771,7 @@ export async function buildersInFlight(now = new Date()): Promise<string[]> {
   const db = await getDb();
   if (!db) return [];
   const rows = await db.select({ jobName: dealJobRuns.jobName }).from(dealJobRuns)
-    .where(and(eq(dealJobRuns.chicagoDay, chicagoDay(now)), eq(dealJobRuns.status, "running"), gte(dealJobRuns.startedAt, new Date(now.getTime() - BUILDER_LEASE_STALE_MS))));
+    .where(and(eq(dealJobRuns.chicagoDay, BUILDER_LEASE_DAY), eq(dealJobRuns.status, "running"), gte(dealJobRuns.startedAt, new Date(now.getTime() - BUILDER_LEASE_STALE_MS))));
   return rows.flatMap((row) => row.jobName.startsWith(BUILDER_LEASE_PREFIX) ? [row.jobName.slice(BUILDER_LEASE_PREFIX.length)] : []);
 }
 
@@ -774,8 +815,9 @@ export async function refreshDueCommunitiesBatch(options: { clock?: () => number
     while (next < lanesOfWork.length) {
       const [builder, communities] = lanesOfWork[next++]!;
       // Another batch (or Refresh now) is already reading this builder: leave it to them.
-      const release = await leaseBuilder(builder, new Date(clock()));
-      if (!release) continue;
+      const lease = await leaseBuilder(builder, new Date(clock()));
+      if (!lease) continue;
+      const { release, heartbeat } = lease;
       try {
         for (const community of communities) {
           if (clock() >= deadline) { stoppedForTime = true; return; }
@@ -787,10 +829,10 @@ export async function refreshDueCommunitiesBatch(options: { clock?: () => number
           try {
             results.push(await refreshCommunity(fresh, at, summaries, holds));
           } catch (error) {
-            console.error(`[deals-sync] community ${community.id} refresh failed`, error instanceof Error ? error.message : error);
-            results.push({ communityId: community.id, reelCode: community.reelCode, ok: false, reason: "refresh_failed" });
+            results.push(await refreshFailed(fresh, at, holds, error));
           }
           await recordDigestEntry(summaries, holds);
+          await heartbeat();
         }
       } finally {
         await release();

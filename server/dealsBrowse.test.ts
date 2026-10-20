@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
-import { EMPTY_FILTERS, areaChoices, bedsFrom, gatedCommunityVisible, homesMatching, landingMatches, priceCapLabel } from "../client/src/lib/dealsBrowse";
+import { EMPTY_FILTERS, areaChoices, bedsFrom, dealSelection, gatedCommunityVisible, homesMatching, landingMatches, priceCapLabel } from "../client/src/lib/dealsBrowse";
 import type { GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
 import { browseOrder } from "./dealsService";
 
@@ -41,6 +41,27 @@ describe("browse filters", () => {
     expect(landingMatches(card, { ...EMPTY_FILTERS, maxPrice: 500_000, builderRate: true, bigLots: true })).toBe(true);
     expect(landingMatches(card, { ...EMPTY_FILTERS, moveInReady: true })).toBe(false);
     expect(landingMatches({ ...card, label: "North San Antonio | Trails" }, { ...EMPTY_FILTERS, bigLots: true })).toBe(false);
+    // The landing card carries a band floor ("From the $300s" is 300,000), so "Under $300K" leaves out a community really starting at $309,990.
+    expect(landingMatches({ ...card, fromPrice: 300_000 }, { ...EMPTY_FILTERS, maxPrice: 300_000 })).toBe(false);
+    expect(landingMatches({ ...card, fromPrice: 290_000 }, { ...EMPTY_FILTERS, maxPrice: 300_000 })).toBe(true);
+  });
+
+  it("clears filters for a Best Deals tap only when they hide the community or the home itself, and turns to its page otherwise", () => {
+    const list = Array.from({ length: 20 }, (_, index) => community(index));
+    const all = list.map((_, index) => index);
+    const shown = { many: true, pages: 1, visibleIndexes: all };
+    // No filters: a home on page 2 turns the page; a home on page 1 changes nothing.
+    expect(dealSelection(list, list[15]!.homes[0]!.card, EMPTY_FILTERS, shown)).toEqual({ index: 15, clearFilters: false, pages: 2 });
+    expect(dealSelection(list, list[2]!.homes[0]!.card, EMPTY_FILTERS, shown)).toEqual({ index: 2, clearFilters: false, pages: null });
+    // A price cap keeps community 2 on the list (its $320,000 home passes) but hides its $470,000 plan: tapping that plan clears the filters.
+    const capped = { ...EMPTY_FILTERS, maxPrice: 400_000 };
+    expect(dealSelection(list, list[2]!.homes[0]!.card, capped, shown)).toEqual({ index: 2, clearFilters: false, pages: null });
+    expect(dealSelection(list, list[2]!.homes[1]!.card, capped, shown)).toEqual({ index: 2, clearFilters: true, pages: 1 });
+    // An area filter that hides the whole community clears too, and lands on the page the community is on without filters.
+    const visibleInArea = list.flatMap((entry, index) => entry.area === "New Braunfels" ? [index] : []);
+    expect(dealSelection(list, list[15]!.homes[0]!.card, { ...EMPTY_FILTERS, area: "New Braunfels" }, { ...shown, visibleIndexes: visibleInArea })).toEqual({ index: 15, clearFilters: true, pages: 2 });
+    // A card from no community on this list is left to the page to scroll to.
+    expect(dealSelection(list, "elsewhere", EMPTY_FILTERS, shown)).toEqual({ index: -1, clearFilters: false, pages: null });
   });
 
   it("filters a private list's homes by price, bedrooms, move-in ready and lot, and drops communities with none left", () => {

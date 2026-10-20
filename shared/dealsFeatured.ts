@@ -133,6 +133,8 @@ export type FeaturedRate = {
 export type FeaturedCandidate = {
   /** Groups homes by community so the top three are three different communities. */
   communityKey: string;
+  /** Opaque per-home handle carried onto the deal (see FeaturedDeal.key). */
+  key?: string;
   label: string;
   area: string;
   /** The home's opaque card handle on the private list (never on the landing page). */
@@ -169,6 +171,8 @@ export type FeaturedDeal = {
   priceLabel?: string;
   /** Landing page only: "about 2,300 sq ft". */
   sqftLabel?: string | null;
+  /** Opaque, per-deal: lets the strip tell two deals with the same label and band apart. Never an id. */
+  key?: string;
 };
 
 export type FeaturedDeals = {
@@ -193,6 +197,7 @@ function priced(candidate: FeaturedCandidate, settings: FeaturedSettings): Featu
     label: candidate.label,
     area: candidate.area,
     ...(candidate.card ? { card: candidate.card } : {}),
+    ...(candidate.key ? { key: candidate.key } : {}),
     ...(candidate.detail !== undefined ? { detail: candidate.detail } : {}),
     price: candidate.price,
     kind: candidate.kind,
@@ -276,10 +281,13 @@ export function roundedSqft(sqft: number): number {
  * typed into a listing site to find the home without talking to an agent.
  */
 export function roundForPublic(deal: FeaturedDeal): FeaturedDeal {
+  const bandPrice = priceBandFloor(deal.price);
   return {
     ...deal,
-    price: priceBandFloor(deal.price),
+    price: bandPrice,
     priceLabel: `${priceBandLabel(deal.price)}`,
+    // The payment is figured on the band's low end, so it cannot be turned back into the exact price.
+    estMonthly: monthlyPrincipalAndInterest({ price: bandPrice, ratePercent: deal.rate.ratePercent, downPercent: deal.downPercent }),
     sqft: deal.sqft ? roundedSqft(deal.sqft) : deal.sqft ?? null,
     sqftLabel: deal.sqft ? `about ${roundedSqft(deal.sqft).toLocaleString("en-US")} sq ft` : null,
     acres: deal.acres ? Math.round(deal.acres * 10) / 10 : deal.acres,

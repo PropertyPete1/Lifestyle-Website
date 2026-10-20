@@ -61,6 +61,8 @@ export type DealHoldReason =
   | "expected_incentive_container_not_found"
   /** A home card whose status could not be read: a layout change holds the catalog instead of marking homes sold. */
   | "unlabelled_home_status"
+  /** The reader itself threw: nothing was published or marked sold; the admin hears about it instead of a silent retry loop. */
+  | "refresh_failed"
   | "private_text_remaining"
   | "missing_promotional_rate"
   | "missing_apr"
@@ -387,9 +389,11 @@ export function decodeHtmlEntities(value: string): string {
     ndash: "–",
     mdash: "—",
   };
+  // A numeric entity past U+10FFFF is not a character; it is kept as written rather than throwing.
+  const codePoint = (whole: string, code: number) => Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
   return value
-    .replace(/&#x([0-9a-f]+);?/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#(\d+);?/g, (_, decimal: string) => String.fromCodePoint(Number.parseInt(decimal, 10)))
+    .replace(/&#x([0-9a-f]+);?/gi, (whole, hex: string) => codePoint(whole, Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);?/g, (whole, decimal: string) => codePoint(whole, Number.parseInt(decimal, 10)))
     .replace(/&([a-z]+);?/gi, (whole, name: string) => named[name.toLowerCase()] ?? whole);
 }
 

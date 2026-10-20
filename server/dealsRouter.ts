@@ -739,9 +739,8 @@ export const dealsRouter = router({
     }),
     /** "Find new communities now": the weekly discovery, started in the background; the result arrives by email. */
     discoverCommunities: adminProcedure.mutation(async () => {
-      const { runCommunityDiscovery } = await import("./dealsDiscovery");
-      void runCommunityDiscovery().catch((error) => console.error("[deals-discovery] manual run failed", error instanceof Error ? error.message : error));
-      return { started: true as const };
+      const { startCommunityDiscovery } = await import("./dealsDiscovery");
+      return startCommunityDiscovery();
     }),
     /** An operator diagnostic restricted to the preconfigured official URL (exact official host, 64 KB cap, redirects reported, never followed). */
     testCommunitySource: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => adminCall(() => testCommunitySource(input.id))),

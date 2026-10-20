@@ -11,7 +11,7 @@ import { Countdown } from "./Countdown";
 import { DealsFooter, Incentive, ReelCard, formatChicagoDate, money, type DealsIncentive } from "./shared";
 import { FeaturedDeals, type FeaturedDealsData } from "./FeaturedDeals";
 import { BrowseBar, BROWSE_COPY, ShowMore } from "./BrowseBar";
-import { BROWSE_PAGE, EMPTY_FILTERS, OPEN_ALL_UP_TO, activeFilterCount, gatedCommunityVisible, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
+import { BROWSE_PAGE, EMPTY_FILTERS, OPEN_ALL_UP_TO, activeFilterCount, dealSelection, gatedCommunityVisible, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export { countdownLabel } from "@/lib/dealsMine";
 export type { ProfileInput } from "@/lib/dealsMine";
@@ -231,13 +231,11 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
   // A Best Deals tap opens that home's community (clearing filters that hide it) and scrolls to the card once it is on the page.
   const selectDeal = (card: string | undefined) => {
     if (!card) return;
-    const index = communities.findIndex((community) => community.homes.some((home) => home.card === card));
-    if (index < 0) return scrollToHomeCard(card);
-    const key = communityKey(communities[index]!, index);
-    const target = matching.findIndex((entry) => entry.key === key);
-    if (target < 0) { setFilters(EMPTY_FILTERS); setPages(Math.floor(index / BROWSE_PAGE) + 1); }
-    else if (many && target >= pages * BROWSE_PAGE) setPages(Math.floor(target / BROWSE_PAGE) + 1);
-    setOpened((current) => new Set(current).add(key));
+    const selection = dealSelection(communities, card, filters, { many, pages, visibleIndexes: matching.map((entry) => entry.index) });
+    if (selection.index < 0) return scrollToHomeCard(card);
+    if (selection.clearFilters) setFilters(EMPTY_FILTERS);
+    if (selection.pages !== null) setPages(selection.pages);
+    setOpened((current) => new Set(current).add(communityKey(communities[selection.index]!, selection.index)));
     setPendingCard(card);
   };
   // Every open community counts as viewed once per page load (the list already holds one row per hour server-side).

@@ -76,4 +76,20 @@ describe("catalog reads at the scale of every community", () => {
     expect(gated[0]).toMatchObject({ label: "Area 4 | New Homes", fromYourReel: true });
     expect(new Set(gated.map((entry) => entry.key)).size).toBe(5);
   });
+
+  it("gives the landing page an offer's teaser and figures only; the full wording, the exact homes and the deadlines wait for sign-up", async () => {
+    seedCommunities(1);
+    const offer = db.rows(dealIncentives)[0]!;
+    offer.publicText = "Rates as low as 4.99% (6.2% APR) with the builder's lender. Selected Quick Move-In homes: 118 Sienna Lakes Blvd $349,990, 122 Sienna Lakes Blvd $364,990.";
+    offer.headlineRate = "4.99%";
+    offer.contractBy = new Date("2026-11-08T06:00:00Z");
+    offer.closeBy = new Date("2026-12-20T06:00:00Z");
+    const pub = await publicDealsCatalog();
+    expect(pub[0]!.incentive).toMatchObject({ text: "Rates as low as 4.99% (6.2% APR) with the builder's lender.", teaser: "Rates as low as 4.99% (6.2% APR) with the builder's lender.", headlineRate: "4.99%", contractBy: null, closeBy: null });
+    expect(JSON.stringify(pub)).not.toMatch(/Selected Quick Move-In|349,990|Sienna Lakes|2026-11-08|2026-12-20/);
+    const leadId = db.seed(dealLeads, { phoneE164: "+12105550125", status: "verified", expiresAt: new Date(Date.now() + 3_600_000), deviceHash: "f".repeat(64), consentText: "c", flags: "[]", sourceCode: "r0" });
+    const gated = await gatedDealsCatalog(leadId) as Array<{ incentive: { text: string; contractBy: unknown } }>;
+    expect(gated[0]!.incentive.text).toContain("Selected Quick Move-In homes:");
+    expect(gated[0]!.incentive.contractBy).not.toBeNull();
+  });
 });

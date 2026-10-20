@@ -92,6 +92,7 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
       if (options.onlyCards && (!card || !options.onlyCards.has(card))) continue;
       candidates.push({
         communityKey: String(community.id),
+        key: hashSecret(`deals-featured:${community.id}:${home.sourceKey}`).slice(0, 12),
         label,
         area,
         ...(card ? { card } : {}),

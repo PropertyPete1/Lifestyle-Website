@@ -29,8 +29,8 @@ function homeLine(deal: FeaturedDeal): string {
 }
 
 /** The same home can win several ways; it is shown once, with a tag for each extra win. */
-export function dealKey(deal: Pick<FeaturedDeal, "card" | "label" | "price">): string {
-  return deal.card ?? `${deal.label}|${deal.price}`;
+export function dealKey(deal: Pick<FeaturedDeal, "key" | "card" | "label" | "price">): string {
+  return deal.key ?? deal.card ?? `${deal.label}|${deal.price}`;
 }
 
 function DealRow({ deal, rank, locked, onSelect, tags = [] }: { deal: FeaturedDeal; rank?: number; locked: boolean; onSelect?: (deal: FeaturedDeal) => void; tags?: string[] }) {

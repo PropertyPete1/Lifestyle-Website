@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { dealCommunities } from "../drizzle/schema";
+import { dealCommunities, dealJobRuns } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 
 /**
@@ -9,10 +9,18 @@ import { FakeDealsDb } from "./dealsSync.fakeDb";
  * serves one URL set and a HomeAndConstructionBusiness record next to its
  * Organization and breadcrumb records.
  */
-const mocks = vi.hoisted(() => ({ getDb: vi.fn(), refreshCommunityGeography: vi.fn(), sendBuilderDealsEmail: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getDb: vi.fn(), refreshCommunityGeography: vi.fn(), sendBuilderDealsEmail: vi.fn(), onboardFailure: null as string | null }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 vi.mock("./dealsMap", () => ({ refreshCommunityGeography: (...args: unknown[]) => mocks.refreshCommunityGeography(...args), communityAreaMap: () => null, areaMapRadius: () => 5 }));
 vi.mock("./dealsEmail", () => ({ sendBuilderDealsEmail: (...args: unknown[]) => mocks.sendBuilderDealsEmail(...args) }));
+vi.mock("./dealsOnboarding", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./dealsOnboarding")>();
+  return { ...actual, onboardDiscoveredCommunities: async (communities: Array<{ builder: string }>) => {
+    if (mocks.onboardFailure && communities.some((community) => community.builder === mocks.onboardFailure)) throw new Error("geocoder exploded");
+    return actual.onboardDiscoveredCommunities(communities);
+  } };
+});
+import { leaseBuilder } from "./dealsSync";
 
 import { DISCOVERY_READERS, communityRecordFromHtml, discoverBuilderCommunities, priceFromRange, runCommunityDiscovery } from "./dealsDiscovery";
 
@@ -52,6 +60,7 @@ let db: FakeDealsDb;
 beforeEach(() => {
   vi.clearAllMocks();
   requested.length = 0;
+  mocks.onboardFailure = null;
   db = new FakeDealsDb();
   mocks.getDb.mockResolvedValue(db);
   mocks.refreshCommunityGeography.mockResolvedValue({ ok: false, reason: "test" });
@@ -114,6 +123,52 @@ describe("discovery", () => {
     expect(run).toMatchObject({ created: 1, builders: [{ builder: "Chesmar", ok: false, reason: "sitemap_unreadable", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }] });
     const email = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { content: string };
     expect(email.content).toContain("Could not read Chesmar's site list this time");
+  });
+
+  it("reads each builder under its lease, so a lane or Refresh now never reads the same site at the same time, and releases it after", async () => {
+    const run = await runCommunityDiscovery(fetcher);
+    expect(run).toMatchObject({ created: 3 });
+    const leases = db.rows(dealJobRuns).filter((row) => row.jobName.startsWith("builder-deals-lane-"));
+    expect(leases.map((row) => [row.jobName, row.status]).sort()).toEqual([["builder-deals-lane-Chesmar", "ok"], ["builder-deals-lane-M/I Homes", "ok"]]);
+    // Leases were released: another holder gets them right away.
+    const lease = await leaseBuilder("Chesmar");
+    expect(lease).not.toBeNull();
+    await lease!.release();
+  });
+
+  it("skips a builder whose lease stays busy and reports it, without waiting on the rest", async () => {
+    const held = await leaseBuilder("Chesmar");
+    expect(held).not.toBeNull();
+    // The lease was taken a moment ago, so the wait (twenty minutes, advanced by the fake sleep) ends well inside its two-hour life.
+    let clock = Date.now();
+    const run = await runCommunityDiscovery(fetcher, { now: () => clock, sleep: async (ms) => { clock += ms; } });
+    expect(run).toMatchObject({ created: 1, builders: [{ builder: "Chesmar", ok: false, reason: "builder_busy", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }] });
+    expect(requested.some((url) => url.startsWith(CH))).toBe(false);
+    await held!.release();
+  });
+
+  it("reports a builder whose onboarding throws and still finishes the others and the email", async () => {
+    mocks.onboardFailure = "Chesmar";
+    const run = await runCommunityDiscovery(fetcher);
+    expect(run).toMatchObject({ created: 1, builders: [{ builder: "Chesmar", ok: false, reason: "onboarding_failed", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }] });
+    expect(mocks.sendBuilderDealsEmail).toHaveBeenCalledTimes(1);
+    // The failed builder's lease was released despite the error.
+    const lease = await leaseBuilder("Chesmar");
+    expect(lease).not.toBeNull();
+    await lease!.release();
+    // The run row records the failure for Admin to see.
+    expect(db.rows(dealJobRuns).find((row) => row.jobName === "builder-deals-discovery-run")).toMatchObject({ status: "failed" });
+  });
+
+  it("runs once across servers: a second start while a run is in flight is refused, and a dead run is taken over after three hours", async () => {
+    const started = new Date();
+    db.seed(dealJobRuns, { jobName: "builder-deals-discovery-run", chicagoDay: "run", status: "running", startedAt: started, detail: null, completedAt: null });
+    expect(await runCommunityDiscovery(fetcher, { now: () => started.getTime() + 60_000 })).toEqual({ skipped: "already_running" });
+    expect(requested).toEqual([]);
+    const later = await runCommunityDiscovery(fetcher, { now: () => started.getTime() + 4 * 60 * 60_000 });
+    expect(later).toMatchObject({ created: 3 });
+    expect(db.rows(dealJobRuns).filter((row) => row.jobName === "builder-deals-discovery-run")).toHaveLength(1);
+    expect(db.rows(dealJobRuns).find((row) => row.jobName === "builder-deals-discovery-run")).toMatchObject({ status: "ok" });
   });
 
   it("never follows a sitemap or page to another host", async () => {

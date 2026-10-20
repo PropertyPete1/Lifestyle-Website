@@ -16,7 +16,15 @@ name, sales address and phone (and a price range when there is one).
 - Communities more than 45 miles from downtown (San Marcos, for example) are
   skipped. The page's coordinates are used for that check only, never stored.
 - A builder whose sitemap cannot be read adds nothing that week and is named in
-  the email; the other builders carry on.
+  the email; the other builders carry on. So does a builder whose onboarding
+  fails part-way (its lease is released all the same).
+- Each builder's pages are read under that builder's lease, the same one the
+  catalog checks and "Refresh now" take, so a builder's site never sees two
+  streams of requests at once. Discovery waits up to 20 minutes for a busy
+  lease, then skips that builder for the run ("builder_busy" in the email).
+- The run goes to the background and holds one claim across every server (a
+  `deal_job_runs` row, `builder-deals-discovery-run`); a second start while it
+  is in flight is refused, and a run that died is taken over after three hours.
 - Discovery never removes a community.
 - When something new is added, the sync recipients get one email listing it.
 
@@ -90,10 +98,15 @@ The scheduled check runs every 10 minutes from 4 AM to 10 PM Central
 - stops starting new communities after about four minutes; the next call picks
   up the rest;
 - holds a lease per builder while reading its pages (so an overlapping call,
-  or Refresh now, waits instead of opening a second stream), claims each
-  community before checking it (re-reading it, so a community paused or
+  Refresh now, or discovery waits instead of opening a second stream), claims
+  each community before checking it (re-reading it, so a community paused or
   archived since the call started is left alone), and does not retry a failed
-  one for 90 minutes.
+  one for 90 minutes. A lease carries a token: only the holder releases it, it
+  is renewed while the lane works, and only a lease untouched for two hours is
+  treated as dead and taken over.
+- records a community whose check itself failed (a network error, a page the
+  reader could not parse) as a `refresh_failed` catalog hold, so Admin sees it
+  and the digest names it, instead of the failure passing unnoticed.
 
 Communities whose builder has no reader yet are skipped quietly: no hold, no
 email.
@@ -102,9 +115,11 @@ Each community's changes and new holds are written to the digest the moment
 its check finishes. One morning email goes out once every due community has
 been tried that day and nothing is still being read, or at 10 AM at the
 latest. Anything found later in the day (including incentives the 6:15 PM job
-retires) goes out in one 6 PM follow-up, only if there is something new. The
-entries are marked sent only after the email went out, so a failed send is
-retried by the next call. "Refresh now" in Admin still emails right away.
+retires) goes out in one 7 PM follow-up, only if there is something new. When a
+slot has both changes and holds they go in one email ("Builder Deals update: N
+changes, M holds", holds first). The entries are marked sent only after the
+email went out, so a failed send is retried by the next call. "Refresh now" in
+Admin still emails right away.
 
 ## Browsing every community
 

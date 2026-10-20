@@ -16,7 +16,7 @@ import { featuredDeals, offerFromIncentive } from "./dealsFeatured";
 import { hashSecret } from "./dealsService";
 
 (globalThis as { React?: typeof React }).React = React;
-const { FeaturedDeals, rateLine } = await import("../client/src/components/deals/FeaturedDeals");
+const { FeaturedDeals, dealKey, rateLine } = await import("../client/src/components/deals/FeaturedDeals");
 const decode = (value: string) => value.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
 
 const settings = { marketRatePercent: 7.4, defaultDownPercent: 5 };
@@ -219,14 +219,63 @@ describe("Best Deals from the database, by viewer", () => {
     home(id, { price: 349_990, sqft: 2_318, lotSize: "0.52 acres" });
     const pub = await featuredDeals("public");
     expect(pub.lowestPayment[0]).toMatchObject({ price: 340_000, priceLabel: "$340s", sqft: 2_300, sqftLabel: "about 2,300 sq ft", acres: 0.5 });
-    // Still the real payment, on the real price.
-    expect(pub.lowestPayment[0]?.estMonthly).toBe(monthlyPrincipalAndInterest({ price: 349_990, ratePercent: 7.4, downPercent: 5 }));
+    // The payment is figured on the band, not the real price: the page prints the rate, down payment and term
+    // next to it, so a payment on the real price would give the real price away to within a hundred dollars.
+    expect(pub.lowestPayment[0]?.estMonthly).toBe(monthlyPrincipalAndInterest({ price: 340_000, ratePercent: 7.4, downPercent: 5 }));
+    expect(pub.lowestPayment[0]?.estMonthly).not.toBe(monthlyPrincipalAndInterest({ price: 349_990, ratePercent: 7.4, downPercent: 5 }));
     expect(JSON.stringify(pub)).not.toMatch(/349990|2318|0\.52/);
     const gated = await featuredDeals({ view: "gated" });
     expect(gated.lowestPayment[0]).toMatchObject({ price: 349_990, sqft: 2_318 });
     expect(gated.lowestPayment[0]).not.toHaveProperty("priceLabel");
     expect(priceBandLabel(1_250_000)).toBe("$1.2M+");
     expect(decode(renderToStaticMarkup(React.createElement(FeaturedDeals, { featured: pub, locked: true })))).toContain("$340s · about 2,300 sq ft");
+  });
+
+  it("never lets the landing payment give the real price away, with or without a builder rate", async () => {
+    const market = community({ publicLabel: "Southeast San Antonio | New Homes", areaLabel: "Southeast San Antonio" });
+    home(market, { price: 412_500 });
+    const rated = community({ publicLabel: "North San Antonio | Lakes", areaLabel: "North San Antonio", sourceUrl: "https://www.chesmar.com/north/" });
+    home(rated, { price: 374_990 });
+    db.seed(dealIncentives, { communityId: rated, normalizedText: "r", publicText: "Rates as low as 5.5% FHA with 3.5% down", confirmedAt: new Date(), active: true, held: false, manual: false, headlineRate: "5.5%" });
+    const pub = await featuredDeals("public");
+    const priceFromMonthly = (estMonthly: number, ratePercent: number, downPercent: number) => {
+      const r = ratePercent / 100 / 12;
+      const perDollar = r / (1 - (1 + r) ** -360);
+      return estMonthly / perDollar / (1 - downPercent / 100);
+    };
+    for (const deal of [...pub.lowestPayment, pub.bestRate].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))) {
+      const recovered = priceFromMonthly(deal.estMonthly, deal.rate.ratePercent, deal.downPercent);
+      // Inverting the printed assumptions lands on the band floor (a dollar of payment is about $150 of price), never the real price.
+      expect(Math.abs(recovered - deal.price)).toBeLessThan(200);
+      expect([412_500, 374_990].some((real) => Math.abs(recovered - real) < 1_000)).toBe(false);
+    }
+    expect(JSON.stringify(pub)).not.toMatch(/412500|374990/);
+  });
+
+  it("gives every landing deal its own opaque key, so same-label, same-band communities stay apart and the key names no row", async () => {
+    // Discovery labels hundreds of communities from a fixed vocabulary, so labels and bands repeat.
+    const a = community({ publicLabel: "Northwest San Antonio | From the $300s", areaLabel: "Northwest San Antonio" });
+    home(a, { price: 341_990 });
+    const b = community({ publicLabel: "Northwest San Antonio | From the $300s", areaLabel: "Northwest San Antonio", sourceUrl: "https://www.chesmar.com/b/" });
+    home(b, { price: 348_500 });
+    db.seed(dealIncentives, { communityId: b, normalizedText: "r", publicText: "Rates as low as 7.25% FHA with 3.5% down", confirmedAt: new Date(), active: true, held: false, manual: false, headlineRate: "7.25%" });
+    const c = community({ publicLabel: "North San Antonio | Lakes", areaLabel: "North San Antonio", sourceUrl: "https://www.chesmar.com/c/" });
+    home(c, { price: 360_000 });
+    const pub = await featuredDeals("public");
+    expect(pub.lowestPayment.map((deal) => deal.price)).toEqual([340_000, 340_000, 360_000]);
+    const keys = [...pub.lowestPayment, pub.bestRate!].map((deal) => deal.key);
+    expect(keys.every((key) => typeof key === "string" && /^[a-f0-9]{12}$/.test(key))).toBe(true);
+    expect(new Set(pub.lowestPayment.map((deal) => deal.key)).size).toBe(3);
+    // The best-rate home is the second same-label home, and only that row carries the tag.
+    expect(dealKey(pub.bestRate!)).toBe(dealKey(pub.lowestPayment[1]!));
+    expect(dealKey(pub.bestRate!)).not.toBe(dealKey(pub.lowestPayment[0]!));
+    const html = decode(renderToStaticMarkup(React.createElement(FeaturedDeals, { featured: pub, locked: true })));
+    const rows = html.split("<li").slice(1);
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).not.toContain("Best builder rate");
+    expect(rows[1]).toContain('data-deals-featured-tag="Best builder rate"');
+    expect(rows[1]).toContain("7.25%");
+    expect(JSON.stringify(pub)).not.toMatch(new RegExp(`"key":"${a}"|k-|sourceKey`));
   });
 
   it("ranks a private list's strip among that list's homes only, so it is never short", async () => {

@@ -16,12 +16,13 @@ import { SitterleAdapter } from "./dealsAdapters.sitterle";
 import { ScottFelderAdapter } from "./dealsAdapters.scottfelder";
 import { DrbHomesAdapter } from "./dealsAdapters.drb";
 import { StarlightAdapter } from "./dealsAdapters.starlight";
+import { LegendHomesAdapter } from "./dealsAdapters.legend";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "DRB Homes" | "Starlight Homes" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "DRB Homes" | "Starlight Homes" | "Legend Homes" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -247,8 +248,9 @@ export const SITTERLE_HOST = "www.sitterlehomes.com";
 export const SCOTTFELDER_HOST = "www.scottfelderhomes.com";
 export const DRB_HOST = "www.drbhomes.com";
 export const STARLIGHT_HOST = "www.starlighthomes.com";
+export const LEGEND_HOST = "www.livelegendhomes.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST, "DRB Homes": DRB_HOST, "Starlight Homes": STARLIGHT_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST, "DRB Homes": DRB_HOST, "Starlight Homes": STARLIGHT_HOST, "Legend Homes": LEGEND_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -369,12 +371,12 @@ export async function getDocument(
   fetcher: HtmlFetcher,
   accept: string,
   expectedHost: string,
-): Promise<{ ok: true; text: string } | { ok: false; redirectedOffOfficialHost: boolean }> {
+): Promise<{ ok: true; text: string } | { ok: false; redirectedOffOfficialHost: boolean; /** The HTTP status of the last answer, null when none came. */ status: number | null }> {
   // A slow or briefly failing official site gets one more attempt; a redirect
   // off the official host or a definite client error does not.
   for (let attempt = 0; ; attempt++) {
     const result = await getDocumentOnce(url, fetcher, accept, expectedHost);
-    if (result.ok || result.redirectedOffOfficialHost || !result.retryable || attempt >= 1) return result.ok ? result : { ok: false, redirectedOffOfficialHost: result.redirectedOffOfficialHost };
+    if (result.ok || result.redirectedOffOfficialHost || !result.retryable || attempt >= 1) return result.ok ? result : { ok: false, redirectedOffOfficialHost: result.redirectedOffOfficialHost, status: result.status };
     await new Promise((resolve) => setTimeout(resolve, FETCH_RETRY_DELAY_MS));
   }
 }
@@ -384,34 +386,34 @@ async function getDocumentOnce(
   fetcher: HtmlFetcher,
   accept: string,
   expectedHost: string,
-): Promise<{ ok: true; text: string } | { ok: false; redirectedOffOfficialHost: boolean; retryable: boolean }> {
+): Promise<{ ok: true; text: string } | { ok: false; redirectedOffOfficialHost: boolean; retryable: boolean; status: number | null }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     let target = asUrl(url);
     for (let hop = 0; hop <= 5; hop++) {
-      if (!target || !sameOfficialHost(target, expectedHost)) return { ok: false, redirectedOffOfficialHost: true, retryable: false };
+      if (!target || !sameOfficialHost(target, expectedHost)) return { ok: false, redirectedOffOfficialHost: true, retryable: false, status: null };
       const response = await fetcher(target.toString(), {
         method: "GET", redirect: "manual", signal: controller.signal,
         headers: { Accept: accept, "User-Agent": "LifestyleDesignRealtyDeals/1.0 (read-only official-page parser)" },
       });
       // Check BEFORE the next request; checking only Response.url is too late for SSRF.
-      if (response.url && !sameOfficialHost(new URL(response.url), expectedHost)) return { ok: false, redirectedOffOfficialHost: true, retryable: false };
+      if (response.url && !sameOfficialHost(new URL(response.url), expectedHost)) return { ok: false, redirectedOffOfficialHost: true, retryable: false, status: response.status };
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("location");
         target = location ? absoluteUrl(location, target) : null;
-        if (!target || !sameOfficialHost(target, expectedHost)) return { ok: false, redirectedOffOfficialHost: true, retryable: false };
+        if (!target || !sameOfficialHost(target, expectedHost)) return { ok: false, redirectedOffOfficialHost: true, retryable: false, status: response.status };
         continue;
       }
-      if (!response.ok) return { ok: false, redirectedOffOfficialHost: false, retryable: response.status === 429 || response.status >= 500 };
+      if (!response.ok) return { ok: false, redirectedOffOfficialHost: false, retryable: response.status === 429 || response.status >= 500, status: response.status };
       const text = await response.text();
-      if (text.length > 8_000_000) return { ok: false, redirectedOffOfficialHost: false, retryable: false };
+      if (text.length > 8_000_000) return { ok: false, redirectedOffOfficialHost: false, retryable: false, status: response.status };
       return { ok: true, text };
     }
-    return { ok: false, redirectedOffOfficialHost: false, retryable: false };
+    return { ok: false, redirectedOffOfficialHost: false, retryable: false, status: null };
   } catch {
     // Do not include url in logs or errors: it is private source metadata.
-    return { ok: false, redirectedOffOfficialHost: false, retryable: true };
+    return { ok: false, redirectedOffOfficialHost: false, retryable: true, status: null };
   } finally {
     clearTimeout(timer);
   }
@@ -1160,6 +1162,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "Starlight Homes") { config.builder.push("Starlight Homes", "Starlight", "Ashton Woods"); config.lender.push("Velocio Mortgage", "Velocio", "Trailblazer Mortgage", "Trailblazer"); }
   if (builder === "LGI Homes") { config.builder.push("LGI Homes", "LGI", "Terrata Homes", "CompleteHome"); config.lender.push("LGI Mortgage Solutions", "CalCon Mutual Mortgage", "One Trust Home Loans", "OneTrust Home Loans"); }
   if (builder === "Sitterle Homes") { config.builder.push("Sitterle Homes", "Sitterle"); }
+  if (builder === "Legend Homes") { config.builder.push("Legend Homes", "Legend Home", "Camillo Companies", "Camillo"); }
   if (builder === "DRB Homes") { config.builder.push("DRB Homes", "DRB Group", "DRB Elevate", "DRB"); }
   if (builder === "Scott Felder Homes") { config.builder.push("Scott Felder Homes", "Scott Felder"); config.lender.push("Southern Lending", "First Continental Mortgage", "First Continental"); }
   if (builder === "Highland Homes") { config.builder.push("Highland Homes", "Highland"); config.lender.push("Highland HomeLoans", "Highland Home Loans"); }
@@ -1813,6 +1816,7 @@ let sitterleAdapter: DealAdapter | null = null;
 let scottFelderAdapter: DealAdapter | null = null;
 let drbAdapter: DealAdapter | null = null;
 let starlightAdapter: DealAdapter | null = null;
+let legendAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
@@ -1836,6 +1840,7 @@ export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   get "Scott Felder Homes"() { return (scottFelderAdapter ??= new ScottFelderAdapter()); },
   get "DRB Homes"() { return (drbAdapter ??= new DrbHomesAdapter()); },
   get "Starlight Homes"() { return (starlightAdapter ??= new StarlightAdapter()); },
+  get "Legend Homes"() { return (legendAdapter ??= new LegendHomesAdapter()); },
   Manual: new ManualAdapter(),
 };
 

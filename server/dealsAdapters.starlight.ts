@@ -168,7 +168,8 @@ export function parseStarlightCommunity(html: string, pageUrl: string, now: Date
       const sqft = /([\d,]{3,6})\s*sq\.?\s*ft/i.exec(details);
       const status = starlightStatus(classText(cells, html, "qmi-table__cell--date"), now);
       homes.push({
-        sourceUrl: readable ? `${community.origin}${community.pathname.replace(/\/+$/, "")}#home-${homes.length + 1}` : `${community.origin}${community.pathname.replace(/\/+$/, "")}/unreadable-${homes.length}`,
+        // The homes have no pages: each is a fragment of the community page keyed by its street, so a row's key does not shift when another row goes.
+        sourceUrl: readable ? `${community.origin}${community.pathname.replace(/\/+$/, "")}#home-${street.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}` : `${community.origin}${community.pathname.replace(/\/+$/, "")}/unreadable-${homes.length}`,
         privateName: street,
         privateAddress: street ? `${street}, ${cityLine}` : null,
         privatePlanName: planName,

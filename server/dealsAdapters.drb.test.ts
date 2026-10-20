@@ -46,7 +46,7 @@ const plan = (input: { id: number; name: string; price: number; status?: string;
 const PLANS = [plan({ id: 3212, name: "The Mahogany", price: 424_990 }), plan({ id: 3213, name: "Palm Plan", price: 427_990 }), plan({ id: 3214, name: "Retired", price: 1, status: "inactive" }), plan({ id: 3215, name: "Later", price: 500_000, sales: "coming_soon" })];
 const OFFER = { id: 1635, title: "Up to $50K in Flex Cash, Plus 2% Lender Credit on Select Move-In Homes*", description: "The Joy of Owning New and the Confidence to buy Now! Hurry take advantage of $50K in Flex Cash and 2% in Lender Credit on Select Quick Move-In Homes.", type: "popup", displayFrom: "2026-10-01", displayThrough: "2026-12-31", status: "active", visibilities: ["community", "region"],
   content: { titleOne: "Up to $50K Flex Cash", disclaimer: "Home and community information subject to change without notice. DRB Group Texas, LLC (“DRB Homes”). *Up to $50,000 in flex cash credit(s) from DRB Homes and up to 2% in Approved Lender credit(s) toward closing costs available only for new contracts signed with DRB Homes between October 1, 2026, and December 31, 2026. Call 210-555-0142 or visit www.drbhomes.com for details. NMLS #123456." } };
-const RATE_OFFER = { ...OFFER, id: 1636, title: "4.99% (5.42% APR) 30-year fixed FHA rate with 3.5% down on select homes", description: "", content: { disclaimer: "" } };
+const RATE_OFFER = { ...OFFER, id: 1636, title: "Rate promo_Oct", description: "internal note", content: { titleOne: "4.99% (5.42% APR) 30-year fixed FHA rate with 3.5% down on select homes", copyOne: "", disclaimer: "" } };
 
 const byName = (slug: string) => drbApiUrl(`public/community/state/region/by-name?state=texas&region=san-antonio&name=${slug}`);
 const site: Record<string, { body: string; status?: number }> = {
@@ -80,7 +80,9 @@ describe("DRB Homes reader: statuses, slugs and paths", () => {
     expect(drbStatus("available", "2099-01-01", NOW)).toEqual({ status: "Quick Move-In", readyNow: false, moveInDate: null });
     expect(drbStatus("sold", null, NOW)).toEqual({ status: "Sold", readyNow: false, moveInDate: null });
     expect(drbStatus("under_contract", "2026-11-01", NOW)).toEqual({ status: "Sold", readyNow: false, moveInDate: null });
-    for (const label of [null, "", "pending", "reserved", "coming_soon", "model"]) expect(drbStatus(label, "2026-09-22", NOW).status).toBeNull();
+    // A pending contract or a reservation is neither for sale nor sold: left out, not held.
+    for (const label of ["contract_pending", "pending", "reserved"]) expect(drbStatus(label, "2026-09-22", NOW)).toEqual({ status: "Pending", readyNow: false, moveInDate: null });
+    for (const label of [null, "", "coming_soon", "model", "hold"]) expect(drbStatus(label, "2026-09-22", NOW).status).toBeNull();
     expect(drbSlug("Meyer Ranch – Premier")).toBe("meyer-ranch--premier");
     expect(drbSlug("Meyer Ranch - Enclave")).toBe("meyer-ranch--enclave");
     expect(drbSlug("Casinas at Gruene")).toBe("casinas-at-gruene");
@@ -128,9 +130,15 @@ describe("DRB Homes reader: API bodies", () => {
     expect(parseDrbPlans("[]", COMMUNITY)).toBeNull();
   });
 
-  it("takes ONE current offer as the text (the one naming a rate first), with links, phones, e-mails and NMLS ids gone; expired, future and inactive offers do not count", () => {
+  it("takes ONE current offer as the text (the one naming a rate first) from its public copy, with links, phones, e-mails and NMLS ids gone; expired, future and inactive offers do not count", () => {
     const text = parseDrbOffer(JSON.stringify([OFFER]), NOW);
-    expect(text).toBe("Up to $50K in Flex Cash, Plus 2% Lender Credit on Select Move-In Homes. The Joy of Owning New and the Confidence to buy Now! Hurry take advantage of $50K in Flex Cash and 2% in Lender Credit on Select Quick Move-In Homes. Home and community information subject to change without notice. DRB Group Texas, LLC (“DRB Homes”). Up to $50,000 in flex cash credit(s) from DRB Homes and up to 2% in Approved Lender credit(s) toward closing costs available only for new contracts signed with DRB Homes between October 1, 2026, and December 31, 2026.");
+    // The back office's own name and notes ("Open Door Deal_InPage") are used only when the content block says nothing.
+    const internal = { ...OFFER, title: "Open Door Deal_InPage", description: "Updated ODD offer on homes for San Antonio's Open Door Deal in October", content: { titleOne: "Open Door Deal", copyOne: "From now until Oct. 31, enjoy limited-time, low-interest rates and closing costs assistance on select homes. See a Sales Professional for details.", disclaimer: "" } };
+    expect(parseDrbOffer(JSON.stringify([internal]), NOW)).toBe("Open Door Deal. From now until Oct. 31, enjoy limited-time, low-interest rates and closing costs assistance on select homes. See a Sales Professional for details.");
+    expect(parseDrbOffer(JSON.stringify([{ ...OFFER, content: null }]), NOW)).toBe("Up to $50K in Flex Cash, Plus 2% Lender Credit on Select Move-In Homes. The Joy of Owning New and the Confidence to buy Now! Hurry take advantage of $50K in Flex Cash and 2% in Lender Credit on Select Quick Move-In Homes.");
+    // An image-only offer says nothing.
+    expect(parseDrbOffer(JSON.stringify([{ ...OFFER, title: "Self tour_Fixture", description: "", content: { titleOne: null, copyOne: "", disclaimer: "" } }]), NOW)).toBeNull();
+    expect(text).toBe("Up to $50K Flex Cash. Home and community information subject to change without notice. DRB Group Texas, LLC (“DRB Homes”). Up to $50,000 in flex cash credit(s) from DRB Homes and up to 2% in Approved Lender credit(s) toward closing costs available only for new contracts signed with DRB Homes between October 1, 2026, and December 31, 2026.");
     expect(parseDrbOffer(JSON.stringify([OFFER, RATE_OFFER]), NOW)).toBe("4.99% (5.42% APR) 30-year fixed FHA rate with 3.5% down on select homes.");
     expect(parseDrbOffer(JSON.stringify([{ ...OFFER, displayThrough: "2026-10-19" }, { ...OFFER, displayFrom: "2026-10-21" }, { ...OFFER, status: "inactive" }]), NOW)).toBeNull();
     expect(parseDrbOffer("[]", NOW)).toBeNull();
@@ -158,7 +166,7 @@ describe("DRB Homes reader: a community", () => {
     expect(result.private.homes).toHaveLength(5);
     expect(result.private.plans).toHaveLength(2);
     expect(result.private.communityFacts).toMatchObject({ fromPrice: 269_990 });
-    expect(result.private.incentive?.text).toMatch(/^Up to \$50K in Flex Cash/);
+    expect(result.private.incentive?.text).toMatch(/^Up to \$50K Flex Cash/);
     expect(result.private.incentive?.facts).toMatchObject({ rateKind: "none", contractDeadline: { isoDate: "2026-12-31" } });
     expect(result.public.incentive?.text).not.toMatch(/DRB/);
     const json = JSON.stringify(result.public);
@@ -191,8 +199,9 @@ describe("DRB Homes reader: a community", () => {
     const blank = await loadOfficialDeals(config, { fetcher: withOverrides({ [drbApiUrl("public/community/567/move-in-homes?page=1&limit=1000")]: { body: list([...HOMES, home({ id: 4, street: "", price: 1 })]) } }), now: () => NOW });
     expect(blank.private.homes.at(-1)?.status).toBeNull();
     expect((await loadOfficialDeals({ ...config, sourceUrl: "https://drbhomes.com/drbhomes/find-your-home/communities/texas/san-antonio/fixture-landmark" }, { fetcher })).holdReasons).toEqual(["unsupported_official_host"]);
+    // A server error on the lookup is a failed read, not an unknown community.
     const down = vi.fn(async () => new Response("down", { status: 503, headers: { "content-type": "text/html" } }));
-    expect((await loadOfficialDeals(config, { fetcher: down })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    expect((await loadOfficialDeals(config, { fetcher: down })).holdReasons).toEqual(["community_fetch_failed"]);
     expect((await loadOfficialDeals(config, { fetcher: withOverrides({ [drbApiUrl("public-drb/community/567")]: { body: "down", status: 503 } }), now: () => NOW })).holdReasons).toEqual(["community_fetch_failed"]);
     const noOffers = await loadOfficialDeals(config, { fetcher: withOverrides({ [drbApiUrl("public/offers-v2/by-community/567")]: { body: "gone", status: 404 } }), now: () => NOW });
     expect(noOffers.catalogOk).toBe(true);

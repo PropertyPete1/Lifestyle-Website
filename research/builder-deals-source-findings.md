@@ -283,7 +283,8 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   YYYY>"), under "N Available Homes In This Neighborhood" (the count is
   checked against the rows; rows without the count, or a count without the
   table, hold). The homes have no pages; each is filed as a fragment of the
-  community page. No photos per home.
+  community page keyed by its street (`#home-<street slug>`), so a row's key
+  does not shift when another row goes. No photos per home.
 - Plans: `.plan-card` with heading link, specs, `awh.widen.net` photos; no
   price (the site sells by monthly payment: "Own your new home from
   $1,427/month*", which is not read).
@@ -298,6 +299,38 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - Discovery: the market page's links; each page is read for its record.
 - Scrub: Starlight Homes, Starlight, Ashton Woods; lenders Velocio Mortgage,
   Trailblazer Mortgage.
+
+## Legend Homes reader (added 2026-10-20)
+
+- Site: `www.livelegendhomes.com` (not legendhomes.com, a Portland builder).
+  The same NDG platform as DRB Homes: an Angular app (server-rendered shell
+  with an Angular transfer state on the market page, none on community
+  pages) over the public API `api.livelegendhomes.com` (no key, CORS-open).
+  The shared reader lives in `dealsAdapters.ndg.ts`; DRB and Legend are
+  brand configurations over it.
+- Division list: `public-epcon/community/for-legend?limit=1000&division=san-antonio&barebones=false`
+  → 11 communities (10 Active, Blue Ridge Ranch Closeout; 87 homes for sale
+  in October 2026). Rows carry `regions[0].label` ("San Antonio", "New
+  Braunfels/Seguin", "Elmendorf", "Schertz/Cibolo"), `address.countyName`
+  and `address.city`; the page URL is
+  `/communities/san-antonio/<region slug>/<county slug>/<city slug>/<name slug>`
+  (slug: lower case, punctuation dropped, spaces and slashes hyphens),
+  verified against the sitemap for all 11. The page resolves itself with
+  `public-epcon/community/state/region/county/city/by-name-v2?state=texas&region=…&county=…&city=…&name=…`
+  (HTTP 400 otherwise); `public-drb/community/<id>`,
+  `public/community/<id>/move-in-homes`, `…/plans` and
+  `public/offers-v2/by-community/<id>` are the same as DRB's.
+- Homes: `salesStatus` available | contract_pending | sold seen; a pending
+  contract or a reservation is a "Pending" home (left out, not held);
+  `originalPrice` carries a previous price (358,419 → 324,990 on one home).
+  Photos on `assets.livelegendhomes.com`.
+- Offers: the division-wide "Open Door Deal" (`offers-v2`, visibilities
+  community/division/region) has a back-office `title`
+  ("Open Door Deal_InPage") and `description` (an internal note); the public
+  copy is `content.titleOne`/`copyOne`, which the reader uses (the title
+  only when there is no content block). Its wording ("low-interest rates")
+  names no rate, so it is held for a look. Image-only popups say nothing.
+- Scrub: Legend Homes, Legend Home, Camillo Companies (parent), Camillo.
 
 ## Meritage Homes: deferred
 

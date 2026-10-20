@@ -55,6 +55,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "Chesmar") { config.builder.push("Chesmar Homes", "Chesmar"); config.lender.push("HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HomeAmerican", "HMC"); }
   if (builder === "Perry Homes") { config.builder.push("Perry Homes", "Perry"); config.lender.push("Parkstone Mortgage", "Parkstone", "Crestmark Mortgage", "Crestmark"); }
   // D.R. Horton's product lines name the builder as surely as the builder does.
+  if (builder === "Pulte" || builder === "Centex" || builder === "Del Webb") { config.builder.push("PulteGroup", "Pulte Homes", "Pulte", "Centex Homes", "Centex", "Del Webb"); config.lender.push("Pulte Mortgage LLC", "Pulte Mortgage"); }
   if (builder === "D.R. Horton") { config.builder.push("D.R. Horton", "DR Horton", "D. R. Horton", "Horton", "Express Series", "Express Homes", "Emerald Homes", "Freedom Homes", "Tradition Series"); config.lender.push("DHI Mortgage", "DHI Title", "DHI"); }
   return config;
 }

@@ -38,6 +38,11 @@ describe("Builder Deals private photo primitives", () => {
     expect(() => safeDealImageUrl("https://user@dam.mihomes.com/path/house.jpg")).toThrow("unapproved_source");
     expect(() => safeDealImageUrl("not a URL")).toThrow("unapproved_source");
     expect(() => safeDealImageUrl("upload:abc")).toThrow("unapproved_source");
+    // The newer builders' photo hosts, and a shared CDN only under the builder's own account.
+    expect(safeDealImageUrl("https://res.cloudinary.com/perryhomes/image/upload/v1/x.jpg").hostname).toBe("res.cloudinary.com");
+    expect(() => safeDealImageUrl("https://res.cloudinary.com/someone-else/image/upload/v1/x.jpg")).toThrow("unapproved_source");
+    expect(safeDealImageUrl("https://www.drhorton.com/-/media/drhorton/productcatalog/x/y.jpg").hostname).toBe("www.drhorton.com");
+    expect(safeDealImageUrl("https://pultegroup.cdn.picturepark.com/v/47GVJF5O/").hostname).toBe("pultegroup.cdn.picturepark.com");
   });
 
   it("matches only consecutive complete OCR words above the confidence floor", () => {

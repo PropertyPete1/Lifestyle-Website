@@ -2,12 +2,13 @@ import { dealScrubTerms, emptyDealScrubConfig, hasPrivateTerm, normalizedText, p
 import { applyScrubExclusions } from "./dealsScrub";
 import { PerryHomesAdapter } from "./dealsAdapters.perry";
 import { DrHortonAdapter } from "./dealsAdapters.drhorton";
+import { PulteGroupAdapter } from "./dealsAdapters.pultegroup";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -215,8 +216,10 @@ const CHESMAR_HOST = "www.chesmar.com";
 const MI_HOST = "www.mihomes.com";
 export const PERRY_HOST = "www.perryhomes.com";
 export const DRHORTON_HOST = "www.drhorton.com";
+/** PulteGroup's three brands share one platform; each brand has its own host. */
+export const PULTEGROUP_HOSTS = { Pulte: "www.pulte.com", Centex: "www.centex.com", "Del Webb": "www.delwebb.com" } as const;
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -1642,12 +1645,16 @@ class ManualAdapter implements DealAdapter {
 /** Generic registry. Callers select only by config.builder; no builder-specific network logic is exposed. */
 let perryAdapter: DealAdapter | null = null;
 let drHortonAdapter: DealAdapter | null = null;
+const pulteGroupAdapters: Partial<Record<keyof typeof PULTEGROUP_HOSTS, DealAdapter>> = {};
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
   // Readers in their own modules import this one's helpers, so they are made on first use, after every module has loaded.
   get "Perry Homes"() { return (perryAdapter ??= new PerryHomesAdapter()); },
   get "D.R. Horton"() { return (drHortonAdapter ??= new DrHortonAdapter()); },
+  get Pulte() { return (pulteGroupAdapters.Pulte ??= new PulteGroupAdapter("Pulte")); },
+  get Centex() { return (pulteGroupAdapters.Centex ??= new PulteGroupAdapter("Centex")); },
+  get "Del Webb"() { return (pulteGroupAdapters["Del Webb"] ??= new PulteGroupAdapter("Del Webb")); },
   Manual: new ManualAdapter(),
 };
 

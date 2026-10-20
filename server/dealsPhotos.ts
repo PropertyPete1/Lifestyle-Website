@@ -38,6 +38,12 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "chesmar.com",
   "images.ctfassets.net",
   "cdn.sanity.io",
+  // Perry Homes serves its photos from Cloudinary (…/perryhomes/…); the path is checked below.
+  "res.cloudinary.com",
+  "www.drhorton.com",
+  "drhorton.com",
+  // PulteGroup (Pulte, Centex, Del Webb) serves its photos from Picturepark.
+  "pultegroup.cdn.picturepark.com",
 ]);
 const ACCEPTED_IMAGE_FORMATS = new Set(["jpeg", "png", "webp", "avif", "gif", "heif"]);
 
@@ -259,6 +265,8 @@ export function safeDealImageUrl(raw: string): URL {
   ) {
     throw new PhotoProcessingError("unapproved_source");
   }
+  // A shared image CDN is approved for the builder's own account only.
+  if (url.hostname.toLowerCase() === "res.cloudinary.com" && !url.pathname.startsWith("/perryhomes/")) throw new PhotoProcessingError("unapproved_source");
   return url;
 }
 

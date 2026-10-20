@@ -5,7 +5,8 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -27,21 +28,50 @@ const MAX_SITEMAP_DOCUMENTS = 32;
 export type DiscoveryReader = {
   builder: Exclude<BuilderId, "Manual">;
   host: string;
-  /** Where the builder lists its community pages: its sitemap, or (when the sitemap is too large or missing) its own market listing. */
-  index: { kind: "sitemap"; url: string } | { kind: "listing"; url: string; accept: string; paths: (body: string) => string[] | null };
+  /**
+   * Where the builder lists its community pages: its sitemap, or (when the
+   * sitemap is too large or missing) its own market listing. A listing entry
+   * may carry the community's record itself; then its page is not read.
+   */
+  index: { kind: "sitemap"; url: string } | { kind: "listing"; url: string; accept: string; entries: (body: string, host: string) => ListingEntry[] | null };
   /** Path of a community page in the builder's San Antonio market. */
   communityPath: RegExp;
 };
 
-/** D.R. Horton's San Antonio market listing: `{ CommunityData: [{ commPageLink: "/texas/san-antonio/<city>/<community>", ... }] }`. */
-export function drhListingPaths(body: string): string[] | null {
+export type ListingEntry = { url: string; record: CommunityRecord | null };
+
+/** D.R. Horton's San Antonio market listing: `{ CommunityData: [{ commPageLink: "/texas/san-antonio/<city>/<community>", ... }] }`; the page carries the record. */
+export function drhListingEntries(body: string, host: string): ListingEntry[] | null {
   try {
     const parsed = JSON.parse(body) as { CommunityData?: Array<{ commPageLink?: unknown }> };
     if (!Array.isArray(parsed.CommunityData)) return null;
-    return parsed.CommunityData.flatMap((entry) => typeof entry.commPageLink === "string" ? [entry.commPageLink] : []);
+    return parsed.CommunityData.flatMap((entry) => typeof entry.commPageLink === "string" ? [{ url: new URL(entry.commPageLink, `https://${host}/`).toString(), record: null }] : []);
   } catch {
     return null;
   }
+}
+
+/**
+ * PulteGroup's market listing (all three brands in one): each entry carries the
+ * community's name, sales address, phone, coordinates and starting price, so
+ * no page is read (the pages run past 8 MB). Entries of the other brands point
+ * at their own hosts and are left to those readers.
+ */
+export function pulteListingEntries(body: string, host: string): ListingEntry[] | null {
+  const listings = parsePulteListing(body);
+  if (!listings) return null;
+  return listings.filter((entry) => entry.isCommunityActive).map((entry) => ({
+    url: new URL(entry.pageURL, `https://${host}/`).toString(),
+    record: {
+      name: entry.name.trim(),
+      street: entry.address?.street1 ?? null,
+      city: entry.address?.city ?? null,
+      zip: /^\d{5}/.exec(entry.address?.zipCode ?? "")?.[0] ?? null,
+      phone: entry.salesPhoneNumber?.replace(/[^\d+]/g, "") || null,
+      priceFrom: entry.startingFromPrice && entry.startingFromPrice >= 50_000 ? entry.startingFromPrice : null,
+      geo: entry.latitude !== null && entry.longitude !== null && (entry.latitude !== 0 || entry.longitude !== 0) ? { lat: entry.latitude, lng: entry.longitude } : null,
+    },
+  }));
 }
 
 export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
@@ -52,9 +82,13 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
   },
   {
     // The sitemap is a 17 MB file of 40,000 URLs; the market listing the community finder reads is 70 KB and complete.
-    builder: "D.R. Horton", host: "www.drhorton.com", index: { kind: "listing", url: "https://www.drhorton.com/api/comms/direct/texas/san-antonio", accept: "application/json", paths: drhListingPaths },
+    builder: "D.R. Horton", host: "www.drhorton.com", index: { kind: "listing", url: "https://www.drhorton.com/api/comms/direct/texas/san-antonio", accept: "application/json", entries: drhListingEntries },
     communityPath: /^\/texas\/san-antonio\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
   },
+  ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({
+    builder: brand, host: PULTEGROUP_HOSTS[brand], index: { kind: "listing", url: pulteListingUrl(PULTEGROUP_HOSTS[brand], brand), accept: "application/json", entries: pulteListingEntries },
+    communityPath: /^\/homes\/texas\/san-antonio\/[a-z0-9-]+\/[a-z0-9-]+-\d{4,8}\/?$/i,
+  })),
 ];
 
 /** Every URL in a sitemap or sitemap index on the builder's own host; null when it cannot be read whole. */
@@ -177,27 +211,36 @@ export type BuilderDiscovery = {
 };
 
 /** One builder's San Antonio area communities, read from its own site, one page at a time. */
-/** The builder's community page URLs from its index; null when the index cannot be read whole. */
-async function indexedUrls(reader: DiscoveryReader, fetcher: HtmlFetcher): Promise<string[] | null> {
-  if (reader.index.kind === "sitemap") return officialSitemapUrls(reader.index.url, reader.host, fetcher);
+/** The builder's community pages from its index (with the record when the index carries it); null when the index cannot be read whole. */
+async function indexedEntries(reader: DiscoveryReader, fetcher: HtmlFetcher): Promise<ListingEntry[] | null> {
+  if (reader.index.kind === "sitemap") {
+    const urls = await officialSitemapUrls(reader.index.url, reader.host, fetcher);
+    return urls ? urls.map((url) => ({ url, record: null })) : null;
+  }
   const page = await getDocument(reader.index.url, fetcher, reader.index.accept, reader.host);
   if (!page.ok) return null;
-  const paths = reader.index.paths(page.text);
-  return paths ? paths.map((path) => new URL(path, `https://${reader.host}/`).toString()) : null;
+  return reader.index.entries(page.text, reader.host);
 }
 
 export async function discoverBuilderCommunities(reader: DiscoveryReader, fetcher: HtmlFetcher = fetch): Promise<BuilderDiscovery> {
   const result: BuilderDiscovery = { builder: reader.builder, ok: false, communities: [], skipped: [] };
-  const urls = await indexedUrls(reader, fetcher);
-  if (!urls) return { ...result, reason: "sitemap_unreadable" };
-  const pages = Array.from(new Set(urls.flatMap((raw) => {
-    const url = asUrl(raw);
-    return url && sameOfficialHost(url, reader.host) && reader.communityPath.test(url.pathname) ? [`${url.origin}${url.pathname}`] : [];
-  }))).slice(0, MAX_COMMUNITY_PAGES);
-  for (const url of pages) {
-    const page = await getDocument(url, fetcher, "text/html,application/xhtml+xml", reader.host);
-    if (!page.ok) { result.skipped.push({ url, reason: "page_unreadable" }); continue; }
-    const record = communityRecordFromHtml(page.text);
+  const entries = await indexedEntries(reader, fetcher);
+  if (!entries) return { ...result, reason: "sitemap_unreadable" };
+  const pages = new Map<string, CommunityRecord | null>();
+  for (const entry of entries) {
+    const url = asUrl(entry.url);
+    if (!url || !sameOfficialHost(url, reader.host) || !reader.communityPath.test(url.pathname)) continue;
+    const key = `${url.origin}${url.pathname}`;
+    if (!pages.has(key)) pages.set(key, entry.record);
+    if (pages.size >= MAX_COMMUNITY_PAGES) break;
+  }
+  for (const [url, listed] of Array.from(pages)) {
+    let record = listed;
+    if (!record) {
+      const page = await getDocument(url, fetcher, "text/html,application/xhtml+xml", reader.host);
+      if (!page.ok) { result.skipped.push({ url, reason: "page_unreadable" }); continue; }
+      record = communityRecordFromHtml(page.text);
+    }
     if (!record) { result.skipped.push({ url, reason: "no_community_record" }); continue; }
     if (record.geo && milesBetween(DOWNTOWN_SAN_ANTONIO, record.geo) > DISCOVERY_RADIUS_MILES) { result.skipped.push({ url, reason: "outside_area" }); continue; }
     const address = [record.street, record.city, record.zip ? `TX ${record.zip}` : "TX"].filter(Boolean).join(", ");

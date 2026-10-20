@@ -22,11 +22,22 @@ vi.mock("./dealsOnboarding", async (importOriginal) => {
 });
 import { leaseBuilder } from "./dealsSync";
 
-import { DISCOVERY_READERS, communityRecordFromHtml, discoverBuilderCommunities, drhListingPaths, priceFromRange, runCommunityDiscovery } from "./dealsDiscovery";
+import { DISCOVERY_READERS, communityRecordFromHtml, discoverBuilderCommunities, drhListingEntries, priceFromRange, pulteListingEntries, runCommunityDiscovery } from "./dealsDiscovery";
 
 const CH = "https://www.chesmar.com";
 const MI = "https://www.mihomes.com";
 const DRH = "https://www.drhorton.com";
+const PULTE = "https://www.pulte.com";
+const CENTEX = "https://www.centex.com";
+const DELWEBB = "https://www.delwebb.com";
+/** PulteGroup's market listing names every brand's communities; other brands' pages are absolute URLs on their own hosts. */
+const pulteListing = JSON.stringify([
+  { id: 211074, name: "Fixture Ridge", status: "Save on To-Be-Built Homes", brandName: "Pulte", address: { street1: "13607 Fixture Way", zipCode: "78245", city: "San Antonio" }, latitude: 29.39, longitude: -98.72, isCommunityActive: true, pageURL: "/homes/texas/san-antonio/san-antonio/fixture-ridge-211074", salesPhoneNumber: "(210) 555-0101", startingFromPrice: 333_990 },
+  { id: 211073, name: "Fixture Ridge", status: "Quick Move-Ins Available", brandName: "Centex", address: { street1: "13607 Fixture Way", zipCode: "78245", city: "San Antonio" }, latitude: 29.39, longitude: -98.72, isCommunityActive: true, pageURL: `${CENTEX}/homes/texas/san-antonio/san-antonio/fixture-ridge-211073`, salesPhoneNumber: "(210) 555-0100", startingFromPrice: 251_490 },
+  { id: 211338, name: "Fixture Webb at Far Falls", status: "New Phase Available", brandName: "Del Webb", address: { street1: "1 Far Rd", zipCode: "78640", city: "Kyle" }, latitude: 29.99, longitude: -97.87, isCommunityActive: true, pageURL: `${DELWEBB}/homes/texas/san-antonio/kyle/fixture-webb-211338`, salesPhoneNumber: null, startingFromPrice: 400_000 },
+  { id: 211799, name: "Closed Fixture", status: "Sold Out", brandName: "Pulte", address: { street1: "2 Done St", zipCode: "78245", city: "San Antonio" }, latitude: 29.39, longitude: -98.72, isCommunityActive: false, pageURL: "/homes/texas/san-antonio/san-antonio/closed-fixture-211799", salesPhoneNumber: null, startingFromPrice: null },
+]);
+const pulteListingUrl = (host: string, brand: string) => `https://${host}/API/Community/Search?State=Texas&Region=San%20Antonio&Brand=${encodeURIComponent(brand)}&JsonFormat=true&pageSize=0`;
 /** D.R. Horton: a page-title "Place" record with lower-case address keys and coordinates, then the community's LocalBusiness record. */
 const drhRecords = (name: string, street: string, city: string, zip: string, geo = { latitude: 29.3778, longitude: -98.3754 }) => [
   { name: `Houses For Sale in ${city}, TX | ${name} | D.R. Horton`, description: "Find homes for sale", "@context": "http://schema.org", "@type": "Place", url: `${DRH}/x`, address: { "@type": "PostalAddress", addresslocality: city.toUpperCase(), addressregion: "TX", postalcode: zip, streetaddress: street }, ...geo },
@@ -58,6 +69,10 @@ const site: Record<string, { status?: number; body: string; type?: string; locat
   [`${DRH}/texas/san-antonio/san-antonio/fixture-ranch`]: { body: page(drhRecords("Fixture Ranch", "3702 Fixture Terrace", "San Antonio", "78222")) },
   // Kyle is about 55 miles out: the market listing reaches past the area we cover.
   [`${DRH}/texas/san-antonio/kyle/far-fixture`]: { body: page(drhRecords("Far Fixture", "1 Far Rd", "Kyle", "78640", { latitude: 29.99, longitude: -97.87 })) },
+  // Each host serves the same listing; only its own brand's pages are relative paths.
+  [pulteListingUrl("www.pulte.com", "Pulte")]: { body: pulteListing, type: "application/json; charset=utf-8" },
+  [pulteListingUrl("www.centex.com", "Centex")]: { body: pulteListing.replaceAll("\"pageURL\":\"/homes/", `"pageURL":"${PULTE}/homes/`).replace(`${CENTEX}/homes/texas/san-antonio/san-antonio/fixture-ridge-211073`, "/homes/texas/san-antonio/san-antonio/fixture-ridge-211073"), type: "application/json; charset=utf-8" },
+  [pulteListingUrl("www.delwebb.com", "Del Webb")]: { body: pulteListing.replaceAll("\"pageURL\":\"/homes/", `"pageURL":"${PULTE}/homes/`).replace(`${DELWEBB}/homes/texas/san-antonio/kyle/fixture-webb-211338`, "/homes/texas/san-antonio/kyle/fixture-webb-211338"), type: "application/json; charset=utf-8" },
 };
 
 const requested: string[] = [];
@@ -88,9 +103,14 @@ describe("reading a builder's own records", () => {
     expect(communityRecordFromHtml("<script type=\"application/ld+json\">{broken</script>")).toBeNull();
     // D.R. Horton: the plain-named LocalBusiness record wins over the page-title Place record, which lends its coordinates.
     expect(communityRecordFromHtml(page(drhRecords("Fixture Ranch", "3702 Fixture Terrace", "San Antonio", "78222")))).toEqual({ name: "Fixture Ranch", street: "3702 Fixture Terrace", city: "San Antonio", zip: "78222", phone: null, priceFrom: null, geo: { lat: 29.3778, lng: -98.3754 } });
-    expect(drhListingPaths(drhListing([["A", "/texas/san-antonio/a/b"]]))).toEqual(["/texas/san-antonio/a/b"]);
-    expect(drhListingPaths("<html>maintenance</html>")).toBeNull();
-    expect(drhListingPaths("{\"MetaData\":{}}")).toBeNull();
+    expect(drhListingEntries(drhListing([["A", "/texas/san-antonio/a/b"]]), "www.drhorton.com")).toEqual([{ url: `${DRH}/texas/san-antonio/a/b`, record: null }]);
+    expect(drhListingEntries("<html>maintenance</html>", "www.drhorton.com")).toBeNull();
+    expect(drhListingEntries("{\"MetaData\":{}}", "www.drhorton.com")).toBeNull();
+    // PulteGroup's listing carries the record itself, for every brand; each reader keeps its own host's entries.
+    const pulte = pulteListingEntries(pulteListing, "www.pulte.com")!;
+    expect(pulte.map((entry) => entry.url)).toEqual([`${PULTE}/homes/texas/san-antonio/san-antonio/fixture-ridge-211074`, `${CENTEX}/homes/texas/san-antonio/san-antonio/fixture-ridge-211073`, `${DELWEBB}/homes/texas/san-antonio/kyle/fixture-webb-211338`]);
+    expect(pulte[0]!.record).toEqual({ name: "Fixture Ridge", street: "13607 Fixture Way", city: "San Antonio", zip: "78245", phone: "2105550101", priceFrom: 333_990, geo: { lat: 29.39, lng: -98.72 } });
+    expect(pulteListingEntries("<html>maintenance</html>", "www.pulte.com")).toBeNull();
     expect(priceFromRange("From $1,250,000")).toBe(1_250_000);
     expect(priceFromRange("$$")).toBeNull();
   });
@@ -120,19 +140,29 @@ describe("discovery", () => {
     expect(drh.communities.map((community) => [community.name, community.city, community.zip, community.address])).toEqual([["Fixture Ranch", "San Antonio", "78222", "3702 Fixture Terrace, San Antonio, TX 78222"]]);
     expect(drh.skipped).toEqual([{ url: `${DRH}/texas/san-antonio/kyle/far-fixture`, reason: "outside_area" }]);
     expect(requested.filter((url) => url === `${DRH}/texas/san-antonio`)).toEqual([]);
+
+    // PulteGroup: the listing carries the record, so no community page is read; each brand keeps its own; a closed community and one 55 miles out are left.
+    requested.length = 0;
+    const pulte = await discoverBuilderCommunities(DISCOVERY_READERS[3]!, fetcher);
+    expect(pulte.communities.map((community) => [community.builder, community.name, community.address, community.salesPhone, community.priceFrom])).toEqual([["Pulte", "Fixture Ridge", "13607 Fixture Way, San Antonio, TX 78245", "2105550101", 333_990]]);
+    const centex = await discoverBuilderCommunities(DISCOVERY_READERS[4]!, fetcher);
+    expect(centex.communities.map((community) => [community.builder, community.sourceUrl])).toEqual([["Centex", `${CENTEX}/homes/texas/san-antonio/san-antonio/fixture-ridge-211073`]]);
+    const delWebb = await discoverBuilderCommunities(DISCOVERY_READERS[5]!, fetcher);
+    expect(delWebb).toMatchObject({ ok: true, communities: [], skipped: [{ url: `${DELWEBB}/homes/texas/san-antonio/kyle/fixture-webb-211338`, reason: "outside_area" }] });
+    expect(requested.every((url) => url.includes("/API/Community/Search"))).toBe(true);
   });
 
   it("adds new communities hidden, leaves the ones already there alone, and emails what it found", async () => {
     db.seed(dealCommunities, { builder: "Chesmar", privateName: "Sienna Lakes", sourceUrl: `${CH}/texas/san-antonio-new-homes/san-antonio/sienna-lakes`, privateAddress: "9010 Arroyo Grove, San Antonio, TX 78263", publicLabel: "Southeast San Antonio | Half-Acre Lots and Lakes", areaLabel: "Southeast San Antonio", amenities: "[]", reelCode: "sl1", scrubList: "{}", active: true, paused: false, manualMode: false });
     const run = await runCommunityDiscovery(fetcher);
-    expect(run).toMatchObject({ created: 3, builders: [{ builder: "Chesmar", ok: true, found: 2, created: 1, existing: 1 }, { builder: "M/I Homes", ok: true, found: 1, created: 1 }, { builder: "D.R. Horton", ok: true, found: 1, created: 1 }] });
+    expect(run).toMatchObject({ created: 5, builders: [{ builder: "Chesmar", ok: true, found: 2, created: 1, existing: 1 }, { builder: "M/I Homes", ok: true, found: 1, created: 1 }, { builder: "D.R. Horton", ok: true, found: 1, created: 1 }, { builder: "Pulte", ok: true, found: 1, created: 1 }, { builder: "Centex", ok: true, found: 1, created: 1 }, { builder: "Del Webb", ok: true, found: 0, created: 0 }] });
     const added = db.rows(dealCommunities).filter((row) => row.awaitingFirstSync);
-    expect(added.map((row) => [row.privateName, row.active, row.areaLabel])).toEqual([["Esperanza 60's", false, "Boerne"], ["Paloma Park", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"]]);
+    expect(added.map((row) => [row.privateName, row.active, row.areaLabel])).toEqual([["Esperanza 60's", false, "Boerne"], ["Paloma Park", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Ridge", false, "Greater San Antonio"], ["Fixture Ridge", false, "Greater San Antonio"]]);
     // The exact coordinates on the builder's page are never stored.
     expect(JSON.stringify(db.rows(dealCommunities))).not.toMatch(/29\.79|98\.73|29\.52/);
     expect(mocks.sendBuilderDealsEmail).toHaveBeenCalledTimes(1);
     const email = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { subject: string; content: string };
-    expect(email.subject).toBe("Builder Deals: 3 new communities found");
+    expect(email.subject).toBe("Builder Deals: 5 new communities found");
     expect(email.content).toContain("Esperanza 60's (Chesmar)");
     expect(email.content).toContain("Paloma Park (M/I Homes)");
     expect(email.content).toContain("Fixture Ranch (D.R. Horton)");
@@ -145,16 +175,16 @@ describe("discovery", () => {
   it("adds nothing for a builder whose sitemap cannot be read, says so, and carries on with the rest", async () => {
     const broken = vi.fn(async (input: string) => input.startsWith(CH) ? new Response("<html>maintenance</html>", { status: 200, headers: { "content-type": "text/html" } }) : fetcher(input));
     const run = await runCommunityDiscovery(broken);
-    expect(run).toMatchObject({ created: 2, builders: [{ builder: "Chesmar", ok: false, reason: "sitemap_unreadable", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }] });
+    expect(run).toMatchObject({ created: 4, builders: [{ builder: "Chesmar", ok: false, reason: "sitemap_unreadable", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
     const email = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { content: string };
     expect(email.content).toContain("Could not read Chesmar's site list this time");
   });
 
   it("reads each builder under its lease, so a lane or Refresh now never reads the same site at the same time, and releases it after", async () => {
     const run = await runCommunityDiscovery(fetcher);
-    expect(run).toMatchObject({ created: 4 });
+    expect(run).toMatchObject({ created: 6 });
     const leases = db.rows(dealJobRuns).filter((row) => row.jobName.startsWith("builder-deals-lane-"));
-    expect(leases.map((row) => [row.jobName, row.status]).sort()).toEqual([["builder-deals-lane-Chesmar", "ok"], ["builder-deals-lane-D.R. Horton", "ok"], ["builder-deals-lane-M/I Homes", "ok"]]);
+    expect(leases.map((row) => [row.jobName, row.status]).sort()).toEqual([["builder-deals-lane-Centex", "ok"], ["builder-deals-lane-Chesmar", "ok"], ["builder-deals-lane-D.R. Horton", "ok"], ["builder-deals-lane-Del Webb", "ok"], ["builder-deals-lane-M/I Homes", "ok"], ["builder-deals-lane-Pulte", "ok"]]);
     // Leases were released: another holder gets them right away.
     const lease = await leaseBuilder("Chesmar");
     expect(lease).not.toBeNull();
@@ -167,7 +197,7 @@ describe("discovery", () => {
     // The lease was taken a moment ago, so the wait (twenty minutes, advanced by the fake sleep) ends well inside its two-hour life.
     let clock = Date.now();
     const run = await runCommunityDiscovery(fetcher, { now: () => clock, sleep: async (ms) => { clock += ms; } });
-    expect(run).toMatchObject({ created: 2, builders: [{ builder: "Chesmar", ok: false, reason: "builder_busy", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }] });
+    expect(run).toMatchObject({ created: 4, builders: [{ builder: "Chesmar", ok: false, reason: "builder_busy", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
     expect(requested.some((url) => url.startsWith(CH))).toBe(false);
     await held!.release();
   });
@@ -175,7 +205,7 @@ describe("discovery", () => {
   it("reports a builder whose onboarding throws and still finishes the others and the email", async () => {
     mocks.onboardFailure = "Chesmar";
     const run = await runCommunityDiscovery(fetcher);
-    expect(run).toMatchObject({ created: 2, builders: [{ builder: "Chesmar", ok: false, reason: "onboarding_failed", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }] });
+    expect(run).toMatchObject({ created: 4, builders: [{ builder: "Chesmar", ok: false, reason: "onboarding_failed", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
     expect(mocks.sendBuilderDealsEmail).toHaveBeenCalledTimes(1);
     // The failed builder's lease was released despite the error.
     const lease = await leaseBuilder("Chesmar");
@@ -191,7 +221,7 @@ describe("discovery", () => {
     expect(await runCommunityDiscovery(fetcher, { now: () => started.getTime() + 60_000 })).toEqual({ skipped: "already_running" });
     expect(requested).toEqual([]);
     const later = await runCommunityDiscovery(fetcher, { now: () => started.getTime() + 4 * 60 * 60_000 });
-    expect(later).toMatchObject({ created: 4 });
+    expect(later).toMatchObject({ created: 6 });
     expect(db.rows(dealJobRuns).filter((row) => row.jobName === "builder-deals-discovery-run")).toHaveLength(1);
     expect(db.rows(dealJobRuns).find((row) => row.jobName === "builder-deals-discovery-run")).toMatchObject({ status: "ok" });
   });

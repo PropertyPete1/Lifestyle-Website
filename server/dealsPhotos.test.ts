@@ -43,6 +43,15 @@ describe("Builder Deals private photo primitives", () => {
     expect(() => safeDealImageUrl("https://res.cloudinary.com/someone-else/image/upload/v1/x.jpg")).toThrow("unapproved_source");
     expect(safeDealImageUrl("https://www.drhorton.com/-/media/drhorton/productcatalog/x/y.jpg").hostname).toBe("www.drhorton.com");
     expect(safeDealImageUrl("https://pultegroup.cdn.picturepark.com/v/47GVJF5O/").hostname).toBe("pultegroup.cdn.picturepark.com");
+    // Builders whose photo host serves other things too are approved under their image paths only.
+    expect(safeDealImageUrl("https://yourviewhome.com/wp-content/uploads/2026/01/x.jpg").hostname).toBe("yourviewhome.com");
+    expect(() => safeDealImageUrl("https://yourviewhome.com/region/texas/x.jpg")).toThrow("unapproved_source");
+    expect(safeDealImageUrl("https://www.texas-homes.com/sites/default/files/2022-12/x.jpg").hostname).toBe("www.texas-homes.com");
+    expect(() => safeDealImageUrl("https://www.texas-homes.com/move-in-ready/x.jpg")).toThrow("unapproved_source");
+    expect(safeDealImageUrl("https://www.hakesbrothers.com/storage/app/medialibrary/x.jpg").hostname).toBe("www.hakesbrothers.com");
+    expect(() => safeDealImageUrl("https://www.hakesbrothers.com/san-antonio/x.jpg")).toThrow("unapproved_source");
+    expect(safeDealImageUrl("https://cdn.lennar.com/api/images/contentassets/abc/x.jpg").hostname).toBe("cdn.lennar.com");
+    expect(() => safeDealImageUrl("https://cdn.lennar.com/other/x.jpg")).toThrow("unapproved_source");
   });
 
   it("matches only consecutive complete OCR words above the confidence floor", () => {

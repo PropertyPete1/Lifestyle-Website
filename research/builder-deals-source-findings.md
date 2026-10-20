@@ -592,6 +592,80 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   Beazer Mortgage Choice, Mortgage Choice, Cardinal Financial Company,
   Cardinal Financial, Choice Lender.
 
+## Lennar reader (added 2026-10-20)
+
+- Site: `www.lennar.com` (Next.js pages router). The community page
+  `/new-homes/texas/san-antonio/<city>/<slug>` (about 430 KB) carries its
+  data in `<script id="__NEXT_DATA__">`: `props.pageProps` has `pageType`
+  "MASTER_PLANNED_COMMUNITY", `variables.mpcid` and `initialApolloState`, a
+  normalized Apollo cache keyed `<__typename>:<id>` whose objects link with
+  `{ __ref }` (`parseLennarNextData`, `resolveLennarRef`). On a community
+  page the cache holds the masterplan (`MpcType:m_<mpcid>`: `name`, `url`,
+  `latitude/longitude`, `status` "ACTIVE", `customPrice` "$254,999 -
+  $313,499" / "From $261k" / "Coming soon", `city` → `CityType` (`name`),
+  `consultants.phoneNumber`, `communities[]`), its collections
+  (`CommunityType`: `name` "Eventide Collection", `url` `<page>/<slug>`,
+  `address` (the sales office's street — an intersection, "Southton Rd and
+  Greensfield Wy", for a community without a model yet), `zipCode`,
+  `priceRange` [min, max] (`basePrice` on the market page), `status`,
+  `soAddress`/`soCityName`/`soZipCode` (a sales office elsewhere; null
+  everywhere on 2026-10-20), `hoaFee`, `taxRate`, `plans[]`,
+  `homesitesCount` = the lot count, never the homes for sale), the plans
+  (`PlanType`: `name`, `url` `<collection>/<plan>`, `beds`, `baths`,
+  `halfBaths`, `sqft`, `startingPrice`, `customPrice`, `status`,
+  `availableHomesitesCount`, `homesites[]`, `elevationImages({"first":1})
+  [].image.url`) and the homes for sale (`HomesiteType`: `url`
+  `<plan>/<lot id>`, `address`, `number` (the homesite), `price`,
+  `wasPrice` (the previous figure of a cut — the page's "$17K" badge),
+  `status` MOVE_IN_READY / UNDER_CONSTRUCTION / COMING_SOON (SOLD is a
+  page filter; none in the cache on 2026-10-20), `beds`, `baths`,
+  `halfBaths`, `sqft`, `latitude/longitude`, `elevationImage.image.url` on
+  `cdn.lennar.com/api/images/…`, `plan` → PlanType, `isHotw`,
+  `offerAvailable` (false everywhere), `soldDate`). Every home the cache
+  held was reachable through plan → homesites (11 of 11 at Blossom Ranch);
+  the reader walks the collections' plans and then reads any cache home no
+  plan lists, under the page's path.
+- The homesite table heading (`<h3>36<!-- --> homes available</h3>`, "No
+  homes available" when empty; `lennarHomesAvailable`) corroborates the
+  count: it matched the cache's homes on all 41 market pages (0 to 47).
+  A page listing homes without the heading holds
+  `expected_community_container_not_found`; a count the data does not
+  match holds `incomplete_inventory`; more than 150 homes hold.
+- Statuses: MOVE_IN_READY → "Quick Move-In (Move-In Ready)" (ready now);
+  UNDER_CONSTRUCTION → "Quick Move-In (Under Construction)" (undated; the
+  cache has no completion date); COMING_SOON → "Coming Soon" (not
+  published); SOLD → "Sold"; anything else → no status (the sync holds
+  `unlabelled_home_status`).
+- Offer: the only promotion is the corporate banner (`MessageV3Type`,
+  "Black Friday" / "Limited-Time Deals on New Homes", link
+  `/corporate/corp_bf26`, 2026-10-13 to 2026-11-29) whose page names no
+  rate, figure or term ("Current offers and promotions vary by homesite
+  and community. See a New Home Consultant"). The reader records no
+  incentive; Lennar's deals are the per-home price cuts (`wasPrice` →
+  `price`), carried as each home's previous price and drop.
+- Discovery: the market page `/new-homes/texas/san-antonio` (about 890 KB,
+  same `__NEXT_DATA__`) holds 41 `MpcType` rows for the market with each
+  one's collections (`CommunityType` with `address`, `zipCode`,
+  `basePrice`) and `CityType` names, so `lennarListingEntries` lists every
+  masterplan with its record and no page is read (one whose street is an
+  intersection has its page read for the same answer, and is added without a
+  street on its pin). A masterplan with no collection carrying an address
+  ("Coming soon": Spring Grove) is not listed. Two pairs share a name and a
+  pin under different URLs (Grace Valley in Marion and Cibolo, Steelwood
+  Trails in New Braunfels and Marion): both are listed, as the site lists
+  them. Lubbock's Copper Creek lists under this market; the 45-mile rule
+  leaves it out. `communityPath` is `/new-homes/texas/san-antonio/<city>/
+  <slug>` (a collection page sits a segment deeper; the masterplan page
+  carries all of its collections' homes).
+- Scrub: Lennar Homes, Lennar Corporation, Lennar, Everything's Included,
+  Next Gen; lenders Lennar Mortgage, Lennar Title.
+- Research note: a direct `curl` of a community URL met a Cloudflare
+  challenge during the October research pass, while the browser pane read
+  every page; whether the cloud fetcher is challenged is a live check (a
+  challenge page has no `__NEXT_DATA__` and holds
+  `expected_community_container_not_found`; a 403 holds
+  `community_fetch_failed`).
+
 ## Meritage Homes: deferred
 
 - `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.
@@ -614,6 +688,7 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - Starlight: the footer's "**Monthly payment" note and `&copy;` line follow the terms paragraph; the reader reads the paragraph's own element (the innermost `p`/`li` that carries the buydown wording, else the longest, so neither a span inside it nor an `li` around it and the footer changes the text; a split paragraph that stops before the page's own "2/1 Program"/"year one" wording — read up to the footer's "**"/"©" — holds the offer as a changed page). Whether the terms are one flat `<p>` on every community page, and a sold-out community's count wording ("0 Available Homes" with no table), are live checks.
 - KB Home: a community heading "Move-in Ready (0)" beside the market's count corroborates an empty list; "(0)" beside a list with homes says nothing.
 - View Homes: coming-soon roster rows are left out of discovery (as Drees); a badge month without a "Move In" line is the next such month; a promo page with offer text but no participating-communities block holds the offer. Whether the outer `regions:` key is ever quoted (`"regions":[` would hold every community) and whether coming-soon pages carry the `#floorplans` module shell are live checks. If the roster's `homes[]` ever omits a home the page shows (or shows one the page hides) every run holds `incomplete_inventory`; a badge wording other than "Ready Now!" / "Est. Completion- <Month>" (e.g. a sold label) holds through the sync's status rule. The promo banner changes per campaign: a page without `.promo-overview` holds the offer only (`expected_incentive_container_not_found`).
+- Lennar: whether the cloud fetcher meets the Cloudflare challenge the research pass saw on `curl` (every page would hold); whether a sold home ever appears in the cache with `status` "SOLD" (it would publish as sold) or another value (the sync would hold the community); whether the market page's `MpcType` rows ever exceed the 8 MB document limit; whether a collection page is ever onboarded on its own (its homes would double the masterplan's — the research list and discovery use masterplan URLs only).
 - Beazer: whether a community with many homes ever carries a "Load more" grid whose payload holds the first page only (the grid had every home on 2026-10-20, 7 at most); whether `extraData.activeOffersCurrently` is present on every community page (a page without it publishes no offer, no hold); whether the metro id changes.
 - Texas Homes: the list's rows are tied to the community by the row logo (`.mir-teaser-bottom-right img`, the community page's `.field--name-field-logo img`), by the exposed filter's selected `field_neighborhood_target_id` option and by the two-sided count rule (homes for sale ≤ the menu count ≤ all rows); a community page without a logo loses the first tie. The menu count is read as a lower bound only; a community page without the "Quick Move-In Homes in <name>" link while the menu counts homes for it holds every run (the closeouts Bent Tree and Vistas of Sonoma have no menu row; `/bent-tree` answered 403 on 2026-10-20 — a bot block would hold `community_fetch_failed`). Whether a coming-soon or sold-out page keeps the `.sales-address-link` block is unknown (without it or the pin the page holds).
 - Hakes Brothers: a coming-soon page's shape is unknown (Highland Gardens, Mesa Vista, Park Place): without the business record's street, or without `#home-tabs`, the page holds `expected_community_container_not_found` until it opens; if the residence records ever list a home the cards hide (or the reverse), the community holds `incomplete_inventory` every run.

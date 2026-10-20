@@ -69,6 +69,8 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "cmp.beazer.com",
   "cms.beazer.com",
   "www.beazer.com",
+  // Lennar serves its photos from its image API (…/api/images/…); the path is checked below.
+  "cdn.lennar.com",
   // LGI Homes serves its photos from Sitecore's edge CDN (…/lgihomesinc…/…); the path is checked below.
   "edge.sitecorecloud.io",
 ]);
@@ -299,6 +301,7 @@ export function safeDealImageUrl(raw: string): URL {
   if (url.hostname.toLowerCase() === "yourviewhome.com" && !/^\/wp-content\/uploads\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "www.texas-homes.com" && !/^\/sites\/default\/files\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "www.hakesbrothers.com" && !/^\/storage\/app\/medialibrary\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
+  if (url.hostname.toLowerCase() === "cdn.lennar.com" && !/^\/api\/images\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   return url;
 }
 

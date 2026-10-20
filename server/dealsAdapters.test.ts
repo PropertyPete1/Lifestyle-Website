@@ -135,7 +135,7 @@ function miDocuments(total = 15): Record<string, string> {
 
 describe("deals adapters", () => {
   it("registers the required generic builder adapters", () => {
-    expect(Object.keys(DEAL_ADAPTERS).sort()).toEqual(["Ashton Woods", "Beazer Homes", "Centex", "Century Communities", "Chesmar", "Coventry Homes", "D.R. Horton", "DRB Homes", "David Weekley Homes", "Davidson Homes", "Del Webb", "Drees Custom Homes", "First America Homes", "Hakes Brothers", "Highland Homes", "KB Home", "LGI Homes", "Legend Homes", "M/I Homes", "Manual", "Perry Homes", "Pulte", "Scott Felder Homes", "Sitterle Homes", "Starlight Homes", "Texas Homes", "Toll Brothers", "View Homes"]);
+    expect(Object.keys(DEAL_ADAPTERS).sort()).toEqual(["Ashton Woods", "Beazer Homes", "Centex", "Century Communities", "Chesmar", "Coventry Homes", "D.R. Horton", "DRB Homes", "David Weekley Homes", "Davidson Homes", "Del Webb", "Drees Custom Homes", "First America Homes", "Hakes Brothers", "Highland Homes", "KB Home", "LGI Homes", "Legend Homes", "Lennar", "M/I Homes", "Manual", "Perry Homes", "Pulte", "Scott Felder Homes", "Sitterle Homes", "Starlight Homes", "Texas Homes", "Toll Brothers", "View Homes"]);
     expect(DEAL_ADAPTERS["Perry Homes"].builder).toBe("Perry Homes");
   });
 

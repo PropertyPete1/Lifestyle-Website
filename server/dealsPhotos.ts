@@ -51,6 +51,8 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "www.centurycommunities.com",
   "www.kbhome.com",
   "cdn.tollbrothers.com",
+  "www.davidweekleyhomes.com",
+  "assetcontentdeliveryapi.davidweekleyhomes.com",
 ]);
 const ACCEPTED_IMAGE_FORMATS = new Set(["jpeg", "png", "webp", "avif", "gif", "heif"]);
 

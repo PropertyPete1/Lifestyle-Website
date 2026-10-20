@@ -1,8 +1,8 @@
-import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
-import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealPhotos } from "../drizzle/schema";
+import { and, desc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
+import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealJobRuns, dealPhotos, dealSyncDigestEntries } from "../drizzle/schema";
 import { getDb } from "./db";
-import { chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
-import { MAX_DETAIL_LIMIT, htmlToText, loadOfficialDeals, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts } from "./dealsAdapters";
+import { chicagoClock, chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
+import { MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts } from "./dealsAdapters";
 import { dealScrubTerms, emptyDealScrubConfig, mergeDealScrubConfig, normalizedDealSourceKey, normalizedText, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
 import { applyScrubExclusions, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
 import { processPendingDealPhotos } from "./dealsPhotos";
@@ -105,7 +105,7 @@ function storedPrice(value: number | null | undefined): number | null {
 }
 
 function isOfficialBuilder(value: string): value is Exclude<BuilderId, "Manual"> {
-  return value === "Chesmar" || value === "M/I Homes";
+  return hasBuilderReader(value);
 }
 
 /** Adapter configuration built from the row itself; LAUNCH_DEALS plays no part here. */
@@ -453,6 +453,8 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
   if (!community.active && !community.awaitingFirstSync) return { ...base, ok: false, skipped: "inactive" };
   if (community.paused) return { ...base, ok: false, skipped: "paused" };
   if (community.manualMode || community.builder === "Manual") return { ...base, ok: false, skipped: "manual_mode" };
+  // Discovered communities wait quietly (no hold, no email) until their builder has a reader.
+  if (community.awaitingFirstSync && !hasBuilderReader(community.builder)) return { ...base, ok: false, skipped: "no_builder_reader" };
   await db.update(dealCommunities).set({ lastAttemptAt: now }).where(eq(dealCommunities.id, community.id));
   if (!community.zipCentroidLat || !community.zipCentroidLng) await refreshCommunityGeography(community.id).catch(() => null);
   const sourceConfig = communitySourceConfig(community);
@@ -531,13 +533,22 @@ function money(value: number) {
   return `$${value.toLocaleString("en-US")}`;
 }
 
+type RunEmail = { category: string; subject: string; content: string };
+
 /** One change-summary email per run and one email for every new hold; failures never fail the sync. */
 async function sendRunEmails(summaries: readonly CommunityChangeSummary[], holds: readonly HoldNotice[]) {
-  if (!summaries.length && !holds.length) return;
+  const messages = composeRunEmails(summaries, holds);
+  if (!messages.length) return;
   let recipients: string[] = [];
   try { recipients = (await getDealSettings()).syncEmailRecipients; } catch { recipients = []; }
-  const send = (category: string, subject: string, content: string) =>
-    sendBuilderDealsEmail({ category, recipients, subject, content }).catch((error) => console.error("[deals-sync] email failed", error instanceof Error ? error.message : error));
+  for (const message of messages) {
+    await sendBuilderDealsEmail({ ...message, recipients }).catch((error) => console.error("[deals-sync] email failed", error instanceof Error ? error.message : error));
+  }
+}
+
+function composeRunEmails(summaries: readonly CommunityChangeSummary[], holds: readonly HoldNotice[]): RunEmail[] {
+  const messages: RunEmail[] = [];
+  const send = (category: string, subject: string, content: string) => { messages.push({ category, subject, content }); };
   if (summaries.length) {
     const lines = summaries.flatMap((summary) => [
       `${summary.privateName} (${summary.builder})`,
@@ -549,12 +560,13 @@ async function sendRunEmails(summaries: readonly CommunityChangeSummary[], holds
       "",
     ]);
     const total = summaries.reduce((count, summary) => count + summary.added.length + summary.sold.length + summary.reappeared.length + summary.priceChanges.length + summary.incentive.length, 0);
-    await send("deals_sync_summary", `Builder Deals update: ${total} change${total === 1 ? "" : "s"}`, ["Official builder refresh summary.", "", ...lines, "Review in Admin, Builder Deals: /admin/deals"].join("\n"));
+    send("deals_sync_summary", `Builder Deals update: ${total} change${total === 1 ? "" : "s"}`, ["Official builder refresh summary.", "", ...lines, "Review in Admin, Builder Deals: /admin/deals"].join("\n"));
   }
   if (holds.length) {
     const lines = holds.flatMap((hold) => [`${hold.privateName} (${hold.builder}), ${hold.kind} hold: ${hold.reason}`, ...(hold.detail ? [`  ${hold.detail}`] : []), ""]);
-    await send("deals_sync_hold", `Builder Deals hold: ${holds.map((hold) => hold.privateName).join(", ")}`, ["A builder page could not be published. The last good data stays live.", "", ...lines, "Catalog holds offer Dismiss hold or Switch to Manual; incentive holds offer Accept this update in Admin, Builder Deals: /admin/deals"].join("\n"));
+    send("deals_sync_hold", `Builder Deals hold: ${holds.map((hold) => hold.privateName).join(", ")}`, ["A builder page could not be published. The last good data stays live.", "", ...lines, "Catalog holds offer Dismiss hold or Switch to Manual; incentive holds offer Accept this update in Admin, Builder Deals: /admin/deals"].join("\n"));
   }
+  return messages;
 }
 
 /**
@@ -619,19 +631,161 @@ export function communityRefreshDue(lastSuccessfulSyncAt: Date | null, now = new
   return chicagoDayNumber(chicagoDay(now)) - chicagoDayNumber(chicagoDay(lastSuccessfulSyncAt)) >= days;
 }
 
+/** Each scheduled batch stops starting new communities after this long, so one cron call stays short. */
+export const CATALOG_BATCH_BUDGET_MS = 4 * 60_000;
+/** Builders checked side by side; one builder's communities are always checked one at a time. */
+export const CATALOG_BATCH_LANES = 4;
+/** A failed (or still running) community is not tried again sooner than this. */
+export const CATALOG_RETRY_GAP_MS = 90 * 60_000;
+/** The morning summary goes out once nothing is left to check, or at this Chicago hour at the latest. */
+const DIGEST_MORNING_DEADLINE_HOUR = 10;
+/** Anything found after the morning summary goes out in one evening follow-up. */
+const DIGEST_EVENING_HOUR = 18;
+const DIGEST_KEEP_DAYS = 30;
+
+export type CatalogBatchResult = {
+  checked: number;
+  ok: number;
+  failed: number;
+  /** Due communities this batch did not reach (time budget or another batch had them). */
+  remaining: number;
+  stoppedForTime: boolean;
+  digest: "sent" | "nothing_new" | "waiting";
+  results: RefreshResult[];
+};
+
+type DueCandidate = CommunityRow;
+
+/** Due today and not tried within the retry gap; communities whose builder has no reader yet are left out. */
+function dueCandidates(rows: readonly CommunityRow[], now: Date, everyDays: number): DueCandidate[] {
+  return rows.filter((community) => community.builder !== "Manual" && hasBuilderReader(community.builder)
+    && communityRefreshDue(community.lastSuccessfulSyncAt, now, everyDays)
+    && (!community.lastAttemptAt || now.getTime() - community.lastAttemptAt.getTime() >= CATALOG_RETRY_GAP_MS));
+}
+
+/** Atomically takes a community for this batch, so two overlapping batches never check it twice. */
+async function claimCommunity(communityId: number, at: Date): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const claimed = await db.update(dealCommunities).set({ lastAttemptAt: at })
+    .where(and(eq(dealCommunities.id, communityId), or(isNull(dealCommunities.lastAttemptAt), lt(dealCommunities.lastAttemptAt, new Date(at.getTime() - CATALOG_RETRY_GAP_MS)))));
+  return Number((claimed as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) === 1;
+}
+
 /**
- * The scheduled catalog job intentionally does not scrape every morning. Only
- * the communities that have never completed an official refresh, or whose last
- * success is at least three Chicago calendar days old, are refreshed.
+ * The scheduled builder check, run every 10 minutes from 4 AM Central. Each
+ * call checks the communities that are due (daily by default, Admin's
+ * "Check each builder page every (days)"), several builders side by side, and
+ * stops starting new ones after a few minutes; the next call picks up the rest.
+ * Changes and new holds are collected into one morning summary email instead
+ * of an email per batch.
  */
-export async function refreshOfficialDealsIfDue(now = new Date()): Promise<RefreshResult[]> {
+export async function refreshDueCommunitiesBatch(options: { clock?: () => number; budgetMs?: number; lanes?: number } = {}): Promise<CatalogBatchResult> {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
-  const communities = await db.select().from(dealCommunities).where(and(or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
+  const clock = options.clock ?? (() => Date.now());
+  const startedAt = clock();
+  const deadline = startedAt + (options.budgetMs ?? CATALOG_BATCH_BUDGET_MS);
+  const now = new Date(startedAt);
   const { catalogRefreshDays } = await getDealSettings();
-  const due = communities.filter((community) => community.builder !== "Manual" && communityRefreshDue(community.lastSuccessfulSyncAt, now, catalogRefreshDays));
-  if (!due.length) return [{ communityId: 0, reelCode: "scheduled", ok: true, skipped: "fresh_within_refresh_window" }];
-  return refreshOfficialDeals({ communityIds: due.map((community) => community.id), now });
+  const rows = await db.select().from(dealCommunities).where(and(or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
+  // Live communities first (oldest data first), then ones waiting for their first pull.
+  const due = dueCandidates(rows, now, catalogRefreshDays).sort((a, b) =>
+    Number(a.awaitingFirstSync) - Number(b.awaitingFirstSync)
+    || (a.lastSuccessfulSyncAt?.getTime() ?? 0) - (b.lastSuccessfulSyncAt?.getTime() ?? 0)
+    || a.id - b.id);
+  const byBuilder = new Map<string, DueCandidate[]>();
+  for (const community of due) byBuilder.set(community.builder, [...(byBuilder.get(community.builder) ?? []), community]);
+  const lanesOfWork = Array.from(byBuilder.values());
+  const results: RefreshResult[] = [];
+  const summaries: CommunityChangeSummary[] = [];
+  const holds: HoldNotice[] = [];
+  let stoppedForTime = false;
+  let next = 0;
+  const lane = async () => {
+    while (next < lanesOfWork.length) {
+      const communities = lanesOfWork[next++]!;
+      for (const community of communities) {
+        if (clock() >= deadline) { stoppedForTime = true; return; }
+        const at = new Date(clock());
+        if (!(await claimCommunity(community.id, at))) continue;
+        try {
+          results.push(await refreshCommunity({ ...community, lastAttemptAt: at }, at, summaries, holds));
+        } catch (error) {
+          console.error(`[deals-sync] community ${community.id} refresh failed`, error instanceof Error ? error.message : error);
+          results.push({ communityId: community.id, reelCode: community.reelCode, ok: false, reason: "refresh_failed" });
+        }
+      }
+    }
+  };
+  if (lanesOfWork.length) {
+    void processPendingDealPhotos(5).catch((error) => console.warn("[deals-photo] retry queue drain failed", error));
+    await Promise.all(Array.from({ length: Math.min(Math.max(1, options.lanes ?? CATALOG_BATCH_LANES), lanesOfWork.length) }, lane));
+    void processPendingDealPhotos(10).catch((error) => console.warn("[deals-photo] retry queue drain failed", error));
+  }
+  if (summaries.length || holds.length) {
+    await db.insert(dealSyncDigestEntries).values({ summaries: JSON.stringify(summaries), holds: JSON.stringify(holds) });
+  }
+  const checkedIds = new Set(results.map((result) => result.communityId));
+  const remaining = due.filter((community) => !checkedIds.has(community.id)).length;
+  // Still to do today: due and not tried yet today (a failed one being retried later does not hold the summary back).
+  const today = chicagoDay(now);
+  const fresh = await db.select().from(dealCommunities).where(and(or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
+  const untriedToday = dueCandidates(fresh, new Date(clock()), catalogRefreshDays).filter((community) => !community.lastAttemptAt || chicagoDay(community.lastAttemptAt) !== today).length;
+  const digest = await sendSyncDigestIfReady(new Date(clock()), untriedToday === 0);
+  return {
+    checked: results.filter((result) => !result.skipped).length,
+    ok: results.filter((result) => result.ok).length,
+    failed: results.filter((result) => !result.ok && !result.skipped).length,
+    remaining,
+    stoppedForTime,
+    digest,
+    results,
+  };
+}
+
+/** Claims a once-a-day digest slot; false when another batch already sent it. */
+async function claimDigestSlot(slot: "morning" | "evening", now: Date): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const jobName = `builder-deals-sync-digest-${slot}`;
+  const day = chicagoDay(now);
+  if ((await db.select({ id: dealJobRuns.id }).from(dealJobRuns).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).limit(1)).length) return false;
+  try {
+    // The (job, day) unique key settles two batches racing for the same slot.
+    await db.insert(dealJobRuns).values({ jobName, chicagoDay: day, status: "ok", completedAt: now });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The morning summary goes out once every due community has been tried today
+ * (or at 10 AM Central at the latest); the evening follow-up at 6 PM carries
+ * anything found after it. Each entry is claimed before sending, so it goes
+ * out once even when batches overlap.
+ */
+export async function sendSyncDigestIfReady(now: Date, allTriedToday: boolean): Promise<CatalogBatchResult["digest"]> {
+  const db = await getDb();
+  if (!db) return "waiting";
+  await db.delete(dealSyncDigestEntries).where(lt(dealSyncDigestEntries.sentAt, new Date(now.getTime() - DIGEST_KEEP_DAYS * 86_400_000)));
+  const { hour } = chicagoClock(now);
+  const slot = hour >= DIGEST_EVENING_HOUR ? "evening" : allTriedToday || hour >= DIGEST_MORNING_DEADLINE_HOUR ? "morning" : null;
+  if (!slot) return "waiting";
+  const unsent = await db.select().from(dealSyncDigestEntries).where(isNull(dealSyncDigestEntries.sentAt)).orderBy(dealSyncDigestEntries.id);
+  // The evening follow-up only goes out when something new turned up; the morning slot is spent either way.
+  if (slot === "evening" && !unsent.length) return "nothing_new";
+  if (!(await claimDigestSlot(slot, now))) return unsent.length ? "waiting" : "nothing_new";
+  const claimed: Array<typeof dealSyncDigestEntries.$inferSelect> = [];
+  for (const entry of unsent) {
+    const result = await db.update(dealSyncDigestEntries).set({ sentAt: now }).where(and(eq(dealSyncDigestEntries.id, entry.id), isNull(dealSyncDigestEntries.sentAt)));
+    if (Number((result as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) === 1) claimed.push(entry);
+  }
+  if (!claimed.length) return "nothing_new";
+  const parse = <T,>(text: string): T[] => { try { const value: unknown = JSON.parse(text); return Array.isArray(value) ? value as T[] : []; } catch { return []; } };
+  await sendRunEmails(claimed.flatMap((entry) => parse<CommunityChangeSummary>(entry.summaries)), claimed.flatMap((entry) => parse<HoldNotice>(entry.holds)));
+  return "sent";
 }
 
 /**

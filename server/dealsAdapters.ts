@@ -211,6 +211,10 @@ const CHESMAR_HOST = "www.chesmar.com";
 const MI_HOST = "www.mihomes.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
 export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST };
+/** True when a reader exists for this builder's official site (new builders get one at a time). */
+export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
+  return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
+}
 export function officialHostFor(builder: string): string | null {
   return builder === "Chesmar" ? CHESMAR_HOST : builder === "M/I Homes" ? MI_HOST : null;
 }

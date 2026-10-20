@@ -142,6 +142,10 @@ describe("Builder Deals cron registration", () => {
       expect.objectContaining({ name: "builder-deals-photo-queue", cron: "0 */10 * * * *", payload: { job: "photos" } }),
       expect.objectContaining({ name: "builder-deals-activity-note", cron: "0 30 6,7 * * *", payload: { job: "activity" } }),
     ]));
-    expect(dealsJobNeedsReconcile({ cronExpression: " 0 0 11,12 * * * ", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"catalog"}' }, DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "catalog")!)).toBe(false);
+    const catalog = DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "catalog")!;
+    // The builder check runs every 10 minutes now; an existing 6 AM registration is moved over on the next boot.
+    expect(catalog.cron).toBe("0 */10 * * * *");
+    expect(dealsJobNeedsReconcile({ cronExpression: " 0 */10 * * * * ", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"catalog"}' }, catalog)).toBe(false);
+    expect(dealsJobNeedsReconcile({ cronExpression: "0 0 11,12 * * *", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"catalog"}' }, catalog)).toBe(true);
   });
 });

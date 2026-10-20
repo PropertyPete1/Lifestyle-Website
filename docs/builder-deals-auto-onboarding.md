@@ -52,8 +52,27 @@ community's name, and the street from its sales address, so the first pull is
 already checked against them. The reel code is a private `auto-` hash until
 Peter films the community and adds its reel.
 
-## Refresh cadence
+## Refresh cadence and the daily email
 
 Each builder page is checked daily by default. Admin, "Check each builder page
 every (days)" (`catalogRefreshDays`, 1 to 30), slows that down if a builder's
 site needs it. "Refresh due" in Admin follows the same setting.
+
+The scheduled check runs every 10 minutes from 4 AM to 10 PM Central
+(`refreshDueCommunitiesBatch`). Each call:
+
+- takes the communities that are due, live ones first and oldest data first;
+- checks up to four builders side by side, one community at a time per builder,
+  so a builder's site sees one stream of requests per call;
+- stops starting new communities after about four minutes; the next call picks
+  up the rest;
+- claims each community before checking it, so two overlapping calls never
+  check the same one, and does not retry a failed one for 90 minutes.
+
+Communities whose builder has no reader yet are skipped quietly: no hold, no
+email.
+
+Changes and new holds go into one morning email instead of one per call. It is
+sent once every due community has been tried that day, or at 10 AM at the
+latest. Anything found later in the day goes out in one 6 PM follow-up, only if
+there is something new. "Refresh now" in Admin still emails right away.

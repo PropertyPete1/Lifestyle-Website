@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { dealJobRuns } from "../drizzle/schema";
 import { sdk } from "./_core/sdk";
 import { getDb } from "./db";
-import { refreshOfficialDealsIfDue, revalidateDealIncentives } from "./dealsSync";
+import { refreshDueCommunitiesBatch, revalidateDealIncentives } from "./dealsSync";
 import { importTrecLicenses } from "./dealsTrec";
 import { cleanupDealsTestRecords, runBuilderDealsHealthJob, sendBuilderDealsMondayReport, syncKnownAgentsFromFub, syncTeamAllowlistFromFub } from "./dealsMaintenance";
 import { enqueueDailyActivityNote, runPendingDealsFubJobs } from "./dealsFubJobs";
@@ -14,6 +14,9 @@ import { chicagoClock, chicagoDay } from "./dealsService";
 export function isDueAtChicago(now: { hour: number; minute: number; weekday: string }, hour: number, minute: number, weekday?: string) {
   return now.hour === hour && now.minute >= minute && (!weekday || now.weekday === weekday);
 }
+/** Builder checks run from 4 AM (fresh each morning) until 10 PM Central. */
+export const CATALOG_FIRST_HOUR = 4;
+export const CATALOG_LAST_HOUR = 22;
 function dueAt(hour: number, minute: number, weekday?: string) { return isDueAtChicago(chicagoClock(), hour, minute, weekday); }
 function isSuccessfulResult(result: unknown) {
   if (Array.isArray(result)) return result.some((item) => item && typeof item === "object" && (item as { ok?: unknown }).ok === true);
@@ -42,7 +45,12 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
     const user = await sdk.authenticateRequest(req); if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
     const job = typeof req.body?.job === "string" ? req.body.job : "catalog";
     if (job === "incentive") return res.json({ ok: true, result: await whenDue(dueAt(18, 15), "builder-deals-incentive-revalidate", revalidateDealIncentives) });
-    if (job === "catalog") return res.json({ ok: true, result: await whenDue(dueAt(6, 0), "builder-deals-catalog-refresh", refreshOfficialDealsIfDue) });
+    // Every 10 minutes from 4 AM to 10 PM Central: a few minutes of builder checks per call (see refreshDueCommunitiesBatch).
+    if (job === "catalog") {
+      const { hour } = chicagoClock();
+      if (hour < CATALOG_FIRST_HOUR || hour >= CATALOG_LAST_HOUR) return res.json({ ok: true, result: { skipped: "outside_catalog_hours_chicago" } });
+      return res.json({ ok: true, result: await refreshDueCommunitiesBatch() });
+    }
     if (job === "trec") return res.json({ ok: true, result: await whenDue(dueAt(1, 15), "builder-deals-trec-import", importTrecLicenses) });
     if (job === "team") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-team-sync", syncTeamAllowlistFromFub) });
     if (job === "agents") return res.json({ ok: true, result: await whenDue(dueAt(1, 45), "builder-deals-known-agent-sync", syncKnownAgentsFromFub) });

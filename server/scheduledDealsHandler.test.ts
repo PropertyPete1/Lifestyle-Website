@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
   chicagoClock: vi.fn(),
   chicagoDay: vi.fn(),
-  refreshOfficialDealsIfDue: vi.fn(),
+  refreshDueCommunitiesBatch: vi.fn(),
   revalidateDealIncentives: vi.fn(),
   importTrecLicenses: vi.fn(),
   runBuilderDealsHealthJob: vi.fn(),
@@ -33,8 +33,8 @@ vi.mock("./dealsService", () => ({
   chicagoDay: (...args: unknown[]) => mocks.chicagoDay(...args),
 }));
 vi.mock("./dealsSync", () => ({
-  refreshOfficialDealsIfDue: (...args: unknown[]) =>
-    mocks.refreshOfficialDealsIfDue(...args),
+  refreshDueCommunitiesBatch: (...args: unknown[]) =>
+    mocks.refreshDueCommunitiesBatch(...args),
   revalidateDealIncentives: (...args: unknown[]) =>
     mocks.revalidateDealIncentives(...args),
 }));
@@ -99,7 +99,7 @@ beforeEach(() => {
   });
   mocks.chicagoClock.mockReturnValue({ hour: 6, minute: 0, weekday: "Mon" });
   mocks.chicagoDay.mockReturnValue("2026-10-18");
-  mocks.refreshOfficialDealsIfDue.mockResolvedValue({ ok: true });
+  mocks.refreshDueCommunitiesBatch.mockResolvedValue({ checked: 0, ok: 0, failed: 0, remaining: 0, stoppedForTime: false, digest: "waiting", results: [] });
   mocks.revalidateDealIncentives.mockResolvedValue({ ok: true });
 });
 
@@ -155,23 +155,16 @@ describe("Builder Deals scheduled handler helpers", () => {
     expect(due.json).toHaveBeenCalledWith({ ok: true, result: { skipped: "already_running" } });
   });
 
-  it("does not run catalog work when that Chicago-day job is already running", async () => {
-    const db = runningJobDb();
-    mocks.getDb.mockResolvedValue(db);
-    const { response, json } = responseRecorder();
-
-    await scheduledDealsHandler(
-      { body: { job: "catalog" } } as Request,
-      response
-    );
-
-    expect(json).toHaveBeenCalledWith({
-      ok: true,
-      result: { skipped: "already_running" },
-    });
-    expect(mocks.refreshOfficialDealsIfDue).not.toHaveBeenCalled();
-    expect(db.insert).not.toHaveBeenCalled();
-    expect(db.update).not.toHaveBeenCalled();
+  it("runs a time-boxed catalog batch on every callback from 4 AM to 10 PM Chicago, without a daily job record", async () => {
+    for (const [hour, runs] of [[3, false], [4, true], [13, true], [21, true], [22, false]] as const) {
+      mocks.refreshDueCommunitiesBatch.mockClear();
+      mocks.chicagoClock.mockReturnValue({ hour, minute: 10, weekday: "Mon" });
+      const { response, json } = responseRecorder();
+      await scheduledDealsHandler({ body: { job: "catalog" } } as Request, response);
+      expect(mocks.refreshDueCommunitiesBatch).toHaveBeenCalledTimes(runs ? 1 : 0);
+      expect(json).toHaveBeenCalledWith({ ok: true, result: runs ? expect.objectContaining({ checked: 0 }) : { skipped: "outside_catalog_hours_chicago" } });
+    }
+    expect(mocks.getDb).not.toHaveBeenCalled();
   });
 });
 
@@ -179,37 +172,6 @@ describe("Builder Deals once-per-day job records", () => {
   /** No run yet today: once() claims the (job, Chicago day) row, runs the work and records the outcome on that row. */
   const freshDb = () => createFakeDealsDb([[dealJobRuns, []]]);
   const runRows = (db: ReturnType<typeof createFakeDealsDb>) => db.writes.filter((write) => write.table === dealJobRuns);
-
-  it("records a successful catalog run as ok with the result as detail and answers with the result", async () => {
-    const result = [{ communityId: 1, reelCode: "vg1", ok: true }, { communityId: 2, reelCode: "sl1", ok: false, reason: "community_fetch_failed" }];
-    mocks.refreshOfficialDealsIfDue.mockResolvedValue(result);
-    const db = freshDb();
-    mocks.getDb.mockResolvedValue(db);
-    const { response, json } = responseRecorder();
-
-    await scheduledDealsHandler({ body: { job: "catalog" } } as Request, response);
-
-    expect(mocks.refreshOfficialDealsIfDue).toHaveBeenCalledTimes(1);
-    expect(json).toHaveBeenCalledWith({ ok: true, result });
-    expect(response.status).not.toHaveBeenCalled();
-    const writes = runRows(db);
-    expect(writes[0]).toMatchObject({ op: "insert", values: { jobName: "builder-deals-catalog-refresh", chicagoDay: "2026-10-18", status: "running" } });
-    expect(writes[1]).toMatchObject({ op: "update", set: { status: "ok", detail: JSON.stringify(result), completedAt: expect.any(Date) } });
-    expect(writes).toHaveLength(2);
-  });
-
-  it("records the run as failed and answers 500 when every due community is held", async () => {
-    mocks.refreshOfficialDealsIfDue.mockResolvedValue([{ communityId: 1, reelCode: "vg1", ok: false, reason: "community_fetch_failed" }, { communityId: 2, reelCode: "sl1", ok: false, reason: "unlabelled_home_status" }]);
-    const db = freshDb();
-    mocks.getDb.mockResolvedValue(db);
-    const { response, json } = responseRecorder();
-
-    await scheduledDealsHandler({ body: { job: "catalog" } } as Request, response);
-
-    expect(response.status).toHaveBeenCalledWith(500);
-    expect(json).toHaveBeenCalledWith({ error: "scheduled operation reported no successful community" });
-    expect(runRows(db)[1]).toMatchObject({ op: "update", set: { status: "failed", detail: "scheduled operation reported no successful community", completedAt: expect.any(Date) } });
-  });
 
   it("records an ok:false job result as failed so tomorrow's health check sees it, and an ok:true result as ok", async () => {
     mocks.chicagoClock.mockReturnValue({ hour: 7, minute: 2, weekday: "Tue" });

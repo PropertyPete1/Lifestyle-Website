@@ -141,6 +141,13 @@
       "when": 1792455394203,
       "tag": "0019_auto_onboarding",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1792456450226,
+      "tag": "0020_sync_digest",
+      "breakpoints": true
     }
   ]
 }

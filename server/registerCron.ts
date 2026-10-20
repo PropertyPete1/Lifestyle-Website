@@ -17,7 +17,7 @@ export const DEALS_CRON_PATH = "/api/scheduled/refreshDeals";
 export const DEALS_JOB_DEFINITIONS = [
   { name: "builder-deals-health", cron: "0 0 12,13 * * *", path: DEALS_CRON_PATH, payload: { job: "health" }, description: "7:00 AM Central health-check candidates; handler enforces America/Chicago time" },
   { name: "builder-deals-incentive-revalidate", cron: "0 15 23,0 * * *", path: DEALS_CRON_PATH, payload: { job: "incentive" }, description: "6:15 PM Central incentive lapse-only candidates for DST" },
-  { name: "builder-deals-catalog-refresh", cron: "0 0 11,12 * * *", path: DEALS_CRON_PATH, payload: { job: "catalog" }, description: "6:00 AM Central official catalog candidates for DST; handler runs only when 3 days old" },
+  { name: "builder-deals-catalog-refresh", cron: "0 */10 * * * *", path: DEALS_CRON_PATH, payload: { job: "catalog" }, description: "Every 10 minutes: a few minutes of due builder page checks per call, 4 AM to 10 PM Central (handler enforces the hours)" },
   { name: "builder-deals-trec-import", cron: "0 15 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "trec" }, description: "1:15 AM Central TREC import candidates for DST" },
   { name: "builder-deals-team-sync", cron: "0 30 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "team" }, description: "1:30 AM Central FUB team mirror candidates for DST" },
   { name: "builder-deals-known-agent-sync", cron: "0 45 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "agents" }, description: "1:45 AM Central FUB recruiter mirror candidates for DST" },

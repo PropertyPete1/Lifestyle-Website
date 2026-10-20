@@ -1,4 +1,4 @@
-import { boolean, index, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { boolean, index, int, mediumtext, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -609,6 +609,18 @@ export const dealFubRecords = mysqlTable("deal_fub_records", {
 export const dealFubJobs = mysqlTable("deal_fub_jobs", { id: int("id").autoincrement().primaryKey(), leadId: int("lead_id").notNull(), operation: varchar("operation", { length: 80 }).notNull(), payload: text("payload").notNull(), status: mysqlEnum("status", ["pending", "leased", "synced", "failed"]).default("pending").notNull(), attempts: int("attempts").default(0).notNull(), lastError: text("last_error"), nextAttemptAt: timestamp("next_attempt_at"), leaseToken: varchar("lease_token", { length: 80 }), leasedAt: timestamp("leased_at"), completedAt: timestamp("completed_at"), createdAt: timestamp("created_at").defaultNow().notNull() }, (t) => [uniqueIndex("idx_deal_fub_lead_operation").on(t.leadId, t.operation), index("idx_deal_fub_status").on(t.status, t.nextAttemptAt)]);
 export const dealCommunityViews = mysqlTable("deal_community_views", { id: int("id").autoincrement().primaryKey(), leadId: int("lead_id").notNull(), communityId: int("community_id").notNull(), viewedAt: timestamp("viewed_at").defaultNow().notNull() }, (t) => [index("idx_deal_view_lead").on(t.leadId, t.viewedAt)]);
 export const dealJobRuns = mysqlTable("deal_job_runs", { id: int("id").autoincrement().primaryKey(), jobName: varchar("job_name", { length: 100 }).notNull(), chicagoDay: varchar("chicago_day", { length: 10 }).notNull(), status: mysqlEnum("status", ["running", "ok", "failed", "skipped"]).notNull(), detail: text("detail"), startedAt: timestamp("started_at").defaultNow().notNull(), completedAt: timestamp("completed_at") }, (t) => [uniqueIndex("idx_deal_job_daily").on(t.jobName, t.chicagoDay)]);
+/**
+ * What each scheduled builder check found (changes and new holds), kept until
+ * it goes out in the morning summary email (or the evening follow-up). Private:
+ * entries name communities and builders and are only ever read by the sync.
+ */
+export const dealSyncDigestEntries = mysqlTable("deal_sync_digest_entries", {
+  id: int("id").autoincrement().primaryKey(),
+  summaries: mediumtext("summaries").notNull(),
+  holds: mediumtext("holds").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  sentAt: timestamp("sent_at"),
+}, (t) => [index("idx_deal_sync_digest_sent").on(t.sentAt)]);
 export const dealPhotoRenders = mysqlTable("deal_photo_renders", { id: int("id").autoincrement().primaryKey(), photoId: int("photo_id").notNull(), leadId: int("lead_id").notNull(), version: varchar("version", { length: 64 }).notNull(), storageKey: text("storage_key").notNull(), expiresAt: timestamp("expires_at").notNull(), createdAt: timestamp("created_at").defaultNow().notNull() }, (t) => [uniqueIndex("idx_deal_photo_render").on(t.photoId, t.leadId, t.version), index("idx_deal_photo_render_expiry").on(t.expiresAt)]);
 
 /**

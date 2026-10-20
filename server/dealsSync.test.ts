@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealSettings } from "../drizzle/schema";
+import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealSettings, dealSyncDigestEntries } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 import type { DealAdapterResult, DealHoldReason, PrivatePlanOrHome } from "./dealsAdapters";
 
@@ -27,7 +27,7 @@ vi.mock("./_core/heartbeat", () => ({
 }));
 
 import { parsePromotionalRate } from "./dealsAdapters";
-import { communityRefreshDue, refreshOfficialDeals, refreshOfficialDealsIfDue, revalidateDealIncentives, storedScrubConfig } from "./dealsSync";
+import { communityRefreshDue, refreshDueCommunitiesBatch, refreshOfficialDeals, revalidateDealIncentives, sendSyncDigestIfReady, storedScrubConfig } from "./dealsSync";
 import { DEALS_JOB_DEFINITIONS, ensureDealsCron } from "./registerCron";
 import { chicagoEndOfDay } from "./dealsService";
 
@@ -362,29 +362,118 @@ describe("scheduling", () => {
     const dueId = seedCommunity({ reelCode: "due", privateName: "Due Fixture", lastSuccessfulSyncAt: null });
     seedCommunity({ reelCode: "manual", privateName: "Manual Fixture", builder: "Manual", manualMode: true, lastSuccessfulSyncAt: null });
     mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));
-    const results = await refreshOfficialDealsIfDue(new Date("2026-10-21T11:00:00Z"));
-    expect(results.map((result) => [result.communityId, result.ok])).toEqual([[communityId, true], [dueId, true]]);
+    const batch = await refreshDueCommunitiesBatch({ clock: () => Date.parse("2026-10-21T11:00:00Z") });
+    // Never-pulled first, then the oldest data.
+    expect(batch.results.map((result) => [result.communityId, result.ok])).toEqual([[dueId, true], [communityId, true]]);
+    expect(batch).toMatchObject({ checked: 2, ok: 2, failed: 0, remaining: 0, stoppedForTime: false, digest: "sent" });
     expect(mocks.loadOfficialDeals).toHaveBeenCalledTimes(2);
     expect(db.rows(dealCommunities).find((row) => row.id === freshId)?.lastAttemptAt).toBeNull();
+    // Everything due was tried, so the morning summary went out at 6 AM in one email.
+    expect(emails().map((email) => email.category)).toEqual(["deals_sync_summary"]);
     mocks.loadOfficialDeals.mockClear();
-    expect(await refreshOfficialDealsIfDue(new Date("2026-10-21T12:00:00Z"))).toEqual([{ communityId: 0, reelCode: "scheduled", ok: true, skipped: "fresh_within_refresh_window" }]);
+    expect(await refreshDueCommunitiesBatch({ clock: () => Date.parse("2026-10-21T12:00:00Z") })).toMatchObject({ checked: 0, remaining: 0, results: [] });
     expect(mocks.loadOfficialDeals).not.toHaveBeenCalled();
   });
 
-  it("returns every due community as ok:false when all of them are held, so the scheduled run is recorded as failed instead of fresh", async () => {
+  it("reports every due community as failed when all of them are held, in one hold email", async () => {
     const secondId = seedCommunity({ reelCode: "second", privateName: "Second Fixture", lastSuccessfulSyncAt: null });
     mocks.loadOfficialDeals.mockResolvedValue(snapshot({ catalogOk: false, holdReasons: ["community_fetch_failed"] }));
-    const results = await refreshOfficialDealsIfDue(new Date("2026-10-21T11:00:00Z"));
-    expect(results).toEqual([
+    const batch = await refreshDueCommunitiesBatch({ clock: () => Date.parse("2026-10-21T11:00:00Z") });
+    expect(batch.results).toEqual([
       { communityId, reelCode: "vg1", ok: false, reason: "community_fetch_failed" },
       { communityId: secondId, reelCode: "second", ok: false, reason: "community_fetch_failed" },
     ]);
-    expect(results.some((result) => result.ok)).toBe(false);
+    expect(batch).toMatchObject({ ok: 0, failed: 2 });
     expect(db.rows(dealCommunities).map((row) => [row.catalogHoldReason, row.lastSuccessfulSyncAt])).toEqual([["community_fetch_failed", null], ["community_fetch_failed", null]]);
     // One hold email names both communities; the data each one had (none yet) is untouched.
     expect(emails().map((email) => email.category)).toEqual(["deals_sync_hold"]);
     expect(emails()[0].subject).toBe("Builder Deals hold: Fixture Gardens, Second Fixture");
     expect(db.rows(dealHomes)).toEqual([]);
+  });
+
+  it("stops starting communities when its few minutes are up, and the next batch picks up the rest", async () => {
+    const ids = [communityId, seedCommunity({ reelCode: "b", privateName: "B", sourceUrl: `${COMMUNITY_URL}-b` }), seedCommunity({ reelCode: "c", privateName: "C", sourceUrl: `${COMMUNITY_URL}-c` })];
+    let clock = Date.parse("2026-10-21T11:00:00Z");
+    // Each builder page takes 100 seconds.
+    mocks.loadOfficialDeals.mockImplementation(async (config: { sourceUrl: string }) => { clock += 100_000; return snapshot({ homes: [{ sourceUrl: `${config.sourceUrl}/fixture-a-plan/8301-a` }] }); });
+    const first = await refreshDueCommunitiesBatch({ clock: () => clock, budgetMs: 150_000 });
+    expect(first).toMatchObject({ checked: 2, remaining: 1, stoppedForTime: true, digest: "waiting" });
+    expect(emails()).toEqual([]);
+    clock += 10 * 60_000;
+    const second = await refreshDueCommunitiesBatch({ clock: () => clock, budgetMs: 150_000 });
+    expect(second).toMatchObject({ checked: 1, remaining: 0, stoppedForTime: false, digest: "sent" });
+    expect(new Set([...first.results, ...second.results].map((result) => result.communityId))).toEqual(new Set(ids));
+    // Both batches' changes arrive in one summary email.
+    expect(emails().map((email) => email.category)).toEqual(["deals_sync_summary"]);
+    for (const name of ["Fixture Gardens", "B", "C"]) expect(emails()[0].content).toContain(`${name} (M/I Homes)\n  added:`);
+  });
+
+  it("checks different builders side by side but one builder's communities one at a time", async () => {
+    seedCommunity({ reelCode: "m2", privateName: "M2", sourceUrl: `${COMMUNITY_URL}-2` });
+    seedCommunity({ reelCode: "c1", privateName: "C1", builder: "Chesmar", sourceUrl: "https://www.chesmar.com/c1/" });
+    seedCommunity({ reelCode: "c2", privateName: "C2", builder: "Chesmar", sourceUrl: "https://www.chesmar.com/c2/" });
+    const inFlight: string[] = [];
+    let mostAtOnce = 0;
+    let sameBuilderOverlap = false;
+    mocks.loadOfficialDeals.mockImplementation(async (config: { builder: string }) => {
+      if (inFlight.includes(config.builder)) sameBuilderOverlap = true;
+      inFlight.push(config.builder);
+      mostAtOnce = Math.max(mostAtOnce, inFlight.length);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight.splice(inFlight.indexOf(config.builder), 1);
+      return snapshot({ homes: [{ sourceUrl: home("8301-a") }] });
+    });
+    const batch = await refreshDueCommunitiesBatch({ clock: () => Date.parse("2026-10-21T11:00:00Z") });
+    expect(batch).toMatchObject({ checked: 4, ok: 4 });
+    expect(mostAtOnce).toBe(2);
+    expect(sameBuilderOverlap).toBe(false);
+  });
+
+  it("does not retry a community within 90 minutes of its last try, and never checks one another batch just took", async () => {
+    const at = Date.parse("2026-10-21T11:00:00Z");
+    db.rows(dealCommunities)[0].lastAttemptAt = new Date(at - 30 * 60_000);
+    const olderTry = seedCommunity({ reelCode: "older", privateName: "Older", sourceUrl: `${COMMUNITY_URL}-older`, lastAttemptAt: new Date(at - 2 * 3_600_000) });
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));
+    const batch = await refreshDueCommunitiesBatch({ clock: () => at });
+    expect(batch.results.map((result) => result.communityId)).toEqual([olderTry]);
+  });
+
+  it("leaves a discovered community alone until its builder has a reader: no hold, no email, no attempt", async () => {
+    const waiting = seedCommunity({ reelCode: "auto-p", privateName: "Perry Place", builder: "Perry Homes", sourceUrl: "https://www.perryhomes.com/x", active: false, awaitingFirstSync: true });
+    db.rows(dealCommunities)[0].lastSuccessfulSyncAt = new Date("2026-10-21T10:00:00Z");
+    const batch = await refreshDueCommunitiesBatch({ clock: () => Date.parse("2026-10-21T11:00:00Z") });
+    expect(batch).toMatchObject({ checked: 0, results: [] });
+    expect(await refreshOfficialDeals({ communityId: waiting, now: new Date("2026-10-21T11:00:00Z") })).toEqual([{ communityId: waiting, reelCode: "auto-p", ok: false, skipped: "no_builder_reader" }]);
+    expect(mocks.loadOfficialDeals).not.toHaveBeenCalled();
+    expect(db.rows(dealCommunities).find((row) => row.id === waiting)).toMatchObject({ lastAttemptAt: null, catalogHoldReason: null, active: false, awaitingFirstSync: true });
+    expect(emails()).toEqual([]);
+  });
+
+  it("sends the morning summary once, holds later finds for the 6 PM follow-up, and sends at 10 AM if checks are still running", async () => {
+    let clock = Date.parse("2026-10-21T09:05:00Z"); // 4:05 AM Chicago
+    const second = seedCommunity({ reelCode: "b", privateName: "B", sourceUrl: `${COMMUNITY_URL}-b` });
+    mocks.loadOfficialDeals.mockImplementation(async () => { clock += 100_000; return snapshot({ catalogOk: false, holdReasons: ["community_fetch_failed"] }); });
+    // 4:05: one of two tried, the summary waits.
+    expect(await refreshDueCommunitiesBatch({ clock: () => clock, budgetMs: 50_000 })).toMatchObject({ checked: 1, digest: "waiting" });
+    expect(emails()).toEqual([]);
+    // 4:15: the second is tried; everything due has been tried today, so the summary goes out.
+    clock = Date.parse("2026-10-21T09:15:00Z");
+    expect(await refreshDueCommunitiesBatch({ clock: () => clock, budgetMs: 50_000 })).toMatchObject({ checked: 1, digest: "sent" });
+    expect(emails().map((email) => email.subject)).toEqual(["Builder Deals hold: Fixture Gardens, B"]);
+    // 6:00: the first community's retry succeeds; the change waits for the evening.
+    clock = Date.parse("2026-10-21T11:00:00Z");
+    mocks.loadOfficialDeals.mockImplementation(async () => snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));
+    expect(await refreshDueCommunitiesBatch({ clock: () => clock })).toMatchObject({ ok: 2, digest: "waiting" });
+    expect(emails()).toHaveLength(1);
+    // 6:05 PM: the follow-up carries it; a later batch with nothing new sends nothing.
+    expect(await sendSyncDigestIfReady(new Date("2026-10-21T23:05:00Z"), true)).toBe("sent");
+    expect(emails().map((email) => email.category)).toEqual(["deals_sync_hold", "deals_sync_summary"]);
+    expect(await sendSyncDigestIfReady(new Date("2026-10-21T23:15:00Z"), true)).toBe("nothing_new");
+    // Next day: checks still running at 10 AM, the summary goes out anyway.
+    db.seed(dealSyncDigestEntries, { summaries: JSON.stringify([{ communityId: second, privateName: "B", builder: "M/I Homes", added: ["x"], sold: [], reappeared: [], priceChanges: [], incentive: [] }]), holds: "[]" });
+    expect(await sendSyncDigestIfReady(new Date("2026-10-22T14:55:00Z"), false)).toBe("waiting"); // 9:55 AM
+    expect(await sendSyncDigestIfReady(new Date("2026-10-22T15:05:00Z"), false)).toBe("sent"); // 10:05 AM
+    expect(emails()).toHaveLength(3);
   });
 
   it("reconciles a registered job whose cron expression changed and leaves identical jobs untouched", async () => {

@@ -1,10 +1,11 @@
+import crypto from "node:crypto";
 import type { Request, Response } from "express";
 import { eq } from "drizzle-orm";
 import { dealCommunities } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { makeRequest, type DistanceMatrixResult, type GeocodingResult } from "./_core/map";
 import { getDb } from "./db";
-import { getDealSettings, isLiveDealSession } from "./dealsService";
+import { communityScrubConfig, getDealSettings, isLiveDealSession, publicNoPrivateNames } from "./dealsService";
 
 /**
  * AREA MAP: one small static map per community, centered on the community's
@@ -24,11 +25,23 @@ const MAX_CIRCLE_RADIUS_PX = 150;
 export const AREA_MAP_WIDTH = 800;
 export const AREA_MAP_HEIGHT = 400;
 export const AREA_MAP_ATTRIBUTION = "Map data and imagery from Google. Centered on the ZIP code area, not the community.";
+/** The landing card names no ZIP code: its circle is moved off the ZIP center by a few miles. */
+export const PUBLIC_AREA_MAP_ATTRIBUTION = "Map data and imagery from Google. General area only.";
+/** How far the landing card's circle is moved off the ZIP center (never more than 40% of its radius). */
+const PUBLIC_OFFSET_MIN_MILES = 1.5;
+const PUBLIC_OFFSET_MAX_MILES = 3;
 export const DEFAULT_DRIVE_DESTINATIONS = ["downtown San Antonio", "Randolph AFB", "Lackland AFB", "The Pearl"];
-const IMAGE_CACHE_MS = 6 * 60 * 60_000;
-const IMAGE_CACHE_LIMIT = 50;
+const IMAGE_CACHE_MS = 24 * 60 * 60_000;
+/** Enough for both maps of every community; stored as WebP (about 40 KB each). */
+const IMAGE_CACHE_LIMIT = 800;
+/** A failed provider call is not repeated for this long. */
+const FAILURE_CACHE_MS = 10 * 60_000;
 
-export type DealsAreaMap = { lat: number; lng: number; radiusMiles: number; zoom: number; imageUrl: string; attribution: string };
+/**
+ * What the page gets to draw the circle. The private list also gets the ZIP
+ * centroid and zoom; the landing card gets only the circle's size in pixels.
+ */
+export type DealsAreaMap = { lat?: number; lng?: number; zoom?: number; radiusMiles: number; radiusPixels: number; imageUrl: string; attribution: string };
 export type AreaMapVariant = "gated" | "public";
 
 /** The closest zoom at which a circle of this radius still fits comfortably in the image. */
@@ -125,7 +138,8 @@ export async function refreshCommunityGeography(communityId: number): Promise<{ 
       zipCentroidLng: centroid.lng.toFixed(6),
       driveTimeChips: JSON.stringify(chips),
     }).where(eq(dealCommunities.id, communityId));
-    for (const key of Array.from(imageCache.keys())) if (Math.floor(key / 100) === communityId) imageCache.delete(key);
+    for (const key of Array.from(imageCache.keys())) if (key.startsWith(`${communityId}:`)) imageCache.delete(key);
+    for (const key of Array.from(failureCache.keys())) if (key.startsWith(`${communityId}:`)) failureCache.delete(key);
     return { ok: true, chips };
   } catch (error) {
     console.warn("[deals-map] geocoding unavailable", error instanceof Error ? error.message : error);
@@ -133,20 +147,46 @@ export async function refreshCommunityGeography(communityId: number): Promise<{ 
   }
 }
 
-/** The only coordinates a buyer response may carry: the stored ZIP centroid. */
-/**
- * The private list gets a closer circle (behind the session check); the public
- * landing card a wider one, zoomed out to match. Either way the circle is
- * centered on the ZIP code centroid, never the community.
- */
-export function communityAreaMap(row: Pick<typeof dealCommunities.$inferSelect, "id" | "zipCentroidLat" | "zipCentroidLng">, options: { variant?: AreaMapVariant; radiusMiles?: number } = {}): DealsAreaMap | null {
+/** A keyed, per-community direction and distance, so the offset cannot be recomputed from the public id. */
+export function publicMapCenter(communityId: number, centroid: Centroid, radiusMiles: number): Centroid {
+  const key = ENV.cookieSecret || "deals-public-map-offset";
+  const digest = crypto.createHmac("sha256", key).update(`deals-public-map-offset:${communityId}`).digest();
+  const fraction = (offset: number) => digest.readUInt32BE(offset) / 0xffffffff;
+  const miles = Math.min(PUBLIC_OFFSET_MIN_MILES + (PUBLIC_OFFSET_MAX_MILES - PUBLIC_OFFSET_MIN_MILES) * fraction(0), radiusMiles * 0.4);
+  const bearing = 2 * Math.PI * fraction(4);
+  const lat = centroid.lat + (miles * Math.cos(bearing)) / 69.0;
+  const lng = centroid.lng + (miles * Math.sin(bearing)) / (69.172 * Math.cos(centroid.lat * Math.PI / 180));
+  return { lat: Number(lat.toFixed(6)), lng: Number(lng.toFixed(6)) };
+}
+
+function circlePixels(radiusMiles: number, lat: number, zoom: number): number {
+  return Math.round(radiusMiles * 1609.344 / (156543.03392 * Math.cos(lat * Math.PI / 180) / 2 ** zoom) * 10) / 10;
+}
+
+type MapGeometry = { center: Centroid; zoom: number; radiusMiles: number; radiusPixels: number };
+
+/** Where the image is centered and how big the circle is, for either variant. */
+export function areaMapGeometry(row: Pick<typeof dealCommunities.$inferSelect, "id" | "zipCentroidLat" | "zipCentroidLng">, variant: AreaMapVariant, radiusMiles: number): MapGeometry | null {
   const lat = finiteCoordinate(row.zipCentroidLat, 85);
   const lng = finiteCoordinate(row.zipCentroidLng, 180);
   if (lat === null || lng === null) return null;
+  const center = variant === "public" ? publicMapCenter(row.id, { lat, lng }, radiusMiles) : { lat, lng };
+  const zoom = zoomForRadius(radiusMiles, center.lat);
+  return { center, zoom, radiusMiles, radiusPixels: circlePixels(radiusMiles, center.lat, zoom) };
+}
+
+/**
+ * The private list gets a closer circle (behind the session check), centered on
+ * the ZIP code centroid, never the community. The public landing card gets a
+ * wider circle moved a few miles off the ZIP center, and no coordinates at all.
+ */
+export function communityAreaMap(row: Pick<typeof dealCommunities.$inferSelect, "id" | "zipCentroidLat" | "zipCentroidLng">, options: { variant?: AreaMapVariant; radiusMiles?: number } = {}): DealsAreaMap | null {
   const variant = options.variant ?? "gated";
   const radiusMiles = options.radiusMiles ?? (variant === "public" ? PUBLIC_AREA_MAP_RADIUS_MILES : AREA_MAP_RADIUS_MILES);
-  const imageUrl = variant === "public" ? `/deals/maps/${row.id}.png` : `/deals/mine/maps/${row.id}.png`;
-  return { lat, lng, radiusMiles, zoom: zoomForRadius(radiusMiles, lat), imageUrl, attribution: AREA_MAP_ATTRIBUTION };
+  const geometry = areaMapGeometry(row, variant, radiusMiles);
+  if (!geometry) return null;
+  if (variant === "public") return { radiusMiles, radiusPixels: geometry.radiusPixels, imageUrl: `/deals/maps/${row.id}.webp`, attribution: PUBLIC_AREA_MAP_ATTRIBUTION };
+  return { lat: geometry.center.lat, lng: geometry.center.lng, zoom: geometry.zoom, radiusMiles, radiusPixels: geometry.radiusPixels, imageUrl: `/deals/mine/maps/${row.id}.webp`, attribution: AREA_MAP_ATTRIBUTION };
 }
 
 export function mapCommunityIdFromPath(raw: string | undefined): number | null {
@@ -155,7 +195,8 @@ export function mapCommunityIdFromPath(raw: string | undefined): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
-const imageCache = new Map<number, { bytes: Buffer; expiresAt: number; centroidKey: string }>();
+const imageCache = new Map<string, { bytes: Buffer; expiresAt: number; centroidKey: string }>();
+const failureCache = new Map<string, number>();
 /** Remembered per process: whether the provider accepts the exact 800x400 request. */
 let wideStaticMapsAllowed: boolean | null = null;
 
@@ -190,19 +231,30 @@ async function fetchStaticMapVariant(centroid: Centroid, variant: "wide" | "crop
   const image = sharp(bytes, { limitInputPixels: 20_000_000 });
   const meta = await image.metadata();
   if (!meta.width || !meta.height) return null;
-  if (variant === "wide") return meta.width === AREA_MAP_WIDTH && meta.height === AREA_MAP_HEIGHT ? image.png().toBuffer() : null;
+  if (variant === "wide") return meta.width === AREA_MAP_WIDTH && meta.height === AREA_MAP_HEIGHT ? image.webp({ quality: 80 }).toBuffer() : null;
   // Central crop covering (AREA_MAP_WIDTH / 2) x (AREA_MAP_HEIGHT / 2) at the previous zoom level.
   const width = Math.min(meta.width, Math.round(meta.width * (AREA_MAP_WIDTH / 2) / 640));
   const height = Math.min(meta.height, Math.round(meta.height * (AREA_MAP_HEIGHT / 2) / 320));
-  return image.extract({ left: Math.floor((meta.width - width) / 2), top: Math.floor((meta.height - height) / 2), width, height }).resize(AREA_MAP_WIDTH, AREA_MAP_HEIGHT).png().toBuffer();
+  return image.extract({ left: Math.floor((meta.width - width) / 2), top: Math.floor((meta.height - height) / 2), width, height }).resize(AREA_MAP_WIDTH, AREA_MAP_HEIGHT).webp({ quality: 80 }).toBuffer();
 }
 
-/** Static map bytes for a centroid: no markers, provider request made server-side only. */
-export async function loadStaticAreaMap(communityId: number, centroid: Centroid, fetcher: typeof fetch = fetch, zoom = AREA_MAP_ZOOM): Promise<Buffer | null> {
+/**
+ * Static map bytes for a center: no markers, provider request made server-side
+ * only. Kept a day per community and variant; a failure is remembered for ten
+ * minutes so repeated requests cannot keep calling the provider.
+ */
+export async function loadStaticAreaMap(communityId: number, centroid: Centroid, fetcher: typeof fetch = fetch, zoom = AREA_MAP_ZOOM, variant: AreaMapVariant = "gated"): Promise<Buffer | null> {
   const centroidKey = `${centroid.lat.toFixed(6)},${centroid.lng.toFixed(6)}:${zoom}`;
-  const cacheKey = communityId * 100 + zoom;
+  const cacheKey = `${communityId}:${variant}:${zoom}`;
   const cached = imageCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now() && cached.centroidKey === centroidKey) return cached.bytes;
+  if (cached && cached.expiresAt > Date.now() && cached.centroidKey === centroidKey) {
+    // Most recently used goes to the back, so the busiest maps stay cached.
+    imageCache.delete(cacheKey);
+    imageCache.set(cacheKey, cached);
+    return cached.bytes;
+  }
+  const failedUntil = failureCache.get(`${cacheKey}:${centroidKey}`);
+  if (failedUntil && failedUntil > Date.now()) return null;
   if (!ENV.forgeApiUrl || !ENV.forgeApiKey) return null;
   let bytes: Buffer | null = null;
   if (wideStaticMapsAllowed !== false) {
@@ -211,8 +263,12 @@ export async function loadStaticAreaMap(communityId: number, centroid: Centroid,
     else if (wideStaticMapsAllowed === null) wideStaticMapsAllowed = false;
   }
   if (!bytes) bytes = await fetchStaticMapVariant(centroid, "cropped", fetcher, zoom).catch(() => null);
-  if (!bytes) return null;
-  if (imageCache.size >= IMAGE_CACHE_LIMIT) imageCache.delete(imageCache.keys().next().value as number);
+  if (!bytes) {
+    if (failureCache.size >= IMAGE_CACHE_LIMIT) failureCache.delete(failureCache.keys().next().value as string);
+    failureCache.set(`${cacheKey}:${centroidKey}`, Date.now() + FAILURE_CACHE_MS);
+    return null;
+  }
+  if (imageCache.size >= IMAGE_CACHE_LIMIT) imageCache.delete(imageCache.keys().next().value as string);
   imageCache.set(cacheKey, { bytes, expiresAt: Date.now() + IMAGE_CACHE_MS, centroidKey });
   return bytes;
 }
@@ -220,18 +276,37 @@ export async function loadStaticAreaMap(communityId: number, centroid: Centroid,
 /** Test seam only. */
 export function resetAreaMapCache() {
   imageCache.clear();
+  failureCache.clear();
+  publicMapHits.clear();
   wideStaticMapsAllowed = null;
 }
 
+/** Public map requests allowed per visitor IP in ten minutes (a full landing page is far fewer). */
+export const PUBLIC_MAP_REQUESTS_PER_WINDOW = 300;
+const PUBLIC_MAP_WINDOW_MS = 10 * 60_000;
+const publicMapHits = new Map<string, { count: number; resetAt: number }>();
+
+function publicMapAllowed(ip: string, now = Date.now()): boolean {
+  if (publicMapHits.size > 10_000) for (const [key, entry] of Array.from(publicMapHits.entries())) if (entry.resetAt <= now) publicMapHits.delete(key);
+  const entry = publicMapHits.get(ip);
+  if (!entry || entry.resetAt <= now) { publicMapHits.set(ip, { count: 1, resetAt: now + PUBLIC_MAP_WINDOW_MS }); return true; }
+  entry.count += 1;
+  return entry.count <= PUBLIC_MAP_REQUESTS_PER_WINDOW;
+}
+
 /**
- * GET /deals/mine/maps/:communityId(.png) behind the live-session check. The
- * response is image bytes only, served no-store; a missing session, community,
- * or centroid yields an empty status with no hint about what exists.
+ * GET /deals/mine/maps/:communityId(.webp) behind the live-session check, and
+ * GET /deals/maps/:communityId(.webp) for a community shown on the landing
+ * page (no session, rate-limited per IP, no cookies set). The response is image
+ * bytes only; a missing session, community or centroid yields an empty status
+ * with no hint about what exists.
  */
 export async function dealsMapImageHandler(req: Request, res: Response, variant: AreaMapVariant = "gated") {
   if (variant === "gated") {
     const session = await isLiveDealSession(req);
     if (!session) return res.status(401).end();
+  } else if (!publicMapAllowed(req.ip || req.socket?.remoteAddress || "unknown")) {
+    return res.status(429).end();
   }
   const communityId = mapCommunityIdFromPath(String(req.params.communityId ?? ""));
   if (!communityId) return res.status(404).end();
@@ -239,14 +314,16 @@ export async function dealsMapImageHandler(req: Request, res: Response, variant:
   if (!db) return res.status(503).end();
   const community = (await db.select().from(dealCommunities).where(eq(dealCommunities.id, communityId)).limit(1))[0];
   if (!community || !community.active || community.paused) return res.status(404).end();
-  const map = communityAreaMap(community, { variant, radiusMiles: areaMapRadius(await getDealSettings(), variant) });
-  if (!map) return res.status(404).end();
-  const bytes = await loadStaticAreaMap(communityId, { lat: map.lat, lng: map.lng }, fetch, map.zoom);
+  // The public map exists only for a community the landing page shows (its label passed the residue check).
+  if (variant === "public" && !publicNoPrivateNames({ label: community.publicLabel, area: community.areaLabel }, communityScrubConfig(community))) return res.status(404).end();
+  const geometry = areaMapGeometry(community, variant, areaMapRadius(await getDealSettings(), variant));
+  if (!geometry) return res.status(404).end();
+  const bytes = await loadStaticAreaMap(communityId, geometry.center, fetch, geometry.zoom, variant);
   if (!bytes) return res.status(404).end();
-  // The public card's wide map carries nothing private, so browsers may keep it for an hour.
+  // The landing card's map carries nothing private, so browsers may keep it for an hour.
   res.setHeader("Cache-Control", variant === "public" ? "public, max-age=3600" : "private, no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Robots-Tag", "noindex, nofollow");
   res.setHeader("Referrer-Policy", "same-origin");
-  res.type("image/png").send(bytes);
+  res.type("image/webp").send(bytes);
 }

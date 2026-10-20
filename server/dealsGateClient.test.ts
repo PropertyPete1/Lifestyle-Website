@@ -165,7 +165,10 @@ describe("expired and error redirects map to gate messages", () => {
     expect(html).toContain("Comment HOME on one of our videos again, or reach out to us so we can help you find your home.");
     expect(html).toContain('href="https://www.instagram.com/lifestyledesignrealtytexas/"');
     expect(html).toContain('href="tel:5125421477"');
-    expect(html).toContain("Call or text (512) 542-1477");
+    expect(html).toContain("Call (512) 542-1477");
+    // A phone can text the line straight from the screen.
+    expect(html).toContain('href="sms:5125421477"');
+    expect(html).toContain("Text (512) 542-1477");
     expect(html).not.toContain("Get a new link now");
     expect(html).not.toContain('id="deals-phone"');
     expect(html).not.toContain("?body=");

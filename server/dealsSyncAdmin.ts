@@ -185,6 +185,11 @@ export async function saveIncentiveForCommunity(input: AdminIncentiveInput): Pro
   const categories = storedScrubConfig(community);
   const publicText = scrubPrivateNames(fields.publicText.trim(), categories);
   if (hasPrivateTerm(publicText, categories)) throw new DealsAdminError("BAD_REQUEST", "Private names remain in incentive text.");
+  // Every typed field is shown to buyers too, so each one gets the same check.
+  for (const [field, label] of [["loanType", "loan type"], ["downPayment", "down payment"], ["repaymentTerms", "repayment terms"], ["followOnPeriod", "follow-on period"]] as const) {
+    const value = fields[field]?.trim();
+    if (value && hasPrivateTerm(value, categories)) throw new DealsAdminError("BAD_REQUEST", `Private names remain in the ${label}. Keep it to the program and figures (for example "FHA" or "3.5% down").`);
+  }
   const contractBy = adminDate(rawContractBy);
   const closeBy = adminDate(rawCloseBy);
   const required = incentiveRequiredFields({ ...fields, publicText, contractBy, closeBy });

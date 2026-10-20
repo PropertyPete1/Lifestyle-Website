@@ -23,12 +23,24 @@ Taxes, insurance and HOA are not included, and the strip says so.
 
 - Lowest payment: the three lowest, from three different communities.
 - Best builder rate: the lowest long-term rate among the builder offers.
-- Big lots: the cheapest homes on half an acre or more (read from the lot size
-  or the community's lot-size text and public label), one per community.
+- Big lots: the cheapest homes on half an acre or more, one per community.
+  A home's own lot size wins; otherwise the smallest lot the community's
+  lot-size text promises ("0.15 to 0.5 acres" counts as 0.15). Free text only
+  counts acreage next to a lot word, so "a 200-acre park" is never a lot, and
+  nothing over 20 acres is.
 
 A community with move-in-ready homes competes on those; plan prices stand in
-only when it has none. Builders listed in Admin, "Builders never featured in
-Best Deals" (default Lennar), are never ranked but stay listed.
+only when it has none. On a private list, only the homes on that list compete.
+
+Builders listed in Admin, "Builders never featured in Best Deals" (default
+Lennar), are never ranked but stay listed. The list is matched against the
+builder, the builder and lender names in the community's private list, its name
+and its site, so a Lennar community added by hand is out too.
+
+The loan program shown is one of FHA, VA, USDA, Conventional or Jumbo, never
+the typed text; "100% financing" or "$0 down" counts as 0% down, and a figure of
+50% or more is ignored. Every typed incentive field is checked for private names
+when it is saved.
 
 **Who sees what.**
 
@@ -42,19 +54,26 @@ A deal is only shown on the private list if its home's card is on that list.
 
 ## Area maps
 
-Every community with a ZIP code centroid gets a map right under its reel. The
-map is centered on the ZIP code's center, never the community, and shows a
-shaded circle with no pin.
+Every community with a ZIP code centroid gets a map right under its reel, with
+a shaded circle and no pin.
 
-| Where | Circle | Setting |
-| --- | --- | --- |
-| Public landing card | about 8 miles | `publicAreaMapRadiusMiles` |
-| Private list (after sign-up) | about 5 miles | `areaMapRadiusMiles` |
+| Where | Circle | Centered on | Setting |
+| --- | --- | --- | --- |
+| Public landing card | about 8 miles | a point 1.5 to 3 miles off the ZIP center | `publicAreaMapRadiusMiles` |
+| Private list (after sign-up) | about 5 miles | the ZIP code centroid | `areaMapRadiusMiles` |
 
-The zoom follows the radius so the circle always fits. The public image is
-served from `/deals/maps/:id.png` without a session and may be cached for an
-hour; the private one stays behind the session check at
-`/deals/mine/maps/:id.png`. The exact address comes from an agent.
+The landing card names no ZIP code: its JSON carries only the circle's size in
+pixels (no coordinates, no zoom), its caption says "General area only", and its
+center is moved off the ZIP center by a per-community distance and direction
+keyed by the server secret, never more than 40% of the radius, so the ZIP
+center always stays inside the circle.
+
+Images are WebP, kept a day per community, and a failed map provider call is not
+retried for ten minutes. The public image is served from `/deals/maps/:id.webp`
+only for a community the landing page shows, without a session, without
+setting any cookie, rate-limited per visitor, and may be cached for an hour.
+The private one stays behind the session check at `/deals/mine/maps/:id.webp`.
+The exact address comes from an agent.
 
 ## The sign-up box and an expired list
 
@@ -64,7 +83,8 @@ and one of our agents will reach out to help you find your home."
 
 When a reel buyer's 24 hours are up, the screen says "Your list has expired.
 Comment HOME on one of our videos again, or reach out to us so we can help you
-find your home," with the Instagram account and "Call or text" the text line.
+find your home," with the Instagram account and separate "Call" and "Text"
+buttons for the text line.
 There is no self-serve way back in from that screen.
 
 A buyer's session cookie is kept 30 days past their access (it unlocks nothing),

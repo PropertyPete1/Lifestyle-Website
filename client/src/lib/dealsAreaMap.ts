@@ -8,7 +8,7 @@
  * be drawn client-side from the radius alone: no pin, no provider request and
  * no coordinate ever leaves the page.
  */
-export type DealsAreaMap = { lat: number; lng: number; radiusMiles: number; zoom: number; imageUrl: string; attribution: string };
+export type DealsAreaMap = { lat?: number; lng?: number; zoom?: number; radiusMiles: number; radiusPixels?: number; imageUrl: string; attribution: string };
 
 export const AREA_MAP_IMAGE_WIDTH = 800;
 export const AREA_MAP_IMAGE_HEIGHT = 400;
@@ -19,9 +19,12 @@ const EQUATOR_METRES_PER_PIXEL = 156543.03392;
 export function validDealsAreaMap(value: unknown): value is DealsAreaMap {
   if (!value || typeof value !== "object") return false;
   const map = value as DealsAreaMap;
-  return Number.isFinite(map.lat) && Math.abs(map.lat) <= 85 && Number.isFinite(map.lng) && Math.abs(map.lng) <= 180
+  // The landing card sends only the circle's size in pixels; the private list may also send the centroid and zoom.
+  const pixels = typeof map.radiusPixels === "number" && Number.isFinite(map.radiusPixels) && map.radiusPixels > 0 && map.radiusPixels <= AREA_MAP_IMAGE_HEIGHT;
+  const geometry = typeof map.lat === "number" && Number.isFinite(map.lat) && Math.abs(map.lat) <= 85 && typeof map.lng === "number" && Number.isFinite(map.lng) && Math.abs(map.lng) <= 180
+    && typeof map.zoom === "number" && Number.isInteger(map.zoom) && map.zoom >= 0 && map.zoom <= 18;
+  return (pixels || geometry)
     && Number.isFinite(map.radiusMiles) && map.radiusMiles > 0 && map.radiusMiles <= 20
-    && Number.isInteger(map.zoom) && map.zoom >= 0 && map.zoom <= 18
     && typeof map.imageUrl === "string" && /^\/deals\/(?:mine\/)?maps\/[A-Za-z0-9_-]+\.(?:png|webp)$/.test(map.imageUrl)
     && typeof map.attribution === "string" && map.attribution.trim().length > 0;
 }
@@ -32,8 +35,15 @@ export function mercatorMetresPerPixel(lat: number, zoom: number): number {
 }
 
 /** Radius of the shaded circle in image pixels for an 800 x 400 static map at the server's zoom. */
-export function areaMapRadiusPixels(map: Pick<DealsAreaMap, "lat" | "zoom" | "radiusMiles">): number {
-  return map.radiusMiles * METRES_PER_MILE / mercatorMetresPerPixel(map.lat, map.zoom);
+export function areaMapRadiusPixels(map: Pick<DealsAreaMap, "lat" | "zoom" | "radiusMiles" | "radiusPixels">): number {
+  if (typeof map.radiusPixels === "number" && Number.isFinite(map.radiusPixels)) return map.radiusPixels;
+  return map.radiusMiles * METRES_PER_MILE / mercatorMetresPerPixel(map.lat ?? 0, map.zoom ?? 0);
+}
+
+/** "a 5-mile", "an 8-mile", "an 11-mile". */
+export function radiusPhrase(miles: number): string {
+  const figure = String(Number(miles.toFixed(1)));
+  return `${/^8|^1[18](?:\.|$)/.test(figure) ? "an" : "a"} ${figure}-mile`;
 }
 
 /** Only drive-time chips are shown; every chip says "about" and carries a minute figure. */

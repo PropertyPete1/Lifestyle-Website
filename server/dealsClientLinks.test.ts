@@ -25,7 +25,7 @@ vi.mock("./dealsFubJobs", () => ({
   requestTestMode: (...args: unknown[]) => mocks.requestTestMode(...args),
 }));
 
-import { agentDisplayPhone, agentForLead, agentForTeamId, agentWorkspace, attachLeadToClientLink, attachLiveSessionToClientLink, clientLinkForPhone, clientLinkTokenForLead, connectOfferFor, createClientLink, liveAgentForClient, presentClientLink, reassignTeamRowBeforeRemoval, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
+import { agentDisplayPhone, agentForLead, agentForTeamId, agentRowsForLead, agentWorkspace, attachLeadToClientLink, attachLiveSessionToClientLink, clientLinkForPhone, clientLinkTokenForLead, connectOfferFor, createClientLink, liveAgentForClient, presentClientLink, reassignTeamRowBeforeRemoval, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
 import { dealEvents } from "../drizzle/schema";
 import { classifyDealsAccess, revokeNonTeamMatchingDealLinks } from "./dealsEligibility";
 import { createDealsHomeRequest, setDealsHomeSaved } from "./dealsRequests";
@@ -524,6 +524,19 @@ describe("round 3: what a returning client, the nightly screening and team chang
     // A hand-added row on that shared line belongs to neither agent's FUB user: its clients stay with Peter, not a guess.
     const frontDesk = db.seed(dealTeamAllowlist, { name: "Front Desk", phoneE164: OFFICE, source: "manual", active: true });
     expect(await agentForTeamId(frontDesk)).toMatchObject({ name: "Front Desk", fubUserId: null });
+    // Signed in with the shared office line itself: no agent identity, no one's clients, no links made or turned off.
+    const office = lead({ phoneE164: OFFICE, status: "team" });
+    expect(await agentRowsForLead(office)).toEqual({ kind: "shared" });
+    expect(await agentForLead(office)).toBeNull();
+    expect(await agentWorkspace(office)).toBeNull();
+    expect(await createClientLink({ agentLead: office, clientName: "Walk-in" })).toEqual({ ok: false, kind: "shared_number" });
+    expect(await revokeClientLink(office, hers.link.id)).toBe(false);
+    expect(db.rows(dealClientLinks).find((row) => row.id === hers.link.id)?.revokedAt).toBeNull();
+    // Two hand-added rows with different names on one number are just as ambiguous.
+    const SHARED = "+12105550901";
+    db.seed(dealTeamAllowlist, { name: "Agent One", phoneE164: SHARED, source: "manual", active: true });
+    db.seed(dealTeamAllowlist, { name: "Agent Two", phoneE164: SHARED, source: "manual", active: true });
+    expect(await agentRowsForLead(lead({ phoneE164: SHARED, status: "team" }))).toEqual({ kind: "shared" });
   });
 
   it("keeps a buyer's session cookie past their access so a lapsed visit finds their link or the expired screen; a team session ends with access", async () => {

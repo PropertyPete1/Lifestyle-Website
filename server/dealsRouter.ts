@@ -392,7 +392,10 @@ export const dealsRouter = router({
     // The team and buyers with a live agent link get the full list; everyone else the scrubbed one.
     const { view, agent } = await catalogViewForSession(session.lead);
     const { featuredDeals } = await import("./dealsFeatured");
-    const [communities, saved, featured] = await Promise.all([gatedDealsCatalog(session.leadId, view), savedDealCards(session.leadId), featuredDeals(view)]);
+    const [communities, saved] = await Promise.all([gatedDealsCatalog(session.leadId, view), savedDealCards(session.leadId)]);
+    const listCards = new Set((communities as Array<{ homes?: Array<{ card?: string }> }>).flatMap((community) => (community.homes ?? []).flatMap((home) => home.card ? [home.card] : [])));
+    // Ranked among the homes on this list only, so a community dropped from it never leaves a gap.
+    const featured = await featuredDeals(view, { onlyCards: listCards });
     const connection = await getDb();
     if (connection) {
       const active = await connection.select({ id: dealCommunities.id }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)));
@@ -406,8 +409,7 @@ export const dealsRouter = router({
     }
     // The client sees their own agent's real number: they are meant to text it.
     // A featured home always has its card in this list: deals whose card is not shown are dropped.
-    const cards = new Set((communities as Array<{ homes?: Array<{ card?: string }> }>).flatMap((community) => (community.homes ?? []).flatMap((home) => home.card ? [home.card] : [])));
-    const onList = <T extends { card?: string }>(deal: T) => Boolean(deal.card && cards.has(deal.card));
+    const onList = <T extends { card?: string }>(deal: T) => Boolean(deal.card && listCards.has(deal.card));
     const featuredOnList = { ...featured, lowestPayment: featured.lowestPayment.filter(onList), bestRate: featured.bestRate && onList(featured.bestRate) ? featured.bestRate : null, bigLots: featured.bigLots.filter(onList) };
     return { lead: { ...leadPresentation(session.lead), agentClient: Boolean(agent) }, communities, saved, featured: featuredOnList, fullDetails: view.view === "full", agent: agent ? { name: agent.name, firstName: agent.firstName, phone: agentDisplayPhone(agent) } : null };
   }),
@@ -457,7 +459,11 @@ export const dealsRouter = router({
       if (!session) throw new TRPCError({ code: "UNAUTHORIZED", message: "A current Builder Deals session is required." });
       if (session.lead.status !== "team") throw new TRPCError({ code: "FORBIDDEN", message: "Agent tools are for the Lifestyle Design Realty team." });
       const workspace = await agentWorkspace(session.lead);
-      if (!workspace) throw new TRPCError({ code: "FORBIDDEN", message: settings_testTeamNote(session.lead.phoneE164, await getDealSettings()) });
+      if (!workspace) {
+        const { agentRowsForLead, SHARED_TEAM_NUMBER_MESSAGE } = await import("./dealsClientLinks");
+        const shared = (await agentRowsForLead(session.lead)).kind === "shared";
+        throw new TRPCError({ code: "FORBIDDEN", message: shared ? SHARED_TEAM_NUMBER_MESSAGE : settings_testTeamNote(session.lead.phoneE164, await getDealSettings()) });
+      }
       return { lead: leadPresentation(session.lead), agent: { name: workspace.agent.name, email: workspace.agent.email, fubLinked: Boolean(workspace.agent.fubUserId) }, clients: workspace.clients };
     }),
     createClientLink: publicProcedure.input(z.object({ clientName: z.string().trim().min(2).max(190), clientPhone: z.string().trim().max(60).optional(), note: z.string().trim().max(500).optional() })).mutation(async ({ input, ctx }) => {
@@ -467,8 +473,9 @@ export const dealsRouter = router({
       if (session.lead.status !== "team") throw new TRPCError({ code: "FORBIDDEN" });
       const result = await createClientLink({ agentLead: session.lead, clientName: input.clientName, clientPhone: input.clientPhone, note: input.note });
       if (!result.ok) {
-        const messages = { not_team: "Your number is not on the team list yet. Ask Peter to add it in Admin, Builder Deals.", invalid_phone: "Enter a valid US mobile number, or leave the phone blank.", invalid_name: "Enter the client's name.", unavailable: "Links are unavailable right now. Try again in a moment." } as const;
-        throw new TRPCError({ code: result.kind === "unavailable" ? "INTERNAL_SERVER_ERROR" : result.kind === "not_team" ? "FORBIDDEN" : "BAD_REQUEST", message: messages[result.kind] });
+        const { SHARED_TEAM_NUMBER_MESSAGE } = await import("./dealsClientLinks");
+        const messages = { shared_number: SHARED_TEAM_NUMBER_MESSAGE, not_team: "Your number is not on the team list yet. Ask Peter to add it in Admin, Builder Deals.", invalid_phone: "Enter a valid US mobile number, or leave the phone blank.", invalid_name: "Enter the client's name.", unavailable: "Links are unavailable right now. Try again in a moment." } as const;
+        throw new TRPCError({ code: result.kind === "unavailable" ? "INTERNAL_SERVER_ERROR" : result.kind === "not_team" || result.kind === "shared_number" ? "FORBIDDEN" : "BAD_REQUEST", message: messages[result.kind] });
       }
       const { nationalDigits } = await import("./dealsClientLinks");
       return { ok: true as const, id: result.link.id, path: result.path, expiresAt: result.link.expiresAt.toISOString(), clientName: result.link.clientName, clientPhoneDigits: nationalDigits(result.link.clientPhoneE164) };

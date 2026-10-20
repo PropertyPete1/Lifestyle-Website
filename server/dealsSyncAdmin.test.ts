@@ -103,6 +103,11 @@ describe("incentive admin", () => {
     await expect(saveIncentiveForCommunity({ communityId, manual: true, publicText: "Ask about VGX today." })).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Private names remain in incentive text." });
     await expect(saveIncentiveForCommunity({ communityId, manual: true, publicText: "First-year rates as low as 4.25% (6.051% APR).", apr: "6.051%" })).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Required before publication: followOnRate, followOnPeriod" });
     expect(db.rows(dealIncentives)).toHaveLength(1);
+    // The typed loan type, down payment and terms are shown to buyers too, so they get the same check.
+    db.rows(dealCommunities)[0].scrubList = JSON.stringify({ lender: ["Pulte Mortgage"] });
+    await expect(saveIncentiveForCommunity({ communityId, manual: true, publicText: "Ask about our rate.", loanType: "Conventional with Pulte Mortgage" })).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("loan type") });
+    await expect(saveIncentiveForCommunity({ communityId, manual: true, publicText: "Ask about our rate.", repaymentTerms: "30 years through Pulte Mortgage" })).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("repayment terms") });
+    expect(db.rows(dealIncentives)).toHaveLength(1);
   });
 
   it("accepts a held incentive only once its hold reasons are satisfied, making the entered date sticky", async () => {

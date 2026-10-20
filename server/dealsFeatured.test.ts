@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dealCommunities, dealHomes, dealIncentives, dealSettings } from "../drizzle/schema";
-import { acresFromText, builderExcluded, monthlyPrincipalAndInterest, mortgageRateFrom, percentFrom, rankFeatured, type FeaturedCandidate } from "../shared/dealsFeatured";
+import { acresFromText, builderExcluded, downPaymentPercentFrom, loanTypeLabel, lotAcres, monthlyPrincipalAndInterest, mortgageRateFrom, percentFrom, rankFeatured, type FeaturedCandidate } from "../shared/dealsFeatured";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 
 /**
@@ -47,11 +47,42 @@ describe("the payment math", () => {
     expect(acresFromText(null)).toBeNull();
   });
 
+  it("reads a lot size only where the text talks about lots, smallest first, and never a park", () => {
+    expect(lotAcres("Southeast San Antonio | Half-Acre Lots and Lakes")).toBe(0.5);
+    expect(lotAcres("0.15 to 0.5 acres", { field: true })).toBe(0.15);
+    expect(lotAcres("Homesites from 0.15 to 0.5 acres")).toBe(0.15);
+    expect(lotAcres("Homes by a 200-acre park")).toBeNull();
+    expect(lotAcres("15 acres of trails and 0.25-acre lots")).toBe(0.25);
+    expect(lotAcres("15 acres of trails")).toBeNull();
+    expect(lotAcres("a 200-acre community with half-acre homesites")).toBe(0.5);
+    expect(lotAcres("lots up to 1 acre")).toBe(1);
+    expect(lotAcres("0.52 acres", { field: true })).toBe(0.52);
+    expect(lotAcres("40 acres", { field: true })).toBeNull();
+  });
+
+  it("reads down payments and keeps the loan program to a fixed list", () => {
+    expect(downPaymentPercentFrom("3.5% minimum down payment")).toBe(3.5);
+    expect(downPaymentPercentFrom("100% financing")).toBe(0);
+    expect(downPaymentPercentFrom("$0 down")).toBe(0);
+    expect(downPaymentPercentFrom("No down payment for VA")).toBe(0);
+    expect(downPaymentPercentFrom("0% down")).toBe(0);
+    expect(downPaymentPercentFrom("60% down")).toBeNull();
+    expect(downPaymentPercentFrom("ask us")).toBeNull();
+    expect(loanTypeLabel("Conventional with Pulte Mortgage")).toBe("Conventional");
+    expect(loanTypeLabel("30-year fixed FHA through HomeAmerican Mortgage")).toBe("FHA");
+    expect(loanTypeLabel("FHA or VA")).toBe("FHA/VA");
+    expect(loanTypeLabel("Lennar Mortgage special")).toBeNull();
+    // "100% financing" is no longer 100% down, so the payment is never $0.
+    expect(offerFromIncentive({ headlineRate: "5.5%", followOnRate: null, loanType: "USDA", downPayment: "100% financing" })).toMatchObject({ downPercent: 0, loanType: "USDA" });
+  });
+
   it("keeps Lennar out by default however the name is written, and nothing out for a blank entry", () => {
     expect(builderExcluded("Lennar", ["Lennar"])).toBe(true);
     expect(builderExcluded("Lennar Homes of Texas", ["lennar"])).toBe(true);
     expect(builderExcluded("Chesmar", ["Lennar"])).toBe(false);
     expect(builderExcluded("Chesmar", [" "])).toBe(false);
+    expect(builderExcluded(["Manual", "Lennar Mortgage"], ["Lennar"])).toBe(true);
+    expect(builderExcluded(["Manual", "www.lennar.com"], ["Lennar"])).toBe(true);
   });
 });
 
@@ -149,6 +180,47 @@ describe("Best Deals from the database, by viewer", () => {
 
     const full = await featuredDeals({ view: "full", builderPages: true });
     expect(full.bestRate?.detail).toBe("Sienna Lakes · 118 Sienna Lakes Blvd");
+  });
+
+  it("keeps a hand-added (Manual) Lennar community out, found by its scrub names or its site", async () => {
+    const byScrub = community({ builder: "Manual", privateName: "Cheap Acres", publicLabel: "West San Antonio | Starter Homes", sourceUrl: "https://example.com/cheap", scrubList: JSON.stringify({ builder: ["Lennar"] }) });
+    home(byScrub, { price: 219_990 });
+    const bySite = community({ builder: "Manual", privateName: "Other Acres", publicLabel: "North San Antonio | Starter Homes", sourceUrl: "https://www.lennar.com/new-homes/texas/san-antonio/x", scrubList: "{}" });
+    home(bySite, { price: 209_990 });
+    const fair = community({ builder: "Manual", privateName: "Fair Place", publicLabel: "East San Antonio | New Homes", sourceUrl: "https://example.com/fair", scrubList: "{}" });
+    home(fair, { price: 330_000 });
+    const pub = await featuredDeals("public");
+    expect(pub.lowestPayment.map((deal) => deal.label)).toEqual(["East San Antonio | New Homes"]);
+  });
+
+  it("never shows a lender's name from a typed loan type, and never a lot bigger than the home's own", async () => {
+    const pulte = community({ privateName: "Pulte Place", publicLabel: "North San Antonio | Homesites from 0.15 to 0.5 acres", scrubList: JSON.stringify({ lender: ["Pulte Mortgage"], builder: ["Pulte"] }) });
+    home(pulte, { price: 350_000, lotSize: "0.15 acres" });
+    db.seed(dealIncentives, { communityId: pulte, normalizedText: "x", publicText: "x", headlineRate: "4.99%", loanType: "Conventional with Pulte Mortgage", downPayment: "5%", confirmedAt: new Date(), active: true, held: false, manual: false });
+    for (const view of ["public", { view: "gated" as const }] as const) {
+      const featured = await featuredDeals(view);
+      expect(JSON.stringify(featured)).not.toMatch(/Pulte/i);
+      expect(featured.bestRate).toMatchObject({ rate: { loanType: "Conventional" } });
+      // The home's own 0.15-acre lot wins over the community's "up to 0.5 acres", so it is not a big lot.
+      expect(featured.bestRate?.acres).toBe(0.15);
+      expect(featured.bigLots).toEqual([]);
+    }
+    // A park in the label never makes a big lot either.
+    const park = community({ privateName: "Park Place", publicLabel: "West San Antonio | Homes by a 200-acre park", scrubList: "{}" });
+    home(park, { price: 360_000 });
+    expect((await featuredDeals("public")).bigLots).toEqual([]);
+  });
+
+  it("ranks a private list's strip among that list's homes only, so it is never short", async () => {
+    const keys = ["a", "b", "c", "d"].map((letter, index) => {
+      const id = community({ privateName: `Place ${letter}`, publicLabel: `Area ${letter} | New Homes`, scrubList: "{}" });
+      home(id, { sourceKey: `key-${letter}`, price: 300_000 + index * 10_000 });
+      return hashSecret(`deals-card:key-${letter}`).slice(0, 20);
+    });
+    // The cheapest community is not on this buyer's list.
+    const onList = new Set(keys.slice(1));
+    const featured = await featuredDeals({ view: "gated" }, { onlyCards: onList });
+    expect(featured.lowestPayment.map((deal) => deal.label)).toEqual(["Area b | New Homes", "Area c | New Homes", "Area d | New Homes"]);
   });
 
   it("drops a community whose public label slipped a private name, and ignores a held or lapsed offer", async () => {

@@ -136,7 +136,8 @@ export function ExpiredHelp({ state }: { state: DealsContactState }) {
     <p className="text-foreground">Comment {keyword} on one of our videos again, or reach out to us so we can help you find your home.</p>
     <div className="flex flex-wrap gap-3">
       <a href="https://www.instagram.com/lifestyledesignrealtytexas/" target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center border border-gold/45 px-4 text-xs uppercase tracking-widest text-gold hover:bg-gold/10">@lifestyledesignrealtytexas</a>
-      {line && <a href={`tel:${digits}`} className="inline-flex min-h-11 items-center border border-border px-4 text-xs uppercase tracking-widest text-foreground hover:text-gold">Call or text {line}</a>}
+      {line && <a href={`tel:${digits}`} className="inline-flex min-h-11 items-center border border-border px-4 text-xs uppercase tracking-widest text-foreground hover:text-gold">Call {line}</a>}
+      {line && <a href={`sms:${digits}`} className="inline-flex min-h-11 items-center border border-border px-4 text-xs uppercase tracking-widest text-foreground hover:text-gold">Text {line}</a>}
     </div>
   </div>;
 }

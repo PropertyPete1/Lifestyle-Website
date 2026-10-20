@@ -516,9 +516,9 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     // First clean pull of a discovered community: its headline now uses what the pull found, then it goes live.
     const facts = snapshot.private.communityFacts;
     const { relabelFromCentroid } = await import("./dealsOnboarding");
-    const { acresFromText } = await import("../shared/dealsFeatured");
+    const { lotAcres } = await import("../shared/dealsFeatured");
     await relabelFromCentroid(community.id, {
-      acres: acresFromText(facts?.lotSizes ?? null),
+      acres: lotAcres(facts?.lotSizes ?? null, { field: true }),
       fromPrice: facts?.fromPrice ?? community.fromPrice,
       amenities: facts?.amenities ?? [],
       moveInReadyCount: snapshot.private.homes.filter((home) => /quick\s+move|available\s+now/i.test(home.status ?? "")).length,

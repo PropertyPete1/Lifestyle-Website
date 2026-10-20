@@ -56,6 +56,15 @@ describe("Builder Deals public boundary", () => {
     expect(response.headers.get("x-robots-tag")).toContain("noindex");
   });
 
+  it("never sets a cookie on the public area map, which browsers and caches may keep", async () => {
+    const response = await fetch(new URL("/deals/maps/1.webp", server.baseUrl), { redirect: "manual" });
+    expect(response.headers.getSetCookie()).toEqual([]);
+    // The private map still goes through the usual cookie and session path.
+    const gated = await fetch(new URL("/deals/mine/maps/1.webp", server.baseUrl), { redirect: "manual" });
+    expect(rootCookieNames(gated)).toEqual(expect.arrayContaining(["ldr_deals_device", "ldr_deals_probe"]));
+    expect(gated.status).toBe(401);
+  });
+
   it("rejects malformed token and verification requests without reaching a private document", async () => {
     const malformedToken = await fetch(new URL("/deals/v/not-a-token", server.baseUrl), { redirect: "manual" });
     expect(malformedToken.status).toBe(302);

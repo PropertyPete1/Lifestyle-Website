@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { dealCommunities } from "../drizzle/schema";
 import { mergeDealScrubConfig, normalizedDealSourceKey, type DealScrubConfig } from "../shared/deals";
-import { acresFromText } from "../shared/dealsFeatured";
+import { lotAcres } from "../shared/dealsFeatured";
 import { areaLabelFor, publicLabelFor, type HeadlineFacts } from "../shared/dealsArea";
 import { getDb } from "./db";
 import { hashSecret } from "./dealsService";
@@ -57,7 +57,7 @@ export function initialScrubConfig(community: Pick<DiscoveredCommunity, "builder
 }
 
 export function headlineFactsFor(community: Pick<DiscoveredCommunity, "priceFrom" | "lotSizesText" | "moveInReadyCount">): HeadlineFacts {
-  return { acres: acresFromText(community.lotSizesText), fromPrice: community.priceFrom ?? null, moveInReadyCount: community.moveInReadyCount ?? null };
+  return { acres: lotAcres(community.lotSizesText, { field: true }), fromPrice: community.priceFrom ?? null, moveInReadyCount: community.moveInReadyCount ?? null };
 }
 
 /** A stable, private funnel code for a discovered community (it is never a reel code a buyer can type). */
@@ -132,7 +132,7 @@ export async function relabelFromCentroid(communityId: number, facts?: HeadlineF
   const centroid = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
   const city = row.privateAddress.split(",").map((part) => part.trim()).at(-2) ?? null;
   const area = areaLabelFor({ centroid, city });
-  const headlineFacts: HeadlineFacts = facts ?? { acres: acresFromText(row.lotSizes), fromPrice: row.fromPrice, amenities: JSON.parse(row.amenities ?? "[]") as string[] };
+  const headlineFacts: HeadlineFacts = facts ?? { acres: lotAcres(row.lotSizes, { field: true }), fromPrice: row.fromPrice, amenities: JSON.parse(row.amenities ?? "[]") as string[] };
   const publicLabel = publicLabelFor(area, headlineFacts).slice(0, 190);
   await db.update(dealCommunities).set({ areaLabel: area, publicLabel }).where(eq(dealCommunities.id, communityId));
   return { ...row, areaLabel: area, publicLabel };

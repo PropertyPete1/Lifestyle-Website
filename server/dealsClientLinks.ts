@@ -118,25 +118,42 @@ export async function teamRowsForLead(lead: Pick<LeadRow, "phoneE164" | "email">
   )).orderBy(desc(dealTeamAllowlist.id));
 }
 
+export type AgentRowsForLead = { kind: "none" } | { kind: "shared" } | { kind: "one"; rows: TeamRow[]; person: TeamRow[] };
+
 /**
- * Every team row id of the same people as `rows`, active or not: a link made
- * under a phone that FUB later changed, or under a hand-added row before the
- * agent's FUB user existed, still belongs to the agent.
+ * The team rows behind a team session, as one person. A number (or email) on
+ * more than one agent's profile, such as an office line, is "shared": it still
+ * sees the team list, but never one agent's clients or links, because it
+ * cannot tell which agent is signing in.
  */
-async function sameAgentTeamIds(rows: TeamRow[]): Promise<number[]> {
-  return (await samePersonRows(rows)).map((row) => row.id);
+export async function agentRowsForLead(lead: Pick<LeadRow, "phoneE164" | "email">): Promise<AgentRowsForLead> {
+  const rows = await teamRowsForLead(lead);
+  if (!rows.length) return { kind: "none" };
+  const person = await samePersonRows(rows);
+  const fubUsers = new Set(person.flatMap((row) => row.fubUserId?.trim() ? [row.fubUserId.trim()] : []));
+  if (fubUsers.size > 1) return { kind: "shared" };
+  if (!fubUsers.size) {
+    const names = new Set(person.flatMap((row) => row.name?.trim() ? [row.name.trim().toLowerCase().replace(/\s+/g, " ")] : []));
+    if (names.size > 1) return { kind: "shared" };
+  }
+  return { kind: "one", rows, person };
 }
+
+/** Shown on agent tools when the number signed in is on several agents' profiles. */
+export const SHARED_TEAM_NUMBER_MESSAGE = "This number is on more than one agent's profile in Follow Up Boss, so client links are off for it. Sign in with your own cell number to use them.";
 
 /**
  * The agent identity for a team session. A FUB user mirrors to one row per
  * phone, so the row carrying a FUB user id (and a name) wins; the contact
- * details are completed from the other rows of the same person.
+ * details are completed from the other rows of the same person. A shared
+ * number has no agent identity.
  */
 export async function agentForLead(lead: Pick<LeadRow, "phoneE164" | "email">): Promise<DealsAgent | null> {
-  const rows = await teamRowsForLead(lead);
-  if (!rows.length) return null;
+  const found = await agentRowsForLead(lead);
+  if (found.kind !== "one") return null;
+  const { rows } = found;
   const primary = rows.find((row) => row.fubUserId && row.name) ?? rows.find((row) => row.fubUserId) ?? rows.find((row) => row.name) ?? rows[0]!;
-  return agentFromRows(primary.id, await samePersonRows(rows));
+  return agentFromRows(primary.id, found.person);
 }
 
 /** The agent behind a link or client (by the team row id stored on it). Inactive agents still resolve so history keeps its name. */
@@ -174,7 +191,7 @@ export async function reassignTeamRowBeforeRemoval(teamId: number): Promise<numb
 export type CreateClientLinkInput = { agentLead: LeadRow; clientName: string; clientPhone?: string | null; note?: string | null };
 export type CreateClientLinkResult =
   | { ok: true; link: ClientLinkRow; path: string }
-  | { ok: false; kind: "not_team" | "invalid_phone" | "invalid_name" | "unavailable" };
+  | { ok: false; kind: "not_team" | "shared_number" | "invalid_phone" | "invalid_name" | "unavailable" };
 
 /** The relative URL the agent sends; the client lands on the gate with the agent's name on it. */
 export function clientLinkPath(token: string) {
@@ -190,6 +207,7 @@ export async function createClientLink(input: CreateClientLinkInput): Promise<Cr
   const db = await getDb();
   if (!db) return { ok: false, kind: "unavailable" };
   if (input.agentLead.status !== "team") return { ok: false, kind: "not_team" };
+  if ((await agentRowsForLead(input.agentLead)).kind === "shared") return { ok: false, kind: "shared_number" };
   const agent = await agentForLead(input.agentLead);
   if (!agent) return { ok: false, kind: "not_team" };
   const clientName = input.clientName.replace(/\s+/g, " ").trim().slice(0, 190);
@@ -379,8 +397,8 @@ export async function attachLiveSessionToClientLink(input: { lead: LeadRow; toke
 
 /** The agent's own links only: every team row of the same person, including rows of a phone FUB later changed. */
 async function agentLinkTeamIds(agentLead: LeadRow): Promise<number[]> {
-  const rows = await teamRowsForLead(agentLead);
-  return rows.length ? sameAgentTeamIds(rows) : [];
+  const found = await agentRowsForLead(agentLead);
+  return found.kind === "one" ? found.person.map((row) => row.id) : [];
 }
 
 export async function revokeClientLink(agentLead: LeadRow, linkId: number): Promise<boolean> {

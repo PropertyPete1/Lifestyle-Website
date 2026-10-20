@@ -42,28 +42,78 @@ export function monthlyPrincipalAndInterest(input: { price: number; ratePercent:
 }
 
 const WORD_ACRES: Array<[RegExp, number]> = [
-  [/\bhalf[\s-]+acre/i, 0.5],
-  [/\b(?:one[\s-]+)?quarter[\s-]+acre/i, 0.25],
-  [/\bthree[\s-]+quarter[\s-]+acre/i, 0.75],
-  [/\b(?:one|1)[\s-]+acre/i, 1],
+  [/\bhalf[\s-]+acre/gi, 0.5],
+  [/\b(?:one[\s-]+)?quarter[\s-]+acre/gi, 0.25],
+  [/\bthree[\s-]+quarter[\s-]+acre/gi, 0.75],
+  [/\b(?:one|1)[\s-]+acre/gi, 1],
   // "Acre lots", but not the "acre lots" inside "Half-Acre Lots" or "1.5 acre lots" (those are read above).
-  [/(?<![a-z0-9./][\s-]*)\bacre[\s-]+(?:plus|\+)?\s*(?:lots?|homesites?|sites?)\b/i, 1],
+  [/(?<![a-z0-9./][\s-]*)\bacre[\s-]+(?:plus|\+)?\s*(?:lots?|homesites?|sites?)\b/gi, 1],
 ];
+/** No lot in a buyer's search is bigger than this; larger figures are parks, ranches or the whole community. */
+export const MAX_LOT_ACRES = 20;
+const LOT_WORDS = /\b(?:lots?|homesites?|home\s*sites?|sites?|acreage)\b/i;
 
-/** The largest lot size a text mentions, in acres: "Half-Acre Lots" -> 0.5, "0.75 acre" -> 0.75, "1/2 acre" -> 0.5. */
+type AcreMention = { value: number; start: number; end: number };
+
+function acreMentions(text: string): AcreMention[] {
+  const found: AcreMention[] = [];
+  const push = (value: number, match: RegExpMatchArray) => {
+    if (Number.isFinite(value) && value > 0) found.push({ value, start: match.index ?? 0, end: (match.index ?? 0) + match[0].length });
+  };
+  // "0.15 to 0.5 acres", "1/4 - 1/2 acre": the low end of a range counts too.
+  for (const match of Array.from(text.matchAll(/(?<![\d/.])(\d*\.?\d+)\s*(?:to|-|–|—)\s*\d*\.?\d+\s*-?\s*acres?\b/gi))) push(Number(match[1]), match);
+  for (const match of Array.from(text.matchAll(/(\d+)\s*\/\s*(\d+)\s*(?:to|-|–|—)\s*\d+\s*\/\s*\d+\s*-?\s*acres?\b/gi))) push(Number(match[1]) / Number(match[2]), match);
+  for (const match of Array.from(text.matchAll(/(\d+)\s*\/\s*(\d+)\s*-?\s*acres?\b/gi))) push(Number(match[1]) / Number(match[2]), match);
+  for (const match of Array.from(text.matchAll(/(?<![\d/])(\d*\.?\d+)\s*\+?\s*-?\s*acres?\b/gi))) push(Number(match[1]), match);
+  for (const [pattern, value] of WORD_ACRES) for (const match of Array.from(text.matchAll(pattern))) push(value, match);
+  return found;
+}
+
+/** The largest acreage a text mentions: "Half-Acre Lots" -> 0.5, "0.75 acre" -> 0.75, "1/2 acre" -> 0.5. */
 export function acresFromText(text: string | null | undefined): number | null {
   if (!text) return null;
-  const found: number[] = [];
-  for (const match of Array.from(text.matchAll(/(\d+)\s*\/\s*(\d+)\s*-?\s*acres?\b/gi))) {
-    const value = Number(match[1]) / Number(match[2]);
-    if (Number.isFinite(value) && value > 0) found.push(value);
-  }
-  for (const match of Array.from(text.matchAll(/(?<![\d/])(\d*\.?\d+)\s*\+?\s*-?\s*acres?\b/gi))) {
-    const value = Number(match[1]);
-    if (Number.isFinite(value) && value > 0 && value < 1_000) found.push(value);
-  }
-  for (const [pattern, value] of WORD_ACRES) if (pattern.test(text)) found.push(value);
-  return found.length ? Math.max(...found) : null;
+  const values = acreMentions(text).map((mention) => mention.value).filter((value) => value < 1_000);
+  return values.length ? Math.max(...values) : null;
+}
+
+/**
+ * The smallest lot a text promises, in acres, so a home is never shown on a
+ * bigger lot than it may have: "0.15 to 0.5 acres" -> 0.15. A lot-size field
+ * (`field`) is read as is; free text only counts acreage right next to a lot
+ * word ("half-acre homesites", "lots up to 1 acre"), never "a 200-acre park"
+ * or "15 acres of trails". Anything over 20 acres is not a lot.
+ */
+export function lotAcres(text: string | null | undefined, options: { field?: boolean } = {}): number | null {
+  if (!text) return null;
+  const values = acreMentions(text).filter((mention) => {
+    if (mention.value > MAX_LOT_ACRES) return false;
+    const after = text.slice(mention.end, mention.end + 25);
+    if (/^\s*of\b/i.test(after)) return false;
+    if (options.field) return true;
+    return LOT_WORDS.test(text.slice(mention.start, mention.end)) || LOT_WORDS.test(after) || LOT_WORDS.test(text.slice(Math.max(0, mention.start - 25), mention.start));
+  }).map((mention) => mention.value);
+  return values.length ? Math.min(...values) : null;
+}
+
+/**
+ * The down payment as a percent of the price: "3.5% down" -> 3.5, "100%
+ * financing" / "$0 down" / "no down payment" -> 0. Half the price or more is
+ * not a down payment figure, so it is ignored (the default is used).
+ */
+export function downPaymentPercentFrom(value: string | null | undefined): number | null {
+  if (!value?.trim()) return null;
+  if (/100\s*%\s*financ|\bzero[\s-]+down\b|\bno[\s-]+(?:money[\s-]+)?down\b|\$\s*0\s+down\b|(?<![\d.])0\s*%\s*down\b/i.test(value)) return 0;
+  const percent = percentFrom(value);
+  return percent !== null && percent >= 0 && percent < 50 ? percent : null;
+}
+
+const LOAN_TYPES: Array<[RegExp, string]> = [[/\bFHA\b/i, "FHA"], [/\bVA\b/, "VA"], [/\bUSDA\b/i, "USDA"], [/\bconventional\b/i, "Conventional"], [/\bjumbo\b/i, "Jumbo"]];
+
+/** Only the loan program, from a fixed list: "Conventional with Pulte Mortgage" -> "Conventional". Anything else is dropped. */
+export function loanTypeLabel(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const found = LOAN_TYPES.filter(([pattern]) => pattern.test(value)).map(([, label]) => label);
+  return found.length ? found.join("/") : null;
 }
 
 /** The builder's financing on a home, as the ranking uses it. */
@@ -185,10 +235,10 @@ export function rankFeatured(candidates: readonly FeaturedCandidate[], settings:
   return { lowestPayment, bestRate, bigLots, assumptions: { marketRatePercent: settings.marketRatePercent, defaultDownPercent: settings.defaultDownPercent, termYears: DEFAULT_TERM_YEARS } };
 }
 
-/** "Lennar" excludes "Lennar", "Lennar Homes" and "lennar"; a blank entry excludes nothing. */
-export function builderExcluded(builder: string | null | undefined, excluded: readonly string[]): boolean {
-  const name = builder?.trim().toLowerCase() ?? "";
-  return Boolean(name) && excluded.some((entry) => entry.trim() && name.includes(entry.trim().toLowerCase()));
+/** "Lennar" excludes "Lennar", "Lennar Homes", "Lennar Mortgage" and "www.lennar.com"; a blank entry excludes nothing. */
+export function builderExcluded(names: string | null | undefined | ReadonlyArray<string | null | undefined>, excluded: readonly string[]): boolean {
+  const list = (Array.isArray(names) ? names : [names]).map((name) => name?.trim().toLowerCase() ?? "").filter(Boolean);
+  return list.some((name) => excluded.some((entry) => entry.trim() && name.includes(entry.trim().toLowerCase())));
 }
 
 /** "4.999%" style figure with no trailing zeros. */

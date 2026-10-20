@@ -31,7 +31,8 @@ export function registerDealsRoutes(app: Express) {
     dealsCsp(res);
     // The landing response—not a later API response—must establish the device
     // and probe cookies. A blocked browser is detected on the next request.
-    if (req.method === "GET") {
+    // The public area map is a cacheable image: it never sets a cookie, so a shared cache cannot hand one device id to many buyers.
+    if (req.method === "GET" && !/^\/maps\//.test(req.path)) {
       const cookies = ensureDealsCookies(req, res);
       if (req.path === "/" && !isDealsCrawler(req)) {
         const agentLink = Boolean(linkSuffix(req.query.c));

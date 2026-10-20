@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
-import { areaMapRadiusPixels, driveTimeChipLabels, mercatorMetresPerPixel, validDealsAreaMap } from "../client/src/lib/dealsAreaMap";
+import { areaMapRadiusPixels, driveTimeChipLabels, mercatorMetresPerPixel, radiusPhrase, validDealsAreaMap } from "../client/src/lib/dealsAreaMap";
 import { IDENTITY_PATTERN_OPACITY, escapeXml, identityPatternDataUri, identityPatternStyle, identityPatternSvg, identityPatternText } from "../client/src/lib/dealsIdentityPattern";
 import { MINE_COPY, PROFILE_NAME_MAX, countdownExpired, countdownSeconds, isUnauthorizedDealsError, profileErrorCopy, profileInput } from "../client/src/lib/dealsMine";
 import { SITE } from "../shared/site";
@@ -211,6 +211,18 @@ describe("area map (G1)", () => {
     expect(html).toContain("about 25 min to downtown San Antonio");
     expect(html).toContain("about 20 min to Randolph AFB");
     expect(html).not.toContain("Approximate area map unavailable");
+  });
+
+  it("draws the landing card's circle from its pixel size alone, with no ZIP wording and the right article", () => {
+    const publicMap = { radiusMiles: 8, radiusPixels: 132.4, imageUrl: "/deals/maps/7.webp", attribution: "Map data and imagery from Google. General area only." };
+    expect(validDealsAreaMap(publicMap)).toBe(true);
+    expect(validDealsAreaMap({ ...publicMap, radiusPixels: 9_999 })).toBe(false);
+    expect(validDealsAreaMap({ radiusMiles: 8, imageUrl: "/deals/maps/7.webp", attribution: "x" })).toBe(false);
+    const html = renderToStaticMarkup(createElement(AreaMap, { map: publicMap, variant: "public" }));
+    expect(/<circle ([^>]*)>/.exec(html)?.[1]).toContain('r="132.4"');
+    expect(html).toContain("General area only: about an 8-mile radius. Unlock the list for a closer look.");
+    expect(html).not.toMatch(/ZIP|centroid|a 8-mile/);
+    for (const [miles, phrase] of [[5, "a 5-mile"], [11, "an 11-mile"], [18, "an 18-mile"], [1, "a 1-mile"], [12, "a 12-mile"], [8.5, "an 8.5-mile"]] as const) expect(radiusPhrase(miles)).toBe(phrase);
   });
 
   it("fails closed without a map: the fallback copy, no image and no circle", () => {

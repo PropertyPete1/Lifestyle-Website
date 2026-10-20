@@ -1,7 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealIncentives } from "../drizzle/schema";
 import { scrubPrivateNames, selectDealCatalogHomes } from "../shared/deals";
-import { acresFromText, builderExcluded, mortgageRateFrom, percentFrom, rankFeatured, type FeaturedCandidate, type FeaturedDeals } from "../shared/dealsFeatured";
+import { builderExcluded, downPaymentPercentFrom, loanTypeLabel, lotAcres, mortgageRateFrom, rankFeatured, type FeaturedCandidate, type FeaturedDeals } from "../shared/dealsFeatured";
 import { getDb } from "./db";
 import { communityScrubConfig, getDealSettings, hashSecret, publicNoPrivateNames, type DealsCatalogView } from "./dealsService";
 
@@ -32,16 +32,29 @@ export function offerFromIncentive(row: Pick<Incentive, "headlineRate" | "follow
   const headline = mortgageRateFrom(row.headlineRate);
   const followOn = mortgageRateFrom(row.followOnRate);
   if (headline === null && followOn === null) return null;
-  const down = percentFrom(row.downPayment);
   return {
     ratePercent: followOn ?? headline,
     firstYearRatePercent: followOn !== null && headline !== null && headline !== followOn ? headline : null,
-    loanType: row.loanType?.trim() || null,
-    downPercent: down !== null && down >= 0 && down <= 100 ? down : null,
+    // Only the program name ("FHA"), never free text that could carry a lender's name.
+    loanType: loanTypeLabel(row.loanType),
+    downPercent: downPaymentPercentFrom(row.downPayment),
   };
 }
 
-export async function featuredDeals(view: FeaturedView): Promise<FeaturedDeals> {
+function hostOf(url: string): string | null {
+  try { return new URL(url).hostname; } catch { return null; }
+}
+
+/**
+ * The excluded-builder list matches every name the community is known by: the
+ * builder column, the builder and lender names in its private list, its own
+ * name and its site, so a Lennar community added by hand ("Manual") is still out.
+ */
+export function communityExcludedFromFeatured(community: Pick<typeof dealCommunities.$inferSelect, "builder" | "privateName" | "sourceUrl">, config: { builder: readonly string[]; lender: readonly string[] }, excluded: readonly string[]): boolean {
+  return builderExcluded([community.builder, ...config.builder, ...config.lender, community.privateName, hostOf(community.sourceUrl)], excluded);
+}
+
+export async function featuredDeals(view: FeaturedView, options: { onlyCards?: ReadonlySet<string> } = {}): Promise<FeaturedDeals> {
   const settings = await getDealSettings();
   // Stored settings are hand-editable JSON: anything unusable falls back to the defaults.
   const finite = (value: unknown, fallback: number, min: number, max: number) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max ? value : fallback;
@@ -69,22 +82,26 @@ export async function featuredDeals(view: FeaturedView): Promise<FeaturedDeals> 
     const live = incentives.filter((row) => row.communityId === community.id && incentiveIsLive(row, now, settings.incentiveLapseDays))
       .sort((a, b) => b.confirmedAt.getTime() - a.confirmedAt.getTime())[0];
     const offer = offerFromIncentive(live);
-    const communityAcres = Math.max(acresFromText(community.lotSizes) ?? 0, acresFromText(community.publicLabel) ?? 0) || null;
-    const excluded = builderExcluded(community.builder, excludedBuilders);
+    // The smallest lot the community promises; a home's own lot size wins when it has one.
+    const communityAcres = lotAcres(community.lotSizes, { field: true }) ?? lotAcres(community.publicLabel);
+    const excluded = communityExcludedFromFeatured(community, config, excludedBuilders);
     for (const home of selectDealCatalogHomes(homes.filter((row) => row.communityId === community.id))) {
-      const homeAcres = acresFromText(home.lotSize);
+      const homeAcres = lotAcres(home.lotSize, { field: true });
+      const card = view !== "public" ? hashSecret(`deals-card:${home.sourceKey}`).slice(0, 20) : undefined;
+      // On a private list, only homes on that list compete, so the strip is never short.
+      if (options.onlyCards && (!card || !options.onlyCards.has(card))) continue;
       candidates.push({
         communityKey: String(community.id),
         label,
         area,
-        ...(view !== "public" ? { card: hashSecret(`deals-card:${home.sourceKey}`).slice(0, 20) } : {}),
+        ...(card ? { card } : {}),
         ...(full ? { detail: [community.privateName, home.privateAddress ?? home.privatePlanName].filter(Boolean).join(" · ") || null } : {}),
         price: home.price,
         kind: home.kind,
         beds: home.beds,
         sqft: home.sqft,
         offer,
-        acres: Math.max(homeAcres ?? 0, communityAcres ?? 0) || null,
+        acres: homeAcres ?? communityAcres,
         excluded,
       });
     }

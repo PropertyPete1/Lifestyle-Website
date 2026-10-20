@@ -963,3 +963,11 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Amount words:** after "save", "up to", "receive" or "earn", a figure is a rate only with loan wording right after it, or with decimals and at least 2.5%, or with loan wording later in the clause. Incentives, contributions, co-ops and "from the builder" are amounts. "Commission rate", "co-op rate", MUD, PID and millage rates are not loan rates.
 - **Regional rates:** a second starting figure after "and", "or", a comma or "&" counts only when it is itself a rate (not a credit, closing costs, an incentive or a co-op), including after "as low as".
 - **Residue:** any name before .COM, .NET, .ORG or .BIZ is an address. The glued-sentence skip applies only before TLDs that are also words or codes.
+
+## Round 26 corrections
+
+- **Stepped buydowns:** a figure for a single "year 2" is a follow-on rate only when the period is open ("years 2-30", "years 2 and beyond"). A follow-on read for a later period that equals a year-2 figure holds `ambiguous_rate`.
+- **APR layouts:** "4.99% APR 5.62%" (label-first) reads the APR as 5.62%. Any rate equal to its APR, or a fixed APR below the rate, holds `ambiguous_rate`.
+- **Reads:** "N% 30-Year Fixed (FHA) Rate (M% APR)", "Interest rate: N%" and "Rate N% / APR M%" give the headline. An APR-paired figure is skipped only after "down payment of". "Incentive rate" and "the builder's preferred lender" are rate wording. Tax, co-op, MUD and PID rates are never the "as low as" headline.
+- **Relative rates:** only rate words may stand between the figure and the change word ("1% first-year rate cut", "1% interest rate reduction"), so "4.99% rate for lower monthly payments" is a rate.
+- **Hold reasons** are de-duplicated. An all-caps name before a word TLD is a glued sentence only in an all-caps passage.

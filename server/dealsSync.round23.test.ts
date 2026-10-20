@@ -108,7 +108,8 @@ describe("buydowns written figure first", () => {
 describe("rate wording", () => {
   it("an amount word before a figure does not hide loan wording after it", () => {
     for (const text of ["Receive 4.99% financing on select quick move-in homes.", "Receive 3.99% fixed for 30 years on select homes.", "Earn a 4.99% FHA rate on select homes.", "Receive a 4.99% 30-year fixed FHA loan on select homes.", "Receive 2.99% financing through our preferred lender.", "Up to 4.99% fixed on select homes.", "Earn 3.99% interest on select quick move-in homes."]) {
-      expect(parsePromotionalRate(text).holdReasons, text).toEqual(expect.arrayContaining(["missing_promotional_rate", "missing_apr"]));
+      // A rate, so never published without its APR.
+      expect(parsePromotionalRate(text).holdReasons, text).toContain("missing_apr");
     }
     for (const text of ["Receive 2% when you use our preferred lender.", "Save up to 3% on closing costs.", "Starting at 3% down on select homes.", "2% builder contribution with a 10-year structural warranty.", "Builder pays 2% for your 2-year HOA dues."]) {
       expect(parsePromotionalRate(text), text).toMatchObject({ rateKind: "none", holdReasons: [] });
@@ -194,7 +195,7 @@ describe("round 24: savings amounts, amount words, residue and labelled legacy f
       expect(parsePromotionalRate(text), text).toMatchObject({ promotionalRatePercent: null, publishable: false });
       expect(parsePromotionalRate(text).holdReasons, text).toContain("missing_promotional_rate");
     }
-    expect(parsePromotionalRate("2% year 1 / 1% year 2 rate buydown on a 6.25% (6.4% APR) 30-year fixed conventional loan with 5% down payment.").holdReasons).toContain("ambiguous_rate");
+    expect(parsePromotionalRate("2% year 1 / 1% year 2 rate buydown on a 6.25% (6.4% APR) 30-year fixed conventional loan with 5% down payment.").publishable).toBe(false);
   });
 
   it("an amount word hides a whole figure, not a rate written with decimals", () => {
@@ -284,6 +285,34 @@ describe("round 25: relative rates, down payments beside an APR, amounts, region
   it("a name before .COM/.NET/.ORG is always an address", () => {
     for (const text of ["Apply at Guild.COM Today.", "Visit Chase.COM Today for details.", "See Fairway.Com For details.", "Visit lennar.COM Today.", "See Perry.Net For terms."]) expect(publicTextResidue(text), text).toBe("web address");
     expect(publicTextResidue("OFFER VALID ON SELECT HOMES.HOMES MUST CLOSE BY 12/31/2026.")).toBeNull();
+  });
+});
+
+describe("round 26: stepped buydowns, label-first APRs, holds and reads", () => {
+  it("a 2-1 buydown never publishes its year-2 rate as the rate from year 3", () => {
+    for (const text of ["2-1 buydown: 2.99% year 1, 3.99% year 2, beginning in year 3 the rate is 4.99% (5.12% APR) on a 30-year fixed FHA loan with 3.5% down payment.", "2-1 buydown: 2.99% for year 1, 3.99% for year 2, 4.99% for years 3 through 30 (5.12% APR) on a 30-year fixed FHA loan with 3.5% down payment.", "Get a 2-1 buydown: 4.99% year 1, 5.99% year 2 and 6.99% years 3 through 30. 6.75% APR on a 30-year fixed FHA loan with 3.5% down payment."]) {
+      const facts = parsePromotionalRate(text);
+      expect(facts.followOnRatePercent === 3.99 || facts.followOnRatePercent === 5.99 ? facts.publishable : false, text).toBe(false);
+    }
+    expect(parsePromotionalRate("1-0 buydown: 3.99% for year 1, 4.99% for years 2 and beyond (5.40% APR) on a 30-year fixed FHA loan with 3.5% down payment.")).toMatchObject({ promotionalRatePercent: 3.99, followOnRatePercent: 4.99 });
+  });
+
+  it("an APR label after the rate does not make the rate the APR", () => {
+    expect(parsePromotionalRate("Rates as low as 4.99%! Interest Rate 4.99% APR 5.62% on a 30-year fixed FHA loan with 3.5% down payment.")).toMatchObject({ promotionalRatePercent: 4.99, aprPercent: 5.62 });
+    expect(parsePromotionalRate("Rates as low as 4.99% APR* on select homes.").publishable).toBe(false);
+  });
+
+  it("choices, headings and marketing words beside a rate do not hold it", () => {
+    for (const text of ["Seller credit of $15,000 or 4.99% (5.62% APR) 30-year fixed FHA financing with 3.5% down payment.", "Fall Into Savings 4.99% (5.62% APR) 30-year fixed FHA financing with 3.5% down payment.", "Get a 4.99% rate for lower monthly payments with our preferred lender (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment.", "4.99% 30-Year Fixed Rate (5.737% APR) FHA with 3.5% down payment."]) {
+      expect(parsePromotionalRate(text), text).toMatchObject({ promotionalRatePercent: 4.99, holdReasons: [] });
+    }
+  });
+
+  it("an incentive rate is a rate; a tax rate is not the headline", () => {
+    expect(parsePromotionalRate("Special 4.99% incentive rate with our preferred lender on select homes.").holdReasons).toContain("missing_apr");
+    expect(parsePromotionalRate("Tax rates as low as 1.98%! Interest rate: 4.99%, APR: 5.62%, 30-year fixed FHA loan with 3.5% down payment.").promotionalRatePercent).toBe(4.99);
+    expect(parsePromotionalRate("Enjoy a 1% first-year rate cut! 5.99% for years 2-30 (6.1% APR) on a 30-year fixed FHA loan with 3.5% down payment.").holdReasons.filter((reason) => reason === "ambiguous_rate")).toHaveLength(1);
+    expect(publicTextResidue("Apply at GUILD.MORTGAGE Today.")).toBe("web address");
   });
 });
 

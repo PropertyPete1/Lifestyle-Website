@@ -204,8 +204,9 @@ describe("View Homes reader: adapter", () => {
 
   it("publishes the roster's homes for the page (statuses with the move-in year, prices, specs, photo), the page's plans, the facts and the promotion that names the community", async () => {
     const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
-    // The promotion names no repayment term, so the offer (not the catalog) waits for a look.
-    expect(result.holdReasons).toEqual(["missing_repayment_term"]);
+    // The promotion names no repayment term, and its FHA and VA programs state two APRs and two down payments, so the offer
+    // (not the catalog) waits for a look.
+    expect(result.holdReasons).toEqual(["missing_repayment_term", "apr_check", "ambiguous_rate"]);
     expect(result.catalogOk).toBe(true);
     expect(requested).toEqual([COMMUNITY, viewHomesListingUrl(), PROMO]);
     const { private: privateSnapshot, public: snapshot } = result;
@@ -220,7 +221,7 @@ describe("View Homes reader: adapter", () => {
     expect(privateSnapshot.communityFacts).toMatchObject({ fromPrice: 309_990, schoolDistrict: "Medina Valley ISD" });
     expect(privateSnapshot.incentive?.sourceUrl).toBe(COMMUNITY);
     expect(privateSnapshot.incentive?.text).toContain("5.25% Fixed-Rate or up to $55,000 in flex cash");
-    expect(privateSnapshot.incentive?.facts).toMatchObject({ rateKind: "fixed", promotionalRatePercent: 5.25, aprPercent: 5.993, loanType: "FHA", downPaymentPercent: 3.5, repaymentTermYears: null, contractDeadline: null, closingDeadline: { raw: "11/30/2026", isoDate: "2026-11-30" }, holdReasons: ["missing_repayment_term"] });
+    expect(privateSnapshot.incentive?.facts).toMatchObject({ rateKind: "fixed", promotionalRatePercent: 5.25, aprPercent: 5.993, loanType: "FHA", downPaymentPercent: 3.5, repaymentTermYears: null, contractDeadline: null, closingDeadline: { raw: "11/30/2026", isoDate: "2026-11-30" }, holdReasons: ["missing_repayment_term", "apr_check", "ambiguous_rate"] });
     expect(privateSnapshot.pages.map((page) => page.kind)).toEqual(["community", "home", "home", "home", "home", "plan", "plan", "plan", "incentive"]);
     expect(snapshot.homes).toHaveLength(4);
     expect(snapshot.plans).toHaveLength(3);
@@ -244,7 +245,7 @@ describe("View Homes reader: adapter", () => {
       const second = await loadOfficialDeals(ridgeConfig, { fetcher, now: () => NOW });
       const third = await loadOfficialDeals({ ...config, sourceUrl: other, privateCommunityName: "Fixture Other" }, { fetcher, now: () => NOW });
       expect([first.catalogOk, second.catalogOk, third.catalogOk]).toEqual([true, true, true]);
-      expect([first.holdReasons, second.holdReasons, third.holdReasons]).toEqual([["missing_repayment_term"], ["missing_repayment_term"], []]);
+      expect([first.holdReasons, second.holdReasons, third.holdReasons]).toEqual([["missing_repayment_term", "apr_check", "ambiguous_rate"], ["missing_repayment_term", "apr_check", "ambiguous_rate"], []]);
       expect(requested).toEqual([COMMUNITY, viewHomesListingUrl(), PROMO, ridge, other]);
       expect(second.private.incentive?.text).toContain("flex cash");
       expect(second.private.homes).toEqual([]);

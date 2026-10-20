@@ -186,6 +186,11 @@ describe("the Best Deals strip", () => {
     expect(html).toContain("$354,990 · 4 beds · 2,011 sq ft");
     expect(html).toContain("at the 7.4% market rate, 5% down");
     expect(html).toContain("at 4.999% FHA, 3.5% down · 0.5 acre lot");
+    // The half-acre home wins all three ways: it is shown once, tagged, not repeated under its own headings.
+    expect(html.match(/>Southeast San Antonio \| Half-Acre Lots and Lakes</g)).toHaveLength(1);
+    expect(html).toContain('data-deals-featured-tag="Best builder rate"');
+    expect(html).toContain('data-deals-featured-tag="Big lot"');
+    expect(html).not.toContain(">Best builder rate</p>");
     expect(html).toContain("Builder rates apply to select homes with the builder's lender and qualifying credit; homes without a builder rate use the 7.4% market rate and 5% down. Taxes, insurance and HOA are extra. Not a commitment to lend.");
     expect(html).not.toContain("—");
   });

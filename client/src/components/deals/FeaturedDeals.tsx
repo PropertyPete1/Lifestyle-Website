@@ -28,12 +28,18 @@ function homeLine(deal: FeaturedDeal): string {
   return [money.format(deal.price), deal.beds ? `${deal.beds} beds` : null, deal.sqft ? `${deal.sqft.toLocaleString()} sq ft` : null, deal.kind === "to_be_built" ? "to be built" : null].filter(Boolean).join(" · ");
 }
 
-function DealRow({ deal, rank, locked, onSelect }: { deal: FeaturedDeal; rank?: number; locked: boolean; onSelect?: (deal: FeaturedDeal) => void }) {
+/** The same home can win several ways; it is shown once, with a tag for each extra win. */
+export function dealKey(deal: Pick<FeaturedDeal, "card" | "label" | "price">): string {
+  return deal.card ?? `${deal.label}|${deal.price}`;
+}
+
+function DealRow({ deal, rank, locked, onSelect, tags = [] }: { deal: FeaturedDeal; rank?: number; locked: boolean; onSelect?: (deal: FeaturedDeal) => void; tags?: string[] }) {
   const action = locked ? FEATURED_COPY.unlock : FEATURED_COPY.see;
   return <li className="min-w-0 border border-border bg-card">
     <button type="button" onClick={() => onSelect?.(deal)} className="flex w-full min-w-0 items-start gap-4 p-4 text-left transition-colors hover:bg-gold/5" data-deals-featured={deal.reason} aria-label={`${action}: ${deal.label}, ${money.format(deal.estMonthly)} a month estimated`}>
       {rank !== undefined && <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-gold/50 font-serif text-lg text-gold">{rank}</span>}
       <span className="min-w-0 flex-1">
+        {tags.length > 0 && <span className="mb-2 flex flex-wrap gap-1.5">{tags.map((tag) => <span key={tag} data-deals-featured-tag={tag} className="bg-gold px-2 py-0.5 text-[10px] font-medium uppercase tracking-widest text-primary-foreground">{tag}</span>)}</span>}
         <span className="block font-serif text-3xl leading-none text-gold">{money.format(deal.estMonthly)}<span className="ml-1 font-sans text-xs uppercase tracking-widest text-muted-foreground">{FEATURED_COPY.perMonth}</span></span>
         <span className="mt-2 block break-words text-base leading-snug text-foreground">{deal.label}</span>
         {deal.detail && <span className="mt-1 block break-words text-sm text-foreground/80" data-deals-featured-detail="true">{deal.detail}</span>}
@@ -52,21 +58,29 @@ function DealRow({ deal, rank, locked, onSelect }: { deal: FeaturedDeal; rank?: 
 export function FeaturedDeals({ featured, locked = false, onSelect }: { featured: FeaturedDealsData | null | undefined; locked?: boolean; onSelect?: (deal: FeaturedDeal) => void }) {
   if (!featured || (!featured.lowestPayment.length && !featured.bestRate && !featured.bigLots.length)) return null;
   const { assumptions } = featured;
+  // A home already in the top three carries its other wins as tags instead of appearing again.
+  const shown = new Set(featured.lowestPayment.map(dealKey));
+  const tagsFor = (deal: FeaturedDeal) => [
+    ...(featured.bestRate && dealKey(featured.bestRate) === dealKey(deal) ? [FEATURED_COPY.bestRate] : []),
+    ...(featured.bigLots.some((lot) => dealKey(lot) === dealKey(deal)) ? [FEATURED_COPY.bigLots.replace(/s$/, "")] : []),
+  ];
+  const bestRate = featured.bestRate && !shown.has(dealKey(featured.bestRate)) ? featured.bestRate : null;
+  const bigLots = featured.bigLots.filter((deal) => !shown.has(dealKey(deal)) && !(bestRate && dealKey(bestRate) === dealKey(deal)));
   return <section aria-labelledby="deals-featured-heading" data-deals-featured-section="true" className="mt-10 min-w-0">
     <p className="eyebrow text-gold">{FEATURED_COPY.eyebrow}</p>
     <h2 id="deals-featured-heading" className="mt-2 text-3xl leading-tight sm:text-4xl">{FEATURED_COPY.heading}</h2>
     {featured.lowestPayment.length > 0 && <>
       <p className="mt-6 flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground"><Trophy className="h-4 w-4 text-gold" />{FEATURED_COPY.lowest}</p>
-      <ol className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-3">{featured.lowestPayment.map((deal, index) => <DealRow key={`${deal.card ?? deal.label}-${index}`} deal={deal} rank={index + 1} locked={locked} onSelect={onSelect} />)}</ol>
+      <ol className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-3">{featured.lowestPayment.map((deal, index) => <DealRow key={`${deal.card ?? deal.label}-${index}`} deal={deal} rank={index + 1} locked={locked} onSelect={onSelect} tags={tagsFor(deal)} />)}</ol>
     </>}
     <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-2">
-      {featured.bestRate && <div className="min-w-0">
+      {bestRate && <div className="min-w-0">
         <p className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground"><Percent className="h-4 w-4 text-gold" />{FEATURED_COPY.bestRate}</p>
-        <ul className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3"><DealRow deal={featured.bestRate} locked={locked} onSelect={onSelect} /></ul>
+        <ul className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3"><DealRow deal={bestRate} locked={locked} onSelect={onSelect} tags={tagsFor(bestRate).filter((tag) => tag !== FEATURED_COPY.bestRate)} /></ul>
       </div>}
-      {featured.bigLots.length > 0 && <div className="min-w-0">
+      {bigLots.length > 0 && <div className="min-w-0">
         <p className="flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground"><Trees className="h-4 w-4 text-gold" />{FEATURED_COPY.bigLots}</p>
-        <ul className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">{featured.bigLots.map((deal, index) => <DealRow key={`${deal.card ?? deal.label}-lot-${index}`} deal={deal} locked={locked} onSelect={onSelect} />)}</ul>
+        <ul className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">{bigLots.map((deal, index) => <DealRow key={`${deal.card ?? deal.label}-lot-${index}`} deal={deal} locked={locked} onSelect={onSelect} />)}</ul>
       </div>}
     </div>
     <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground" data-deals-featured-assumptions="true">Estimated principal and interest on a {assumptions.termYears}-year loan. Builder rates apply to select homes with the builder's lender and qualifying credit; homes without a builder rate use the {formatRate(assumptions.marketRatePercent)} market rate and {Number(assumptions.defaultDownPercent.toFixed(2))}% down. Taxes, insurance and HOA are extra. Not a commitment to lend. {FEATURED_COPY.updated}</p>

@@ -7,7 +7,7 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { ASHTON_HOST, CENTURY_HOST, DRB_HOST, DREES_HOST, LEGEND_HOST, VIEWHOMES_HOST, TEXASHOMES_HOST, HAKES_HOST, BEAZER_HOST, LENNAR_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { ASHTON_HOST, CENTURY_HOST, DRB_HOST, DREES_HOST, LEGEND_HOST, VIEWHOMES_HOST, TEXASHOMES_HOST, HAKES_HOST, BEAZER_HOST, LENNAR_HOST, EMPIRE_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
@@ -28,6 +28,7 @@ import { texasHomesListingEntries, texasHomesListingUrl, texasHomesRecord } from
 import { hakesListingEntries, hakesListingUrl, hakesRecord } from "./dealsAdapters.hakes";
 import { beazerListingEntries, beazerListingUrl, beazerRecord } from "./dealsAdapters.beazer";
 import { lennarListingEntries, lennarListingUrl, lennarRecord } from "./dealsAdapters.lennar";
+import { empireRecord, empireRegionLinks, empireRegionUrl } from "./dealsAdapters.empire";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -236,6 +237,13 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     index: { kind: "listing", url: lennarListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => lennarListingEntries(body, host) },
     communityPath: /^\/new-homes\/texas\/san-antonio\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
     record: lennarRecord,
+  },
+  {
+    // Empire Homes: the region page links every community (and its city pages, which have no sales office and are skipped); each page's static map gives the name, sales address and pin.
+    builder: "Empire Homes", host: EMPIRE_HOST,
+    index: { kind: "listing", url: empireRegionUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => empireRegionLinks(body, host)?.map((url) => ({ url, record: null })) ?? null },
+    communityPath: /^\/us\/texas\/san-antonio\/(?:[a-z0-9-]+\/)?[a-z0-9-]+\/?$/i,
+    record: empireRecord,
   },
   { builder: "Century Communities", host: CENTURY_HOST, index: { kind: "sitemap", url: `https://${CENTURY_HOST}/sitemap.xml` }, communityPath: /^\/find-your-new-home\/texas\/san-antonio-metro\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({

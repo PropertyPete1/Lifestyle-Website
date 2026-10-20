@@ -23,12 +23,13 @@ import { TexasHomesAdapter } from "./dealsAdapters.texashomes";
 import { HakesBrothersAdapter } from "./dealsAdapters.hakes";
 import { BeazerAdapter } from "./dealsAdapters.beazer";
 import { LennarAdapter } from "./dealsAdapters.lennar";
+import { EmpireHomesAdapter } from "./dealsAdapters.empire";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "DRB Homes" | "Starlight Homes" | "Legend Homes" | "Drees Custom Homes" | "View Homes" | "Texas Homes" | "Hakes Brothers" | "Beazer Homes" | "Lennar" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "DRB Homes" | "Starlight Homes" | "Legend Homes" | "Drees Custom Homes" | "View Homes" | "Texas Homes" | "Hakes Brothers" | "Beazer Homes" | "Lennar" | "Empire Homes" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -262,8 +263,9 @@ export const TEXASHOMES_HOST = "www.texas-homes.com";
 export const HAKES_HOST = "www.hakesbrothers.com";
 export const BEAZER_HOST = "www.beazer.com";
 export const LENNAR_HOST = "www.lennar.com";
+export const EMPIRE_HOST = "empirehomes.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST, "DRB Homes": DRB_HOST, "Starlight Homes": STARLIGHT_HOST, "Legend Homes": LEGEND_HOST, "Drees Custom Homes": DREES_HOST, "View Homes": VIEWHOMES_HOST, "Texas Homes": TEXASHOMES_HOST, "Hakes Brothers": HAKES_HOST, "Beazer Homes": BEAZER_HOST, Lennar: LENNAR_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST, "DRB Homes": DRB_HOST, "Starlight Homes": STARLIGHT_HOST, "Legend Homes": LEGEND_HOST, "Drees Custom Homes": DREES_HOST, "View Homes": VIEWHOMES_HOST, "Texas Homes": TEXASHOMES_HOST, "Hakes Brothers": HAKES_HOST, "Beazer Homes": BEAZER_HOST, Lennar: LENNAR_HOST, "Empire Homes": EMPIRE_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -1246,6 +1248,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "Beazer Homes") { config.builder.push("Beazer Homes", "Beazer", "Gatherings by Beazer", "Gatherings"); config.lender.push("Beazer Mortgage Choice", "Mortgage Choice", "Cardinal Financial Company", "Cardinal Financial", "Choice Lender"); }
   if (builder === "Hakes Brothers") { config.builder.push("Hakes Brothers", "Hakes Bros", "Hakes"); }
   if (builder === "Lennar") { config.builder.push("Lennar Homes", "Lennar Corporation", "Lennar", "Everything's Included", "Everything’s Included", "Next Gen"); config.lender.push("Lennar Mortgage", "Lennar Title"); }
+  if (builder === "Empire Homes") { config.builder.push("Empire Homes", "Empire Communities", "Empire", "Smart Move Sales Event"); config.lender.push("Alta Home Lending", "Alta"); }
   if (builder === "Texas Homes") { config.builder.push("Texas Homes"); config.lender.push("CMG Mortgage", "CMG Home Loans", "CMG"); }
   if (builder === "View Homes") { config.builder.push("View Homes", "Your View Home", "Thoughtful Collection"); config.lender.push("View Homes Lending"); }
   if (builder === "Scott Felder Homes") { config.builder.push("Scott Felder Homes", "Scott Felder"); config.lender.push("Southern Lending", "First Continental Mortgage", "First Continental"); }
@@ -1907,6 +1910,7 @@ let texasHomesAdapter: DealAdapter | null = null;
 let hakesAdapter: DealAdapter | null = null;
 let beazerAdapter: DealAdapter | null = null;
 let lennarAdapter: DealAdapter | null = null;
+let empireAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
@@ -1937,6 +1941,7 @@ export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   get "Hakes Brothers"() { return (hakesAdapter ??= new HakesBrothersAdapter()); },
   get "Beazer Homes"() { return (beazerAdapter ??= new BeazerAdapter()); },
   get Lennar() { return (lennarAdapter ??= new LennarAdapter()); },
+  get "Empire Homes"() { return (empireAdapter ??= new EmpireHomesAdapter()); },
   Manual: new ManualAdapter(),
 };
 

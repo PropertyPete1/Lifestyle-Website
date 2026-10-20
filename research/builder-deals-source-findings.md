@@ -666,6 +666,79 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   `expected_community_container_not_found`; a 403 holds
   `community_fetch_failed`).
 
+## Empire Homes reader (added 2026-10-20)
+
+- Site: `empirehomes.com` (WordPress/Elementor, apex host). The community
+  page `/us/texas/san-antonio/[<city>/]<slug>/` (about 650 KB) carries two
+  listing widgets (`.apartments-widget[data-detail]`, base64 JSON `{
+  items_per_page: "4", display: "quick_delivery_homes" | "new_home_plans",
+  endpoint: "https://empirehomes.com//wp-json/custom/v1/
+  get_lots_by_community_name", community: "Agave", region, permalink,
+  is_rental }`; `parseEmpireWidgets`), the first four home cards
+  (`.quick-homes-grid-item[data-community]` with `a[href]` under
+  `<page>listing/<slug>/`, a price and a struck previous price, "Load
+  More" after), the sales office's static map (`.map-agent-static-container
+  img`: `src` `…/maps/api/staticmap?center=<lat>,<lng>…&key=…`, `alt` "Map
+  of 8602 Partida, San Antonio, TX 78222" — Willowbrook's caption reads
+  "…, New Braunfels, TX, 78130"; `.map-agent-static-label` is the
+  community's name), the office phone in a text widget and the address
+  again in `.elementor-shortcode`. The static map's URL carries the site's
+  own map key: the reader takes the center from it and never keeps the URL
+  (the "get directions" link, `daddr=<lat>,<lng>`, is missing on
+  Willowbrook, so the map is the pin). No schema.org record names the
+  community (the site's record is the Ontario head office).
+- Listing: `/wp-json/custom/v1/get_lots_by_community_name?per_page=100&
+  page=1&name=<community>&meta_key=apartment_type&meta_value=quick_delivery
+  &sort_comminity=collection&orderby=collection&order=DESC` (the page's own
+  widget request; `&meta_value=new_home_plan&unit_type=Plan` for the
+  plans; plain GET, no key) answers `{ success: true, data: { filter,
+  data: [rows], query (the SQL, never read), pagination: { total, per_page,
+  current_page, last_page } }, cacheDate }`. A home row: `unit_type`
+  "Unit", `permalink`, `unit_address`, `unit_name_single` "Duval A | 4966
+  Don Julio" (the plan before the bar), `unit_status` MoveInReady /
+  UnderConstruction / Sold (a sold row stays listed with `unit_sale_status`
+  "Sold"), `move_in_date` ("Move-in Ready" even under construction) and
+  `move_in_date_day` (ISO: a day to come names the month; passed or blank
+  → undated), `price`, `previus_price` (sic; "0" when none), `size`,
+  `bedrooms`, `bathrooms`, `halfbaths`, `unit_garages`, `lot`, `block`,
+  `phase`, `mls`, `custom_banner_presale` ("October Low Pricing", "4.99%
+  Fixed Rate Available" — a label with no terms, never read),
+  `spcMortPromInterest`/`spcMortPromLoanDuration` (never read),
+  `is_active`, `plan_images_details[].url` and `interior_images[]` on
+  `empirehomes.com/wp-content/uploads/` (`floorplan_images` are floor
+  plans; `button_url` is a self-tour on another host, never read). A plan
+  row: `unit_type` "Plan", `permalink` `<page>home-plans/<slug>-<id>/`,
+  `unit_name_single`, `price` ("0" sometimes), `size`, beds/baths,
+  `elevations[].ElevationPrice` (the price when the row has none;
+  `ElevationImage` on empire-portal.com, not a photo host). Agave listed 8
+  homes (1 ready, 6 under construction, 1 sold) and 8 plans; Everly
+  Estates 8; Willowbrook under 100. The reader holds `incomplete_inventory`
+  when `last_page` > 1 or `total` ≠ rows, and when a page card is missing
+  from the listing (the cards are the listing's first page, so the two must
+  agree); `invalid_inventory_response` when a widget's permalink or a row's
+  link is another page's.
+- Offer: every community page carries the market's "Smart Move Sales
+  Event" banner (`.banner-promotion-single`: "Interest Rates as Low as
+  3.99%*", "4.99% Fixed FHA/VA Interest Rate*", "Up to $50,000 in Price
+  Reductions", "Up to $10,000 Closing Costs", …) and links the campaign
+  page `/us/texas/san-antonio/smart-move-campaign/`, whose text widget
+  holds the footnote ("Disclaimer: *Offer valid on select move-in ready
+  homes … contracts dated October 1st-December 31st and must close by
+  December 31st … Alta Home Lending (NMLS #40561 …)"). The footnote names
+  no APR, term or year, so the offer holds for its missing terms (the
+  catalog publishes); a banner whose footnote cannot be read holds the
+  offer only.
+- Discovery: the region page `/us/texas/san-antonio/` links the four
+  community pages, the city pages (`/new-braunfels/`, `/bulverde-village/`)
+  and the campaign page; `communityPath` is `/us/texas/san-antonio/
+  [<city>/]<slug>/` (listing and plan pages sit deeper). Each page is read
+  for its record: a city or campaign page has no map and is skipped
+  (`no_community_record`), as is a sold-out page (Cibolo Canyons: a map pin
+  and no address, no widgets). `empireRecord` needs a street, so a
+  coming-soon page without one is not added until it opens.
+- Scrub: Empire Homes, Empire Communities, Empire, Smart Move Sales Event;
+  lenders Alta Home Lending, Alta.
+
 ## Meritage Homes: deferred
 
 - `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.
@@ -689,6 +762,7 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - KB Home: a community heading "Move-in Ready (0)" beside the market's count corroborates an empty list; "(0)" beside a list with homes says nothing.
 - View Homes: coming-soon roster rows are left out of discovery (as Drees); a badge month without a "Move In" line is the next such month; a promo page with offer text but no participating-communities block holds the offer. Whether the outer `regions:` key is ever quoted (`"regions":[` would hold every community) and whether coming-soon pages carry the `#floorplans` module shell are live checks. If the roster's `homes[]` ever omits a home the page shows (or shows one the page hides) every run holds `incomplete_inventory`; a badge wording other than "Ready Now!" / "Est. Completion- <Month>" (e.g. a sold label) holds through the sync's status rule. The promo banner changes per campaign: a page without `.promo-overview` holds the offer only (`expected_incentive_container_not_found`).
 - Lennar: whether the cloud fetcher meets the Cloudflare challenge the research pass saw on `curl` (every page would hold); whether a sold home ever appears in the cache with `status` "SOLD" (it would publish as sold) or another value (the sync would hold the community); whether the market page's `MpcType` rows ever exceed the 8 MB document limit; whether a collection page is ever onboarded on its own (its homes would double the masterplan's — the research list and discovery use masterplan URLs only).
+- Empire Homes: whether the listing endpoint answers the cloud fetcher as it answered the browser (a WordPress REST route; a 403 or an HTML answer holds the community); whether a community ever lists more than 100 homes (`per_page` 100; a second page holds); whether the page's first four cards are always the listing's first rows (they were on 2026-10-20; a card the listing lacks holds); whether the campaign page keeps its "Disclaimer:" text widget between campaigns (without it the offer holds).
 - Beazer: whether a community with many homes ever carries a "Load more" grid whose payload holds the first page only (the grid had every home on 2026-10-20, 7 at most); whether `extraData.activeOffersCurrently` is present on every community page (a page without it publishes no offer, no hold); whether the metro id changes.
 - Texas Homes: the list's rows are tied to the community by the row logo (`.mir-teaser-bottom-right img`, the community page's `.field--name-field-logo img`), by the exposed filter's selected `field_neighborhood_target_id` option and by the two-sided count rule (homes for sale ≤ the menu count ≤ all rows); a community page without a logo loses the first tie. The menu count is read as a lower bound only; a community page without the "Quick Move-In Homes in <name>" link while the menu counts homes for it holds every run (the closeouts Bent Tree and Vistas of Sonoma have no menu row; `/bent-tree` answered 403 on 2026-10-20 — a bot block would hold `community_fetch_failed`). Whether a coming-soon or sold-out page keeps the `.sales-address-link` block is unknown (without it or the pin the page holds).
 - Hakes Brothers: a coming-soon page's shape is unknown (Highland Gardens, Mesa Vista, Park Place): without the business record's street, or without `#home-tabs`, the page holds `expected_community_container_not_found` until it opens; if the residence records ever list a home the cards hide (or the reverse), the community holds `incomplete_inventory` every run.

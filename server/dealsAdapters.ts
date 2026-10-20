@@ -3,12 +3,13 @@ import { applyScrubExclusions } from "./dealsScrub";
 import { PerryHomesAdapter } from "./dealsAdapters.perry";
 import { DrHortonAdapter } from "./dealsAdapters.drhorton";
 import { PulteGroupAdapter } from "./dealsAdapters.pultegroup";
+import { HomefinitiAdapter } from "./dealsAdapters.homefiniti";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -218,8 +219,10 @@ export const PERRY_HOST = "www.perryhomes.com";
 export const DRHORTON_HOST = "www.drhorton.com";
 /** PulteGroup's three brands share one platform; each brand has its own host. */
 export const PULTEGROUP_HOSTS = { Pulte: "www.pulte.com", Centex: "www.centex.com", "Del Webb": "www.delwebb.com" } as const;
+/** Builders on the Homefiniti site platform (schema.org home records on the community page); each has its own host. */
+export const HOMEFINITI_HOSTS = { "First America Homes": "www.firstamericahomes.com", "Coventry Homes": "www.coventryhomes.com" } as const;
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -1029,6 +1032,8 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "M/I Homes") { config.builder.push("M/I Homes", "M/I"); config.lender.push("M/I Financial, LLC", "M/I Financial"); }
   if (builder === "Chesmar") { config.builder.push("Chesmar Homes", "Chesmar"); config.lender.push("HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HomeAmerican", "HMC"); }
   if (builder === "Perry Homes") { config.builder.push("Perry Homes", "Perry"); config.lender.push("Parkstone Mortgage", "Parkstone", "Crestmark Mortgage", "Crestmark"); }
+  if (builder === "First America Homes") { config.builder.push("First America Homes", "First America"); }
+  if (builder === "Coventry Homes") { config.builder.push("Coventry Homes", "Coventry", "DFH Coventry", "Dream Finders Homes", "Dream Finders"); }
   if (builder === "Pulte" || builder === "Centex" || builder === "Del Webb") { config.builder.push("PulteGroup", "Pulte Homes", "Pulte", "Centex Homes", "Centex", "Del Webb"); config.lender.push("Pulte Mortgage LLC", "Pulte Mortgage"); }
   // D.R. Horton's product lines name the builder as surely as the builder does.
   if (builder === "D.R. Horton") { config.builder.push("D.R. Horton", "DR Horton", "D. R. Horton", "Horton", "Express Series", "Express Homes", "Emerald Homes", "Freedom Homes", "Tradition Series"); config.lender.push("DHI Mortgage", "DHI Title", "DHI"); }
@@ -1660,6 +1665,7 @@ class ManualAdapter implements DealAdapter {
 let perryAdapter: DealAdapter | null = null;
 let drHortonAdapter: DealAdapter | null = null;
 const pulteGroupAdapters: Partial<Record<keyof typeof PULTEGROUP_HOSTS, DealAdapter>> = {};
+const homefinitiAdapters: Partial<Record<keyof typeof HOMEFINITI_HOSTS, DealAdapter>> = {};
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
@@ -1669,6 +1675,8 @@ export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   get Pulte() { return (pulteGroupAdapters.Pulte ??= new PulteGroupAdapter("Pulte")); },
   get Centex() { return (pulteGroupAdapters.Centex ??= new PulteGroupAdapter("Centex")); },
   get "Del Webb"() { return (pulteGroupAdapters["Del Webb"] ??= new PulteGroupAdapter("Del Webb")); },
+  get "First America Homes"() { return (homefinitiAdapters["First America Homes"] ??= new HomefinitiAdapter("First America Homes")); },
+  get "Coventry Homes"() { return (homefinitiAdapters["Coventry Homes"] ??= new HomefinitiAdapter("Coventry Homes")); },
   Manual: new ManualAdapter(),
 };
 

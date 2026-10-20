@@ -6,8 +6,9 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
+import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -85,6 +86,13 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     // The sitemap is a 17 MB file of 40,000 URLs; the market listing the community finder reads is 70 KB and complete.
     builder: "D.R. Horton", host: "www.drhorton.com", index: { kind: "listing", url: "https://www.drhorton.com/api/comms/direct/texas/san-antonio", accept: "application/json", entries: drhListingEntries },
     communityPath: /^\/texas\/san-antonio\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
+  },
+  { builder: "First America Homes", host: HOMEFINITI_HOSTS["First America Homes"], index: { kind: "sitemap", url: "https://www.firstamericahomes.com/sitemap.xml" }, communityPath: /^\/new-homes\/tx\/san-antonio-metro\/(?!floorplans\/)[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
+  {
+    // Coventry builds across Texas; its San Antonio market page lists the area's communities, so the sitemap's 270 community pages are not all read.
+    builder: "Coventry Homes", host: HOMEFINITI_HOSTS["Coventry Homes"],
+    index: { kind: "listing", url: "https://www.coventryhomes.com/new-homes/tx/san-antonio/", accept: "text/html,application/xhtml+xml", entries: (body, host) => homefinitiMarketLinks(body, host).map((url) => ({ url, record: null })) },
+    communityPath: /^\/new-homes\/tx\/[a-z0-9-]+\/(?!available-homes\/|floorplans\/|build-on-your-lot)[a-z0-9-]+\/?$/i,
   },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({
     builder: brand, host: PULTEGROUP_HOSTS[brand], index: { kind: "listing", url: pulteListingUrl(PULTEGROUP_HOSTS[brand], brand), accept: "application/json", entries: pulteListingEntries },

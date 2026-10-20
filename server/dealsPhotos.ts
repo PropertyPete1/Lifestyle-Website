@@ -44,6 +44,9 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "drhorton.com",
   // PulteGroup (Pulte, Centex, Del Webb) serves its photos from Picturepark.
   "pultegroup.cdn.picturepark.com",
+  // Homefiniti-platform builders serve photos from media.<builder>.com.
+  "media.firstamericahomes.com",
+  "media.coventryhomes.com",
 ]);
 const ACCEPTED_IMAGE_FORMATS = new Set(["jpeg", "png", "webp", "avif", "gif", "heif"]);
 

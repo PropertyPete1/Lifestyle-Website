@@ -47,7 +47,7 @@ const html = (body: string) => vi.fn(async () => new Response(body, { status: 20
 beforeEach(() => { vi.clearAllMocks(); requested.length = 0; });
 
 describe("Starlight reader: page data", () => {
-  it("reads the homes from the table (status from the availability cell, price, plan, specs), the plans from the cards (photos on the asset host, drawings left out) and the financing terms as the offer", () => {
+  it("reads the homes from the table (status from the availability cell, price, plan, specs), the plans from the cards (photos on the asset host, drawings left out) and the financing terms as the offer", async () => {
     const parsed = parseStarlightCommunity(communityPage(), COMMUNITY, NOW)!;
     expect(parsed.record).toEqual({ name: "Fixture Trails", street: "101 Fixture Street", city: "Seguin", zip: "78155", phone: "8305550142", priceFrom: null, geo: { lat: 29.6285335, lng: -97.9853734 } });
     expect(parsed).toMatchObject({ foreignPage: false, foreignPlan: false, statedHomeCount: 4, hasTable: true });
@@ -72,6 +72,16 @@ describe("Starlight reader: page data", () => {
     const bare = communityPage().replace("<p>**Monthly payment shown is an estimate.</p><p>&copy; 2026 Starlight Homes, LLC.</p>", "<p>&copy; 2026 Starlight Homes, LLC. Privacy Policy Terms of Use 1234 Fixture Parkway Suite 500 Atlanta GA 30339</p>");
     expect(bare).not.toBe(communityPage());
     expect(parseStarlightCommunity(bare, COMMUNITY, NOW)!.offer).not.toMatch(/Privacy|Atlanta|2026 Starlight/);
+    // A span or a split paragraph around the lead sentence never cuts the buydown wording off: the paragraph is the element, and a cut offer says nothing (held).
+    const [lead, rest] = [TERMS.slice(0, TERMS.indexOf("2/1 Program")), TERMS.slice(TERMS.indexOf("2/1 Program"))];
+    const spanned = communityPage({ terms: `<span>${lead}</span>${rest}` });
+    expect(parseStarlightCommunity(spanned, COMMUNITY, NOW)!.offer).toMatch(/2\/1 Program.*year three/);
+    const split = communityPage({ terms: `${lead}</p><p>${rest}` });
+    expect(parseStarlightCommunity(split, COMMUNITY, NOW)).toMatchObject({ offer: null, offerTruncated: true });
+    const held = await loadOfficialDeals(config, { fetcher: html(split), now: () => NOW });
+    expect(held.catalogOk).toBe(true);
+    expect(held.incentiveHoldReasons).toEqual(["expected_incentive_container_not_found"]);
+    expect(held.private.incentive).toBeNull();
     // Status wording: ready now, a future month, a past month (no date), unknown or none (no status), sold.
     expect(starlightStatus("Ready Now", NOW)).toEqual({ status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null });
     expect(starlightStatus("Available December 2026", NOW)).toEqual({ status: "Quick Move-In (December 2026)", readyNow: false, moveInDate: "December 2026" });

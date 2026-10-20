@@ -7,7 +7,7 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { ASHTON_HOST, CENTURY_HOST, DRB_HOST, DREES_HOST, LEGEND_HOST, VIEWHOMES_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { ASHTON_HOST, CENTURY_HOST, DRB_HOST, DREES_HOST, LEGEND_HOST, VIEWHOMES_HOST, TEXASHOMES_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
@@ -24,6 +24,7 @@ import { starlightListingEntries, starlightListingUrl, starlightRecord } from ".
 import { LEGEND_API_HOST, legendListingEntries, legendListingUrl } from "./dealsAdapters.legend";
 import { dreesDiscoveryEntries } from "./dealsAdapters.drees";
 import { viewHomesListingEntries, viewHomesListingUrl } from "./dealsAdapters.viewhomes";
+import { texasHomesListingEntries, texasHomesListingUrl, texasHomesRecord } from "./dealsAdapters.texashomes";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -194,7 +195,7 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     communityPath: /^\/communities\/san-antonio\/[a-z0-9-]+\/[a-z0-9-]+\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
   },
   {
-    // Drees: the reader lists the San Antonio market itself (areas, then the market's community list) with every record; parents only where a community has sub-neighborhoods.
+    // Drees: the reader lists the San Antonio market itself (areas, then the market's community list) with every record; sub-neighborhoods as their own pages (a parent page would show the same homes twice), none without an address or captioned "Coming Soon".
     builder: "Drees Custom Homes", host: DREES_HOST,
     index: { kind: "reader", entries: (fetcher, now) => dreesDiscoveryEntries(fetcher, now) },
     communityPath: /^\/new-homes-san-antonio\/[a-z0-9-]+\/[a-z0-9-]+(?:\/[a-z0-9-]+)?\/?$/i,
@@ -204,6 +205,13 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "View Homes", host: VIEWHOMES_HOST,
     index: { kind: "listing", url: viewHomesListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => viewHomesListingEntries(body, host) },
     communityPath: /^\/communities\/[a-z0-9-]+\/?$/i,
+  },
+  {
+    // Texas Homes: the site menu on the home page links every community; each page gives the model home's address and pin.
+    builder: "Texas Homes", host: TEXASHOMES_HOST,
+    index: { kind: "listing", url: texasHomesListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => texasHomesListingEntries(body, host) },
+    communityPath: /^\/(?!move-in-ready|about-|why-|contact|build-on|text-agent|choose-|node\/)[a-z0-9-]+\/?$/i,
+    record: texasHomesRecord,
   },
   { builder: "Century Communities", host: CENTURY_HOST, index: { kind: "sitemap", url: `https://${CENTURY_HOST}/sitemap.xml` }, communityPath: /^\/find-your-new-home\/texas\/san-antonio-metro\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({

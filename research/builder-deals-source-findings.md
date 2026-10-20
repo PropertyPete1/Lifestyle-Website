@@ -370,11 +370,13 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   description "… this promotion ends November 22, 2026!"); one promo is the
   offer, a rate-naming one first.
 - Discovery: the reader lists the market itself (`DiscoveryReader.index.kind
-  "reader"`); a parent community stands for its sub-neighborhoods and takes
-  the first one's model address (the parent row names none), as with Ashton
-  Woods. The research list carries sub-neighborhood URLs (Esperanza 70s,
-  Ladera 50s): where a parent is also onboarded the same homes would move
-  between the two — keep one of each pair.
+  "reader"`) and onboards the neighborhoods as their own pages — never a
+  parent community (its page shows the sub-neighborhoods' homes a second
+  time, and the research list carries the sub-neighborhood URLs: Esperanza
+  70s, Ladera 50s), never a row without a model address or captioned "Coming
+  Soon" (nothing to read yet; the KB interest-list pattern is not repeated).
+  A parent configured by hand still reads (`withParentAddress` gives it the
+  first sub-neighborhood's address); keep one of each pair.
 - Scrub: Drees Custom Homes, Drees Homes, The Drees Company, Drees; lender
   First Equity Mortgage.
 
@@ -437,6 +439,57 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   while the site has two pages (50's and 60's, one address) — discovery adds
   the 60's as its own community.
 
+## Texas Homes reader (added 2026-10-20)
+
+- Site: `www.texas-homes.com` (Drupal 10, server-rendered). The community
+  page `/<slug>` (Potranco Acres, Trilogy Grove, …) has the h1, the model
+  home's address in `.sales-address-link a` (text "241 Stone Loop<br>
+  Castroville, TX, 78009"; the Google Maps `query` carries the same), the
+  pin in `.field--name-field-geolocation` ("29.4293913, -98.8569532"), the
+  sales phone (`a.contact-phone`), one `.plan-teaser` per plan (h2 link
+  `/<slug>/plan-2568` or `/<slug>/1592`, "Starting from $657,990",
+  `features-single-container` stories/sqft/beds/baths/garage/half-baths
+  with "3 to 4" ranges, the main elevation under `/sites/default/files/`)
+  and, when homes are for sale, a "Quick Move-In Homes in <name>" link to
+  `/move-in-ready?field_neighborhood_target_id=<id>` (the plan teasers'
+  `/move-in-ready-plan?neighborhood_id=<id>&plan_id=…` links name the same
+  id). The site menu on every page lists the 8 selling communities with a
+  "View Quick Move-In Homes" count (`.menu-mir-count`; the two closeouts
+  Bent Tree and Vistas of Sonoma are not in the menu, and `/bent-tree`
+  answered 403 on 2026-10-20).
+- Homes: the filtered list (`.mir-view .views-row`) has the street (h3 link
+  to `/move-in-ready/<street slug>`, site-wide paths), specs, an MLS
+  number (not read), "Valued at: $739,737" with "Now: $719,737" when cut
+  (the cut price is the price, the valued one the previous), "Available"
+  + "Move In Ready Now" / "Move In Ready" / "Ready Now!" / "Ready Now" /
+  "November 2026" / nothing (an undated quick move-in), photos under
+  `/sites/default/files/styles/neighborhood_teaser/public/…` (the reader
+  keys the original under `/sites/default/files/…`), and the
+  `mir-teaser-sold` class on a sold card (sold rows stay listed for a
+  while). 29 homes site-wide in October 2026, no pager; the reader holds on
+  a `.pager`. The menu count is a lower bound (sold rows are sometimes
+  counted, sometimes not): fewer rows than the count holds
+  `incomplete_inventory`.
+- Offers: the home page's wysiwyg heading "4.99% 30-year fixed FHA/VA" is
+  followed by a "Learn More" link to the campaign page
+  (`/choose-it-use-it-flex-cash` in October 2026), whose heading ("4.99%
+  fixed rate FHA/VA financing or Up to $50,000 in Customized Incentives*")
+  and "*" footnote state the offer (4.99% / 5.75% APR, FHA or VA 30-year
+  fixed, CMG Mortgage, "contracts written between September 4 and
+  September 30, 2026", "close by October 31, 2026"). The offer is
+  site-wide; the footnote names no down payment, so it holds
+  `missing_down_payment` until accepted, and its contract window had
+  already passed on 2026-10-20 (the sync's expiry handles that). The body
+  copy ("lower your monthly payments with a rate buy-down") is left out of
+  the offer text so the rate is not read as a buydown. The parser now reads
+  "between September 4 and September 30, 2026" (first date without a
+  year) as the contract deadline.
+- Discovery: the home page's menu links (`a.main-menu-main-link`); each
+  page is read for its record; paths such as `/move-in-ready`,
+  `/build-on-your-lot`, `/about-…`, `/why-…`, `/choose-…` are not
+  community paths.
+- Scrub: Texas Homes; lender CMG Mortgage, CMG Home Loans, CMG.
+
 ## Meritage Homes: deferred
 
 - `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.
@@ -452,8 +505,12 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - Ashton Woods, LGI Homes: zero cards or an empty plan list is read as the page says (nothing for sale); neither page carries a count to check it against. Find one on the live page if a sweep to sold is ever seen.
 - LGI Homes cards on the landing page say "0 homes" because LGI sells plans only and the card counts quick move-in homes.
 - Scott Felder: every San Antonio community row's `area` must slug to the URL's sub-market ("Schertz/Cibolo" → `schertzcibolo`); a blank or differently worded `area` holds every run.
+- DRB / Legend: only the by-name lookup's HTTP 400 is "no such community"; a 404, 429, 5xx or a timeout holds `community_fetch_failed`. An offer whose content block carries only a disclaimer says nothing (never published as an offer). Whether `offers-v2` ever carries such a block, and Legend's home page path (`/quick-move-in-homes/<street>-<homesite>` is DRB's shape) and dash rule (`legendSlug` keeps a hyphen; no live name carries one), are live checks.
+- Drees: the page's `var url` is read from the script block that declares `contentId` (a tracking snippet's `var url` ahead of it is not the page's); a same-host redirect answer to a search POST holds `community_fetch_failed` (one off the host `unsupported_official_host`). Live checks: whether a build-on-your-lot card is ever counted in `qmiCount` (it would hold `incomplete_inventory` every run), whether a parent community page 404s (a hand-configured parent would hold `community_fetch_failed`), and whether `isPlanAvailable` is false on a coming-soon plan list.
+- KB Home: the community's own "Move-in Ready (N)" is read from a heading; a "(0)" in another market's navigation beside the community's heading count says nothing, and a "(0)" corroborates an empty list only as a heading or with no positive count anywhere on the page.
 - DRB / Legend: if the API's `moveInNowHomesCount` counts hidden (`displayInventory: false`) rows the community holds `incomplete_inventory` every run; a home row with `status` other than "active" and `salesStatus` "available" would publish (row-level `status` is not read); `availabilityDate` is compared in UTC (a one-day skew around midnight is possible for the ready-now label).
-- Starlight: the footer's "**Monthly payment" note and `&copy;` line follow the terms paragraph; the reader now reads the paragraph's own element, so neither matters. A sold-out community's count wording ("0 Available Homes" with no table) is a live check.
+- Starlight: the footer's "**Monthly payment" note and `&copy;` line follow the terms paragraph; the reader reads the paragraph's own element (the longest `p`/`li` opening with the sentence, so a span inside it cannot cut the buydown wording off; a split paragraph that stops before the page's own "2/1 Program"/"year one" wording holds the offer as a changed page). Whether the terms are one flat `<p>` on every community page, and a sold-out community's count wording ("0 Available Homes" with no table), are live checks.
 - KB Home: a community heading "Move-in Ready (0)" beside the market's count corroborates an empty list; "(0)" beside a list with homes says nothing.
 - View Homes: if the roster's `homes[]` ever omits a home the page shows (or shows one the page hides) every run holds `incomplete_inventory`; a badge wording other than "Ready Now!" / "Est. Completion- <Month>" (e.g. a sold label) holds through the sync's status rule. The promo banner changes per campaign: a page without `.promo-overview` holds the offer only (`expected_incentive_container_not_found`).
+- Texas Homes: the menu count is read as a lower bound only; a community page without the "Quick Move-In Homes in <name>" link while the menu counts homes for it holds every run (the closeouts Bent Tree and Vistas of Sonoma have no menu row; `/bent-tree` answered 403 on 2026-10-20 — a bot block would hold `community_fetch_failed`). Whether a coming-soon or sold-out page keeps the `.sales-address-link` block is unknown (without it or the pin the page holds).
 - Century: if the live page renders the card list twice (mobile and desktop) or shows sold or model cards with `.street-number-text`, the card count exceeds the records and every run holds. The sitemap is one 2 MB urlset (8,205 URLs, no index) today.

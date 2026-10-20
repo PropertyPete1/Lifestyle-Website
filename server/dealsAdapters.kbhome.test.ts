@@ -65,6 +65,14 @@ describe("KB Home reader: page data", () => {
     expect(parseKbArray("LocalQMIs = [{\"a\":1}]; LocalQMIs = [{\"a\":2}];", "LocalQMIs")).toBeNull();
     expect(kbMoveInCount("<h2>Move-in Ready (3)</h2>")).toBe(3);
     expect(kbMoveInCount("<h2>Move-in ready homes to get you moving.</h2>")).toBeNull();
+    // A "(0)" corroborates an empty list only with no other count beside it than the market's: a stray zero next to the community's own "(3)" says nothing.
+    expect(kbMoveInCount("<nav>Move-in Ready (0)</nav><h2>Move-in Ready (3)</h2>", true)).toBe(3);
+    expect(kbMoveInCount("<nav>Move-in Ready (57)</nav><h2>Move-in Ready (0)</h2>", true)).toBe(0);
+    expect(kbMoveInCount("<nav>Move-in Ready (57)</nav><h2>Move-in Ready (3)</h2>", false)).toBe(3);
+    expect(kbMoveInCount("<nav>Move-in Ready (0)</nav><nav>Move-in Ready (3)</nav>", true)).toBe(3);
+    expect(kbMoveInCount("<nav>Move-in Ready (0)</nav>", true)).toBe(0);
+    expect(kbMoveInCount("<h2>Move-in Ready (0)</h2>", true)).toBe(0);
+    expect(kbMoveInCount("<h2>Move-in Ready (0)</h2>", false)).toBeNull();
     // The market navigation counts the whole market; the smaller count is the community's.
     expect(kbMoveInCount("<nav>Move-in Ready (57)</nav><h2>Move-in Ready (3)</h2>")).toBe(3);
     expect(kbMoveInCount("<nav>Move-in Ready (0)</nav><h2>Move-in Ready (5)</h2>")).toBe(5);

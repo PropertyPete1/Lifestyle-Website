@@ -139,6 +139,8 @@ export type StarlightPage = {
   homes: PrivatePlanOrHome[];
   plans: PrivatePlanOrHome[];
   offer: string | null;
+  /** True when the terms element stops before the page's own buydown wording: the offer is held, never published cut short. */
+  offerTruncated: boolean;
 };
 
 /** The community on the page; null when the page has no business record. */
@@ -215,9 +217,18 @@ export function parseStarlightCommunity(html: string, pageUrl: string, now: Date
   const text = htmlToText(html);
   const count = /(\d{1,3})\s+Available\s+Homes?\s+In\s+This\s+Neighborhood/i.exec(text);
   // The financing terms paragraph states the offer in full: the one element whose own text opens with it (never the page text after it); a page without it has no offer.
-  const termsElement = all.filter((item) => /^(?:p|div|li|span)$/.test(item.tag)).map((item) => ({ item, text: elementText(item, html) })).filter(({ text: own }) => /^\*?\s*Terms\s+are\s+based\s+upon\s+a\s+loan/i.test(own)).sort((a, b) => a.text.length - b.text.length)[0] ?? null;
-  const offer = termsElement ? cleanOfferText(termsElement.text.slice(0, 4_000)) : null;
-  return { record, foreignPage, foreignPlan, statedHomeCount: count ? Number(count[1]) : null, hasTable: Boolean(table), homes, plans, offer: offer && /\d+(?:\.\d+)?\s*%/.test(offer) ? offer : null };
+  // The paragraph is the longest `p`/`li` whose own text opens with the sentence (a span inside it, or a split lead sentence, would cut the buydown
+  // wording off), else a span, else the shortest `div` (a wrapper runs on into the footer). An element that stops before the page text's own
+  // buydown wording is a truncated offer, and says nothing.
+  const candidates = all.filter((item) => /^(?:p|div|li|span)$/.test(item.tag)).map((item) => ({ item, text: elementText(item, html) })).filter(({ text: own }) => /^\*?\s*Terms\s+are\s+based\s+upon\s+a\s+loan/i.test(own));
+  const byLength = (direction: 1 | -1) => (a: { text: string }, b: { text: string }) => direction * (a.text.length - b.text.length);
+  const termsElement = candidates.filter(({ item }) => item.tag === "p" || item.tag === "li").sort(byLength(-1))[0] ?? candidates.filter(({ item }) => item.tag === "span").sort(byLength(-1))[0] ?? candidates.filter(({ item }) => item.tag === "div").sort(byLength(1))[0] ?? null;
+  const lead = /\*?\s*Terms\s+are\s+based\s+upon\s+a\s+loan/i.exec(text);
+  const following = lead ? text.slice(lead.index, lead.index + 2_500) : "";
+  const buydownWording = /\b(?:\d\/\d\s+program|buy[- ]?down|year\s+(?:one|two|three)\b)/i;
+  const truncated = termsElement !== null && buydownWording.test(following) && !buydownWording.test(termsElement.text);
+  const offer = termsElement && !truncated ? cleanOfferText(termsElement.text.slice(0, 4_000)) : null;
+  return { record, foreignPage, foreignPlan, statedHomeCount: count ? Number(count[1]) : null, hasTable: Boolean(table), homes, plans, offer: offer && /\d+(?:\.\d+)?\s*%/.test(offer) ? offer : null, offerTruncated: truncated };
 }
 
 /** The market page's community links; null when there are none. Each page is read for its record. */
@@ -262,6 +273,6 @@ export class StarlightAdapter implements DealAdapter {
     for (const home of parsed.homes) { privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }
     for (const plan of parsed.plans) { privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }
     if (parsed.offer) privateSnapshot.incentive = { sourceUrl: community.toString(), text: parsed.offer, facts: parsePromotionalRate(parsed.offer) };
-    return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config));
+    return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, parsed.offerTruncated ? ["expected_incentive_container_not_found"] : []));
   }
 }

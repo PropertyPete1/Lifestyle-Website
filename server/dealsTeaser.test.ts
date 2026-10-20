@@ -49,6 +49,11 @@ describe("the landing page's offer teaser", () => {
     expect(incentiveTeaser("5.5% FHA rate on select homes through the 30th of November.")).toBe("5.5% FHA rate on select homes.");
     expect(incentiveTeaser("Get a 2/1 buydown with a 1/0 option: 4.99% (6.1% APR) year one on 1/2 acre lots.")).toBe("Get a 2/1 buydown with a 1/0 option: 4.99% (6.1% APR) year one on 1/2 acre lots.");
     expect(incentiveTeaser("Year 1: 4.25% (6.051% APR). 5.25% (6.051% APR) for years 2-30.")).toBe("Year 1: 4.25% (6.051% APR).");
+    // A bare day/month after a deadline connector is a date mid-sentence too, and a "between … and …" pair goes whole; plan figures stay.
+    expect(incentiveTeaser("$10,000 in closing costs through 12/31 and a 4.99% rate.")).toBe("$10,000 in closing costs and a 4.99% rate.");
+    expect(incentiveTeaser("4.99% if you buy between 10/12 and 11/8.")).toBe("4.99% if you buy.");
+    expect(incentiveTeaser("4.99% on 3/2 and 4/3 homes.")).toBe("4.99% on 3/2 and 4/3 homes.");
+    expect(incentiveTeaser("Save 4.99% through 11/30 and up to $10,000 in closing costs.")).toBe("Save 4.99% and up to $10,000 in closing costs.");
   });
 
   it("falls back to the first sentence when no sentence names a rate, and never runs long", () => {

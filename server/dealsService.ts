@@ -722,7 +722,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
         photos: photos.map((photo) => `/deals/mine/img/${photo.id}`),
         photoCount: photos.length,
         photosOnRequest: photos.length === 0,
-        ...(full ? { details: { address: home.privateAddress, planName: home.privatePlanName, builderPage: view.builderPages && /^https?:\/\//i.test(home.sourceUrl) ? home.sourceUrl : null } } : {}),
+        ...(full ? { details: { address: home.privateAddress, planName: home.privatePlanName, builderPage: view.builderPages && /^https?:\/\//i.test(home.sourceUrl) ? builderPageFor(home.sourceUrl) : null } } : {}),
       });
     }
     const entry = {
@@ -1099,4 +1099,9 @@ export function safeBlockedMessage(settings: DealSettings) {
 
 export function leadPresentation(lead: typeof dealLeads.$inferSelect) {
   return { display: displayForLead(lead), expiresAt: lead.expiresAt.toISOString(), name: lead.name, timeline: lead.timeline, teamPreview: lead.status === "team", agentClient: Boolean(lead.agentTeamId) };
+}
+
+/** The builder's own page for a home: its source URL, except a home keyed under a path the site does not serve (Starlight's `/available-homes/<street>` keys), whose page is the community's. */
+export function builderPageFor(sourceUrl: string): string {
+  return sourceUrl.replace(/\/available-homes\/[^/?#]+\/?(?=$|[?#])/i, "");
 }

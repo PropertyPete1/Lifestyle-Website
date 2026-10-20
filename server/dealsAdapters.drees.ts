@@ -70,7 +70,11 @@ export function parseDreesPage(html: string): { contentId: number; parent: boole
   const neighborhood = /\bvar\s+isNeighborhoodPage\s*=\s*true\b/.test(html);
   const parent = /\bvar\s+isCommunityPage\s*=\s*true\b/.test(html);
   if (!neighborhood && !parent) return null;
-  const url = /\bvar\s+url\s*=\s*"([^"]+)"/.exec(html);
+  // The page's own `var url` sits in the script block that declares `contentId`, never a tracking snippet's.
+  const scriptStart = html.lastIndexOf("<script", id.index);
+  const scriptEnd = html.indexOf("</script", id.index);
+  const block = scriptStart >= 0 && scriptEnd > scriptStart ? html.slice(scriptStart, scriptEnd) : html.slice(Math.max(0, id.index - 2_000), id.index + 2_000);
+  const url = /\bvar\s+url\s*=\s*"([^"]+)"/.exec(block);
   return { contentId: Number(id[1]), parent, url: url ? url[1]! : null };
 }
 
@@ -324,8 +328,7 @@ export async function dreesDiscoveryEntries(fetcher: HtmlFetcher, now: number): 
   const market = await marketNeighborhoods(fetcher, now);
   if ("hold" in market) return null;
   const listed = withParentAddress(parseDreesNeighborhoods(JSON.stringify({ data: { neighborhoods: market.neighborhoods } }), DREES_HOST) ?? []);
-  // A parent community's page shows its sub-neighborhoods' homes; only the parents are onboarded, as with Ashton Woods.
-  const parents = listed.filter((row) => row.parent);
-  const parentPaths = parents.map((row) => new URL(row.url).pathname.toLowerCase());
-  return listed.filter((row) => row.parent || !parentPaths.some((path) => new URL(row.url).pathname.toLowerCase().startsWith(path))).map((row) => ({ url: row.url, record: row.record }));
+  // Each neighborhood is its own page; a parent community's page would show the same homes a second time (and the research list carries the
+  // sub-neighborhood URLs), so parents are left out. A row without a sales address, or captioned "Coming Soon", has nothing to read yet.
+  return listed.filter((row) => !row.parent && row.record.street && !/coming\s+soon/i.test(row.caption ?? "")).map((row) => ({ url: row.url, record: row.record }));
 }

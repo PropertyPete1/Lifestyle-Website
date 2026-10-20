@@ -138,6 +138,8 @@ describe("DRB Homes reader: API bodies", () => {
     expect(parseDrbOffer(JSON.stringify([{ ...OFFER, content: null }]), NOW)).toBe("Up to $50K in Flex Cash, Plus 2% Lender Credit on Select Move-In Homes. The Joy of Owning New and the Confidence to buy Now! Hurry take advantage of $50K in Flex Cash and 2% in Lender Credit on Select Quick Move-In Homes.");
     // An image-only offer says nothing.
     expect(parseDrbOffer(JSON.stringify([{ ...OFFER, title: "Self tour_Fixture", description: "", content: { titleOne: null, copyOne: "", disclaimer: "" } }]), NOW)).toBeNull();
+    // So does one whose block carries only a disclaimer: legal text is not an offer.
+    expect(parseDrbOffer(JSON.stringify([{ ...OFFER, title: "Self tour_Fixture", description: "", content: { titleOne: null, copyOne: "", disclaimer: "Offer valid on contracts signed by December 31, 2026. See a sales associate for details." } }]), NOW)).toBeNull();
     expect(text).toBe("Up to $50K Flex Cash. Home and community information subject to change without notice. DRB Group Texas, LLC (“DRB Homes”). Up to $50,000 in flex cash credit(s) from DRB Homes and up to 2% in Approved Lender credit(s) toward closing costs available only for new contracts signed with DRB Homes between October 1, 2026, and December 31, 2026.");
     expect(parseDrbOffer(JSON.stringify([OFFER, RATE_OFFER]), NOW)).toBe("4.99% (5.42% APR) 30-year fixed FHA rate with 3.5% down on select homes.");
     expect(parseDrbOffer(JSON.stringify([{ ...OFFER, displayThrough: "2026-10-19" }, { ...OFFER, displayFrom: "2026-10-21" }, { ...OFFER, status: "inactive" }]), NOW)).toBeNull();
@@ -203,13 +205,17 @@ describe("DRB Homes reader: a community", () => {
     const down = vi.fn(async () => new Response("down", { status: 503, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: down })).holdReasons).toEqual(["community_fetch_failed"]);
     expect((await loadOfficialDeals(config, { fetcher: withOverrides({ [drbApiUrl("public-drb/community/567")]: { body: "down", status: 503 } }), now: () => NOW })).holdReasons).toEqual(["community_fetch_failed"]);
+    // Only the API's 400 ("no such community") is an unknown community; a 404, 429 or a thrown fetch on the lookup is a failed read.
+    for (const status of [404, 429]) expect((await loadOfficialDeals(config, { fetcher: withOverrides({ [byName("fixture-landmark")]: { body: "{}", status } }), now: () => NOW })).holdReasons, String(status)).toEqual(["community_fetch_failed"]);
+    expect((await loadOfficialDeals(config, { fetcher: withOverrides({ [byName("fixture-landmark")]: { body: "{}", status: 400 } }), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    expect((await loadOfficialDeals(config, { fetcher: vi.fn(async () => { throw new Error("timeout"); }) })).holdReasons).toEqual(["community_fetch_failed"]);
     const noOffers = await loadOfficialDeals(config, { fetcher: withOverrides({ [drbApiUrl("public/offers-v2/by-community/567")]: { body: "gone", status: 404 } }), now: () => NOW });
     expect(noOffers.catalogOk).toBe(true);
     expect(noOffers.incentiveHoldReasons).toEqual(["incentive_fetch_failed"]);
     const oddOffers = await loadOfficialDeals(config, { fetcher: withOverrides({ [drbApiUrl("public/offers-v2/by-community/567")]: { body: "{}" } }), now: () => NOW });
     expect(oddOffers.catalogOk).toBe(true);
     expect(oddOffers.incentiveHoldReasons).toEqual(["expected_incentive_container_not_found"]);
-  });
+  }, 20_000);
 
   it("is an adapter the registry knows", () => {
     expect(new DrbHomesAdapter().builder).toBe("DRB Homes");

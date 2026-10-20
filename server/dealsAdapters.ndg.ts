@@ -275,8 +275,8 @@ export function parseNdgOffer(body: string, now: Date): string | null | "unreada
     // The public copy is the content block; `title` and `description` are the back office's own names and notes ("Open Door Deal_InPage"), used only when the block says nothing.
     const content = obj(offer.content);
     const copy = [str(content?.titleOne), str(content?.copyOne), str(content?.titleTwo), str(content?.copyTwo)].filter((part): part is string => Boolean(part));
-    // An offer with a content block that says nothing (an image-only popup) is no text; one without a block is its title and description.
-    const parts = (content ? [...copy, str(content.disclaimer)] : [str(offer.title), str(offer.description)]).filter((part): part is string => Boolean(part)).map(cleanOfferText).filter(Boolean);
+    // An offer with a content block that says nothing (an image-only popup, with or without a disclaimer) is no text; one without a block is its title and description.
+    const parts = (content ? (copy.length ? [...copy, str(content.disclaimer)] : []) : [str(offer.title), str(offer.description)]).filter((part): part is string => Boolean(part)).map(cleanOfferText).filter(Boolean);
     return parts.map((part) => /[.!?]$/.test(part) ? part : `${part}.`).join(" ");
   }).filter(Boolean);
   if (!current.length) return null;
@@ -322,9 +322,9 @@ export class NdgAdapter implements DealAdapter {
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     const api = async (relative: string) => getDocument(ndgApiUrl(brand, relative), fetcher, "application/json", brand.apiHost);
     privateSnapshot.pages.push(sourcePage("community", communityPage, config.privateCommunityName));
-    // The slug resolves to the community's id, as the page itself resolves it (HTTP 400 is "no such community"; a server error is a failed read).
+    // The slug resolves to the community's id, as the page itself resolves it (HTTP 400 is "no such community"; anything else — a server error, a timeout, a 404 or 429 — is a failed read).
     const lookup = await getDocument(ndgApiUrl(brand, path.lookup), fetcher, "application/json", brand.apiHost);
-    if (!lookup.ok) return failedResult(config, fetchedAt, privateSnapshot, [lookup.redirectedOffOfficialHost ? "unsupported_official_host" : lookup.status !== null && lookup.status >= 500 ? "community_fetch_failed" : "expected_community_container_not_found"]);
+    if (!lookup.ok) return failedResult(config, fetchedAt, privateSnapshot, [lookup.redirectedOffOfficialHost ? "unsupported_official_host" : lookup.status === 400 ? "expected_community_container_not_found" : "community_fetch_failed"]);
     const id = num(obj(parseJson(lookup.text))?.id);
     if (id === null || !Number.isInteger(id) || id <= 0) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     const detail = await api(`public-drb/community/${id}`);

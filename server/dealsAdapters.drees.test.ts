@@ -19,10 +19,10 @@ const page = (contentId: number, kind: "neighborhood" | "parent" | "none" = "nei
     ${url ? `var url="${url}";` : ""}
     window.dataLayer = window.dataLayer || [];
 </script></head><body><div id="app"></div><footer>Drees Custom Homes, 20734 Stone Oak Parkway Suite 103 San Antonio, TX 78258 | (210) 969-4100</footer></body></html>`;
-const neighborhood = (input: { id: number; name: string; url: string; street?: string | null; city?: string; zip?: string; parent?: boolean; qmi?: number; plans?: number; priceLow?: number; geo?: [number, number] }) => ({
+const neighborhood = (input: { id: number; name: string; url: string; street?: string | null; city?: string; zip?: string; parent?: boolean; qmi?: number; plans?: number; priceLow?: number; geo?: [number, number]; caption?: string }) => ({
   contentId: input.id, ...(input.parent ? { communityName: input.name, isCommunity: true, neighborhoodCount: 2 } : { neighborhoodName: input.name, isCommunity: false }), url: input.url,
   ...(input.street === null ? {} : { address: input.street ?? "105 Fixture Wind" }), cityName: input.city ?? "Boerne", zipCode: input.zip ?? "78006", stateInitials: "TX", modelPhone: "210-555-0142", nhsPhoneNumber: "210-555-0199",
-  lat: input.geo?.[0] ?? 29.807127, lng: input.geo?.[1] ?? -98.64016, priceLow: input.priceLow ?? 1_174_900, priceHigh: 1_599_900, qmiCount: input.qmi ?? 2, modelQmiCount: 1, planCount: input.plans ?? 2, caption: "Now Selling!", schoolDistricts: ["Fixture ISD"],
+  lat: input.geo?.[0] ?? 29.807127, lng: input.geo?.[1] ?? -98.64016, priceLow: input.priceLow ?? 1_174_900, priceHigh: 1_599_900, qmiCount: input.qmi ?? 2, modelQmiCount: 1, planCount: input.plans ?? 2, caption: input.caption ?? "Now Selling!", schoolDistricts: ["Fixture ISD"],
   amenities: [], images: [], drivingDirections: "<p>Private directions.</p>", officehoursList: [],
 });
 const NEIGHBORHOODS = [
@@ -31,6 +31,8 @@ const NEIGHBORHOODS = [
   neighborhood({ id: 310329, name: "Fixture Hills 50S", url: "/new-homes-san-antonio/san-antonio/comm-fixture-hills/fixture-hills-50s/", street: "9512 Fixture Hollow", city: "San Antonio", zip: "78253", qmi: 1, geo: [29.4975, -98.8081] }),
   neighborhood({ id: 400, name: "Far Fixture", url: "/new-homes-san-antonio/kyle/far-fixture/far-fixture/", street: "1 Far Rd", city: "Kyle", zip: "78640", geo: [29.918, -97.85] }),
   neighborhood({ id: 401, name: "Elsewhere", url: "https://evil.example/x/" }),
+  neighborhood({ id: 402, name: "Fixture Summit", url: "/new-homes-san-antonio/san-antonio/fixture-summit/fixture-summit/", street: null, city: "San Antonio", zip: "78257", caption: "Coming Soon!", geo: [29.6, -98.6] }),
+  neighborhood({ id: 403, name: "Fixture Soon", url: "/new-homes-san-antonio/san-antonio/fixture-soon/fixture-soon/", street: "1 Soon Way", city: "San Antonio", zip: "78257", caption: "Coming Soon!", geo: [29.6, -98.6] }),
 ];
 const home = (input: { address: string; url: string; date?: string | null; price: number; was?: number; model?: boolean; boyl?: boolean; plan?: string }) => ({
   address: input.address, cityName: "Boerne", stateInitials: "TX", zipCode: "78006", planName: input.plan ?? "Bennrook", elevation: "D", neighborhoodName: "Fixture Ranch", mlsNumber: "1993683", moveInDate: input.date === undefined ? "Jan 08, 2027" : input.date,
@@ -92,6 +94,8 @@ describe("Drees reader: page and API bodies", () => {
       [326325, "Fixture Hills", PARENT, true, null, "2105550142", 1, 1_174_900],
       [310329, "Fixture Hills 50S", `${PARENT}fixture-hills-50s/`, false, "9512 Fixture Hollow", "2105550142", 1, 1_174_900],
       [400, "Far Fixture", `${HOST}/new-homes-san-antonio/kyle/far-fixture/far-fixture/`, false, "1 Far Rd", "2105550142", 2, 1_174_900],
+      [402, "Fixture Summit", `${HOST}/new-homes-san-antonio/san-antonio/fixture-summit/fixture-summit/`, false, null, "2105550142", 2, 1_174_900],
+      [403, "Fixture Soon", `${HOST}/new-homes-san-antonio/san-antonio/fixture-soon/fixture-soon/`, false, "1 Soon Way", "2105550142", 2, 1_174_900],
     ]);
     // A parent takes its first sub-neighborhood's sales address.
     expect(withParentAddress(rows).find((row) => row.parent)!.record).toMatchObject({ street: "9512 Fixture Hollow", city: "San Antonio", zip: "78253" });
@@ -162,6 +166,12 @@ describe("Drees reader: a community", () => {
     resetDreesCaches();
     expect(await hold(withSite({}, { [dreesApiUrl("community")]: () => ({ body: listBody([neighborhood({ id: 309651, name: "Fixture Ranch", url: "/new-homes-san-antonio/boerne/fixture-ranch/fixture-ranch/", street: null })]) }) }))).toEqual(["expected_community_container_not_found"]);
     resetDreesCaches();
+    // A tracking snippet's `var url` ahead of the page's own is not the page's; a same-host redirect answer to the search is a failed read, not another host.
+    const tracked = page(309651, "neighborhood", "/new-homes-san-antonio/boerne/fixture-ranch/fixture-ranch/").replace("<head>", `<head><script>var url = "https://www.dreeshomes.com/link/track.aspx"; var tracker = url;</script>`);
+    expect(parseDreesPage(tracked)).toMatchObject({ contentId: 309651, url: "/new-homes-san-antonio/boerne/fixture-ranch/fixture-ranch/" });
+    expect(await hold(vi.fn(async (input: string, init?: RequestInit) => init?.method === "POST" && input === dreesApiUrl("qmi") ? new Response("", { status: 302, headers: { location: "/api/en/dreeshomes/qmi/" } }) : withSite({})(input, init)))).toEqual(["community_fetch_failed"]);
+    expect(await hold(vi.fn(async (input: string, init?: RequestInit) => init?.method === "POST" && input === dreesApiUrl("qmi") ? new Response("", { status: 302, headers: { location: "https://evil.example/qmi" } }) : withSite({})(input, init)))).toEqual(["unsupported_official_host"]);
+    resetDreesCaches();
     // The page says it is another community (a same-host redirect), or the market list places this id at another URL.
     expect(await hold(withSite({ [COMMUNITY]: { body: page(309651, "neighborhood", "/new-homes-san-antonio/boerne/other-ranch/other-ranch/") } }))).toEqual(["invalid_inventory_response"]);
     expect(await hold(withSite({}, { [dreesApiUrl("community")]: () => ({ body: listBody([neighborhood({ id: 309651, name: "Fixture Ranch", url: "/new-homes-san-antonio/boerne/other-ranch/other-ranch/" })]) }) }))).toEqual(["invalid_inventory_response"]);
@@ -182,11 +192,11 @@ describe("Drees reader: a community", () => {
     expect(await hold(down)).toEqual(["community_fetch_failed"]);
   });
 
-  it("lists the market for discovery: every neighborhood with its record, parents in place of their sub-neighborhoods, never another host", async () => {
+  it("lists the market for discovery: every selling neighborhood with its record (sub-neighborhoods as their own pages, no parents, no coming-soon or address-less rows), never another host", async () => {
     const entries = (await dreesDiscoveryEntries(fetcher, NOW.getTime()))!;
     expect(entries.map((entry) => [entry.url.replace(HOST, ""), entry.record?.name, entry.record?.street, entry.record?.geo])).toEqual([
       ["/new-homes-san-antonio/boerne/fixture-ranch/fixture-ranch/", "Fixture Ranch", "105 Fixture Wind", { lat: 29.807127, lng: -98.64016 }],
-      ["/new-homes-san-antonio/san-antonio/comm-fixture-hills/", "Fixture Hills", "9512 Fixture Hollow", { lat: 29.4975, lng: -98.8081 }],
+      ["/new-homes-san-antonio/san-antonio/comm-fixture-hills/fixture-hills-50s/", "Fixture Hills 50S", "9512 Fixture Hollow", { lat: 29.4975, lng: -98.8081 }],
       ["/new-homes-san-antonio/kyle/far-fixture/far-fixture/", "Far Fixture", "1 Far Rd", { lat: 29.918, lng: -97.85 }],
     ]);
     resetDreesCaches();

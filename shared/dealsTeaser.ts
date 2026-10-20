@@ -29,7 +29,9 @@ const CONNECTOR = "(?:by|through|thru|until|till|before|on\\s+or\\s+before|no\\s
 const CLAUSE_END = `(?=\\s*(?:[.,;:!?)]|$)|\\s+(?:on|for|with|in)\\b|\\s+and\\s+(?:${LEAD}|${CONNECTOR}|contracts?)\\b)`;
 /** A range tail ("and 11/8/2026") follows a lead word's clause or a full date; a connector-ended bare day/month takes no tail ("3/2 and 4/3 homes" are plan figures). */
 const RANGE_TAIL = `(?:\\s*(?:and|to|through|-|–)\\s*(?:${DATE}|${SHORT_DATE}))?`;
-const DATE_CLAUSE = new RegExp(`(\\s*(?:,\\s*)?(?:\\band\\s+)?)((?:contracts?\\s+)?)(?:${LEAD}\\s+(?:${CONNECTOR}\\s+)?(?:${DATE}|${SHORT_DATE})${RANGE_TAIL}|${CONNECTOR}\\s+${DATE}${RANGE_TAIL}|(?<=contracts?\\s)${CONNECTOR}\\s+${SHORT_DATE}${RANGE_TAIL}|${CONNECTOR}\\s+${SHORT_DATE}${CLAUSE_END})`, "gi");
+/** A deadline connector: a bare day/month after one is a date even mid-sentence ("through 12/31 and a 4.99% rate"), where "on 4/5 homes" is a figure. */
+const DEADLINE_CONNECTOR = "(?:by|through|thru|until|till|before|on\\s+or\\s+before|no\\s+later\\s+than)";
+const DATE_CLAUSE = new RegExp(`(\\s*(?:,\\s*)?(?:\\band\\s+)?)((?:contracts?\\s+)?)(?:${LEAD}\\s+(?:${CONNECTOR}\\s+)?(?:${DATE}|${SHORT_DATE})${RANGE_TAIL}|${CONNECTOR}\\s+${DATE}${RANGE_TAIL}|(?<=contracts?\\s)${CONNECTOR}\\s+${SHORT_DATE}${RANGE_TAIL}|between\\s+${SHORT_DATE}\\s*(?:and|to|-|–)\\s*${SHORT_DATE}${CLAUSE_END}|${DEADLINE_CONNECTOR}\\s+${SHORT_DATE}(?=\\s+and\\s+(?!\\d))|${CONNECTOR}\\s+${SHORT_DATE}${CLAUSE_END})`, "gi");
 const BARE_DATE = new RegExp(`\\s*\\(?(?<![\\d.$])${DATE}\\)?`, "gi");
 /** An adjustable-rate offer says so on the card even when the chosen sentence does not. */
 const ADJUSTABLE = (text: string) => /\bARM\b/.test(text) || /\b\d{1,2}\/\d\s+arm\b|\badjustable[- ]rate|\brate\s+adjusts|\binitial\s+(?:interest\s+)?rate\b/i.test(text);

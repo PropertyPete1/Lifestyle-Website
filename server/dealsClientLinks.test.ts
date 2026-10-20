@@ -29,7 +29,7 @@ import { agentDisplayPhone, agentForLead, agentForTeamId, agentRowsForLead, agen
 import { dealEvents } from "../drizzle/schema";
 import { classifyDealsAccess, revokeNonTeamMatchingDealLinks } from "./dealsEligibility";
 import { createDealsHomeRequest, setDealsHomeSaved } from "./dealsRequests";
-import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, catalogViewForSession, completeVerification, createPendingVerification, exchangeAccessToken, gatedDealsCatalog, getActiveBlock, hashSecret, issueAccessToken, savedDealCards } from "./dealsService";
+import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, builderPageFor, catalogViewForSession, completeVerification, createPendingVerification, exchangeAccessToken, gatedDealsCatalog, getActiveBlock, hashSecret, issueAccessToken, savedDealCards } from "./dealsService";
 
 const HOUR = 3_600_000;
 const AGENT_PHONE = "+12105550101";
@@ -279,6 +279,9 @@ describe("the full list versus the scrubbed list", () => {
     const teamList = await gatedDealsCatalog(agent.id, (await catalogViewForSession(agent)).view) as typeof full;
     expect(teamList[0].details).toMatchObject({ salesLine: "+12105550999", builderPage: "https://www.chesmar.com/fixture-lakes/" });
     expect(teamList[0].homes[0].details.builderPage).toBe("https://www.chesmar.com/fixture-lakes/brandon/1/");
+    // A home keyed under a path the builder's site does not serve (Starlight's street keys) links the team to the community page.
+    expect(builderPageFor("https://www.starlighthomes.com/san-antonio/fixture-trails/available-homes/1412-fixture-street")).toBe("https://www.starlighthomes.com/san-antonio/fixture-trails");
+    expect(builderPageFor("https://www.chesmar.com/fixture-lakes/brandon/1/")).toBe("https://www.chesmar.com/fixture-lakes/brandon/1/");
   });
 
   it("drops a client back to the scrubbed list when the link is turned off, the agent leaves, or the link belongs to someone else", async () => {

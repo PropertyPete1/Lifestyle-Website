@@ -19,12 +19,13 @@ import { StarlightAdapter } from "./dealsAdapters.starlight";
 import { LegendHomesAdapter } from "./dealsAdapters.legend";
 import { DreesAdapter } from "./dealsAdapters.drees";
 import { ViewHomesAdapter } from "./dealsAdapters.viewhomes";
+import { TexasHomesAdapter } from "./dealsAdapters.texashomes";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "DRB Homes" | "Starlight Homes" | "Legend Homes" | "Drees Custom Homes" | "View Homes" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "DRB Homes" | "Starlight Homes" | "Legend Homes" | "Drees Custom Homes" | "View Homes" | "Texas Homes" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -254,8 +255,9 @@ export const LEGEND_HOST = "www.livelegendhomes.com";
 export const DREES_HOST = "www.dreeshomes.com";
 /** View Homes serves its site from the apex host (www redirects to it). */
 export const VIEWHOMES_HOST = "yourviewhome.com";
+export const TEXASHOMES_HOST = "www.texas-homes.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST, "DRB Homes": DRB_HOST, "Starlight Homes": STARLIGHT_HOST, "Legend Homes": LEGEND_HOST, "Drees Custom Homes": DREES_HOST, "View Homes": VIEWHOMES_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST, "DRB Homes": DRB_HOST, "Starlight Homes": STARLIGHT_HOST, "Legend Homes": LEGEND_HOST, "Drees Custom Homes": DREES_HOST, "View Homes": VIEWHOMES_HOST, "Texas Homes": TEXASHOMES_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -422,7 +424,12 @@ async function postJsonOnce(
       headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "LifestyleDesignRealtyDeals/1.0 (read-only official-page parser)" },
     });
     if (response.url && !sameOfficialHost(new URL(response.url), expectedHost)) return { ok: false, redirectedOffOfficialHost: true, retryable: false, status: response.status };
-    if ([301, 302, 303, 307, 308].includes(response.status)) return { ok: false, redirectedOffOfficialHost: true, retryable: false, status: response.status };
+    // A redirect answer, even on the official host, is refused (a POST is never replayed); only one off the host is reported as such.
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      const target = location ? asUrl(new URL(location, url).toString()) : null;
+      return { ok: false, redirectedOffOfficialHost: target !== null && !sameOfficialHost(target, expectedHost), retryable: false, status: response.status };
+    }
     if (!response.ok) return { ok: false, redirectedOffOfficialHost: false, retryable: response.status === 429 || response.status >= 500, status: response.status };
     const text = await response.text();
     if (text.length > 8_000_000) return { ok: false, redirectedOffOfficialHost: false, retryable: false, status: response.status };
@@ -586,7 +593,8 @@ function numberMatch(text: string, pattern: RegExp, group = 1): number | null {
 }
 
 function findContractDeadline(text: string): DeadlineFact | null {
-  const between = new RegExp(`\\b(?:purchase\\s+agreements?|contracts?|contract\\s+sales?)\\b[^.]{0,160}?(?:between\\s+|written\\s+|from\\s+)(${DEADLINE_DATE})\\s*,?\\s*(?:and|to|through|-)\\s+(${DEADLINE_DATE})`, "i").exec(text);
+  // "between September 4 and September 30, 2026": the first date may leave its year to the second.
+  const between = new RegExp(`\\b(?:purchase\\s+agreements?|contracts?|contract\\s+sales?)\\b[^.]{0,160}?(?:between\\s+|written\\s+|from\\s+)(${DEADLINE_DATE}|${MONTH_DAY})\\s*,?\\s*(?:and|to|through|-)\\s+(${DEADLINE_DATE})`, "i").exec(text);
   if (between) return deadlineFromMatch(between[2]);
   // The span between the contract words and the date must not run into the
   // closing clause, or "contract by October 18 and close by 12/31/26" would
@@ -604,6 +612,7 @@ function findClosingDeadline(text: string): DeadlineFact | null {
   return match ? deadlineFromMatch(match[1]) : null;
 }
 
+const MONTH_DAY = "(?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{1,2}";
 const DEADLINE_DATE = "(?:\\d{1,2}/\\d{1,2}/(?:\\d{4}|\\d{2})(?!\\d)|(?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{1,2},?\\s+\\d{4})";
 
 function rateNear(text: string, pattern: RegExp): number | null {
@@ -620,7 +629,7 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   // "2/1 Program … year one … year two" is a temporary buydown as surely as "buydown" is.
   // "year one/two" counts only as rate wording ("rate … for year one", "year one is N%"), not in an HOA-dues or warranty sentence.
   // Cash "applied toward a rate buydown" is a use of the cash, not a temporary rate.
-  const hasTemporaryRate = /\b(?:(?<!\btowards?\s(?:an?\s)?(?:interest\s)?(?:rate\s)?)buy[- ]?down|first[- ]year|year\s*1|temporarily|introductory|\d\/\d\s+(?:program|rate\s+program))\b/i.test(text) || /\brate[^.]{0,60}\byear\s+(?:one|two)\b|\byear\s+(?:one|two)\s+is\s+\d+(?:\.\d+)?%/i.test(text);
+  const hasTemporaryRate = /\b(?:(?<!\btowards?\s(?:an?\s)?(?:interest\s)?(?:rate\s)?)buy[- ]?down|first[- ]year|year\s*1|temporarily|introductory|\d\/\d\s+(?:program|rate\s+program))\b/i.test(text) || /\brate[^.!?]{0,60}\byear\s+(?:one|two)\b|\byear\s+(?:one|two)\s+is\s+\d+(?:\.\d+)?%/i.test(text);
   // "the rate for year one is 2% lower" names a discount, not a rate.
   const headline = rateNear(text, /\brate\s+(?:that\s+applies\s+)?(?:for|to|in|during)\s+(?:the\s+)?(?:first[- ]year|year\s*(?:1|one))\s+(?:is|of|:)?\s*(\d+(?:\.\d+)?)%(?!\s*(?:lower|less|below|off|decrease|reduction|discount|under))/i) ??
     rateNear(text, /(?:first[- ]year|year\s*1)[\s\S]{0,100}?(\d+(?:\.\d+)?)%(?!\s*(?:lower|less|below|off|decrease|reduction|discount|under))/i) ??
@@ -639,7 +648,9 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
     rateNear(text, /(?:years?\s*2\s*(?:-|to|through)\s*\d+|after\s+(?:the\s+)?first\s+year|(?:beginning|starting)\s+(?:in\s+)?year\s+(?:three|3|two|2)|years?\s+(?:three|3)\s+(?:onward|and\s+beyond|through\s+\d+))(?:(?!\b(?:down|payments?|APR)\b)[\s\S]){0,80}?(\d+(?:\.\d+)?)%(?!\s*(?:minimum\s+)?down\b)/i);
   const aprPercent = rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:annual\s+percentage\s+rate|apr)\b/i) ??
     rateNear(text, /\b(?:APR|ANNUAL\s+PERCENTAGE\s+RATE)\s*(?::|=|is)?\s*(\d+(?:\.\d+)?)%/i);
-  const repaymentTermYears = numberMatch(text, /\b(\d{1,2})(?:[- ]?year|[- ]?yr)s?\b/i);
+  // The term is read beside loan wording only ("30-year fixed", "30-YR Fixed FHA loan", "a term of 30 years"): "2 years of HOA dues" is not a term.
+  const repaymentTermYears = numberMatch(text, /\b(\d{1,2})(?:[- ]?year|[- ]?yr)s?\b[-,\s]*(?:fixed|mortgage|loan|term|financing|amortiz|fha\b|va\b|usda|conventional)/i) ??
+    numberMatch(text, /\b(?:term|mortgage|loan|financing)\s+(?:of\s+|for\s+)?(\d{1,2})(?:[- ]?year|[- ]?yr)s?\b/i);
   const loanType = firstMatch(text, /\b(FHA|VA|USDA|conventional|jumbo)\b/i);
   const downPaymentPercent = numberMatch(text, /(\d+(?:\.\d+)?)%\s+(?:minimum\s+)?down(?:\s+payment)?\b/i) ?? (/\bno\s+down\s+payment\b/i.test(text) ? 0 : null);
   const contractDeadline = findContractDeadline(text);
@@ -1226,6 +1237,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "Drees Custom Homes") { config.builder.push("Drees Custom Homes", "Drees Homes", "The Drees Company", "Drees"); config.lender.push("First Equity Mortgage", "First Equity"); }
   if (builder === "Legend Homes") { config.builder.push("Legend Homes", "Legend Home", "Camillo Companies", "Camillo"); }
   if (builder === "DRB Homes") { config.builder.push("DRB Homes", "DRB Group", "DRB Elevate", "DRB"); }
+  if (builder === "Texas Homes") { config.builder.push("Texas Homes"); config.lender.push("CMG Mortgage", "CMG Home Loans", "CMG"); }
   if (builder === "View Homes") { config.builder.push("View Homes", "Your View Home", "Thoughtful Collection"); config.lender.push("View Homes Lending"); }
   if (builder === "Scott Felder Homes") { config.builder.push("Scott Felder Homes", "Scott Felder"); config.lender.push("Southern Lending", "First Continental Mortgage", "First Continental"); }
   if (builder === "Highland Homes") { config.builder.push("Highland Homes", "Highland"); config.lender.push("Highland HomeLoans", "Highland Home Loans"); }
@@ -1882,6 +1894,7 @@ let starlightAdapter: DealAdapter | null = null;
 let legendAdapter: DealAdapter | null = null;
 let dreesAdapter: DealAdapter | null = null;
 let viewHomesAdapter: DealAdapter | null = null;
+let texasHomesAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
@@ -1908,6 +1921,7 @@ export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   get "Legend Homes"() { return (legendAdapter ??= new LegendHomesAdapter()); },
   get "Drees Custom Homes"() { return (dreesAdapter ??= new DreesAdapter()); },
   get "View Homes"() { return (viewHomesAdapter ??= new ViewHomesAdapter()); },
+  get "Texas Homes"() { return (texasHomesAdapter ??= new TexasHomesAdapter()); },
   Manual: new ManualAdapter(),
 };
 

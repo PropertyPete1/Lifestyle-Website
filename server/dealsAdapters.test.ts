@@ -135,7 +135,7 @@ function miDocuments(total = 15): Record<string, string> {
 
 describe("deals adapters", () => {
   it("registers the required generic builder adapters", () => {
-    expect(Object.keys(DEAL_ADAPTERS).sort()).toEqual(["Ashton Woods", "Centex", "Century Communities", "Chesmar", "Coventry Homes", "D.R. Horton", "DRB Homes", "David Weekley Homes", "Davidson Homes", "Del Webb", "Drees Custom Homes", "First America Homes", "Highland Homes", "KB Home", "LGI Homes", "Legend Homes", "M/I Homes", "Manual", "Perry Homes", "Pulte", "Scott Felder Homes", "Sitterle Homes", "Starlight Homes", "Toll Brothers", "View Homes"]);
+    expect(Object.keys(DEAL_ADAPTERS).sort()).toEqual(["Ashton Woods", "Centex", "Century Communities", "Chesmar", "Coventry Homes", "D.R. Horton", "DRB Homes", "David Weekley Homes", "Davidson Homes", "Del Webb", "Drees Custom Homes", "First America Homes", "Highland Homes", "KB Home", "LGI Homes", "Legend Homes", "M/I Homes", "Manual", "Perry Homes", "Pulte", "Scott Felder Homes", "Sitterle Homes", "Starlight Homes", "Texas Homes", "Toll Brothers", "View Homes"]);
     expect(DEAL_ADAPTERS["Perry Homes"].builder).toBe("Perry Homes");
   });
 
@@ -195,6 +195,12 @@ describe("deals adapters", () => {
     // "year two" in an HOA sentence is not a buydown; a fixed-rate offer stays fixed and publishable.
     const hoa = parsePromotionalRate("4.99% (5.50% APR) 30-year fixed FHA rate with 3.5% down on select homes. Builder pays the HOA dues for year two.");
     expect(hoa).toMatchObject({ rateKind: "fixed", promotionalRatePercent: 4.99, publishable: true });
+    // "2 years of HOA dues" is not the loan term, and the rate window does not run across "!"; "a term of 30 years" is.
+    const dues = parsePromotionalRate("Builder pays up to $10,000 in closing costs and 2 years of HOA dues. 4.99% (5.5% APR) 30-year fixed FHA with 3.5% down payment.");
+    expect(dues).toMatchObject({ repaymentTermYears: 30, publishable: true });
+    expect(parsePromotionalRate("Lock your rate today! HOA dues are covered for year one. 4.99% (5.50% APR) 30-year fixed FHA with 3.5% down payment.")).toMatchObject({ rateKind: "fixed", publishable: true });
+    expect(parsePromotionalRate("4.99% (5.5% APR) FHA financing with a term of 30 years and 3.5% down payment.")).toMatchObject({ repaymentTermYears: 30 });
+    expect(parsePromotionalRate("10 yrs structural warranty. 4.99% (5.5% APR) FHA with 3.5% down payment.")).toMatchObject({ repaymentTermYears: null });
     // "the rate for year one is 2% lower" is a discount, not the rate.
     const discount = parsePromotionalRate("2/1 buydown on select homes: the interest rate for year one is 2% lower than the note rate. Note rate 4.99% (6.81% APR) 30-year fixed FHA, 3.5% down payment. Beginning in year three, the fixed rate of 4.99% applies.");
     expect(discount.promotionalRatePercent).not.toBe(2);

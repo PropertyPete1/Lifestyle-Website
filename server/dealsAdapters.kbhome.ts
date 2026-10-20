@@ -76,9 +76,15 @@ export function parseKbArray(html: string, name: string): unknown[] | null {
 export function kbMoveInCount(html: string, emptyList = false): number | null {
   // The page may count twice ("Move-in Ready (57)" in the market navigation, "(3)" over the community's own list): the smaller is the
   // community's; a "(0)" corroborates an empty list, and says nothing beside a list that is not empty.
+  // The community's own count heads its list (a heading); the market's sits in the navigation. A "(0)" corroborates an empty list only as a
+  // heading, or when no positive count stands anywhere beside it: a "(0)" in another market's navigation next to the community's own "(3)" says nothing.
+  const headed = Array.from(html.matchAll(/<h[1-6]\b[^>]*>(?:(?!<\/h[1-6])[\s\S])*?Move-?in\s+Ready\s*\((\d+)\)/gi)).map((match) => Number(match[1]));
+  const headedPositive = headed.filter((count) => count > 0);
+  if (headedPositive.length) return Math.min(...headedPositive);
+  if (emptyList && headed.includes(0)) return 0;
   const counts = Array.from(html.matchAll(/Move-?in\s+Ready\s*\((\d+)\)/gi)).map((match) => Number(match[1]));
-  if (emptyList && counts.includes(0)) return 0;
   const positive = counts.filter((count) => count > 0);
+  if (emptyList && counts.includes(0) && !positive.length) return 0;
   return positive.length ? Math.min(...positive) : null;
 }
 

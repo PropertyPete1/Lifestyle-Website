@@ -3,9 +3,30 @@
 How a community a builder reader finds on a builder's own site becomes a card on
 `/deals`, and what keeps it private until it is ready.
 
+## Finding communities
+
+Every Monday at 5 AM Central (and from Admin, Communities, "Find new
+communities"), `runCommunityDiscovery()` (`server/dealsDiscovery.ts`) reads each
+builder's own sitemap for its San Antonio market community pages, one page at a
+time, and takes the community's schema.org business record from each page:
+name, sales address and phone (and a price range when there is one).
+
+- Only pages on the builder's own host are read; a sitemap pointing elsewhere
+  stops that builder's run.
+- Communities more than 45 miles from downtown (San Marcos, for example) are
+  skipped. The page's coordinates are used for that check only, never stored.
+- A builder whose sitemap cannot be read adds nothing that week and is named in
+  the email; the other builders carry on.
+- Discovery never removes a community.
+- When something new is added, the sync recipients get one email listing it.
+
+Builders with discovery today: Chesmar and M/I Homes. Each new builder gets a
+reader (its community page format) and a discovery entry (its sitemap and
+community URL pattern).
+
 ## From discovery to live
 
-1. A builder reader lists the builder's San Antonio area communities and calls
+1. Discovery (or a future builder reader) calls
    `onboardDiscoveredCommunities()` (`server/dealsOnboarding.ts`).
 2. Each new community (matched by its source URL) is inserted with
    `active = false` and `awaiting_first_sync = true`. Close-outs, unnamed rows

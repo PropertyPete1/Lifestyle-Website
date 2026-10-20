@@ -290,7 +290,7 @@ function successfulResult(
   };
 }
 
-function asUrl(value: string): URL | null {
+export function asUrl(value: string): URL | null {
   try {
     const url = new URL(value);
     return url.protocol === "https:" || url.protocol === "http:" ? url : null;
@@ -303,7 +303,7 @@ function normalizePathname(pathname: string): string {
   return `${pathname.replace(/\/+$/, "") || "/"}/`;
 }
 
-function sameOfficialHost(url: URL, expectedHost: string): boolean {
+export function sameOfficialHost(url: URL, expectedHost: string): boolean {
   return url.protocol === "https:" && !url.port && !url.username && !url.password && url.hostname.toLowerCase() === expectedHost;
 }
 
@@ -321,7 +321,7 @@ function sourcePage(kind: PrivateSourcePage["kind"], sourceUrl: string, privateN
 }
 
 /** Plain GET only. There are no form submissions, click goals, or browser automation here. */
-async function getDocument(
+export async function getDocument(
   url: string,
   fetcher: HtmlFetcher,
   accept: string,
@@ -374,7 +374,7 @@ async function getDocumentOnce(
   }
 }
 
-function decodeHtmlEntities(value: string): string {
+export function decodeHtmlEntities(value: string): string {
   const named: Record<string, string> = {
     amp: "&",
     apos: "'",
@@ -963,7 +963,7 @@ function parseAmenityList(html: string): string[] {
   return list ? Array.from(new Set(items(list))).slice(0, 20) : [];
 }
 
-function parseSitemapUrls(xml: string): string[] | null {
+export function parseSitemapUrls(xml: string): string[] | null {
   // A branded error page can still be HTTP 200. Do not interpret it as a
   // genuine empty inventory sitemap. Both documents used by this adapter are
   // URL sets, so reject any other payload before extracting incidental <loc>s.

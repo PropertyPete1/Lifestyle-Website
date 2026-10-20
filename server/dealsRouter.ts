@@ -712,6 +712,12 @@ export const dealsRouter = router({
     addTrecFakeRow: adminProcedure.input(z.object({ fullName: z.string().trim().min(3).max(190), confirm: z.literal(true) })).mutation(async ({ input }) => (await import("./dealsTrec")).addTrecFakeRow(input.fullName)),
     /** "Refresh now": one background adapter run for this community, recorded in deal_job_runs; refused while a run is in flight. */
     refreshCommunity: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => adminCall(() => refreshCommunityInBackground(input.id))),
+    /** "Find new communities now": the weekly discovery, started in the background; the result arrives by email. */
+    discoverCommunities: adminProcedure.mutation(async () => {
+      const { runCommunityDiscovery } = await import("./dealsDiscovery");
+      void runCommunityDiscovery().catch((error) => console.error("[deals-discovery] manual run failed", error instanceof Error ? error.message : error));
+      return { started: true as const };
+    }),
     /** An operator diagnostic restricted to the preconfigured official URL (exact official host, 64 KB cap, redirects reported, never followed). */
     testCommunitySource: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => adminCall(() => testCommunitySource(input.id))),
     runFubRetry: adminProcedure.mutation(async () => (await import("./dealsFubJobs")).runPendingDealsFubJobs()),

@@ -337,15 +337,18 @@ export function CommunitiesSection({ overview }: { overview: Overview }) {
   const builders: BuilderOption[] = buildersQuery.data ?? [];
   const byId = new Map((diagnosticsQuery.data ?? []).map((row) => [row.id, row]));
   const activeIncentive = (communityId: number) => overview.incentives.find((row) => row.communityId === communityId && row.active && !row.held) ?? null;
+  const discover = trpc.deals.admin.discoverCommunities.useMutation({ onSuccess: () => toast.success("Looking for new communities on every builder's site. New ones are emailed to you and appear here hidden until their first clean update."), onError: (error) => toast.error(error.message) });
+  const waiting = overview.communities.filter((community) => community.awaitingFirstSync).length;
   return (
     <Section
       id="communities"
       title="Communities"
       icon={Building2}
       description="Add a community, edit its mapping and names-to-hide lists, pause it (hidden from public), or remove it. Refresh now runs that community's adapter as a background job. The private builder mapping appears only in this role-gated panel."
-      action={<Button type="button" className={`${TAP} ${GOLD_BUTTON} w-full sm:w-auto`} onClick={() => setAdding((value) => !value)}><Plus className="mr-1 h-4 w-4" /> {adding ? "Close form" : "Add community"}</Button>}
+      action={<div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto"><Button type="button" variant="outline" className={`${TAP} w-full sm:w-auto`} disabled={discover.isPending} onClick={() => discover.mutate()}><RefreshCw className={`mr-1 h-4 w-4 ${discover.isPending ? "animate-spin" : ""}`} /> Find new communities</Button><Button type="button" className={`${TAP} ${GOLD_BUTTON} w-full sm:w-auto`} onClick={() => setAdding((value) => !value)}><Plus className="mr-1 h-4 w-4" /> {adding ? "Close form" : "Add community"}</Button></div>}
     >
       <div className="space-y-4">
+        {waiting > 0 && <p className="text-xs text-muted-foreground" data-deals-waiting-count="true">{waiting} communit{waiting === 1 ? "y was" : "ies were"} added automatically and go{waiting === 1 ? "es" : ""} live after {waiting === 1 ? "its" : "their"} first clean update. Builders are checked every Monday, or now with Find new communities.</p>}
         {adding && (builders.length ? <CommunityForm initial={EMPTY_COMMUNITY} builders={builders} onDone={() => setAdding(false)} /> : <p className="text-xs text-muted-foreground">{buildersQuery.isError ? `Builder list could not be loaded: ${buildersQuery.error.message}` : "Loading builder list..."}</p>)}
         {diagnosticsQuery.isError && <Warning>Community diagnostics could not be loaded ({diagnosticsQuery.error.message}). Holds and refresh history are hidden until it loads.</Warning>}
         {overview.communities.map((community) => <CommunityCard key={community.id} community={community} diagnostics={byId.get(community.id)} activeIncentive={activeIncentive(community.id)} builders={builders} />)}

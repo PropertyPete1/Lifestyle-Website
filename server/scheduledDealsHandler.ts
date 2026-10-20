@@ -51,6 +51,11 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
       if (hour < CATALOG_FIRST_HOUR || hour >= CATALOG_LAST_HOUR) return res.json({ ok: true, result: { skipped: "outside_catalog_hours_chicago" } });
       return res.json({ ok: true, result: await refreshDueCommunitiesBatch() });
     }
+    // Monday 5:00 AM Central: find communities the builders added (new ones stay hidden until their first clean update).
+    if (job === "discovery") {
+      const { runCommunityDiscovery } = await import("./dealsDiscovery");
+      return res.json({ ok: true, result: await whenDue(dueAt(5, 0, "Mon"), "builder-deals-discovery", () => runCommunityDiscovery()) });
+    }
     if (job === "trec") return res.json({ ok: true, result: await whenDue(dueAt(1, 15), "builder-deals-trec-import", importTrecLicenses) });
     if (job === "team") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-team-sync", syncTeamAllowlistFromFub) });
     if (job === "agents") return res.json({ ok: true, result: await whenDue(dueAt(1, 45), "builder-deals-known-agent-sync", syncKnownAgentsFromFub) });

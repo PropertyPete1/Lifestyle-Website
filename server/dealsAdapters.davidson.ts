@@ -228,10 +228,13 @@ export class DavidsonAdapter implements DealAdapter {
     for (const home of parsed.homes) { privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }
     privateSnapshot.plans.push(...parsed.plans);
     const incentiveHolds: DealHoldReason[] = [];
+    // The community banner names its region's promotion page; without a banner the page shows none.
+    if (!parsed.promotionPath) privateSnapshot.offerRead = true;
     if (parsed.promotionPath) {
       const offer = await promotion(parsed.promotionPath, fetcher, now().getTime(), privateSnapshot, config.privateCommunityName);
       if ("hold" in offer) incentiveHolds.push(offer.hold);
-      else if (offer.offer) privateSnapshot.incentive = { sourceUrl: offer.sourceUrl, text: offer.offer.text, facts: parsePromotionalRate(offer.offer.text) };
+      else privateSnapshot.offerRead = true;
+      if (!("hold" in offer) && offer.offer) privateSnapshot.incentive = { sourceUrl: offer.sourceUrl, text: offer.offer.text, facts: parsePromotionalRate(offer.offer.text) };
     }
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));
   }

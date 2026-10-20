@@ -399,6 +399,7 @@ export class EmpireHomesAdapter implements DealAdapter {
     for (const plan of plans) { privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }
     // The market's promotion: the page's banner with the campaign page's footnote; a banner whose footnote cannot be read holds the offer only.
     const incentiveHolds: DealHoldReason[] = [];
+    if (!parsed.promo) privateSnapshot.offerRead = true;
     if (parsed.promo) {
       let footnote: string | null = null;
       if (parsed.campaignUrl) {
@@ -408,6 +409,7 @@ export class EmpireHomesAdapter implements DealAdapter {
       }
       if (!footnote) incentiveHolds.push("expected_incentive_container_not_found");
       else {
+        privateSnapshot.offerRead = true;
         const text = `${parsed.promo} ${footnote}`.slice(0, 6_000);
         privateSnapshot.incentive = { sourceUrl: parsed.campaignUrl ?? community.toString(), text, facts: parsePromotionalRate(text) };
       }

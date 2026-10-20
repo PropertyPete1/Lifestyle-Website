@@ -428,7 +428,8 @@ export class BeazerAdapter implements DealAdapter {
     for (const plan of parsed.plans) { privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }
     const incentiveHolds: DealHoldReason[] = [];
     if (parsed.offerUnreadable) incentiveHolds.push("expected_incentive_container_not_found");
-    else if (parsed.offer) privateSnapshot.incentive = { sourceUrl: community.toString(), text: parsed.offer, facts: parsePromotionalRate(parsed.offer) };
+    else privateSnapshot.offerRead = true;
+    if (!parsed.offerUnreadable && parsed.offer) privateSnapshot.incentive = { sourceUrl: community.toString(), text: parsed.offer, facts: parsePromotionalRate(parsed.offer) };
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));
   }
 }

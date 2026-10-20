@@ -174,6 +174,12 @@ export interface PrivateDealSnapshot {
   plans: PrivatePlanOrHome[];
   homes: PrivatePlanOrHome[];
   incentive: { sourceUrl: string; text: string; facts: PromotionalRateFacts } | null;
+  /**
+   * True when the reader read the builder's offer source for this community this run (found or not). Only then does an
+   * empty `incentive` mean the builder shows none (the sync takes a scraped promo down); a reader that does not read
+   * offers, or read none this run (a cached brand offer, a closeout with no page), leaves the last one to the lapse rule.
+   */
+  offerRead?: boolean;
   /** First-party facts and discoveries remain operational/server-only. */
   communityFacts?: { fromPrice: number | null; schoolDistrict: string | null; lotSizes: string | null; amenities: string[] };
   discoveredScrubConfig?: DealScrubConfig;
@@ -640,11 +646,11 @@ const APR_PAIRED_RATE = /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:[(\[]\s*\d+(?:\.\d+)
 export const RATE_FIGURE_WORDING = /(?<![\d.])(?:1\d|\d)(?:\.\d+)?%\*?\s+(?:\d{1,2}[- ]?(?:year|yr)s?\.?\s+)?(?:fixed|financing|FHA|VA|USDA|conventional)\b/i;
 
 /** "Rates starting at 3.99%", "mortgage rates from 3.99%", "a rate of 3.99%", "Starting at 3.99%*" (a price is written in dollars). */
-const RATE_FROM_FIGURE = /\b(?:rates?\s+(?:starting\s+(?:at|from)|from|of|at)|starting\s+(?:at|from))\s+(\d+(?:\.\d+)?)%/i;
+const RATE_FROM_FIGURE = /\b(?:rates?\s+(?:starting\s+(?:at|from)|from|of|at)|starting\s+(?:at|from))\s+(\d+(?:\.\d+)?)%(?!\*?\s*(?:minimum\s+|required\s+)?(?:down\b|of\b|off\b|toward|closing|in\s|credit|cash))/i;
 /** Words after a percentage that make it something other than a loan rate: a down payment, closing costs, a credit, a discount, a share of the price. */
-const NOT_A_RATE_AFTER = /^\*?\s*(?:\([^)]{0,40}\)\s*)?(?:minimum\s+|required\s+)?(?:down\b|of\b|off\b|toward|towards|in\s+(?:[A-Za-z-]+\s+){0,2}?(?:closing|seller|flex|lender|cash|credits?|incentives?|savings|upgrades|options)|closing|seller|lender[- ](?:credit|paid)|credit\b|commission|bonus\b(?!\s+(?:interest\s+)?rate)|discount\b(?!(?:ed)?\s+(?:interest\s+)?rate)|cash\s+back|deposit|earnest|flex\s+cash|financing\b(?=[^.]*\b(?:USDA|VA|no\s+down|zero\s+down)))/i;
+const NOT_A_RATE_AFTER = /^\*?\s*(?:\([^)]{0,40}\)\s*)?(?:minimum\s+|required\s+)?(?:down\b|of\b|off\b|toward|towards|in\s+(?:[A-Za-z-]+\s+){0,2}?(?:closing|seller|flex|lender|cash|credits?|incentives?|savings|upgrades|options)|closing|seller(?![- ]paid\s+(?:interest\s+)?rate)|lender[- ](?:credit|paid)(?!\s+(?:interest\s+)?rate)|credit\b|commission|bonus\b(?!\s+(?:interest\s+)?rate)|discount\b(?!(?:ed)?\s+(?:interest\s+)?rate)|cash\s+back|deposit|earnest|flex\s+cash|financing\b(?=[^.]*\b(?:USDA|VA|no\s+down|zero\s+down)))/i;
 /** Words just before a percentage that make it something other than a loan rate ("down payment of 3.5%", "assistance up to 5%", "taxes about 2.3%"). */
-const NOT_A_RATE_BEFORE = /\b(?:down\s+payments?|assistance|closing\s+costs?|taxes|tax\s+rate|insurance|credit|flex\s+cash|commission|deposit|earnest\s+money|discount|savings|off)\s+(?:of\s+|up\s+to\s+|about\s+|around\s+|approximately\s+|as\s+low\s+as\s+|is\s+|at\s+|from\s+|equal\s+to\s+)?(?:\$[\d,]+\s+or\s+)?$/i;
+const NOT_A_RATE_BEFORE = /(?:\b(?:down\s+payments?|assistance|closing\s+costs?|taxes|tax\s+rate|insurance|credit|flex\s+cash|commission|deposit|earnest\s+money|discount|savings|off)\s+(?:of\s+|up\s+to\s+|about\s+|around\s+|approximately\s+|as\s+low\s+as\s+|is\s+|at\s+|from\s+|equal\s+to\s+)?(?:\$[\d,]+\s+or\s+)?|\b(?:up\s+to|save|saves|saving|receive|earn)\s+(?:an?\s+(?:extra\s+|additional\s+)?)?)$/i;
 /**
  * Fail-safe rate mention: a percentage below 20 in a sentence that names a
  * rate, financing, a loan, a mortgage or a loan program, unless the words after
@@ -656,7 +662,7 @@ export function mentionsRate(text: string): boolean {
   // "4.99% fixed", "4.99% FHA" unless the words before make it a down payment ("down payment of 3.5% FHA").
   for (const match of Array.from(text.matchAll(new RegExp(RATE_FIGURE_WORDING.source, "gi")))) if (!NOT_A_RATE_BEFORE.test(text.slice(Math.max(0, (match.index ?? 0) - 60), match.index ?? 0))) return true;
   for (const sentence of text.split(/(?<=[.!?])\s+/)) {
-    if (!/\b(?:rates?|financing|loans?|mortgages?|FHA|VA|USDA|conventional|fixed|lender|lock)\b/i.test(sentence)) continue;
+    if (!/\b(?:rates?|financing|loans?|mortgages?|FHA|VA|USDA|conventional|fixed(?![- ]price)|lender|lock|ARM|interest|\d{1,2}[- ]?(?:year|yr)s?)\b/i.test(sentence) && !/\bat\s+\d+(?:\.\d+)?%/.test(sentence)) continue;
     for (const match of Array.from(sentence.matchAll(/(\d+(?:\.\d+)?)%/g))) {
       const value = Number(match[1]);
       if (!Number.isFinite(value) || value <= 0 || value >= 20) continue;
@@ -1354,7 +1360,7 @@ const WEB_TLDS = ["com", "net", "org", "us", "io", "info", "biz", "co", "homes",
 // The domain's own name words never matter; the top-level domain is written in lower case, all upper case, or (for the
 // common ones) title case ("MiHomes.Com") — a glued sentence's next word ("homes.Homes") is title case but no common TLD.
 const WEB_ADDRESS = new RegExp(`\\b[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${WEB_TLDS.join("|")})\\b`);
-const WEB_ADDRESS_UPPER = new RegExp(`\\b[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${WEB_TLDS.map((tld) => tld.toUpperCase()).join("|")}|Com|Net|Org|Us|Co|Io)\\b`);
+const WEB_ADDRESS_UPPER = new RegExp(`\\b[A-Z0-9-]+(?:\\.[A-Z0-9-]+)*\\.(?:${WEB_TLDS.map((tld) => tld.toUpperCase()).join("|")})\\b|\\b[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:Com|Net|Org)\\b`);
 
 export function publicTextResidue(text: string): "link" | "web address" | "e-mail address" | "phone number" | "NMLS id" | null {
   if (/\b(?:https?:\/\/|www\.)\S+/i.test(text)) return "link";
@@ -1595,6 +1601,7 @@ async function fetchOfficialIncentive(
   if (!text) return ["expected_incentive_container_not_found"];
   privateSnapshot.pages.push(sourcePage("incentive", url.toString(), extractFirstHeading(page.text)));
   privateSnapshot.incentive = { sourceUrl: url.toString(), text, facts: parsePromotionalRate(text) };
+  privateSnapshot.offerRead = true;
   return [];
 }
 

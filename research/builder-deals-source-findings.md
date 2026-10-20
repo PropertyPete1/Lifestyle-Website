@@ -739,6 +739,34 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   communities once (each can still be collapsed). "Under $200K" is below
   the cap on both lists.
 
+### Round-22 corrections (2026-10-20)
+
+- `offerRead`: a reader marks the private snapshot when it read the
+  builder's offer source for the community this run (found or not). Only
+  then does an empty incentive take a scraped promo down. Readers that
+  never read offers (Perry, D.R. Horton, Highland, Century, KB, Ashton,
+  LGI, Sitterle, Hakes, Lennar, First America, Coventry) and runs that did
+  not read one (a PulteGroup closeout using the brand's cached offer, a
+  promotion page that failed or held) leave the last promo to the lapse
+  rule.
+- A live record whose stored values answer every reason its text gives (an
+  APR, a date or a term the admin typed before `accepted_at` existed) is
+  adopted as accepted by the next sync rather than held again; migration
+  0022 (a new file, so databases that ran 0021 still get it) backfills
+  manual rows and rows with admin-entered dates.
+- A save with an id always keeps the record's identity, with the manual
+  override turned on or off.
+- The manual-override hold e-mails once per text; the dismissed/expired
+  branch writes a change line when it takes the live promo off.
+- Rate parser: "lender-paid rate", "5/1 ARM", "3.99% interest", "on a
+  30-year", "at 4.99%" are rates; "starting at 3% down", "starting at 2% of
+  the purchase price", "receive 2%", "up to 3%", "save 10%", "fixed-price"
+  are not.
+- Residue: an all-caps top-level domain needs an all-caps name
+  ("FIXTURE.COM"), title case only for .Com/.Net/.Org, so "Hwy.US 281" and
+  "TX.Us Army" are not addresses.
+- Saved: with every saved home gone, the list says so.
+
 ## Lennar reader (added 2026-10-20)
 
 - Site: `www.lennar.com` (Next.js pages router). The community page

@@ -358,7 +358,8 @@ export class NdgAdapter implements DealAdapter {
       else {
         const offer = parseNdgOffer(offersBody.text, now());
         if (offer === "unreadable") incentiveHolds.push("expected_incentive_container_not_found");
-        else if (offer) {
+        else privateSnapshot.offerRead = true;
+        if (offer && offer !== "unreadable") {
           privateSnapshot.pages.push(sourcePage("incentive", ndgApiUrl(brand, `public/offers-v2/by-community/${id}`), null));
           privateSnapshot.incentive = { sourceUrl: communityPage, text: offer, facts: parsePromotionalRate(offer) };
         }

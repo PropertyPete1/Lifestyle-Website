@@ -402,6 +402,7 @@ export class ScottFelderAdapter implements DealAdapter {
       for (const plan of parsed.plans) { privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }
       if (parsed.offer) privateSnapshot.incentive = { sourceUrl: community.toString(), text: parsed.offer, facts: parsePromotionalRate(parsed.offer) };
     }
+    privateSnapshot.offerRead = true;
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config));
   }
 }

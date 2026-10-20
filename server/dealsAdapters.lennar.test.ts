@@ -208,6 +208,8 @@ describe("Lennar reader: adapter", () => {
     expect(result.private.plans.map((plan) => plan.privatePlanName)).toEqual(["Rio", "Aruba"]);
     expect(result.private.communityFacts).toMatchObject({ fromPrice: 229_999, schoolDistrict: "Northside ISD" });
     expect(result.private.incentive).toBeNull();
+    // Lennar has no offer source: an empty incentive never takes an admin's promo down.
+    expect(result.private.offerRead).toBeFalsy();
     expect(result.public.incentive).toBeNull();
     expect(result.private.pages.map((page) => page.kind)).toEqual(["community", "home", "home", "home", "home", "plan", "plan"]);
     expect(result.public.homes).toHaveLength(4);

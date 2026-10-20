@@ -42,7 +42,7 @@ function item(sourceUrl: string, overrides: Partial<PrivatePlanOrHome> = {}): Pr
   return { sourceUrl, privateName: overrides.privateName ?? sourceUrl.split("/").pop()!, status: "Quick Move-In", price: 400_000, bedrooms: 4, bathrooms: 3, squareFeet: 2_300, gallery: [], ...overrides };
 }
 
-function snapshot(input: { homes?: Item[]; plans?: Item[]; incentiveText?: string | null; catalogOk?: boolean; holdReasons?: DealHoldReason[]; incentiveHoldReasons?: DealHoldReason[]; facts?: DealAdapterResult["private"]["communityFacts"]; discovered?: DealAdapterResult["private"]["discoveredScrubConfig"] } = {}): DealAdapterResult {
+function snapshot(input: { homes?: Item[]; plans?: Item[]; incentiveText?: string | null; catalogOk?: boolean; holdReasons?: DealHoldReason[]; incentiveHoldReasons?: DealHoldReason[]; facts?: DealAdapterResult["private"]["communityFacts"]; discovered?: DealAdapterResult["private"]["discoveredScrubConfig"]; offerRead?: boolean } = {}): DealAdapterResult {
   const homes = (input.homes ?? []).map((value) => item(value.sourceUrl, value));
   const plans = (input.plans ?? []).map((value) => item(value.sourceUrl, { status: null, ...value }));
   const catalogOk = input.catalogOk ?? true;
@@ -53,7 +53,7 @@ function snapshot(input: { homes?: Item[]; plans?: Item[]; incentiveText?: strin
     catalogOk,
     incentiveHoldReasons: input.incentiveHoldReasons ?? (incentive && !incentive.facts.publishable ? incentive.facts.holdReasons : []),
     fetchedAt: T0.toISOString(),
-    private: { builder: "M/I Homes", sourceUrl: COMMUNITY_URL, privateCommunityName: "Fixture Gardens", pages: [], plans, homes, incentive, communityFacts: input.facts, discoveredScrubConfig: input.discovered },
+    private: { builder: "M/I Homes", sourceUrl: COMMUNITY_URL, privateCommunityName: "Fixture Gardens", pages: [], plans, homes, incentive, offerRead: input.offerRead ?? true, communityFacts: input.facts, discoveredScrubConfig: input.discovered },
     public: { plans: [], homes: [], incentive: null, holdReasons },
     holdReasons,
   };
@@ -392,6 +392,21 @@ describe("official refresh: incentive lifecycle", () => {
     expect(db.rows(dealCommunities)[0].incentiveHoldReason).toBeNull();
   });
 
+  it("leaves the promo alone when the reader did not read the builder's offer source this run (a reader without offers, a cached brand offer)", async () => {
+    const DATED = "4.999% (5.737% APR) FHA 30-year fixed-rate financing on select homes with 3.5% down payment. Contracts written by 12/31/2026.";
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: DATED }));
+    await refreshOfficialDeals({ communityId, now: T0 });
+    const manualSaved = db.seed(dealIncentives, { communityId, normalizedText: "held other", publicText: HELD_TEXT, active: false, held: true, holdReason: JSON.stringify(["missing_contract_deadline"]), confirmedAt: T0 });
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: null, offerRead: false }));
+    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + DAY) });
+    expect(activeIncentives().map((row) => row.publicText)).toEqual([DATED]);
+    expect(db.rows(dealIncentives).find((row) => row.id === manualSaved)?.held).toBe(true);
+    // The next run that reads it and finds none takes it down.
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: null }));
+    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 2 * DAY) });
+    expect(activeIncentives()).toEqual([]);
+  });
+
   it("keeps an accepted (edited) record live across syncs of the same builder text, and revives it as accepted when it returns", async () => {
     const PHONE_TEXT = `${NO_DATE_TEXT} Call (210) 555-0142.`;
     const run = async (text: string, day: number) => { mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: text })); await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + day * DAY) }); };
@@ -411,6 +426,16 @@ describe("official refresh: incentive lifecycle", () => {
     await run(FULL_TEXT, 9);
     await run(PHONE_TEXT, 12);
     expect(activeIncentives().map((row) => [row.id, row.publicText])).toEqual([[held.id, NO_DATE_TEXT]]);
+    expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(0);
+  });
+
+  it("adopts as accepted a live record (from before acceptance was recorded) whose stored values answer every reason this scrape gives", async () => {
+    const TEXT = "4.99% interest rate on an FHA 30-year fixed loan with 3.5% down payment.";
+    const norm = parsePromotionalRate(TEXT).normalizedText;
+    const id = db.seed(dealIncentives, { communityId, normalizedText: norm, publicText: TEXT, headlineRate: "4.99%", apr: "6.62%", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5% down payment", active: true, held: false, manual: false, confirmedAt: T0 });
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: TEXT }));
+    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + DAY) });
+    expect(db.rows(dealIncentives).find((row) => row.id === id)).toMatchObject({ active: true, held: false, apr: "6.62%", acceptedAt: expect.any(Date) });
     expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(0);
   });
 

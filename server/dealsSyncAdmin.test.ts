@@ -155,6 +155,9 @@ describe("incentive admin", () => {
     await saveIncentiveForCommunity({ id: heldId, communityId, manual: false, publicText: "Ask about 4.99% (5.75% APR) FHA 30-year fixed with 3.5% down.", headlineRate: "4.99%", apr: "5.75%", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5%" });
     expect(db.rows(dealIncentives).find((row) => row.id === heldId)?.normalizedText).toBe("builder text 4.99% call 210 555 0142");
     await expect(saveIncentiveForCommunity({ communityId, manual: false, publicText: "Ask about our rate." })).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("Manual override") });
+    // Turning the manual override on (or off again) for this record keeps its identity too.
+    await saveIncentiveForCommunity({ id: heldId, communityId, manual: true, publicText: "Ask about 4.99% (5.75% APR) FHA 30-year fixed with 3.5% down.", headlineRate: "4.99%", apr: "5.75%", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5%" });
+    expect(db.rows(dealIncentives).find((row) => row.id === heldId)).toMatchObject({ manual: true, normalizedText: "builder text 4.99% call 210 555 0142" });
   });
 
   it("asks for the headline rate before accepting an offer that names two rates, and requires an APR for '4.99% 30-year fixed FHA' wording", async () => {

@@ -461,10 +461,12 @@ export class TexasHomesAdapter implements DealAdapter {
     const incentiveHolds: DealHoldReason[] = [];
     const home = await homePage(fetcher, now().getTime());
     if ("hold" in home) incentiveHolds.push(home.hold);
-    else if (home.page?.promoUrl) {
+    else if (!home.page?.promoUrl) privateSnapshot.offerRead = true;
+    else {
       const promo = await promotion(home.page.promoUrl, fetcher, now().getTime());
       if ("hold" in promo) incentiveHolds.push(promo.hold);
-      else if (promo.text) {
+      else privateSnapshot.offerRead = true;
+      if (!("hold" in promo) && promo.text) {
         privateSnapshot.pages.push(sourcePage("incentive", home.page.promoUrl, null));
         privateSnapshot.incentive = { sourceUrl: pageUrlOf(community), text: promo.text, facts: parsePromotionalRate(promo.text) };
       }

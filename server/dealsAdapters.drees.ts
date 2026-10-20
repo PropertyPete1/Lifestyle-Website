@@ -318,6 +318,7 @@ export class DreesAdapter implements DealAdapter {
     privateSnapshot.communityFacts = { fromPrice: row.record.priceFrom && row.record.priceFrom >= 50_000 ? row.record.priceFrom : null, schoolDistrict: null, lotSizes: null, amenities: [] };
     for (const home of homes.homes) { privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }
     for (const plan of plans.plans) { privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }
+    privateSnapshot.offerRead = true;
     if (homes.offer) { privateSnapshot.pages.push(sourcePage("incentive", dreesApiUrl("qmi"), null)); privateSnapshot.incentive = { sourceUrl: communityPage, text: homes.offer, facts: parsePromotionalRate(homes.offer) }; }
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config));
   }

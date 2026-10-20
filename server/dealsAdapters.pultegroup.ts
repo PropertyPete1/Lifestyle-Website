@@ -309,6 +309,7 @@ export class PulteGroupAdapter implements DealAdapter {
       // A page that was read but carries no carousel says more than one that could not be read; a redirect off the host ends the search.
       if ("hold" in offer) { if (offerHold !== "expected_incentive_container_not_found") offerHold = offer.hold; if (offer.hold === "unsupported_official_host") break; continue; }
       offerHold = null;
+      privateSnapshot.offerRead = true;
       if (offer.offer) privateSnapshot.incentive = { sourceUrl: offer.offer.sourceUrl, text: offer.offer.text, facts: parsePromotionalRate(offer.offer.text) };
       break;
     }

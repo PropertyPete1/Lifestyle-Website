@@ -360,7 +360,8 @@ export class DavidWeekleyAdapter implements DealAdapter {
     const incentiveHolds: DealHoldReason[] = [];
     const offer = await promotions(fetcher, now().getTime(), privateSnapshot, parsed.communityId);
     if ("hold" in offer) incentiveHolds.push(offer.hold);
-    else if (offer.text) privateSnapshot.incentive = { sourceUrl: weekleyPromotionsUrl(), text: offer.text, facts: parsePromotionalRate(offer.text) };
+    else privateSnapshot.offerRead = true;
+    if (!("hold" in offer) && offer.text) privateSnapshot.incentive = { sourceUrl: weekleyPromotionsUrl(), text: offer.text, facts: parsePromotionalRate(offer.text) };
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));
   }
 }

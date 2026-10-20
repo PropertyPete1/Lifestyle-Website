@@ -487,14 +487,18 @@ export class ViewHomesAdapter implements DealAdapter {
     for (const home of homes) { privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }
     for (const plan of parsed.plans) { privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }
     const incentiveHolds: DealHoldReason[] = [];
+    if (!parsed.promoUrl) privateSnapshot.offerRead = true;
     if (parsed.promoUrl) {
       const promo = await promotion(parsed.promoUrl, fetcher, now().getTime());
       if ("hold" in promo) incentiveHolds.push(promo.hold);
       // An offer with no participating-communities block is a changed page: held, never applied or dropped silently.
       else if (promo.promo?.text && !promo.promo.hasCommunityList) incentiveHolds.push("expected_incentive_container_not_found");
-      else if (promo.promo?.text && promo.promo.communityUrls.some((url) => pagePath(new URL(url)) === pagePath(community))) {
-        privateSnapshot.pages.push(sourcePage("incentive", parsed.promoUrl, null));
-        privateSnapshot.incentive = { sourceUrl: communityPage, text: promo.promo.text, facts: parsePromotionalRate(promo.promo.text) };
+      else {
+        privateSnapshot.offerRead = true;
+        if (promo.promo?.text && promo.promo.communityUrls.some((url) => pagePath(new URL(url)) === pagePath(community))) {
+          privateSnapshot.pages.push(sourcePage("incentive", parsed.promoUrl, null));
+          privateSnapshot.incentive = { sourceUrl: communityPage, text: promo.promo.text, facts: parsePromotionalRate(promo.promo.text) };
+        }
       }
     }
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));

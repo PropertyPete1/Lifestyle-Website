@@ -222,8 +222,11 @@ describe("Empire reader: adapter", () => {
     expect(down.private.incentive).toBeNull();
     const bare = await loadOfficialDeals(config, { fetcher: withSite({ [CAMPAIGN]: campaignPage(null) }), now: () => NOW });
     expect(bare.incentiveHoldReasons).toEqual(["expected_incentive_container_not_found"]);
+    expect(down.private.offerRead).toBeFalsy();
     const quiet = await loadOfficialDeals(config, { fetcher: withSite({ [COMMUNITY]: communityPage({ promo: false }) }), now: () => NOW });
     expect(quiet.catalogOk).toBe(true);
+    // The page was read and shows no banner: the builder shows no offer.
+    expect(quiet.private.offerRead).toBe(true);
     expect(quiet.incentiveHoldReasons).toEqual([]);
     expect(quiet.private.incentive).toBeNull();
   });

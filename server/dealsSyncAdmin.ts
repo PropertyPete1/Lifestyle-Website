@@ -221,7 +221,8 @@ export async function saveIncentiveForCommunity(input: AdminIncentiveInput): Pro
   const values = {
     // A scraped record keeps the builder's text as its identity, so the next sync of that text re-confirms this saved record
     // (with the admin's wording and values) instead of holding a fresh copy. A manual record is its own wording.
-    communityId, publicText, normalizedText: existing && !existing.manual && !manual ? existing.normalizedText : normalizedText(publicText), manual,
+    // A saved record keeps its identity (the builder's text for a scraped one), whether or not the manual override is turned on or off.
+    communityId, publicText, normalizedText: existing ? existing.normalizedText : normalizedText(publicText), manual,
     headlineRate: normalizeRateFigure(fields.headlineRate), followOnRate: normalizeRateFigure(fields.followOnRate), followOnPeriod: fields.followOnPeriod ?? null, apr: normalizeRateFigure(fields.apr),
     loanType: fields.loanType ?? null, downPayment: fields.downPayment ?? null, repaymentTerms: fields.repaymentTerms ?? null,
     contractBy, closeBy, contractByManual: contractBy !== null, closeByManual: closeBy !== null, expiresAt: earliest(contractBy, closeBy),

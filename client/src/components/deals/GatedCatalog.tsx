@@ -11,7 +11,7 @@ import { Countdown } from "./Countdown";
 import { DealsFooter, Incentive, ReelCard, formatChicagoDate, money, type DealsIncentive } from "./shared";
 import { FeaturedDeals, type FeaturedDealsData } from "./FeaturedDeals";
 import { BrowseBar, BROWSE_COPY, ShowMore } from "./BrowseBar";
-import { BROWSE_PAGE, EMPTY_FILTERS, OPEN_ALL_UP_TO, activeFilterCount, dealSelection, gatedCommunityVisible, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
+import { BROWSE_PAGE, EMPTY_FILTERS, OPEN_ALL_UP_TO, dealSelection, gatedCommunityVisible, homeFiltersOn, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export { countdownLabel } from "@/lib/dealsMine";
 export type { ProfileInput } from "@/lib/dealsMine";
@@ -223,15 +223,16 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
   const [pages, setPages] = useState(1);
   const [opened, setOpened] = useState<Set<string>>(() => new Set(communities.flatMap((community, index) => (community.fromYourReel || index === 0) ? [communityKey(community, index)] : [])));
   const [pendingCard, setPendingCard] = useState<string | null>(null);
-  const homeFilters = activeFilterCount({ ...filters, area: "", builderRate: false }) > 0;
-  const matching = useMemo(() => communities.map((community, index) => ({ community, index, key: communityKey(community, index) })).filter(({ community }) => gatedCommunityVisible(community, filters)), [communities, filters]);
+  const homeFilters = homeFiltersOn(filters, savedSet);
+  const savedKey = (saved ?? []).join(",");
+  const matching = useMemo(() => communities.map((community, index) => ({ community, index, key: communityKey(community, index) })).filter(({ community }) => gatedCommunityVisible(community, filters, savedSet)), [communities, filters, savedKey]);
   const visible = many ? matching.slice(0, pages * BROWSE_PAGE) : matching;
   const homeCount = communities.reduce((total, community) => total + community.homes.length, 0);
-  const shownHomes = matching.reduce((total, { community }) => total + (homeFilters ? homesMatching(community, filters) : community.homes).length, 0);
+  const shownHomes = matching.reduce((total, { community }) => total + (homeFilters ? homesMatching(community, filters, savedSet) : community.homes).length, 0);
   // A Best Deals tap opens that home's community (clearing filters that hide it) and scrolls to the card once it is on the page.
   const selectDeal = (card: string | undefined) => {
     if (!card) return;
-    const selection = dealSelection(communities, card, filters, { many, pages, visibleIndexes: matching.map((entry) => entry.index) });
+    const selection = dealSelection(communities, card, filters, { many, pages, visibleIndexes: matching.map((entry) => entry.index) }, savedSet);
     if (selection.index < 0) return scrollToHomeCard(card);
     if (selection.clearFilters) setFilters(EMPTY_FILTERS);
     if (selection.pages !== null) setPages(selection.pages);
@@ -258,9 +259,9 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
       {tools}
       {!promptDismissed && !profileSaved && !lead.name && !lead.teamPreview && <NamePrompt onSave={onSaveProfile} saving={savingProfile} error={profileError} onDismiss={() => setPromptDismissed(true)} />}
       <FeaturedDeals featured={featured} onSelect={(deal) => selectDeal(deal.card)} />
-      {many && <BrowseBar filters={filters} onChange={(next) => { setFilters(next); setPages(1); }} areas={communities} shown={shownHomes} total={homeCount} unit="homes" showBeds />}
-      {many && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{BROWSE_COPY.none}</p>}
-      <div className="mt-10 space-y-12">{visible.map(({ community, key }, position) => <CommunitySection key={key} id={`deals-community-${position}`} community={community} homes={homeFilters ? homesMatching(community, filters) : community.homes} open={!many || opened.has(key)} onToggle={many ? () => setOpened((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; }) : undefined} autoLoadReel={!many || position === 0} teamPreview={lead.teamPreview} savedSet={savedSet} savingCard={savingCard} onRequest={onRequest} onSave={onSave} />)}</div>
+      {(many || savedSet.size > 0) && <BrowseBar filters={filters} onChange={(next) => { setFilters(next); setPages(1); }} areas={communities} shown={shownHomes} total={homeCount} unit="homes" showBeds savedCount={savedSet.size} />}
+      {(many || savedSet.size > 0) && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{filters.savedOnly && savedSet.size > 0 ? BROWSE_COPY.noneSaved : BROWSE_COPY.none}</p>}
+      <div className="mt-10 space-y-12">{visible.map(({ community, key }, position) => <CommunitySection key={key} id={`deals-community-${position}`} community={community} homes={homeFilters ? homesMatching(community, filters, savedSet) : community.homes} open={!many || opened.has(key) || (filters.savedOnly && savedSet.size > 0)} onToggle={many ? () => setOpened((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; }) : undefined} autoLoadReel={!many || position === 0} teamPreview={lead.teamPreview} savedSet={savedSet} savingCard={savingCard} onRequest={onRequest} onSave={onSave} />)}</div>
       {many && <ShowMore remaining={matching.length - visible.length} onClick={() => setPages((value) => value + 1)} />}
     </div></section>
     <DealsFooter />

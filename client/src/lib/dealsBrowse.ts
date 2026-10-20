@@ -14,10 +14,12 @@ export type BrowseFilters = {
   moveInReady: boolean;
   builderRate: boolean;
   bigLots: boolean;
+  /** Private list only: just the homes this buyer has saved. */
+  savedOnly: boolean;
 };
 
-export const EMPTY_FILTERS: BrowseFilters = { area: "", maxPrice: null, minBeds: null, moveInReady: false, builderRate: false, bigLots: false };
-export const PRICE_CAPS = [300_000, 400_000, 500_000, 600_000, 750_000, 1_000_000] as const;
+export const EMPTY_FILTERS: BrowseFilters = { area: "", maxPrice: null, minBeds: null, moveInReady: false, builderRate: false, bigLots: false, savedOnly: false };
+export const PRICE_CAPS = [200_000, 300_000, 400_000, 500_000, 600_000, 750_000, 1_000_000] as const;
 export const BED_MINIMUMS = [2, 3, 4, 5] as const;
 /** Communities shown before "Show more". */
 export const BROWSE_PAGE = 12;
@@ -25,7 +27,7 @@ export const BROWSE_PAGE = 12;
 export const OPEN_ALL_UP_TO = 3;
 
 export function activeFilterCount(filters: BrowseFilters): number {
-  return [filters.area, filters.maxPrice, filters.minBeds, filters.moveInReady, filters.builderRate, filters.bigLots].filter(Boolean).length;
+  return [filters.area, filters.maxPrice, filters.minBeds, filters.moveInReady, filters.builderRate, filters.bigLots, filters.savedOnly].filter(Boolean).length;
 }
 
 /** Areas present in the list, most communities first, for the area picker. */
@@ -66,7 +68,13 @@ export function landingMatches(community: LandingBrowseCommunity, filters: Brows
   return true;
 }
 
-export type GatedBrowseHome = { kind: string; price?: number | null; beds?: string | number | null; lotSize?: string | null };
+export type GatedBrowseHome = { kind: string; price?: number | null; beds?: string | number | null; lotSize?: string | null; card?: string };
+/** "Saved only" applies while the buyer has saved something; with nothing saved it narrows nothing (the toggle is hidden then). */
+const savedFilterOn = (filters: BrowseFilters, saved?: ReadonlySet<string>) => filters.savedOnly && Boolean(saved && saved.size > 0);
+/** True when any filter narrows the homes inside a community. */
+export function homeFiltersOn(filters: BrowseFilters, saved?: ReadonlySet<string>): boolean {
+  return filters.maxPrice !== null || filters.minBeds !== null || filters.moveInReady || filters.bigLots || savedFilterOn(filters, saved);
+}
 export type GatedBrowseCommunity<Home extends GatedBrowseHome = GatedBrowseHome> = {
   area: string;
   label: string;
@@ -75,24 +83,25 @@ export type GatedBrowseCommunity<Home extends GatedBrowseHome = GatedBrowseHome>
   homes: Home[];
 };
 
-/** The homes of a community that pass the home filters (price, beds, move-in ready, lot). */
-export function homesMatching<Home extends GatedBrowseHome>(community: GatedBrowseCommunity<Home>, filters: BrowseFilters): Home[] {
+/** The homes of a community that pass the home filters (price, beds, quick move-in, lot, saved). */
+export function homesMatching<Home extends GatedBrowseHome>(community: GatedBrowseCommunity<Home>, filters: BrowseFilters, saved?: ReadonlySet<string>): Home[] {
+  const savedOnly = savedFilterOn(filters, saved);
   const communityLot = lotAcres(community.lotSizes, { field: true }) ?? lotAcres(community.label);
   return community.homes.filter((home) => {
     if (filters.maxPrice !== null && !(home.price && home.price <= filters.maxPrice)) return false;
     if (filters.minBeds !== null && (bedsFrom(home.beds) ?? 0) < filters.minBeds) return false;
     if (filters.moveInReady && home.kind !== "quick_move_in") return false;
     if (filters.bigLots && (homeLotAcres(home.lotSize, communityLot) ?? 0) < BIG_LOT_ACRES) return false;
+    if (savedOnly && !(home.card && saved!.has(home.card))) return false;
     return true;
   });
 }
 
 /** A community stays on the private list when it is in the area, has the offer asked for, and has a home that matches. */
-export function gatedCommunityVisible<Home extends GatedBrowseHome>(community: GatedBrowseCommunity<Home>, filters: BrowseFilters): boolean {
+export function gatedCommunityVisible<Home extends GatedBrowseHome>(community: GatedBrowseCommunity<Home>, filters: BrowseFilters, saved?: ReadonlySet<string>): boolean {
   if (filters.area && community.area !== filters.area) return false;
   if (filters.builderRate && !community.incentive?.headlineRate) return false;
-  const homeFilters = filters.maxPrice !== null || filters.minBeds !== null || filters.moveInReady || filters.bigLots;
-  return !homeFilters || homesMatching(community, filters).length > 0;
+  return !homeFiltersOn(filters, saved) || homesMatching(community, filters, saved).length > 0;
 }
 
 export type DealSelection = { index: number; clearFilters: boolean; pages: number | null };
@@ -104,13 +113,12 @@ export type DealSelection = { index: number; clearFilters: boolean; pages: numbe
  * page to turn to (null when the community is already on the page).
  */
 export function dealSelection<Home extends GatedBrowseHome & { card: string }>(
-  communities: ReadonlyArray<GatedBrowseCommunity<Home>>, card: string, filters: BrowseFilters, state: { many: boolean; pages: number; visibleIndexes: ReadonlyArray<number> },
+  communities: ReadonlyArray<GatedBrowseCommunity<Home>>, card: string, filters: BrowseFilters, state: { many: boolean; pages: number; visibleIndexes: ReadonlyArray<number> }, saved?: ReadonlySet<string>,
 ): DealSelection {
   const index = communities.findIndex((community) => community.homes.some((home) => home.card === card));
   if (index < 0) return { index, clearFilters: false, pages: null };
-  const homeFilters = filters.maxPrice !== null || filters.minBeds !== null || filters.moveInReady || filters.bigLots;
   const target = state.visibleIndexes.indexOf(index);
-  const cardShown = target >= 0 && (!homeFilters || homesMatching(communities[index]!, filters).some((home) => home.card === card));
+  const cardShown = target >= 0 && (!homeFiltersOn(filters, saved) || homesMatching(communities[index]!, filters, saved).some((home) => home.card === card));
   if (!cardShown) return { index, clearFilters: true, pages: Math.floor(index / BROWSE_PAGE) + 1 };
   if (state.many && target >= state.pages * BROWSE_PAGE) return { index, clearFilters: false, pages: Math.floor(target / BROWSE_PAGE) + 1 };
   return { index, clearFilters: false, pages: null };

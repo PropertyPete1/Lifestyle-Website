@@ -12,6 +12,8 @@ export const BROWSE_COPY = {
   moveInReady: "Quick move-in",
   builderRate: "Builder rate offer",
   bigLots: "Half-acre+ lots",
+  saved: "Saved",
+  noneSaved: "None of your saved homes match these filters. Clear a filter to see them all.",
   clear: "Clear filters",
   none: "No communities match these filters yet. Try fewer filters, or ask us: new homes are added every day.",
 } as const;
@@ -26,7 +28,7 @@ function Toggle({ on, label, onChange, name }: { on: boolean; label: string; onC
  * Filters for a list of every community in the area. The landing page has no
  * bedroom counts (`showBeds` off); the private list filters homes by them.
  */
-export function BrowseBar({ filters, onChange, areas, shown, total, unit, showBeds = false }: {
+export function BrowseBar({ filters, onChange, areas, shown, total, unit, showBeds = false, savedCount = 0 }: {
   filters: BrowseFilters;
   onChange: (filters: BrowseFilters) => void;
   areas: ReadonlyArray<{ area: string }>;
@@ -35,6 +37,8 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, showBe
   /** "communities" or "homes", for the count line. */
   unit: string;
   showBeds?: boolean;
+  /** Private list only: how many homes the buyer has saved (the "Saved" toggle shows when there are any). */
+  savedCount?: number;
 }) {
   const choices = areaChoices(areas);
   const active = activeFilterCount(filters);
@@ -62,6 +66,7 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, showBe
       </label>}
     </div>
     <div className="mt-3 flex min-w-0 flex-wrap gap-2">
+      {savedCount > 0 && <Toggle name="saved" on={filters.savedOnly} label={`${BROWSE_COPY.saved} (${savedCount})`} onChange={(value) => set({ savedOnly: value })} />}
       <Toggle name="move-in-ready" on={filters.moveInReady} label={BROWSE_COPY.moveInReady} onChange={(value) => set({ moveInReady: value })} />
       <Toggle name="builder-rate" on={filters.builderRate} label={BROWSE_COPY.builderRate} onChange={(value) => set({ builderRate: value })} />
       <Toggle name="big-lots" on={filters.bigLots} label={BROWSE_COPY.bigLots} onChange={(value) => set({ bigLots: value })} />

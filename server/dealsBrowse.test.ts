@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
-import { EMPTY_FILTERS, areaChoices, bedsFrom, dealSelection, gatedCommunityVisible, homesMatching, landingMatches, priceCapLabel } from "../client/src/lib/dealsBrowse";
+import { EMPTY_FILTERS, PRICE_CAPS, areaChoices, bedsFrom, dealSelection, gatedCommunityVisible, homesMatching, landingMatches, priceCapLabel } from "../client/src/lib/dealsBrowse";
 import type { GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
 import { browseOrder } from "./dealsService";
 
@@ -28,6 +28,8 @@ describe("browse filters", () => {
     expect(areaChoices([{ area: "B" }, { area: "A" }, { area: "B" }, { area: " " }])).toEqual([{ area: "B", count: 2 }, { area: "A", count: 1 }]);
     expect(priceCapLabel(400_000)).toBe("$400K");
     expect(priceCapLabel(1_000_000)).toBe("$1M");
+    expect(PRICE_CAPS[0]).toBe(200_000);
+    expect(priceCapLabel(200_000)).toBe("$200K");
     expect(bedsFrom("3-5")).toBe(5);
     expect(bedsFrom(4)).toBe(4);
     expect(bedsFrom(null)).toBeNull();
@@ -73,6 +75,22 @@ describe("browse filters", () => {
     expect(gatedCommunityVisible(lots, { ...EMPTY_FILTERS, builderRate: true })).toBe(false);
     expect(gatedCommunityVisible({ ...lots, incentive: { headlineRate: "5%" } } as GatedCommunity, { ...EMPTY_FILTERS, builderRate: true })).toBe(true);
   });
+
+  it("narrows to the buyer's saved homes, alone or with other filters, and narrows nothing while nothing is saved", () => {
+    const one = community(1);
+    const two = community(2);
+    const saved = new Set([one.homes[1]!.card]);
+    const filters = { ...EMPTY_FILTERS, savedOnly: true };
+    expect(homesMatching(one, filters, saved).map((row) => row.card)).toEqual([one.homes[1]!.card]);
+    expect(gatedCommunityVisible(one, filters, saved)).toBe(true);
+    expect(gatedCommunityVisible(two, filters, saved)).toBe(false);
+    expect(gatedCommunityVisible(one, { ...filters, moveInReady: true }, saved)).toBe(false);
+    expect(homesMatching(one, filters, new Set()).length).toBe(2);
+    expect(gatedCommunityVisible(two, filters, new Set())).toBe(true);
+    expect(gatedCommunityVisible(two, filters)).toBe(true);
+    // A Best Deals tap on an unsaved home clears the saved-only filter so the home can be shown.
+    expect(dealSelection([one, two], two.homes[0]!.card, filters, { many: false, pages: 1, visibleIndexes: [0] }, saved)).toMatchObject({ index: 1, clearFilters: true });
+  });
 });
 
 describe("list order", () => {
@@ -102,6 +120,18 @@ describe("a long private list", () => {
     expect(html).toContain("40 homes");
     // The open community's reel loads; nothing else on the page embeds Instagram.
     expect(html.match(/instagram-media/g)).toHaveLength(1);
+  });
+
+  it("shows a Saved toggle with the count once the buyer has saved a home, and the under-$200K price choice", () => {
+    const many = Array.from({ length: 20 }, (_, index) => community(index));
+    const saved = [many[3]!.homes[0]!.card, many[7]!.homes[1]!.card];
+    const html = renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead, communities: many, now: NOW, saved })));
+    expect(html).toContain('data-deals-filter="saved"');
+    expect(html).toContain("Saved (2)");
+    expect(html).toContain("Under $200K");
+    expect(render(many)).not.toContain('data-deals-filter="saved"');
+    // A short list with a saved home gets the bar too, so the toggle is there.
+    expect(renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead, communities: [many[3]!], now: NOW, saved: [many[3]!.homes[0]!.card] })))).toContain("Saved (1)");
   });
 
   it("keeps a short list exactly as before: every community open, no filters, no paging", () => {

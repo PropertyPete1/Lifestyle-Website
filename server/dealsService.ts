@@ -493,14 +493,34 @@ export function communityScrubConfig(community: Pick<typeof dealCommunities.$inf
  * when it has no dates, re-confirmed within the lapse window. Evaluated at
  * render time so a rate never stays up past its date between scheduled jobs.
  */
-function liveIncentiveWhere(communityId: number, now: Date, lapseDays: number) {
+function liveIncentiveWhere(communityIds: number[], now: Date, lapseDays: number) {
   const lapseCutoff = new Date(now.getTime() - lapseDays * 24 * 60 * 60_000);
   return and(
-    eq(dealIncentives.communityId, communityId),
+    inArray(dealIncentives.communityId, communityIds),
     eq(dealIncentives.active, true),
     eq(dealIncentives.held, false),
     or(and(isNull(dealIncentives.expiresAt), gt(dealIncentives.confirmedAt, lapseCutoff)), gt(dealIncentives.expiresAt, now)),
   );
+}
+
+/** The newest live incentive of each community, in one read for the whole list. */
+async function liveIncentivesByCommunity(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, communityIds: number[], now: Date, lapseDays: number) {
+  const byCommunity = new Map<number, typeof dealIncentives.$inferSelect>();
+  if (!communityIds.length) return byCommunity;
+  const rows = await db.select().from(dealIncentives).where(liveIncentiveWhere(communityIds, now, lapseDays)).orderBy(desc(dealIncentives.confirmedAt), desc(dealIncentives.id));
+  for (const row of rows) if (!byCommunity.has(row.communityId)) byCommunity.set(row.communityId, row);
+  return byCommunity;
+}
+
+/** Rows grouped by a numeric key, keeping their order. */
+function groupBy<T>(rows: readonly T[], key: (row: T) => number): Map<number, T[]> {
+  const grouped = new Map<number, T[]>();
+  for (const row of rows) {
+    const id = key(row);
+    const list = grouped.get(id);
+    if (list) list.push(row); else grouped.set(id, [row]);
+  }
+  return grouped;
 }
 
 type ResidueSurface = "public" | "gated";
@@ -555,18 +575,24 @@ export async function publicDealsCatalog() {
   const { areaMapRadius, communityAreaMap } = await import("./dealsMap");
   const publicRadius = areaMapRadius(settings, "public");
   const result = [] as Array<{ label: string; area: string; fromPrice: number | null; reelUrl: string | null; homesAvailable: number; incentive: ReturnType<typeof publicIncentive> | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap> }>;
+  if (!communities.length) return result;
+  // Two reads for the whole page, however many communities there are.
+  const ids = communities.map((community) => community.id);
+  const [availableNow, incentives] = await Promise.all([
+    db.select({ communityId: dealHomes.communityId }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"), eq(dealHomes.kind, "quick_move_in"))),
+    liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
+  ]);
+  const availableCount = new Map<number, number>();
+  for (const home of availableNow) availableCount.set(home.communityId, (availableCount.get(home.communityId) ?? 0) + 1);
   for (const community of communities) {
-    const [homes, incentives] = await Promise.all([
-      db.select({ n: sql<number>`count(*)` }).from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.status, "available"), eq(dealHomes.kind, "quick_move_in"))),
-      db.select().from(dealIncentives).where(liveIncentiveWhere(community.id, now, settings.incentiveLapseDays)).orderBy(desc(dealIncentives.confirmedAt)).limit(1),
-    ]);
+    const incentive = incentives.get(community.id);
     const entry = {
       label: community.publicLabel,
       area: community.areaLabel,
       fromPrice: community.fromPrice,
       reelUrl: community.reelUrl,
-      homesAvailable: Number(homes[0]?.n ?? 0),
-      incentive: incentives[0] ? publicIncentive(incentives[0]) : null,
+      homesAvailable: availableCount.get(community.id) ?? 0,
+      incentive: incentive ? publicIncentive(incentive) : null,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       // A wide circle around the ZIP code centroid: "this side of town", never the community.
       areaMap: communityAreaMap(community, { variant: "public", radiusMiles: publicRadius }),
@@ -634,17 +660,28 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
   const gatedRadius = areaMapRadius(settings, "gated");
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
   const data = [] as unknown[];
+  if (!communities.length) return data;
+  // Three reads for the whole list (incentives, homes, photos), however many communities there are.
+  const ids = communities.map((community) => community.id);
+  const [incentives, allHomes] = await Promise.all([
+    liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
+    db.select().from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
+  ]);
+  const homesBy = groupBy(allHomes, (home) => home.communityId);
+  const shownHomes = new Map(communities.map((community) => [community.id, selectDealCatalogHomes(homesBy.get(community.id) ?? [])]));
+  const shownHomeIds = Array.from(shownHomes.values()).flatMap((homes) => homes.map((home) => home.id));
+  const photoRows = shownHomeIds.length
+    ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, shownHomeIds), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
+    : [];
+  const photosBy = groupBy(photoRows, (photo) => photo.homeId);
   for (const community of communities) {
     const scrubNames = communityScrubConfig(community);
     const scrub = (value: string) => full ? value : scrubPrivateNames(value, scrubNames);
-    const [incentiveRows, homeRows] = await Promise.all([
-      db.select().from(dealIncentives).where(liveIncentiveWhere(community.id, now, settings.incentiveLapseDays)).orderBy(desc(dealIncentives.confirmedAt)).limit(1),
-      db.select().from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
-    ]);
+    const incentive = incentives.get(community.id);
     const homes = [] as Array<Record<string, unknown>>;
     // Quick move-ins win; To Be Built cards appear only when there are none.
-    for (const home of selectDealCatalogHomes(homeRows)) {
-      const photos = await db.select({ id: dealPhotos.id }).from(dealPhotos).where(and(eq(dealPhotos.homeId, home.id), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder));
+    for (const home of shownHomes.get(community.id) ?? []) {
+      const photos = photosBy.get(home.id) ?? [];
       homes.push({
         // Opaque, deterministic card handle for React only. It is not a
         // builder listing ID, database ID, source URL, or reversible key.
@@ -677,7 +714,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
       fromPrice: community.fromPrice,
       reelUrl: community.reelUrl,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
-      incentive: incentiveRows[0] ? publicIncentive(incentiveRows[0]) : null,
+      incentive: incentive ? publicIncentive(incentive) : null,
       homes,
       ...(full ? { details: { builderName: community.builder === "Manual" ? null : community.builder, communityName: community.privateName, address: community.privateAddress || null, salesLine: view.builderPages ? community.salesPhone : null, builderPage: view.builderPages && /^https?:\/\//i.test(community.sourceUrl) ? community.sourceUrl : null } } : {}),
     };

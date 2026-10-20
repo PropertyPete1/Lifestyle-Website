@@ -400,10 +400,10 @@ export const dealsRouter = router({
     if (connection) {
       const active = await connection.select({ id: dealCommunities.id }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)));
       const hourAgo = new Date(Date.now() - 60 * 60_000);
-      for (const community of active) {
-        const recent = (await connection.select({ id: dealCommunityViews.id }).from(dealCommunityViews).where(and(eq(dealCommunityViews.leadId, session.leadId), eq(dealCommunityViews.communityId, community.id), sql`${dealCommunityViews.viewedAt} > ${hourAgo}`)).limit(1))[0];
-        if (!recent) await connection.insert(dealCommunityViews).values({ leadId: session.leadId, communityId: community.id });
-      }
+      // One view row per community per hour, read and written in one go however many communities there are.
+      const recent = new Set((await connection.select({ communityId: dealCommunityViews.communityId }).from(dealCommunityViews).where(and(eq(dealCommunityViews.leadId, session.leadId), sql`${dealCommunityViews.viewedAt} > ${hourAgo}`))).map((row) => row.communityId));
+      const unseen = active.filter((community) => !recent.has(community.id));
+      if (unseen.length) await connection.insert(dealCommunityViews).values(unseen.map((community) => ({ leadId: session.leadId, communityId: community.id })));
       const recentListView = (await connection.select({ id: dealEvents.id }).from(dealEvents).where(and(eq(dealEvents.leadId, session.leadId), eq(dealEvents.kind, "viewed_listings"), sql`${dealEvents.createdAt} > ${hourAgo}`)).limit(1))[0];
       if (!recentListView) await logDealEvent({ leadId: session.leadId, kind: "viewed_listings", sourceCode: session.lead.sourceCode, deviceHash: session.deviceHash, ip: ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0" });
     }

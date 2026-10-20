@@ -547,6 +547,27 @@ describe("round 36: another loan type's down payment, a third party's second ver
   });
 });
 
+describe("round 37: conjunctions after the figure, label-first loan types, adjustable wording, more triggering terms", () => {
+  it("'provided'/'given' as conjunctions and 'From August' keep the figure in play; a second figure holds", () => {
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA loan. 3.5% down payment provided borrower has a minimum 580 credit score; 10% down payment required for scores 500-579.").holdReasons).toContain("ambiguous_rate");
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA loan with 3.5% down payment provided buyer qualifies.")).toMatchObject({ downPaymentPercent: 3.5, holdReasons: [] });
+  });
+
+  it("a label-first down payment for another loan type holds", () => {
+    expect(parsePromotionalRate("Rates as low as 4.99% (5.62% APR) on a 30-year fixed VA loan. VA buyers need no down payment; conventional buyers need a down payment of 5%.").publishable).toBe(false);
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA loan. Conventional loans require a down payment of 5%.").publishable).toBe(false);
+  });
+
+  it("adjustable wording holds; a monthly payment or 'fixed for 30 years' triggers the disclosures", () => {
+    for (const text of ["Rates as low as 4.5% (6.38% APR) on a 7/6 adjustable FHA loan, 30-year term, 3.5% down payment.", "4.5% (6.38% APR) variable-rate mortgage, 30-year term, FHA, 3.5% down payment."]) {
+      expect(parsePromotionalRate(text).holdReasons, text).toContain("adjustable_rate");
+    }
+    for (const text of ["Rates as low as 4.99% (5.62% APR) fixed for 30 years.", "Own from $1,899/mo! 4.99% (5.62% APR)."]) {
+      expect(parsePromotionalRate(text).publishable, text).toBe(false);
+    }
+  });
+});
+
 describe("a run that did not read the offer source", () => {
   it("leaves the community's hold line as it was", async () => {
     const id = seedCommunity();

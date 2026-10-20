@@ -932,7 +932,10 @@ function downPaymentFigure(text: string, aprIndex: number | null, rate: number |
     // also a participle after the figure ("\u2026, paid by the builder", "\u2026 is covered", "\u2026 provided/funded by \u2026") and "from"
     // a named brand ("from Lennar", "from Pulte Mortgage").
     const afterAssist = /^\s*(?:(?:and|&|or|\/)\s*closing\s+costs?\s*)?(?:assistance|grants?|gifts?|match|matched|matching|program|help|support|incentives?|credits?|savings?|reimbursements?|contributions?|rebates?|bonus|allowance|paid|covered|not\s+required)\b/i.test(after) || /^\s*[-\u2013\u2014,]?\s*(?:is\s+)?(?:on\s+us|on\s+the\s+(?:builder|seller|house)|from\s+(?:the\s+|your\s+)?(?:builder|seller|lender|us)|courtesy\s+of)\b/i.test(after) || /^\s*(?:and|&|or|\/)\s*closing\s+costs?\b/i.test(after) || /^\s*\S*\s*(?:assistance|grants?|gift)\b/i.test(clause.slice(0, 30)) ||
-      /^\s*[-\u2013\u2014,]?\s*(?:is\s+|are\s+|will\s+be\s+|gets?\s+)?(?:fully\s+)?(?:paid|covered|provided|funded|gifted|given|absorbed|reimbursed|contributed)\b(?!\s+(?:at|in|by\s+(?:you|the\s+(?:buyer|borrower|purchaser)))\b)/i.test(after) || /^\s*[-\u2013\u2014,]?\s*(?:is\s+)?[Ff]rom\s+(?!(?:[Yy]our|[Oo]ur|[Tt]heir|[Mm]y|[Dd]ay)\b)[A-Z][A-Za-z&'.]+/.test(after);
+      // "provided"/"given" are conjunctions ("3.5% down payment provided the buyer qualifies", "given credit approval") unless an
+      // agent follows ("provided by the builder"); "From" before a month, an article or a price word ("From The Low $300s", "From
+      // August 1") names no payer.
+      /^\s*[-\u2013\u2014,]?\s*(?:is\s+|are\s+|will\s+be\s+|gets?\s+)?(?:fully\s+)?(?:(?:paid|covered|funded|gifted|absorbed|reimbursed|contributed)\b(?!\s+(?:at|in|by\s+(?:you|the\s+(?:buyer|borrower|purchaser)))\b)|(?:provided|given)\s+(?:by|from|through|via|courtesy)\b(?!\s+(?:you|the\s+(?:buyer|borrower|purchaser))\b))/i.test(after) || /^\s*[-\u2013\u2014,]?\s*(?:is\s+)?[Ff]rom\s+(?!(?:[Yy]our|[Oo]ur|[Tt]heir|[Mm]y|[Dd]ay|[Tt]he|[Tt]his|[Tt]hat|[Tt]hese|[Tt]hose|[Aa]n?|[Nn]ow|[Tt]oday|[Jj]ust|[Oo]nly|[Aa]s|[Ll]ow|[Mm]id|[Hh]igh|[Jj]an(?:uary)?|[Ff]eb(?:ruary)?|[Mm]ar(?:ch)?|[Aa]pr(?:il)?|[Mm]ay|[Jj]une?|[Jj]uly?|[Aa]ug(?:ust)?|[Ss]ept?(?:ember)?|[Oo]ct(?:ober)?|[Nn]ov(?:ember)?|[Dd]ec(?:ember)?)\b)[A-Z][A-Za-z&'.]+/.test(after);
     const verbBefore = /\b(?:pay|pays|paying|paid|cover|covers|covering|covered|match|matches|matching|reimburse|reimburses|contribute|contributes|gift|gifts|give|gives|giving|provide|provides|providing|fund|funds|funding)[- ]+(?:(?:for|toward|towards|up\s+to|your|you|the|a|an|entire|full|whole|all\s+of|all)\s+){0,3}$/i.test(before) || /-(?:funded|provided|gifted|sponsored|matched)\s+$/i.test(before);
     // "paid"/"covered" right before the figure is a tile label ("Closing Costs Paid 3.5% Down", "$10,000 Paid 3.5% Down")
     // only after a cost noun or an amount; after a brand or an adverb ("Lennar Paid", "Fully Covered", "Down Payment Covered") it is
@@ -956,6 +959,7 @@ function downPaymentFigure(text: string, aprIndex: number | null, rate: number |
   // The label-first down payment ("with a down payment of 3.5%", "Down Payment: 3.5%"), unless that label is the trailing label of
   // a value-first tile ("10% Down Payment 3% Seller Credit": the 3% belongs to the next tile).
   let labelFirstValue: number | null = null;
+  let labelFirstLoan = new Set<string>();
   for (const match of Array.from(text.matchAll(/\b(?:min(?:imum|\.)?\s+)?down(?:[- ]payment)?\s*(?:of\s+|is\s+|as\s+low\s+as\s+|[:=]\s*)?(?:just\s+|only\s+)?(\d+(?:\.\d+)?)%(?!\s*(?:assistance|grants?|gifts?|paid|covered|matched|reimbursed)\b|\s*(?:credits?|incentives?|savings?|contributions?|rebates?|bonus|allowance)\b(?!\s*(?:score|[:$\d(]|up\s+to|of\s+(?:up\s+to\s+)?\$))|\s*[-\u2013\u2014,]?\s*(?:is\s+)?(?:on\s+us|from\s+(?:the\s+)?(?:builder|seller|lender))\b)/gi))) {
     const start = match.index ?? 0;
     const sliceStart = Math.max(0, start - 14);
@@ -963,6 +967,8 @@ function downPaymentFigure(text: string, aprIndex: number | null, rate: number |
     // The label right after an accepted value-first down payment ("10% Down Payment 3% Seller Credit") is that tile's label.
     if (lead && allAt.has(sliceStart + lead.index)) continue;
     labelFirstValue = numericValue(match[1]);
+    // the label-first figure is tied to the loan types its sentence names, as the value-first one is.
+    labelFirstLoan = sentenceLoanTypes(text, start, match[0].length);
     break;
   }
   const softConflict = (value: number) => softSkipped.some((other) => other !== value);
@@ -976,7 +982,7 @@ function downPaymentFigure(text: string, aprIndex: number | null, rate: number |
     if (labelFirstValue !== null) values.add(labelFirstValue.toFixed(3));
     return { value: found[0]!, conflict: values.size > 1 || softConflict(found[0]!) || otherLoan(foundLoan[0]!) || impossibleZero(found[0]!) };
   }
-  if (labelFirstValue !== null) return { value: labelFirstValue, conflict: softConflict(labelFirstValue) || impossibleZero(labelFirstValue) };
+  if (labelFirstValue !== null) return { value: labelFirstValue, conflict: softConflict(labelFirstValue) || otherLoan(labelFirstLoan) || impossibleZero(labelFirstValue) };
   const noDown = /\bno\s+down\s+payment\b/i.exec(text);
   if (!noDown) return { value: null, conflict: false };
   return { value: 0, conflict: otherLoan(sentenceLoanTypes(text, noDown.index, noDown[0].length)) || impossibleZero(0) };
@@ -1070,7 +1076,11 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   // an N-year or N yr term, payments, or a down payment. "first-year" alone is a
   // promotional period, not a repayment term.
   // "3.5% down", "no down payment" and "30-yr" are triggering terms too (Reg Z 1026.24(d)(1)).
-  const triggersTerms = /\b(?:\d+[- ]year|\d+[- ]?\s*yrs?|payments?|down\s+payment)\b|\d%\*?\s+(?:min(?:imum|\.)?\s+)?down\b/i.test(text);
+  // so are a term or down payment the parser itself read ("fixed for 30 years"), a loan-length "for 30 years", a monthly
+  // payment amount ("$1,899/mo", "$1,899 a month", "monthly P&I"), "$0/zero down" and "5 percent down" (Reg Z 1026.24(d)(1)(i)-(iii)).
+  const triggersTerms = /\b(?:\d+[- ]year|\d+[- ]?\s*yrs?|payments?|down\s+payment)\b|\d%\*?\s+(?:min(?:imum|\.)?\s+)?down\b/i.test(text) ||
+    repaymentTermYears !== null || downPaymentPercent !== null ||
+    /\bfor\s+(?:10|15|20|25|30|40)\s+years\b|\$\s?[\d,]+(?:\.\d{2})?\s*(?:\/\s*mo(?:nth)?\b|per\s+month\b|a\s+month\b|monthly\b)|\bmonthly\s+(?:P\s?&\s?I|principal)\b|(?:\$0|\bzero)\s+down\b|\b\d+(?:\.\d+)?\s+percent\s+down\b/i.test(text);
   // The span must not run into the closing clause (as in the finder): "contracts … closing by 11/30" names a closing deadline only.
   const namesContractDeadline = /\b(?:contracts?|purchase\s+agreements?|contract\s+sales?|sign(?:ed|ing)?)\b(?:(?!\bclos)[^.]){0,100}\b(?:by|through|until|between|from|written)\b/i.test(text);
   const namesClosingDeadline = /\b(?:clos(?:e|ing))\b[^.]{0,35}\b(?:by|before|than|through)\b/i.test(text);
@@ -1141,7 +1151,9 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   if (namesContractDeadline && !contractDeadline?.isoDate) holdReasons.push("missing_contract_deadline");
   if (namesClosingDeadline && !closingDeadline?.isoDate) holdReasons.push("missing_closing_deadline");
   // An adjustable-rate or stepped offer ("5/1 ARM", "adjustable rate mortgage", "fixed for 5 years then adjusts annually", a balloon, "then 6.5%") is never published as a plain rate without a look.
-  if (rateKind !== "none" && (/\bARM\b/.test(text) || /\b\d{1,2}\/\d\s+arm\b|\badjustable[- ]rate|\brate\s+adjusts|\binitial\s+(?:interest\s+)?rate\b|\brate\b[^.!?]{0,80}\b(?:then|and|will)\s+adjusts?\b|\badjusts?\s+(?:annually|yearly|every|after|thereafter)\b|\bballoon\b|\bthen\s+\d{1,2}(?:\.\d+)?\s*%/i.test(text))) holdReasons.push("adjustable_rate");
+  // also "7/6 adjustable", "5/6 SOFR", "ARMs", "variable rate", "hybrid", "fixed for the first 5 years" and Reg Z's own
+  // variable-rate disclosure "may increase after consummation" (1026.24(c)).
+  if (rateKind !== "none" && (/\bARMs?\b/.test(text) || /\b\d{1,2}\/\d{1,2}\s+(?:adjustable|arms?|sofr|hybrid)\b|\b\d{1,2}[- ]year\s+adjustable\b|\bvariable[- ]rate\b|\bhybrid\b|\bmay\s+increase\s+after\s+consummation\b|\bfor\s+the\s+first\s+\d{1,2}\s+years\b|\b(?:then|after\s+that)\s+(?:adjustable|variable)\b|\bfixed\s+period\b/i.test(text) ||/\b\d{1,2}\/\d\s+arm\b|\badjustable[- ]rate|\brate\s+adjusts|\binitial\s+(?:interest\s+)?rate\b|\brate\b[^.!?]{0,80}\b(?:then|and|will)\s+adjusts?\b|\badjusts?\s+(?:annually|yearly|every|after|thereafter)\b|\bballoon\b|\bthen\s+\d{1,2}(?:\.\d+)?\s*%/i.test(text))) holdReasons.push("adjustable_rate");
 
   return {
     normalizedText: normalizedText(text),

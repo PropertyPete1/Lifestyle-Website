@@ -1036,3 +1036,10 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Loan type:** a down payment whose sentence names only other loan types ("0% down for VA buyers", "No down payment required on VA and USDA loans"; "veterans" counts as VA) conflicts with the offer, and so does any 0% down on an FHA, conventional or jumbo offer. Both hold `ambiguous_rate`.
 - **Who pays:** after a conjunction, comma or dash, "pay/cover N% down" is the buyer's only when the clause names the buyer, or names no third party and no other giving verb. "Lennar pays closing costs and covers 3.5% down" is assistance. Participles after the figure ("paid by the builder", "is covered", "funded by Lennar"), "-funded/-provided" payers before it, and "from <Brand>" mark assistance. A bare participle tile ("Closing Costs Paid 3.5% Down") is a tile label only after a cost noun or a dollar amount.
 - **Triggering terms:** "N% down" and "30-yr" trigger the repayment-terms disclosure.
+
+## Round 37 corrections
+
+- "provided"/"given" after a down payment figure mark assistance only with an agent ("provided by the builder"); "provided the buyer qualifies" is a condition. "From <Month>/The/Now…" is not a brand payer.
+- A label-first down payment is tied to the loan types its sentence names, as the value-first one is.
+- Adjustable wording holds `adjustable_rate`: ARMs, N/N adjustable/SOFR/hybrid, variable-rate, "may increase after consummation", "fixed for the first N years", "then adjustable/variable", "fixed period".
+- Triggering terms also include a term or down payment the parser read itself, "for N years", a monthly payment amount, "$0/zero down" and "N percent down".

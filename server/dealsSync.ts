@@ -443,13 +443,22 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
       // another held text is retired; the community carries this text's hold (no new e-mail: it went out when the hold began).
       const storedReasons = (() => { try { const parsed: unknown = JSON.parse(same.holdReason ?? "[]"); return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : []; } catch { return [] as string[]; } })();
       const tookOff = activeRows.filter((row) => !row.manual);
+      // The held record takes this read's figures and reasons: a parser fix releases a record it no longer holds, and an Accept
+      // works from what the builder's text says now. Reasons about a manual override or date stay until the admin acts.
+      const adminReasons = storedReasons.filter((reason) => reason === "differs_from_manual_override" || reason === "replaces_manual_date");
+      const nextReasons = Array.from(new Set([...unique, ...adminReasons]));
+      const figures = (({ headlineRate, followOnRate, followOnPeriod, apr, loanType, downPayment, repaymentTerms }) => ({ headlineRate, followOnRate, followOnPeriod, apr, loanType, downPayment, repaymentTerms }))(scrapedIncentiveValues(facts));
+      const release = nextReasons.length === 0;
       await db.transaction(async (tx) => {
         await takeOffOthers(tx, same.id);
         await retireOtherHeld(tx, same.id);
-        await tx.update(dealIncentives).set({ confirmedAt: now }).where(eq(dealIncentives.id, same.id));
+        await tx.update(dealIncentives).set({ confirmedAt: now, ...figures, ...(release ? { held: false, active: true, holdReason: null } : { holdReason: JSON.stringify(nextReasons) }) }).where(eq(dealIncentives.id, same.id));
       });
       if (tookOff.length) summary.incentive.push(`The builder shows the held incentive again; the live one came off: "${tookOff[0]!.publicText.slice(0, 160)}"`);
-      if (storedReasons.length) await recordIncentiveHold(community, holdString(storedReasons), now, holds, `Held text: "${same.publicText.slice(0, 400)}"`, false);
+      if (release) {
+        summary.incentive.push(`A held incentive now passes the publication rules and is live: "${same.publicText.slice(0, 160)}"`);
+        await recordIncentiveHold(community, null, now, holds);
+      } else await recordIncentiveHold(community, holdString(nextReasons), now, holds, `Held text: "${same.publicText.slice(0, 400)}"`, false);
       return;
     }
     if (activeManual && activeManual.id !== same.id) {

@@ -284,7 +284,8 @@ describe("round 25: relative rates, down payments beside an APR, amounts, region
 
   it("a name before .COM/.NET/.ORG is always an address", () => {
     for (const text of ["Apply at Guild.COM Today.", "Visit Chase.COM Today for details.", "See Fairway.Com For details.", "Visit lennar.COM Today.", "See Perry.Net For terms."]) expect(publicTextResidue(text), text).toBe("web address");
-    expect(publicTextResidue("OFFER VALID ON SELECT HOMES.HOMES MUST CLOSE BY 12/31/2026.")).toBeNull();
+    // An all-caps passage is flagged (a cheap false hold) rather than risk a missed address.
+    expect(publicTextResidue("OFFER VALID ON SELECT HOMES.HOMES MUST CLOSE BY 12/31/2026.")).toBe("web address");
   });
 });
 
@@ -336,6 +337,41 @@ describe("round 27: APR layouts, multi-step buydowns, guarded APR pairs", () => 
     }
     expect(parsePromotionalRate("Seller credit of $15,000 or 4.99% (5.62% APR) 30-year fixed FHA financing with 3.5% down payment.")).toMatchObject({ promotionalRatePercent: 4.99, holdReasons: [] });
     expect(publicTextResidue("PRE-QUALIFY AT DHIMORTGAGE.LOANS NOW")).toBe("web address");
+  });
+});
+
+describe("round 28: unlabelled stepped buydowns, step keys, rate cards, held records", () => {
+  it("an unlabelled 2-1 buydown read as one step from year 2 holds", () => {
+    for (const text of ["Rate buydown: 2.99% first year, 3.99% starting year 2, 4.99% from the third year on (5.12% APR), 30-year fixed FHA loan, 3.5% down payment.", "2.99% first-year rate, 3.99% after the first year, 4.99% from year 3 (5.12% APR) on a 30-year fixed FHA loan with 3.5% down payment."]) {
+      expect(parsePromotionalRate(text).publishable, text).toBe(false);
+    }
+  });
+
+  it("a 1-0 buydown with a restated period, a dated contract window or a 2-1/2 bath is not a stepped buydown", () => {
+    for (const text of ["3.99% first-year rate, 4.99% for years 2-30 (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment. After the first year, the interest rate increases to 4.99% for the remaining term.", "1-0 Buydown: Year 1 – 3.99% | Years 2-30 – 4.99% | 5.62% APR on a 30-year fixed FHA loan with 3.5% down payment.", "3.99% first-year rate, 4.99% for years 2-30 (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment on contracts beginning 10/1/2026.", "3.99% first-year rate, 4.99% for years 2-30 (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment. 4 bed, 2-1/2 bath."]) {
+      expect(parsePromotionalRate(text), text).toMatchObject({ promotionalRatePercent: 3.99, followOnRatePercent: 4.99, holdReasons: [] });
+    }
+  });
+
+  it("reads rate cards and an incentive rate with loan wording", () => {
+    expect(parsePromotionalRate("Rate 4.99% APR 5.62% Down Payment 3.5% Term 30-year fixed FHA")).toMatchObject({ promotionalRatePercent: 4.99, aprPercent: 5.62, downPaymentPercent: 3.5, holdReasons: [] });
+    expect(parsePromotionalRate("3.99% First-Year Rate 4.99% Years 2-30 5.62% APR 3.5% Down 30-Year Fixed FHA")).toMatchObject({ aprPercent: 5.62, downPaymentPercent: 3.5 });
+    expect(parsePromotionalRate("Builder incentive: 5% fixed (5.805% APR) on a 30-year FHA loan with 3.5% down payment.")).toMatchObject({ promotionalRatePercent: 5, aprPercent: 5.805, holdReasons: [] });
+    expect(parsePromotionalRate("Closing cost assistance up to 3.5% (5.62% APR) on a 30-year fixed conventional loan with 5% down payment.").promotionalRatePercent).not.toBe(3.5);
+    expect(parsePromotionalRate("Rates as low as 4.99% APR on a 30-year fixed FHA loan with 3.5% down payment.").holdReasons).toContain("apr_check");
+    expect(publicTextResidue("APPLY AT TEXAS.LOANS NOW")).toBe("web address");
+  });
+
+  it("a held record takes each read's figures and reasons, and is released when the rules pass it", async () => {
+    const TEXT = "4.99% (5.62% APR) 30-year fixed FHA financing with 3.5% down payment on select homes.";
+    const misread: PromotionalRateFacts = { ...parsePromotionalRate(TEXT), aprPercent: 4.99, holdReasons: ["apr_check"], publishable: false };
+    const id = seedCommunity();
+    await run({ text: TEXT, facts: misread }, 0, id);
+    expect(heldRows()[0]).toMatchObject({ apr: "4.99%", holdReason: JSON.stringify(["apr_check"]) });
+    await run(TEXT, 1, id);
+    expect(heldRows()).toHaveLength(0);
+    expect(live()[0]).toMatchObject({ apr: "5.62%", acceptedAt: null });
+    expect(holdEmails()).toHaveLength(1);
   });
 });
 

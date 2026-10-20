@@ -85,6 +85,7 @@ export const CATALOG_HOLD_REASON_HELP: Partial<Record<DealHoldReason, string>> =
   private_text_remaining: "A private name, link, web address, e-mail, phone number or NMLS id survived scrubbing; edit the text (or add the name to the names to hide, or exclude a false positive).",
   adjustable_rate: "The offer is an adjustable-rate loan (ARM): the headline rate is a starting rate. Read the terms, then accept or edit the wording.",
   ambiguous_rate: "The offer names more than one rate (for example \"as low as 3.99%\" and \"4.99% fixed\", or a buydown whose figures were read out of order). Check the headline rate (and, for a buydown, the follow-on rate) against the wording before accepting.",
+  apr_check: "The APR read does not fit the rate (it is below or equal to the rate, or equal to the down payment): read the builder's figures and type the APR (and the down payment) before accepting.",
 };
 
 /** One line per stored reason (the sync joins several with ", "); unknown reasons fall back to the raw code. */
@@ -287,6 +288,9 @@ export function heldIncentiveMissingFields(row: IncentiveRow, patch: Omit<Accept
     if (reason === "missing_promotional_rate" && !merged.headlineRate?.trim()) missing.add("headlineRate");
     // Two rate figures: the admin names the headline rate the APR belongs to before it shows.
     if (reason === "ambiguous_rate" && !patch.headlineRate?.trim()) missing.add("headlineRate");
+    // A misread APR: the admin types the APR, and the down payment when there is one, before it shows.
+    if (reason === "apr_check" && !patch.apr?.trim()) missing.add("apr");
+    if (reason === "apr_check" && merged.downPayment?.trim() && !patch.downPayment?.trim()) missing.add("downPayment");
     if (reason === "missing_promotional_period" && !merged.followOnPeriod?.trim()) missing.add("followOnPeriod");
   }
   if ((categories && hasPrivateTerm(merged.publicText, categories)) || publicTextResidue(merged.publicText)) missing.add("publicText");

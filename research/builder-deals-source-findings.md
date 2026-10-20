@@ -978,3 +978,12 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Multi-step buydowns:** two or more later steps ("beginning in year 2 … beginning in year 3", "after the first year … after the second year"), or a 2-1/3-2-1 buydown read as one step from year 2, hold `ambiguous_rate`.
 - **APR-paired rates:** a figure written as a rate (decimals, 2.5% or more) after "$X or" or a heading is the rate. A smaller or whole figure after closing costs, a discount, savings, an incentive, taxes or assistance is not.
 - **Label-first rates** take "Interest Rate N% APR M%" but never "Annual Percentage Rate: N%". "Taxes", "insurance" and "payments" "as low as" are never a rate. The all-caps glued-sentence skip covers only ordinary sentence-ending words (HOMES, a city).
+
+## Round 28 corrections
+
+- **Stepped buydowns:** step periods are normalised to year numbers (year 1 ignored). Dates ("beginning 10/1/2026") and fractions ("2-1/2 bath", "2/1/2027") are not steps or "2-1" labels. A buydown read as one step from year 2 that states a third rate holds `ambiguous_rate`.
+- **APR check:** an APR below or equal to the rate, or equal to the down payment, now holds as `apr_check`. To accept, the admin types the APR (and the down payment when there is one).
+- **Held records** take each read's figures and reasons. A record the rules now pass is released live (manual-override and manual-date reasons stay until the admin acts).
+- **Rate cards:** "Rate 4.99% APR 5.62% Down Payment 3.5%" reads the APR as 5.62% and the down payment as 3.5%. A value-first APR followed by an unlisted figure ("6% Max Seller Contribution") stays the APR.
+- **APR-paired rates:** loan wording after the figure makes it a rate ("incentive: 5% fixed (5.805% APR)"). Assistance and tax figures are never rates, except after "$X or".
+- **Residue:** an all-caps passage is never skipped as a glued sentence.

@@ -1043,3 +1043,11 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - A label-first down payment is tied to the loan types its sentence names, as the value-first one is.
 - Adjustable wording holds `adjustable_rate`: ARMs, N/N adjustable/SOFR/hybrid, variable-rate, "may increase after consummation", "fixed for the first N years", "then adjustable/variable", "fixed period".
 - Triggering terms also include a term or down payment the parser read itself, "for N years", a monthly payment amount, "$0/zero down" and "N percent down".
+
+## Round 38 corrections
+
+- "N% down from <Lender>", "provided/given by/via/through", "funded from" and participles after the figure are a soft skip: never the down payment, but they still conflict with any other figure. "5% down from Pulte Mortgage. Conventional loans with less than 20% down require mortgage insurance." holds `ambiguous_rate` instead of publishing 20%.
+- A threshold ("less/fewer than", "under", "below" before the figure; "or more/greater/higher/less/lower", "and above/over/up" after it) is never the offer's down payment. "PMI required with less than 20% down" alone holds `missing_down_payment`.
+- A loan type named right after the figure ("3% for conventional", "3.5% (FHA)", "0% for VA buyers") is that figure's own type, whatever else its sentence names.
+- Triggering terms also include "$N per mo", "(little to) no money down", "nothing down", "100% financing", spelled-out "thirty-year" terms and "360-month".
+- Adjustable wording also includes "adj. rate", "rate may/can/will change/increase/adjust after/every…", "subject to change after year N / the initial period" and "then N-month adjustable". "Rates subject to change without notice" still publishes.

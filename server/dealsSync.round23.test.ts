@@ -568,6 +568,42 @@ describe("round 37: conjunctions after the figure, label-first loan types, adjus
   });
 });
 
+describe("round 38: lender names after the figure, thresholds, a figure's own loan type, more triggering and adjustable terms", () => {
+  it("'N% down from <Lender>' stays a conflict: with a second figure it holds, alone it never becomes the down payment", () => {
+    for (const text of [
+      "Rates as low as 4.99% (5.62% APR) on a 30-year fixed conventional loan with as little as 5% down from Pulte Mortgage. Conventional loans with less than 20% down require mortgage insurance.",
+      "Rates as low as 3.99% (5.36% APR) on FHA 30-year fixed loans with 3.5% down payment From DHI Mortgage. 10% down payment required for credit scores below 580.",
+    ]) {
+      expect(parsePromotionalRate(text).publishable, text).toBe(false);
+    }
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA loan with as little as 3.5% down from DHI Mortgage.").publishable).toBe(false);
+  });
+
+  it("a PMI or contribution threshold is never the offer's down payment", () => {
+    for (const text of [
+      "Rates as low as 4.99% (5.62% APR) on a 30-year fixed conventional loan. PMI required with less than 20% down.",
+      "Rates as low as 4.99% (5.62% APR) on a 30-year fixed conventional loan. Seller contribution capped at 6% with 10% down or more, 3% with less than 10% down.",
+    ]) {
+      expect(parsePromotionalRate(text).publishable, text).toBe(false);
+    }
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA loan with as little as 3.5% down.")).toMatchObject({ downPaymentPercent: 3.5, holdReasons: [] });
+  });
+
+  it("a figure followed by another loan type's name is that type's figure", () => {
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed conventional loan. Down payment of 3.5% for FHA, 5% for conventional.").publishable).toBe(false);
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA loan. Minimum down payment of 3% for conventional, 3.5% for FHA.").publishable).toBe(false);
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA loan. Down payment of 3.5% for FHA.")).toMatchObject({ downPaymentPercent: 3.5, holdReasons: [] });
+  });
+
+  it("'little to no money down', '100% financing' and spelled-out terms trigger the disclosures; 'adj. rate' wording holds", () => {
+    for (const text of ["Rates as low as 4.99% (5.62% APR) with little to no money down.", "Rates as low as 4.99% (5.62% APR). 100% financing available.", "Rates as low as 4.99% (5.62% APR) on a thirty-year fixed."]) {
+      expect(parsePromotionalRate(text).publishable, text).toBe(false);
+    }
+    expect(parsePromotionalRate("Rates as low as 4.5% (6.38% APR) on an FHA 7/6 Adj. Rate Mortgage, 30-year term, 3.5% down payment.").holdReasons).toContain("adjustable_rate");
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA loan with 3.5% down payment. Rates subject to change without notice.").holdReasons).not.toContain("adjustable_rate");
+  });
+});
+
 describe("a run that did not read the offer source", () => {
   it("leaves the community's hold line as it was", async () => {
     const id = seedCommunity();

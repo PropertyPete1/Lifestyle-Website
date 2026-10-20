@@ -1030,3 +1030,9 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 
 - **Down payment assistance wording:** "on us", "on the builder/seller/house", "from (the/your) builder/seller/lender/us" and "courtesy of" after the figure, "Free N% down", and giving verbs (pay, cover, match, reimburse, contribute, gift, give, provide, fund) through up to three filler words ("pay for your", "cover the full") all mark assistance. The label-first form keeps its assistance nouns unless a tile label follows ("Credit Score", "Savings: $15,000").
 - **The buyer as subject:** you('ll/'d), (home)buyers, borrowers, purchasers, veterans, and/or/when/if/who, or a sentence or tile start or punctuation, with an optional modal. In those cases "pay N% down" is the loan's down payment. A bare "Closing Costs Paid 3.5% Down" tile reads 3.5%. A figure skipped for a payer that is not clearly a third party ("Pulte pays", "Client pays") conflicts with any other down payment and holds.
+
+## Round 36 corrections
+
+- **Loan type:** a down payment whose sentence names only other loan types ("0% down for VA buyers", "No down payment required on VA and USDA loans"; "veterans" counts as VA) conflicts with the offer, and so does any 0% down on an FHA, conventional or jumbo offer. Both hold `ambiguous_rate`.
+- **Who pays:** after a conjunction, comma or dash, "pay/cover N% down" is the buyer's only when the clause names the buyer, or names no third party and no other giving verb. "Lennar pays closing costs and covers 3.5% down" is assistance. Participles after the figure ("paid by the builder", "is covered", "funded by Lennar"), "-funded/-provided" payers before it, and "from <Brand>" mark assistance. A bare participle tile ("Closing Costs Paid 3.5% Down") is a tile label only after a cost noun or a dollar amount.
+- **Triggering terms:** "N% down" and "30-yr" trigger the repayment-terms disclosure.

@@ -897,7 +897,18 @@ function firstRateFigure(text: string): number | null {
  * The down payment. Value first ("3.5% down", "5% Down Payment"), unless that figure is the value of an APR or rate label
  * ("Rate 4.99% APR 5.62% Down Payment 3.5%"); then label first ("down payment of 3.5%", "Down Payment: 3.5%").
  */
-function downPaymentFigure(text: string, aprIndex: number | null, rate: number | null): { value: number | null; conflict: boolean } {
+/**
+ * The loan types the sentence holding a down payment figure names (FHA, VA, USDA, conventional, jumbo; "veterans" is VA).
+ */
+function sentenceLoanTypes(text: string, at: number, length: number): Set<string> {
+  const start = Math.max(0, ...Array.from(text.slice(0, at).matchAll(/[.!?;](?=\s|$)/g)).map((m) => (m.index ?? 0) + 1));
+  const endMatch = /[.!?;](?=\s|$)/.exec(text.slice(at + length));
+  const end = endMatch ? at + length + endMatch.index : text.length;
+  return new Set(Array.from(text.slice(start, end).matchAll(/\b(FHA|VA|USDA|conventional|jumbo|veterans?)\b/gi)).map((m) => (/^veteran/i.test(m[1]!) ? "va" : m[1]!.toLowerCase())));
+}
+
+function downPaymentFigure(text: string, aprIndex: number | null, rate: number | null, loanType: string | null = null): { value: number | null; conflict: boolean } {
+  const foundLoan: Array<Set<string>> = [];
   const found: number[] = [];
   const foundAt = new Set<number>();
   const allAt = new Set<number>();
@@ -918,15 +929,29 @@ function downPaymentFigure(text: string, aprIndex: number | null, rate: number |
     // "Closing Costs Paid" tile label; "Free N% down". The buyer as subject ("you'll pay", "borrowers pay", "and pay") is the
     // loan's own down payment. A figure skipped for a subject that is not a definite third party ("Pulte pays", "Client pays")
     // still conflicts with any other down payment the text states.
-    const afterAssist = /^\s*(?:(?:and|&|or|\/)\s*closing\s+costs?\s*)?(?:assistance|grants?|gifts?|match|matched|matching|program|help|support|incentives?|credits?|savings?|reimbursements?|contributions?|rebates?|bonus|allowance|paid|covered|not\s+required)\b/i.test(after) || /^\s*[-\u2013\u2014,]?\s*(?:is\s+)?(?:on\s+us|on\s+the\s+(?:builder|seller|house)|from\s+(?:the\s+|your\s+)?(?:builder|seller|lender|us)|courtesy\s+of)\b/i.test(after) || /^\s*(?:and|&|or|\/)\s*closing\s+costs?\b/i.test(after) || /^\s*\S*\s*(?:assistance|grants?|gift)\b/i.test(clause.slice(0, 30));
-    const verbBefore = /\b(?:pay|pays|paying|paid|cover|covers|covering|covered|match|matches|matching|reimburse|reimburses|contribute|contributes|gift|gifts|give|gives|giving|provide|provides|providing|fund|funds|funding)[- ]+(?:(?:for|toward|towards|up\s+to|your|you|the|a|an|entire|full|whole|all\s+of|all)\s+){0,3}$/i.test(before);
-    const bareParticiple = /\b(?:paid|covered)[- ]+$/i.test(before) && !/(?:-|\b(?:builder|seller|lender|program|grant|employer)[- ]+)(?:paid|covered)[- ]+$/i.test(before);
-    const buyerSubject = /(?:^|[.!?;:|,(&\-\u2013\u2014]\s*|\b(?:you(?:'ll|'d)?|(?:home)?buyers?|borrowers?|purchasers?|veterans?|only|just|(?:need|have)\s+to|and|or|when|if|who)\s+)(?:(?:will|can|could|would|must|may|only|just)\s+)?(?:pay|pays|paying|cover|covers)\s+(?:just\s+|only\s+)?$/i.test(before);
+    // also a participle after the figure ("\u2026, paid by the builder", "\u2026 is covered", "\u2026 provided/funded by \u2026") and "from"
+    // a named brand ("from Lennar", "from Pulte Mortgage").
+    const afterAssist = /^\s*(?:(?:and|&|or|\/)\s*closing\s+costs?\s*)?(?:assistance|grants?|gifts?|match|matched|matching|program|help|support|incentives?|credits?|savings?|reimbursements?|contributions?|rebates?|bonus|allowance|paid|covered|not\s+required)\b/i.test(after) || /^\s*[-\u2013\u2014,]?\s*(?:is\s+)?(?:on\s+us|on\s+the\s+(?:builder|seller|house)|from\s+(?:the\s+|your\s+)?(?:builder|seller|lender|us)|courtesy\s+of)\b/i.test(after) || /^\s*(?:and|&|or|\/)\s*closing\s+costs?\b/i.test(after) || /^\s*\S*\s*(?:assistance|grants?|gift)\b/i.test(clause.slice(0, 30)) ||
+      /^\s*[-\u2013\u2014,]?\s*(?:is\s+|are\s+|will\s+be\s+|gets?\s+)?(?:fully\s+)?(?:paid|covered|provided|funded|gifted|given|absorbed|reimbursed|contributed)\b(?!\s+(?:at|in|by\s+(?:you|the\s+(?:buyer|borrower|purchaser)))\b)/i.test(after) || /^\s*[-\u2013\u2014,]?\s*(?:is\s+)?[Ff]rom\s+(?!(?:[Yy]our|[Oo]ur|[Tt]heir|[Mm]y|[Dd]ay)\b)[A-Z][A-Za-z&'.]+/.test(after);
+    const verbBefore = /\b(?:pay|pays|paying|paid|cover|covers|covering|covered|match|matches|matching|reimburse|reimburses|contribute|contributes|gift|gifts|give|gives|giving|provide|provides|providing|fund|funds|funding)[- ]+(?:(?:for|toward|towards|up\s+to|your|you|the|a|an|entire|full|whole|all\s+of|all)\s+){0,3}$/i.test(before) || /-(?:funded|provided|gifted|sponsored|matched)\s+$/i.test(before);
+    // "paid"/"covered" right before the figure is a tile label ("Closing Costs Paid 3.5% Down", "$10,000 Paid 3.5% Down")
+    // only after a cost noun or an amount; after a brand or an adverb ("Lennar Paid", "Fully Covered", "Down Payment Covered") it is
+    // assistance.
+    const bareParticiple = /\b(?:closing\s+costs?|costs|fees|title(?:\s+policy)?|HOA(?:\s+dues)?|appraisal|insurance|taxes|points)\s+(?:paid|covered)[- ]+$|\$[\d,]+(?:\.\d+)?k?\s+(?:paid|covered)[- ]+$/i.test(before);
+    // the buyer is the subject when named ("you'll pay", "borrowers pay") or at a sentence/tile start. After a conjunction or
+    // a comma/dash ("and pay", ", pay", "who pays") the subject is whoever the clause names: the buyer unless the clause names a
+    // third party or another giving verb ("We'll pay your closing costs and cover 3.5% down", "Builder Incentive - covers 3.5% down").
+    const namedBuyer = /(?:^|[.!?;:|]\s*|\b(?:you(?:'ll|'d)?|(?:home)?buyers?|borrowers?|purchasers?|veterans?|only|just|(?:need|have)\s+to)\s+)(?:(?:will|can|could|would|must|may|only|just)\s+)?(?:pay|pays|paying|cover|covers)\s+(?:just\s+|only\s+)?$/i.test(before);
+    const joinedVerb = /(?:[,(&\-\u2013\u2014]\s*|\b(?:and|or|when|if|who)\s+)(?:(?:will|can|could|would|must|may|only|just)\s+)?(?:pay|pays|paying|cover|covers)\s+(?:just\s+|only\s+)?$/i.exec(before);
+    const clauseHead = joinedVerb ? (text.slice(Math.max(0, at - 160), at - before.length + joinedVerb.index).split(/[.!?;:|](?=\s|$)/).pop() ?? "") : "";
+    const clauseBuyer = /\b(?:you(?:'ll|'d|'re)?|(?:home)?buyers?|borrowers?|purchasers?|veterans?)\b/i.test(clauseHead);
+    const clausePayer = /\b(?:we(?:'ll|'re)?|us|our|builder|seller|lender|they|homes|program|grant|employer|incentives?|flex\s+cash|pays?|paid|covers?|covered|gives?|provides?|funds?|contributes?|matches)\b/i.test(clauseHead);
+    const buyerSubject = namedBuyer || (joinedVerb !== null && (clauseBuyer || !clausePayer));
     const definitePayer = /\b(?:we(?:'ll|'re)?|us|builder|seller|lender|they|homes|program|grant|employer)\b[^.!?;]{0,30}$/i.test(before) || /-(?:paid|covered|funded)\s+$/i.test(before);
     if (/\bfree\s+$/i.test(before) || afterAssist) continue;
     if (verbBefore && !bareParticiple && !buyerSubject) { if (!definitePayer && value !== null) softSkipped.push(value); continue; }
     if (/\brate\s*[:=]?\s*$/i.test(before) && value !== null && value === rate) continue;
-    if (value !== null) { found.push(value); foundAt.add(at); }
+    if (value !== null) { found.push(value); foundAt.add(at); foundLoan.push(sentenceLoanTypes(text, at, match[0].length)); }
   }
   // The label-first down payment ("with a down payment of 3.5%", "Down Payment: 3.5%"), unless that label is the trailing label of
   // a value-first tile ("10% Down Payment 3% Seller Credit": the 3% belongs to the next tile).
@@ -941,13 +966,20 @@ function downPaymentFigure(text: string, aprIndex: number | null, rate: number |
     break;
   }
   const softConflict = (value: number) => softSkipped.some((other) => other !== value);
+  // a figure in a sentence that names only other loan types ("VA buyers: 0% down" on an FHA offer) is not this offer's down payment; and
+  // FHA, conventional and jumbo loans never have a 0% down payment, whichever sentence said it.
+  const offerLoan = loanType?.toLowerCase() ?? null;
+  const otherLoan = (types: Set<string>) => offerLoan !== null && types.size > 0 && !types.has(offerLoan);
+  const impossibleZero = (value: number) => value === 0 && offerLoan !== null && /^(?:fha|conventional|jumbo)$/.test(offerLoan);
   if (found.length) {
     const values = new Set(found.map((value) => value.toFixed(3)));
     if (labelFirstValue !== null) values.add(labelFirstValue.toFixed(3));
-    return { value: found[0]!, conflict: values.size > 1 || softConflict(found[0]!) };
+    return { value: found[0]!, conflict: values.size > 1 || softConflict(found[0]!) || otherLoan(foundLoan[0]!) || impossibleZero(found[0]!) };
   }
-  if (labelFirstValue !== null) return { value: labelFirstValue, conflict: softConflict(labelFirstValue) };
-  return { value: /\bno\s+down\s+payment\b/i.test(text) ? 0 : null, conflict: false };
+  if (labelFirstValue !== null) return { value: labelFirstValue, conflict: softConflict(labelFirstValue) || impossibleZero(labelFirstValue) };
+  const noDown = /\bno\s+down\s+payment\b/i.exec(text);
+  if (!noDown) return { value: null, conflict: false };
+  return { value: 0, conflict: otherLoan(sentenceLoanTypes(text, noDown.index, noDown[0].length)) || impossibleZero(0) };
 }
 
 /** Every percentage under 20 the text could state as a rate: not an APR, a down payment, a credit, a share or a rate change. */
@@ -1029,7 +1061,7 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const repaymentTermYears = numberMatch(text, /\b(\d{1,2})(?:[- ]?year|[- ]?yr)s?\b\.?[-,\s]*(?:fixed|mortgage|loan|term|financing|amortiz|fha\b|va\b|usda|conventional)/i) ??
     numberMatch(text, /\b(?:term|mortgage|loan|financing|fixed)\s+(?:of\s+|for\s+)?(\d{1,2})(?:[- ]?year|[- ]?yr)s?\b/i);
   const loanType = firstMatch(text, /\b(FHA|VA|USDA|conventional|jumbo)\b/i);
-  const downPaymentRead = downPaymentFigure(text, aprRead?.index ?? null, promotionalRatePercent);
+  const downPaymentRead = downPaymentFigure(text, aprRead?.index ?? null, promotionalRatePercent, loanType);
   const downPaymentPercent = downPaymentRead.value;
   const downPaymentConflict = downPaymentRead.conflict;
   const contractDeadline = findContractDeadline(text);
@@ -1037,7 +1069,8 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   // Repayment disclosures are required only when the text itself states terms:
   // an N-year or N yr term, payments, or a down payment. "first-year" alone is a
   // promotional period, not a repayment term.
-  const triggersTerms = /\b(?:\d+[- ]year|\d+\s*yr|payments?|down\s+payment)\b/i.test(text);
+  // "3.5% down", "no down payment" and "30-yr" are triggering terms too (Reg Z 1026.24(d)(1)).
+  const triggersTerms = /\b(?:\d+[- ]year|\d+[- ]?\s*yrs?|payments?|down\s+payment)\b|\d%\*?\s+(?:min(?:imum|\.)?\s+)?down\b/i.test(text);
   // The span must not run into the closing clause (as in the finder): "contracts … closing by 11/30" names a closing deadline only.
   const namesContractDeadline = /\b(?:contracts?|purchase\s+agreements?|contract\s+sales?|sign(?:ed|ing)?)\b(?:(?!\bclos)[^.]){0,100}\b(?:by|through|until|between|from|written)\b/i.test(text);
   const namesClosingDeadline = /\b(?:clos(?:e|ing))\b[^.]{0,35}\b(?:by|before|than|through)\b/i.test(text);

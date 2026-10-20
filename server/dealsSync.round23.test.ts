@@ -530,6 +530,23 @@ describe("round 35: 'on us', giving verbs, the buyer as subject, label-first ass
   });
 });
 
+describe("round 36: another loan type's down payment, a third party's second verb, participles after the figure", () => {
+  it("a down payment stated for another loan type, or 0% on FHA/conventional, holds", () => {
+    for (const text of ["Rates as low as 4.99% (5.62% APR) on a 30-year fixed FHA loan. 0% down for VA buyers.", "4.99% (5.62% APR) 30-year fixed FHA loan. Little to no down payment with VA or USDA financing.", "4.99% (5.62% APR) 30-year fixed conventional loan. No down payment required on VA and USDA loans."]) {
+      expect(parsePromotionalRate(text).publishable, text).toBe(false);
+    }
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA/VA financing with 3.5% down payment.")).toMatchObject({ downPaymentPercent: 3.5, holdReasons: [] });
+  });
+
+  it("a third party's second verb, a participle after the figure, or a brand payer marks assistance", () => {
+    for (const text of ["Lennar pays closing costs and covers 3.5% down payment. 4.99% (5.62% APR) 30-year fixed FHA loan.", "5% down payment, paid by the builder! 4.99% (5.62% APR) 30-year fixed conventional loan.", "Builder-funded 3.5% down payment! 4.99% (5.62% APR) 30-year fixed FHA loan.", "Lennar Paid 3.5% Down Payment! 4.99% (5.62% APR) 30-year fixed FHA loan."]) {
+      expect(parsePromotionalRate(text).downPaymentPercent, text).toBeNull();
+    }
+    expect(parsePromotionalRate("Lock 4.99% (5.62% APR) on a 30-year fixed FHA loan and pay 3.5% down.").downPaymentPercent).toBe(3.5);
+    expect(parsePromotionalRate("4.99% (5.62% APR) FHA loan with 3.5% down.").holdReasons).toContain("missing_repayment_term");
+  });
+});
+
 describe("a run that did not read the offer source", () => {
   it("leaves the community's hold line as it was", async () => {
     const id = seedCommunity();

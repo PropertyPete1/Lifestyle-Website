@@ -375,6 +375,35 @@ describe("round 28: unlabelled stepped buydowns, step keys, rate cards, held rec
   });
 });
 
+describe("round 29: tile down payments, manual override beside a held text, 'year one'", () => {
+  it("a value-first down payment followed by another tile keeps its own figure; a label-first card reads its labels", () => {
+    for (const [text, dp, apr] of [["4.99% (5.62% APR) 30-yr fixed FHA, 3.5% down payment 6% seller paid closing costs", 3.5, 5.62], ["4.99% Rate 5.62% APR 3.5% Down Payment 6% Seller Contribution 30-Year Fixed FHA", 3.5, 5.62], ["3.99% First-Year Rate 5.81% APR 10% Down Payment 3% Seller Credit 4.99% Years 2-30 30-Year Fixed Conventional", 10, 5.81], ["3.99% First-Year Rate 4.99% Years 2-30 5.81% APR 5% Down 1% Lender Credit 30-Year Fixed Conventional", 5, 5.81], ["Rate 4.99% APR 5.62% Down Payment 3.5% Term 30-year fixed FHA", 3.5, 5.62], ["Rate: 4.99% APR: 5.62% Term: 30-year fixed FHA Down payment: 3.5%", 3.5, 5.62], ["1-0 buydown 3.99% Year 1 Rate 4.99% Years 2-30 Rate 5.21% APR 5% Down Payment 30-year fixed conventional", 5, 5.21]] as const) {
+      expect(parsePromotionalRate(text), text).toMatchObject({ downPaymentPercent: dp, aprPercent: apr });
+    }
+  });
+
+  it("'year one' is a buydown period; an incentive or assistance figure before an APR is not a rate", () => {
+    expect(parsePromotionalRate("3.99% year one, 4.99% thereafter (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment.")).toMatchObject({ rateKind: "promotional", publishable: false });
+    expect(parsePromotionalRate("Incentive: 3% (5.62% APR) FHA 30-year fixed, 3.5% down payment.").promotionalRatePercent).not.toBe(3);
+    expect(parsePromotionalRate("Use your flex cash at 4.99% (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment.")).toMatchObject({ promotionalRatePercent: 4.99, holdReasons: [] });
+    expect(parsePromotionalRate("Closing costs up to 3% (5.62% APR) 30-year fixed FHA loan with 3.5% down payment.").promotionalRatePercent).not.toBe(3);
+  });
+
+  it("a held text the rules now pass stays held while a manual override is live", async () => {
+    const TEXT = "4.99% (5.62% APR) 30-year fixed FHA financing with 3.5% down payment on select homes.";
+    const older: PromotionalRateFacts = { ...parsePromotionalRate(TEXT), holdReasons: ["ambiguous_rate"], publishable: false };
+    const id = seedCommunity();
+    const lead = seedLead();
+    await run({ text: TEXT, facts: older }, 0, id);
+    await saveIncentiveForCommunity({ communityId: id, publicText: MANUAL, manual: true });
+    await run(TEXT, 1, id);
+    expect(live()).toHaveLength(1);
+    expect(live()[0]!.manual).toBe(true);
+    expect(JSON.parse(heldRows()[0]!.holdReason!)).toContain("differs_from_manual_override");
+    expect(((await gatedDealsCatalog(lead)) as Gated)[0]!.incentive!.text).toBe(MANUAL);
+  });
+});
+
 describe("a run that did not read the offer source", () => {
   it("leaves the community's hold line as it was", async () => {
     const id = seedCommunity();

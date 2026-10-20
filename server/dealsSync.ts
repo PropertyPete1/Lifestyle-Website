@@ -446,13 +446,17 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
       // The held record takes this read's figures and reasons: a parser fix releases a record it no longer holds, and an Accept
       // works from what the builder's text says now. Reasons about a manual override or date stay until the admin acts.
       const adminReasons = storedReasons.filter((reason) => reason === "differs_from_manual_override" || reason === "replaces_manual_date");
-      const nextReasons = Array.from(new Set([...unique, ...adminReasons]));
+      // A manual override live beside it keeps the text held, as the new-text path does.
+      const nextReasons = Array.from(new Set([...unique, ...adminReasons, ...(activeManual && activeManual.id !== same.id ? ["differs_from_manual_override"] : [])]));
       const figures = (({ headlineRate, followOnRate, followOnPeriod, apr, loanType, downPayment, repaymentTerms }) => ({ headlineRate, followOnRate, followOnPeriod, apr, loanType, downPayment, repaymentTerms }))(scrapedIncentiveValues(facts));
       const release = nextReasons.length === 0;
       await db.transaction(async (tx) => {
         await takeOffOthers(tx, same.id);
         await retireOtherHeld(tx, same.id);
-        await tx.update(dealIncentives).set({ confirmedAt: now, ...figures, ...(release ? { held: false, active: true, holdReason: null } : { holdReason: JSON.stringify(nextReasons) }) }).where(eq(dealIncentives.id, same.id));
+        // A released record takes this read's dates too (unless the admin set them), so it expires by them like any new record.
+        const scrapedDates = scrapedIncentiveValues(facts);
+        const dates = release ? { ...(same.contractByManual ? {} : { contractBy: scrapedDates.contractBy }), ...(same.closeByManual ? {} : { closeBy: scrapedDates.closeBy }), expiresAt: earliest(same.contractByManual ? same.contractBy : scrapedDates.contractBy, same.closeByManual ? same.closeBy : scrapedDates.closeBy) } : {};
+        await tx.update(dealIncentives).set({ confirmedAt: now, ...figures, ...dates, ...(release ? { held: false, active: true, holdReason: null } : { holdReason: JSON.stringify(nextReasons) }) }).where(eq(dealIncentives.id, same.id));
       });
       if (tookOff.length) summary.incentive.push(`The builder shows the held incentive again; the live one came off: "${tookOff[0]!.publicText.slice(0, 160)}"`);
       if (release) {

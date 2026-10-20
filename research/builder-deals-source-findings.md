@@ -987,3 +987,12 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Rate cards:** "Rate 4.99% APR 5.62% Down Payment 3.5%" reads the APR as 5.62% and the down payment as 3.5%. A value-first APR followed by an unlisted figure ("6% Max Seller Contribution") stays the APR.
 - **APR-paired rates:** loan wording after the figure makes it a rate ("incentive: 5% fixed (5.805% APR)"). Assistance and tax figures are never rates, except after "$X or".
 - **Residue:** an all-caps passage is never skipped as a glued sentence.
+
+## Round 29 corrections
+
+- **Down payment:** value first ("3.5% down payment", "5% Down"), whatever tile follows it. A figure is refused only when it is the value of an APR or rate label already read as that APR or rate ("Rate 4.99% APR 5.62% Down Payment 3.5%"); then the label-first form is read.
+- **APR on tile cards:** a "Rate" label preceded by a figure ("3.99% First-Year Rate 5.81% APR") belongs to the previous tile, so the APR is value-first. A label with no percentage ("Term:", "Loan:") or a figure with its own label ends a label-first card.
+- **Buydowns:** "N% year one" marks a temporary rate.
+- **APR-paired rates:** a figure written as a rate (decimals, at least 2.5%) is the rate after "flex cash at", a "Savings" heading or "Assistance +". A whole or small figure after closing costs, credit or a discount never is. Loan wording must follow the figure itself to lift the incentive skip. Taxes or assistance stated as the figure are never rates.
+- **Held records:** a manual override live beside a held text keeps it held (`differs_from_manual_override`). A released record takes the read's dates (unless the admin set them), so it expires by them.
+- **Extra-rate hold:** ignores rate-change figures ("1% first year buy down").

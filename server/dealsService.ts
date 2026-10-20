@@ -566,7 +566,19 @@ async function dropPrivateResidue(communityId: number, payload: unknown, config:
   return true;
 }
 
-export async function publicDealsCatalog() {
+/**
+ * List order for every community in the area: the one whose reel brought the
+ * visitor first, then the ones with Peter's reels, then the rest by age.
+ */
+export function browseOrder<T extends { id: number; reelCode: string; reelUrl: string | null }>(communities: readonly T[], reelCode: string | null | undefined): T[] {
+  const code = reelCode?.trim().toLowerCase() || null;
+  return [...communities].sort((a, b) =>
+    Number(Boolean(code) && b.reelCode.toLowerCase() === code) - Number(Boolean(code) && a.reelCode.toLowerCase() === code)
+    || Number(Boolean(b.reelUrl)) - Number(Boolean(a.reelUrl))
+    || a.id - b.id);
+}
+
+export async function publicDealsCatalog(src?: string | null) {
   const db = await getDb();
   if (!db) return [];
   const now = new Date();
@@ -574,8 +586,9 @@ export async function publicDealsCatalog() {
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
   const { areaMapRadius, communityAreaMap } = await import("./dealsMap");
   const publicRadius = areaMapRadius(settings, "public");
-  const result = [] as Array<{ label: string; area: string; fromPrice: number | null; reelUrl: string | null; homesAvailable: number; incentive: ReturnType<typeof publicIncentive> | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap> }>;
+  const result = [] as Array<{ label: string; area: string; fromPrice: number | null; reelUrl: string | null; homesAvailable: number; incentive: ReturnType<typeof publicIncentive> | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean }>;
   if (!communities.length) return result;
+  const reelCode = src?.trim().toLowerCase() || null;
   // Two reads for the whole page, however many communities there are.
   const ids = communities.map((community) => community.id);
   const [availableNow, incentives] = await Promise.all([
@@ -584,9 +597,10 @@ export async function publicDealsCatalog() {
   ]);
   const availableCount = new Map<number, number>();
   for (const home of availableNow) availableCount.set(home.communityId, (availableCount.get(home.communityId) ?? 0) + 1);
-  for (const community of communities) {
+  for (const community of browseOrder(communities, reelCode)) {
     const incentive = incentives.get(community.id);
     const entry = {
+      fromYourReel: Boolean(reelCode) && community.reelCode.toLowerCase() === reelCode,
       label: community.publicLabel,
       area: community.areaLabel,
       fromPrice: community.fromPrice,
@@ -674,7 +688,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
     ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, shownHomeIds), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
     : [];
   const photosBy = groupBy(photoRows, (photo) => photo.homeId);
-  for (const community of communities) {
+  for (const community of browseOrder(communities, lead.sourceCode)) {
     const scrubNames = communityScrubConfig(community);
     const scrub = (value: string) => full ? value : scrubPrivateNames(value, scrubNames);
     const incentive = incentives.get(community.id);
@@ -703,6 +717,10 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
       });
     }
     const entry = {
+      // The community whose reel this buyer commented on opens first on their list.
+      fromYourReel: Boolean(lead.sourceCode) && community.reelCode.toLowerCase() === lead.sourceCode.toLowerCase(),
+      // Opaque handle the page keys its open/closed state on.
+      key: hashSecret(`deals-community:${community.id}`).slice(0, 16),
       label: scrub(community.publicLabel),
       area: scrub(community.areaLabel),
       schoolDistrict: scrub(community.schoolDistrict ?? ""),

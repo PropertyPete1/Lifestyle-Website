@@ -76,3 +76,23 @@ Changes and new holds go into one morning email instead of one per call. It is
 sent once every due community has been tried that day, or at 10 AM at the
 latest. Anything found later in the day goes out in one 6 PM follow-up, only if
 there is something new. "Refresh now" in Admin still emails right away.
+
+## Browsing every community
+
+With every community on the page, both lists change shape once they are long:
+
+- **Order:** the community whose reel brought the visitor (`?src=` on the
+  landing page, the buyer's source code on their list) comes first, then the
+  communities with Peter's reels, then the rest.
+- **Reels:** only the first reel loads by itself; every other reel shows a
+  "Watch the video tour" cover and loads when tapped, so the page never opens
+  dozens of Instagram embeds.
+- **Landing page (more than 6 communities):** filters for area, max price,
+  move-in ready, builder rate offer and half-acre+ lots, 12 cards at a time
+  with "Show more".
+- **Private list (more than 3 communities):** the same filters plus bedrooms,
+  applied to homes; communities show as rows with a short summary ("From
+  $389,990 · 2 move-in ready") and open on tap. The buyer's reel community
+  starts open. A Best Deals tap opens that home's community (clearing filters
+  that hide it) and scrolls to the home.
+- Short lists (3 communities or fewer) look exactly as before.

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
-import { Send } from "lucide-react";
+import { Play, Send } from "lucide-react";
 import { SITE } from "@shared/site";
 
 export const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -39,11 +39,17 @@ export function useInstagramEmbeds() {
   }, []);
 }
 
-export function ReelCard({ reelUrl, label }: { reelUrl: string | null; label: string }) {
+/**
+ * The community's Instagram reel. On a long list only the first reel loads on
+ * its own (`autoLoad`); the rest show a "Watch the video tour" cover and load
+ * when tapped, so a page of every community never opens dozens of embeds.
+ */
+export function ReelCard({ reelUrl, label, autoLoad = true }: { reelUrl: string | null; label: string; autoLoad?: boolean }) {
   const [fallback, setFallback] = useState(!reelUrl);
+  const [started, setStarted] = useState(autoLoad);
   const wrapperRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!reelUrl) return;
+    if (!reelUrl || !started) return;
     const process = () => (window as any).instgrm?.Embeds?.process?.();
     process();
     const timer = window.setTimeout(() => {
@@ -54,7 +60,16 @@ export function ReelCard({ reelUrl, label }: { reelUrl: string | null; label: st
       setFallback((current) => current || !embedded);
     }, 5_000);
     return () => window.clearTimeout(timer);
-  }, [reelUrl]);
+  }, [reelUrl, started]);
+  if (reelUrl && !started && !fallback) {
+    return (
+      <button type="button" onClick={() => setStarted(true)} data-deals-reel-cover="true" aria-label={`Watch the video tour of ${label}`} className="flex aspect-[4/5] w-full flex-col items-center justify-center bg-[radial-gradient(ellipse_at_50%_0%,oklch(0.75_0.09_85_/_0.22),transparent_60%),linear-gradient(150deg,oklch(0.2_0.01_285),oklch(0.09_0.005_285))] px-6 text-center">
+        <span className="mb-4 rounded-full border border-gold/50 bg-black/30 p-5 text-gold"><Play className="h-6 w-6 fill-current" /></span>
+        <span className="eyebrow text-gold">Watch the video tour</span>
+        <span className="mt-3 max-w-[16rem] font-serif text-2xl leading-tight">{label}</span>
+      </button>
+    );
+  }
   if (fallback) {
     return (
       <a href={reelUrl ?? "#unlock"} target={reelUrl ? "_blank" : undefined} rel="noreferrer" className="flex aspect-[4/5] w-full flex-col items-center justify-center bg-[radial-gradient(ellipse_at_50%_0%,oklch(0.75_0.09_85_/_0.16),transparent_60%),linear-gradient(150deg,oklch(0.2_0.01_285),oklch(0.09_0.005_285))] px-6 text-center">

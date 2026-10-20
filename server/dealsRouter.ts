@@ -261,9 +261,10 @@ function settings_testTeamNote(phone: string, settings: { testTeamNumbers: strin
 }
 
 export const dealsRouter = router({
-  publicCatalog: publicProcedure.query(async ({ ctx }) => {
+  /** Every community's public card; the one whose reel brought the visitor (`src`) comes first. */
+  publicCatalog: publicProcedure.input(z.object({ src: z.string().trim().max(40).optional() }).optional()).query(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);
-    return publicDealsCatalog();
+    return publicDealsCatalog(input?.src);
   }),
   /** Best Deals on the landing page: public labels, prices and payments only, no card handles or names. */
   featured: publicProcedure.query(async ({ ctx }) => {

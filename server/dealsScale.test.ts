@@ -64,4 +64,16 @@ describe("catalog reads at the scale of every community", () => {
     expect(bigGated.every((entry) => entry.homes.length === 3 && entry.homes.every((home) => home.photos.length === 1))).toBe(true);
     expect(new Set(bigGated.flatMap((entry) => entry.homes.flatMap((home) => home.photos))).size).toBe(120);
   });
+
+  it("puts the community from the visitor's reel first on the landing page and on their private list", async () => {
+    seedCommunities(5);
+    const pub = await publicDealsCatalog("R3");
+    expect(pub[0]).toMatchObject({ label: "Area 3 | New Homes", fromYourReel: true });
+    expect(pub.filter((entry) => entry.fromYourReel)).toHaveLength(1);
+    expect((await publicDealsCatalog()).every((entry) => !entry.fromYourReel)).toBe(true);
+    const leadId = db.seed(dealLeads, { phoneE164: "+12105550124", status: "verified", expiresAt: new Date(Date.now() + 3_600_000), deviceHash: "e".repeat(64), consentText: "c", flags: "[]", sourceCode: "r4" });
+    const gated = await gatedDealsCatalog(leadId) as Array<{ label: string; fromYourReel: boolean; key: string }>;
+    expect(gated[0]).toMatchObject({ label: "Area 4 | New Homes", fromYourReel: true });
+    expect(new Set(gated.map((entry) => entry.key)).size).toBe(5);
+  });
 });

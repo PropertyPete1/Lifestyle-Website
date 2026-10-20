@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "wouter";
-import { Clock3, ExternalLink, Heart, X } from "lucide-react";
+import { ChevronDown, Clock3, ExternalLink, Heart, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
@@ -10,6 +10,8 @@ import { AreaMap } from "./AreaMap";
 import { Countdown } from "./Countdown";
 import { DealsFooter, Incentive, ReelCard, formatChicagoDate, money, type DealsIncentive } from "./shared";
 import { FeaturedDeals, type FeaturedDealsData } from "./FeaturedDeals";
+import { BrowseBar, BROWSE_COPY, ShowMore } from "./BrowseBar";
+import { BROWSE_PAGE, EMPTY_FILTERS, OPEN_ALL_UP_TO, activeFilterCount, gatedCommunityVisible, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export { countdownLabel } from "@/lib/dealsMine";
 export type { ProfileInput } from "@/lib/dealsMine";
@@ -37,6 +39,10 @@ export type GatedHome = {
 
 export type GatedCommunityDetails = { builderName?: string | null; communityName?: string | null; address?: string | null; salesLine?: string | null; builderPage?: string | null };
 export type GatedCommunity = {
+  /** Opaque handle for the page (open/closed state); not a database id. */
+  key?: string;
+  /** The community whose reel this buyer commented on: first, and open. */
+  fromYourReel?: boolean;
   label: string;
   area: string;
   schoolDistrict?: string | null;
@@ -171,30 +177,83 @@ export function scrollToHomeCard(card: string | undefined) {
   document.getElementById(`home-${card}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function communityKey(community: GatedCommunity, index: number) {
+  return community.key ?? `${community.label}#${index}`;
+}
+
+/** One community: a tappable summary row on a long list, the full section when open. */
+function CommunitySection({ community, homes, open, onToggle, autoLoadReel, teamPreview, savedSet, savingCard, onRequest, onSave, id }: {
+  community: GatedCommunity; homes: GatedHome[]; open: boolean; onToggle?: () => void; autoLoadReel: boolean; teamPreview: boolean; savedSet: Set<string>; savingCard?: string | null;
+  onRequest?: (request: HomeRequest) => void; onSave?: (card: string, saved: boolean) => void; id: string;
+}) {
+  const prices = homes.map((home) => home.price).filter((price): price is number => typeof price === "number" && price > 0);
+  const from = prices.length ? Math.min(...prices) : community.fromPrice ?? null;
+  const ready = homes.filter((home) => home.kind === "quick_move_in").length;
+  const summary = [from ? `From ${money.format(from)}` : null, ready ? `${ready} move-in ready` : `${homes.length} home${homes.length === 1 ? "" : "s"}`, community.incentive?.headlineRate ? `${community.incentive.headlineRate} builder rate` : null].filter(Boolean).join(" · ");
+  return <section className="border-t border-border pt-8" data-deals-community={open ? "open" : "closed"}>
+    {onToggle
+      ? <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={id} className="flex w-full min-w-0 items-start justify-between gap-4 text-left">
+          <span className="min-w-0"><span className="eyebrow block text-gold">{community.area}{community.schoolDistrict ? ` · ${community.schoolDistrict}` : ""}{community.fromYourReel ? " · From your reel" : ""}</span><span className="mt-2 block break-words font-serif text-3xl leading-tight sm:text-4xl">{community.label}</span><span className="mt-2 block text-sm text-muted-foreground">{summary}</span></span>
+          <ChevronDown className={`mt-2 h-5 w-5 shrink-0 text-gold transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
+        </button>
+      : <><p className="eyebrow text-gold">{community.area}{community.schoolDistrict ? ` · ${community.schoolDistrict}` : ""}</p><h2 className="mt-2 text-4xl">{community.label}</h2></>}
+    {open && <div id={id}>
+      <CommunityDetails details={community.details} />
+      {community.lotSizes && <p className="mt-2 text-sm text-muted-foreground">{community.lotSizes}</p>}
+      <div className="mt-5"><ReelCard reelUrl={community.reelUrl} label={community.label} autoLoad={autoLoadReel} /></div>
+      {/* The area map sits right under the reel: the general area, never the community. */}
+      <AreaMap chips={community.driveTimes} map={community.areaMap} />
+      <div className="mt-5"><Incentive incentive={community.incentive} /></div>
+      {community.amenities && community.amenities.length > 0 && <div className="mt-5 flex flex-wrap gap-2">{community.amenities.map((item) => <span key={item} className="border border-border px-3 py-1.5 text-xs text-muted-foreground">{item}</span>)}</div>}
+      <div className="mt-7 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">{homes.map((home) => <HomeCard key={home.card} home={home} teamPreview={teamPreview} saved={savedSet.has(home.card)} saving={savingCard === home.card} onRequest={onRequest} onSave={onSave} />)}</div>
+    </div>}
+  </section>;
+}
+
 export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire, featured }: GatedCatalogProps) {
   const [promptDismissed, setPromptDismissed] = useState(false);
   const updatedAt = communities.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
   const savedSet = new Set(saved ?? []);
   const eyebrow = lead.teamPreview ? "Team view" : agent ? `Shared by ${agent.name}` : "Private buyer list";
+  // A short list shows everything open, as before. A list of every community opens only the buyer's own (or the first).
+  const many = communities.length > OPEN_ALL_UP_TO;
+  const [filters, setFilters] = useState<BrowseFilters>(EMPTY_FILTERS);
+  const [pages, setPages] = useState(1);
+  const [opened, setOpened] = useState<Set<string>>(() => new Set(communities.flatMap((community, index) => (community.fromYourReel || index === 0) ? [communityKey(community, index)] : [])));
+  const [pendingCard, setPendingCard] = useState<string | null>(null);
+  const homeFilters = activeFilterCount({ ...filters, area: "", builderRate: false }) > 0;
+  const matching = useMemo(() => communities.map((community, index) => ({ community, index, key: communityKey(community, index) })).filter(({ community }) => gatedCommunityVisible(community, filters)), [communities, filters]);
+  const visible = many ? matching.slice(0, pages * BROWSE_PAGE) : matching;
+  const homeCount = communities.reduce((total, community) => total + community.homes.length, 0);
+  const shownHomes = matching.reduce((total, { community }) => total + (homeFilters ? homesMatching(community, filters) : community.homes).length, 0);
+  // A Best Deals tap opens that home's community (clearing filters that hide it) and scrolls to the card once it is on the page.
+  const selectDeal = (card: string | undefined) => {
+    if (!card) return;
+    const index = communities.findIndex((community) => community.homes.some((home) => home.card === card));
+    if (index < 0) return scrollToHomeCard(card);
+    const key = communityKey(communities[index]!, index);
+    const target = matching.findIndex((entry) => entry.key === key);
+    if (target < 0) { setFilters(EMPTY_FILTERS); setPages(Math.floor(index / BROWSE_PAGE) + 1); }
+    else if (many && target >= pages * BROWSE_PAGE) setPages(Math.floor(target / BROWSE_PAGE) + 1);
+    setOpened((current) => new Set(current).add(key));
+    setPendingCard(card);
+  };
+  useEffect(() => {
+    if (!pendingCard || typeof window === "undefined") return;
+    const frame = window.requestAnimationFrame(() => { scrollToHomeCard(pendingCard); setPendingCard(null); });
+    return () => window.cancelAnimationFrame(frame);
+  }, [pendingCard, opened, pages, filters]);
   return <main data-deals-gated="true" style={identityPatternStyle(lead.display)} className="min-h-screen max-w-full overflow-x-clip bg-background">
     <header className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link><span className="flex items-center gap-4 text-xs text-gold">{lead.teamPreview && <Link href="/deals/team" className="inline-flex min-h-11 items-center underline-offset-4 hover:underline">Agent tools</Link>}<span><Clock3 className="mr-1 inline h-3.5 w-3.5" /> <Countdown expiresAt={lead.expiresAt} now={now} onExpire={onExpire} /></span></span></header>
     <section className="px-5 py-10 sm:px-8"><div className="mx-auto max-w-5xl">
       <div className="border-b border-border pb-7"><p className="eyebrow text-gold">{eyebrow}</p><h1 className="mt-2 break-words text-4xl sm:text-5xl">Prepared for {lead.display}</h1><p className="mt-3 text-sm text-muted-foreground">Updated {formatChicagoDate(updatedAt)}. Your access expires in <Countdown expiresAt={lead.expiresAt} now={now} />.</p>{agent && !lead.teamPreview && <p className="mt-3 text-sm text-foreground" data-deals-agent-note="true">Shared with you by {agent.name}. Tap Save on any home and {agent.firstName ?? "your agent"} hears about it right away.{agent.phone ? ` Questions? Text ${agent.firstName ?? agent.name} at ${agent.phone}.` : ""}</p>}</div>
       {tools}
       {!promptDismissed && !profileSaved && !lead.name && !lead.teamPreview && <NamePrompt onSave={onSaveProfile} saving={savingProfile} error={profileError} onDismiss={() => setPromptDismissed(true)} />}
-      <FeaturedDeals featured={featured} onSelect={(deal) => scrollToHomeCard(deal.card)} />
-      <div className="mt-10 space-y-12">{communities.map((community, index) => <section key={index} className="border-t border-border pt-8">
-        <p className="eyebrow text-gold">{community.area}{community.schoolDistrict ? ` · ${community.schoolDistrict}` : ""}</p>
-        <h2 className="mt-2 text-4xl">{community.label}</h2>
-        <CommunityDetails details={community.details} />
-        {community.lotSizes && <p className="mt-2 text-sm text-muted-foreground">{community.lotSizes}</p>}
-        <div className="mt-5"><ReelCard reelUrl={community.reelUrl} label={community.label} /></div>
-        {/* The area map sits right under the reel: the general area, never the community. */}
-        <AreaMap chips={community.driveTimes} map={community.areaMap} />
-        <div className="mt-5"><Incentive incentive={community.incentive} /></div>
-        {community.amenities && community.amenities.length > 0 && <div className="mt-5 flex flex-wrap gap-2">{community.amenities.map((item) => <span key={item} className="border border-border px-3 py-1.5 text-xs text-muted-foreground">{item}</span>)}</div>}
-        <div className="mt-7 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">{community.homes.map((home) => <HomeCard key={home.card} home={home} teamPreview={lead.teamPreview} saved={savedSet.has(home.card)} saving={savingCard === home.card} onRequest={onRequest} onSave={onSave} />)}</div>
-      </section>)}</div>
+      <FeaturedDeals featured={featured} onSelect={(deal) => selectDeal(deal.card)} />
+      {many && <BrowseBar filters={filters} onChange={(next) => { setFilters(next); setPages(1); }} areas={communities} shown={shownHomes} total={homeCount} unit="homes" showBeds />}
+      {many && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{BROWSE_COPY.none}</p>}
+      <div className="mt-10 space-y-12">{visible.map(({ community, key }, position) => <CommunitySection key={key} id={`deals-community-${position}`} community={community} homes={homeFilters ? homesMatching(community, filters) : community.homes} open={!many || opened.has(key)} onToggle={many ? () => setOpened((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; }) : undefined} autoLoadReel={!many || position === 0} teamPreview={lead.teamPreview} savedSet={savedSet} savingCard={savingCard} onRequest={onRequest} onSave={onSave} />)}</div>
+      {many && <ShowMore remaining={matching.length - visible.length} onClick={() => setPages((value) => value + 1)} />}
     </div></section>
     <DealsFooter />
   </main>;

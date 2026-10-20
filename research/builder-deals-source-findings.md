@@ -996,3 +996,9 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **APR-paired rates:** a figure written as a rate (decimals, at least 2.5%) is the rate after "flex cash at", a "Savings" heading or "Assistance +". A whole or small figure after closing costs, credit or a discount never is. Loan wording must follow the figure itself to lift the incentive skip. Taxes or assistance stated as the figure are never rates.
 - **Held records:** a manual override live beside a held text keeps it held (`differs_from_manual_override`). A released record takes the read's dates (unless the admin set them), so it expires by them.
 - **Extra-rate hold:** ignores rate-change figures ("1% first year buy down").
+
+## Round 30 corrections
+
+- **APR by plausibility:** the APR is read by layout first. If that read cannot be an APR (not above the rates read, or more than 3 points above them), the other reading is taken when it fits. Otherwise the read stands and holds `apr_check`, which also fires whenever an APR is more than 3 points above the rates read. Any "Rate" label with a figure before it in the same run of tile text belongs to the previous tile, whatever its length.
+- **Down payment:** only the figure at the exact position read as the APR is refused (by position, not value). "N% down payment assistance / grant / match / program" is not the down payment.
+- **One-year rates:** "1st year", "(APR) year one", "in/for/during year one" mark a temporary rate. "Thereafter", "after that" and "for the remaining term" are follow-on periods with their figure. A third rate beside such a period holds `ambiguous_rate`.

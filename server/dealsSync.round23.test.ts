@@ -383,7 +383,7 @@ describe("round 29: tile down payments, manual override beside a held text, 'yea
   });
 
   it("'year one' is a buydown period; an incentive or assistance figure before an APR is not a rate", () => {
-    expect(parsePromotionalRate("3.99% year one, 4.99% thereafter (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment.")).toMatchObject({ rateKind: "promotional", publishable: false });
+    expect(parsePromotionalRate("3.99% year one, 4.99% thereafter (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment.")).toMatchObject({ rateKind: "promotional", promotionalRatePercent: 3.99, followOnRatePercent: 4.99, followOnPeriod: "thereafter" });
     expect(parsePromotionalRate("Incentive: 3% (5.62% APR) FHA 30-year fixed, 3.5% down payment.").promotionalRatePercent).not.toBe(3);
     expect(parsePromotionalRate("Use your flex cash at 4.99% (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment.")).toMatchObject({ promotionalRatePercent: 4.99, holdReasons: [] });
     expect(parsePromotionalRate("Closing costs up to 3% (5.62% APR) 30-year fixed FHA loan with 3.5% down payment.").promotionalRatePercent).not.toBe(3);
@@ -401,6 +401,30 @@ describe("round 29: tile down payments, manual override beside a held text, 'yea
     expect(live()[0]!.manual).toBe(true);
     expect(JSON.parse(heldRows()[0]!.holdReason!)).toContain("differs_from_manual_override");
     expect(((await gatedDealsCatalog(lead)) as Gated)[0]!.incentive!.text).toBe(MANUAL);
+  });
+});
+
+describe("round 30: tile APRs by plausibility and position, assistance, one-year wordings", () => {
+  it("a long rate label before a value-first APR does not make the next tile the APR", () => {
+    for (const text of ["3.99% First Year Interest Rate 5.81% APR 10% Down Payment 3% Seller Credit 4.99% Years 2-30 30-Year Fixed Conventional", "3.99% Year 1 Rate 4.99% Years 2 - 30 Rate 5.81% APR 10% Down Payment 2% Seller Credit 30-Year Fixed Conventional", "3.99% First Year Interest Rate 5.81% APR 20% Down Payment 4.99% Years 2-30 30-Year Fixed Conventional"]) {
+      const facts = parsePromotionalRate(text);
+      expect(facts.aprPercent, text).toBe(5.81);
+      expect([10, 20], text).toContain(facts.downPaymentPercent);
+    }
+    expect(parsePromotionalRate("5% Rate 5.25% APR 5% Down Payment 3% Seller Credit 30-Year Fixed Conventional").downPaymentPercent).toBe(5);
+  });
+
+  it("down payment assistance is not the down payment", () => {
+    for (const text of ["Up to 5% down payment assistance available! 4.99% (5.62% APR) 30-year fixed FHA with 3.5% down payment.", "3% down payment assistance plus 4.99% (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment."]) {
+      expect(parsePromotionalRate(text).downPaymentPercent, text).toBe(3.5);
+    }
+  });
+
+  it("one-year rates written '1st year', '(APR) year one', 'in year one' are buydowns with their follow-on", () => {
+    for (const text of ["3.99% (5.62% APR) 1st year, 4.99% thereafter, 30-year fixed FHA loan with 3.5% down payment.", "Get 3.99% (5.62% APR) in year one and 4.99% after that on a 30-year fixed FHA loan with 3.5% down payment.", "Enjoy 3.99% (5.62% APR) for year one! 4.99% for the remaining term. 30-year fixed FHA loan with 3.5% down payment."]) {
+      expect(parsePromotionalRate(text), text).toMatchObject({ rateKind: "promotional", promotionalRatePercent: 3.99, followOnRatePercent: 4.99 });
+    }
+    expect(parsePromotionalRate("2.99% year one, 3.99% year two, 4.99% thereafter (5.12% APR) on a 30-year fixed FHA loan with 3.5% down payment.").holdReasons).toContain("ambiguous_rate");
   });
 });
 

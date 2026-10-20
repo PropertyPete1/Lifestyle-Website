@@ -971,3 +971,10 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Reads:** "N% 30-Year Fixed (FHA) Rate (M% APR)", "Interest rate: N%" and "Rate N% / APR M%" give the headline. An APR-paired figure is skipped only after "down payment of". "Incentive rate" and "the builder's preferred lender" are rate wording. Tax, co-op, MUD and PID rates are never the "as low as" headline.
 - **Relative rates:** only rate words may stand between the figure and the change word ("1% first-year rate cut", "1% interest rate reduction"), so "4.99% rate for lower monthly payments" is a rate.
 - **Hold reasons** are de-duplicated. An all-caps name before a word TLD is a glued sentence only in an all-caps passage.
+
+## Round 27 corrections
+
+- **APR:** a value-first "N% APR" is the APR unless the figure before it follows a rate label and "APR" is followed by another figure that is not a down payment, points or a credit ("Rate 4.99% APR 5.62%"). A label-first APR figure that is a down payment, points or a credit is never the APR. An APR below the first-year rate, or equal to the down payment, holds `ambiguous_rate` for every rate kind.
+- **Multi-step buydowns:** two or more later steps ("beginning in year 2 … beginning in year 3", "after the first year … after the second year"), or a 2-1/3-2-1 buydown read as one step from year 2, hold `ambiguous_rate`.
+- **APR-paired rates:** a figure written as a rate (decimals, 2.5% or more) after "$X or" or a heading is the rate. A smaller or whole figure after closing costs, a discount, savings, an incentive, taxes or assistance is not.
+- **Label-first rates** take "Interest Rate N% APR M%" but never "Annual Percentage Rate: N%". "Taxes", "insurance" and "payments" "as low as" are never a rate. The all-caps glued-sentence skip covers only ordinary sentence-ending words (HOMES, a city).

@@ -316,6 +316,29 @@ describe("round 26: stepped buydowns, label-first APRs, holds and reads", () => 
   });
 });
 
+describe("round 27: APR layouts, multi-step buydowns, guarded APR pairs", () => {
+  it("a value-first APR followed by a down payment or points is the APR", () => {
+    for (const [text, apr] of [["3.99% first-year rate with a 1-0 buydown, 4.99% for years 2-30, 5.81% APR* 5% down payment, 30-year fixed conventional.", 5.81], ["3.99% First-Year Rate 4.99% Years 2-30 5.62% APR 3.5% Down 30-Year Fixed FHA", 5.62], ["1-0 buydown 3.99% Year 1 Rate 4.99% Years 2-30 Rate 5.21% APR 5% Down Payment 30-year fixed conventional", 5.21], ["4.99% Rate 5.62% APR 3.5% Down 30-Year Fixed FHA", 5.62], ["4.75% fixed rate, 5.12% APR 0.5% discount points, 30-year fixed conventional loan with 5% down payment.", 5.12]] as const) {
+      expect(parsePromotionalRate(text).aprPercent, text).toBe(apr);
+    }
+    expect(parsePromotionalRate("Interest Rate 4.875% APR 5.512% on a 30-year fixed FHA loan with 3.5% down payment.")).toMatchObject({ promotionalRatePercent: 4.875, aprPercent: 5.512 });
+  });
+
+  it("a buydown with more than one later step holds", () => {
+    for (const text of ["2-1 buydown: 3.99% first year, 4.99% beginning in year 2 and 5.99% beginning in year 3 (6.1% APR) on a 30-year fixed FHA loan with 3.5% down payment.", "3.99% for the first year, 4.99% after the first year and 5.99% after the second year (6.1% APR) on a 30-year fixed FHA loan with 3.5% down payment.", "3.99% first year; beginning in year 2 the rate is 4.99%; beginning in year 3 the rate is 5.99% (6.1% APR) on a 30-year fixed FHA loan with 3.5% down payment."]) {
+      expect(parsePromotionalRate(text).holdReasons, text).toContain("ambiguous_rate");
+    }
+  });
+
+  it("a small or whole figure after closing costs, a discount or savings is not an APR-paired rate", () => {
+    for (const text of ["Closing costs up to 3% (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment.", "Rate discount of 1% (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment.", "Savings 1% (5.62% APR) on a 30-year fixed FHA loan with 3.5% down payment."]) {
+      expect(parsePromotionalRate(text).publishable, text).toBe(false);
+    }
+    expect(parsePromotionalRate("Seller credit of $15,000 or 4.99% (5.62% APR) 30-year fixed FHA financing with 3.5% down payment.")).toMatchObject({ promotionalRatePercent: 4.99, holdReasons: [] });
+    expect(publicTextResidue("PRE-QUALIFY AT DHIMORTGAGE.LOANS NOW")).toBe("web address");
+  });
+});
+
 describe("a run that did not read the offer source", () => {
   it("leaves the community's hold line as it was", async () => {
     const id = seedCommunity();

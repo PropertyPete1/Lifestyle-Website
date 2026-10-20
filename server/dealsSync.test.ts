@@ -325,6 +325,59 @@ describe("official refresh: incentive lifecycle", () => {
     expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(1);
   });
 
+  it("never leaves a promo the builder no longer shows live while builders alternate a held and a clean banner (A held → B → A → B → A)", async () => {
+    const run = async (text: string, day: number) => { mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: text })); await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + day * DAY) }); };
+    await run(HELD_TEXT, 0);
+    await run(NO_DATE_TEXT, 3);
+    expect(activeIncentives().map((row) => row.publicText)).toEqual([NO_DATE_TEXT]);
+    await run(HELD_TEXT, 6);
+    expect(activeIncentives()).toEqual([]);
+    await run(NO_DATE_TEXT, 9);
+    expect(activeIncentives().map((row) => row.publicText)).toEqual([NO_DATE_TEXT]);
+    expect(db.rows(dealCommunities)[0].incentiveHoldReason).toBeNull();
+    await run(HELD_TEXT, 12);
+    expect(activeIncentives()).toEqual([]);
+    expect(String(db.rows(dealCommunities)[0].incentiveHoldReason)).toMatch(/^missing_contract_deadline/);
+    await run(HELD_TEXT, 15);
+    expect(activeIncentives()).toEqual([]);
+    expect(db.rows(dealIncentives).filter((row) => row.held)).toHaveLength(1);
+  });
+
+  it("keeps an accepted (edited) record live across syncs of the same builder text, and revives it as accepted when it returns", async () => {
+    const PHONE_TEXT = `${NO_DATE_TEXT} Call (210) 555-0142.`;
+    const run = async (text: string, day: number) => { mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: text })); await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + day * DAY) }); };
+    await run(PHONE_TEXT, 0);
+    const held = db.rows(dealIncentives).find((row) => row.held)!;
+    expect(JSON.parse(String(held.holdReason))).toContain("private_text_remaining");
+    // The admin edits the phone number out and accepts (what acceptIncentiveHold writes: the builder's identity stays, the wording is the admin's).
+    Object.assign(held, { publicText: NO_DATE_TEXT, active: true, held: false, holdReason: null, acceptedAt: new Date(T0.getTime() + DAY) });
+    db.rows(dealCommunities)[0].incentiveHoldReason = null;
+    mocks.sendBuilderDealsEmail.mockClear();
+    await run(PHONE_TEXT, 3);
+    await run(PHONE_TEXT, 6);
+    expect(activeIncentives().map((row) => [row.id, row.publicText])).toEqual([[held.id, NO_DATE_TEXT]]);
+    expect(db.rows(dealIncentives)).toHaveLength(1);
+    expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(0);
+    // Replaced, then back: the accepted record returns as the admin left it, with no new hold.
+    await run(FULL_TEXT, 9);
+    await run(PHONE_TEXT, 12);
+    expect(activeIncentives().map((row) => [row.id, row.publicText])).toEqual([[held.id, NO_DATE_TEXT]]);
+    expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(0);
+  });
+
+  it("judges a live scraped record again on every run: one published under earlier rules comes off and is held, with one e-mail", async () => {
+    const OLD = "Interest rates as low as 3.99%. 4.99% (6.62% APR) FHA 30-year fixed with 3.5% down payment.";
+    const norm = parsePromotionalRate(OLD).normalizedText;
+    db.seed(dealIncentives, { communityId, normalizedText: norm, publicText: OLD, headlineRate: "3.99%", apr: "6.62%", active: true, held: false, manual: false, confirmedAt: T0 });
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: OLD }));
+    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + DAY) });
+    expect(activeIncentives()).toEqual([]);
+    expect(JSON.parse(String(db.rows(dealIncentives)[0].holdReason))).toContain("ambiguous_rate");
+    expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(1);
+    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 2 * DAY) });
+    expect(emails().filter((email) => email.category === "deals_sync_hold")).toHaveLength(1);
+  });
+
   it("keeps a manual override and its sticky dates, holds a differing scrape with differs_from_manual_override, and names a dropped manual date", async () => {
     const manualId = db.seed(dealIncentives, { communityId, normalizedText: "4.999% 5.737% apr fha 30 year fixed rate financing on select homes with 3.5% down payment", publicText: NO_DATE_TEXT, manual: true, active: true, held: false, contractBy: chicagoEndOfDay(2026, 11, 8), contractByManual: true, expiresAt: chicagoEndOfDay(2026, 11, 8), confirmedAt: new Date(T0.getTime() - 5 * DAY) });
     mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }], incentiveText: NO_DATE_TEXT }));

@@ -331,6 +331,8 @@ export const dealIncentives = mysqlTable(
     held: boolean("held").default(false).notNull(),
     holdReason: text("hold_reason"),
     manual: boolean("manual").default(false).notNull(),
+    /** When an admin accepted or saved this text: the sync never re-holds it for the same builder text, and keeps the admin's wording and values. */
+    acceptedAt: timestamp("accepted_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
   },

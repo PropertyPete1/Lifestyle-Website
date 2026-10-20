@@ -141,7 +141,8 @@ describe("incentive admin", () => {
       await expect(saveIncentiveForCommunity({ communityId, manual: true, publicText: text, headlineRate: "4.99%", apr: "5.75%", loanType: "FHA", repaymentTerms: "30-year fixed", downPayment: "3.5%" })).rejects.toMatchObject({ code: "BAD_REQUEST", message: `Remove the ${kind} from the incentive text before publishing.` });
       // Edited clean, it is accepted.
       await acceptIncentiveHold({ id: heldId, publicText: "4.99% (5.75% APR) FHA 30-year fixed with 3.5% down." });
-      expect(db.rows(dealIncentives).find((row) => row.id === heldId)).toMatchObject({ active: true, held: false });
+      // The edit is the published wording; the builder's text stays the record's identity, so the next sync re-confirms it.
+      expect(db.rows(dealIncentives).find((row) => row.id === heldId)).toMatchObject({ active: true, held: false, publicText: "4.99% (5.75% APR) FHA 30-year fixed with 3.5% down.", normalizedText: `held ${kind} ${text.length}`, acceptedAt: expect.any(Date) });
     }
   });
 

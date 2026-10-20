@@ -683,6 +683,29 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - Empire offer text: CTA labels ("View Offers", "Learn More") and the
   leftover parenthesis of a removed loan-officer clause are cleaned.
 
+### Round-20 corrections (2026-10-20): the incentive state machine
+
+- An admin's Accept or save marks the record (`accepted_at`, migration
+  0021) and keeps the builder's text as its identity (`normalized_text`);
+  only the published wording is the admin's. The next sync of the same
+  builder text re-confirms it (no new held copy, no e-mail), and an
+  accepted text that returns after being replaced or lapsing comes back as
+  accepted.
+- A scraped record that is not admin-owned is judged on every run: live,
+  superseded or lapsed, if this scrape's rules hold it, it comes off and is
+  held (one e-mail); a live one otherwise takes this scrape's figures.
+- When the builder shows a held text again, any other scraped promo comes
+  off and the community carries the hold again if a run in between cleared
+  it; a revived text retires other held records as superseded.
+- Rate parser: "rates starting at / from / of N%" and any figure under 20%
+  in a sentence about a rate, financing, a loan or a loan program count as a
+  rate (APR required), unless the words after it make it a down payment,
+  closing costs, a credit or a discount; figures of 20% or more ("100%
+  financing") are never a rate figure.
+- Residue: a phone number with any or no separators after the area code;
+  web addresses on more top-level domains, matched only in lower or all
+  upper case so "homes.Homes" (two sentences glued) is not an address.
+
 ## Lennar reader (added 2026-10-20)
 
 - Site: `www.lennar.com` (Next.js pages router). The community page

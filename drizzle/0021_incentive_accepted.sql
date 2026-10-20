@@ -1,0 +1,1 @@
+ALTER TABLE `deal_incentives` ADD `accepted_at` timestamp;

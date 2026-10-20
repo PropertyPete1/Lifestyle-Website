@@ -185,6 +185,17 @@ describe("deals adapters", () => {
       expect(parsePromotionalRate(wording).rateKind, wording).toBe("fixed");
       expect(parsePromotionalRate(wording).holdReasons, wording).toContain("missing_apr");
     }
+    // "Rates starting at 3.99%", "Mortgage rates from 3.99%" and "Get 3.99% on FHA loans" are rates (an APR is required); beside another rate they are a second figure.
+    for (const wording of ["Rates starting at 3.99% on select quick move-in homes.", "Mortgage rates from 3.99% on select homes.", "Get 3.99% on FHA loans this month."]) {
+      expect(parsePromotionalRate(wording).rateKind, wording).not.toBe("none");
+      expect(parsePromotionalRate(wording).holdReasons, wording).toContain("missing_apr");
+    }
+    expect(parsePromotionalRate("Rates starting at 3.99%. 4.99% (5.6% APR) FHA 30-year fixed with 3.5% down payment.").holdReasons).toContain("ambiguous_rate");
+    // Not rates: a down payment, closing costs, a lender credit, "100% financing".
+    for (const wording of ["Up to 3% toward closing costs on FHA loans.", "Only 3.5% down on FHA financing.", "A 1% lender credit on conventional loans.", "100% USDA financing available with no down payment."]) {
+      expect(parsePromotionalRate(wording).rateKind, wording).toBe("none");
+    }
+    expect(parsePromotionalRate("4.99% (5.62% APR) USDA 30-year fixed with 100% financing and 0% down payment.").holdReasons).not.toContain("ambiguous_rate");
     // Boilerplate "subject to change and adjust at any time" names no stepped rate.
     expect(parsePromotionalRate("4.5% (6.38% APR) FHA 30-year fixed, 3.5% down. Prices, plans and incentives are subject to change and adjust at any time.").holdReasons).not.toContain("adjustable_rate");
     // Dates are only required when the source actually names a contract or closing deadline.
@@ -231,6 +242,9 @@ describe("deals adapters", () => {
     // A lender's NMLS id in any spelling names the lender.
     for (const id of ["NMLS 1791", "NMLS #1791", "NMLS ID No. 1791", "NMLSR ID 1791", "NMLS Unique Identifier 1791", "N.M.L.S. 1791", "NMLS Consumer Access 1791"]) expect(toPublicSafeText(`Financing through our lender (${id}).`, config)).toBeNull();
     expect(toPublicSafeText("Financing through our lender.", config)).toBe("Financing through our lender.");
+    // Phone numbers written without a separator after the area code, a .realtor address; never sentences glued without a space, prices, ids or dates.
+    for (const residue of ["Call (210)555-0142.", "Call 210-5550142.", "Visit fixture.realtor today.", "Write sales@fixture.site."]) expect(toPublicSafeText(residue, config), residue).toBeNull();
+    for (const clean of ["On select homes.Homes must close by 12/31/2026.", "Priced at $1,500,000 with 2,450 sq ft on Lot 12, ZIP 78222-1234.", "Homesite 40477523124, 30-year fixed, 2026 pricing.", "U.S. Bank financing available."]) expect(toPublicSafeText(clean, config), clean).not.toBeNull();
     // A bare domain and a ten-digit phone number are residue like a link is; prices and ZIP codes are not.
     expect(toPublicSafeText("See TollBrothersMortgage.com for details.", config)).toBeNull();
     expect(toPublicSafeText("Call 8775000508 today.", config)).toBeNull();

@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealIncentives, dealJobRuns } from "../drizzle/schema";
 import { getDb } from "./db";
-import { RATE_FIGURE_WORDING, hasBuilderReader, officialHostFor, publicTextResidue, type DealHoldReason } from "./dealsAdapters";
+import { hasBuilderReader, mentionsRate, officialHostFor, publicTextResidue, type DealHoldReason } from "./dealsAdapters";
 import { chicagoDay, chicagoEndOfDay, getDealSettings } from "./dealsService";
 import { normalizeExcludedTerms, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
 import { activeCatalogHold, builderScrubConfig, communityRefreshDue, leaseBuilder, refreshOfficialDeals, storedExcludedScrubTerms, storedScrubConfig, summarizeHolds } from "./dealsSync";
@@ -172,7 +172,7 @@ function earliest(a: Date | null, b: Date | null): Date | null {
 export function incentiveRequiredFields(input: { publicText: string; headlineRate?: string | null; apr?: string | null; followOnRate?: string | null; followOnPeriod?: string | null; loanType?: string | null; downPayment?: string | null; repaymentTerms?: string | null; contractBy?: Date | null; closeBy?: Date | null; noContractDeadline?: boolean }): string[] {
   const missing: string[] = [];
   const text = input.publicText;
-  const rateMentioned = Boolean(input.headlineRate?.trim()) || /\d+(?:\.\d+)?%\s*(?:\(|\/)?\s*(?:\d+(?:\.\d+)?%\s*)?(?:APR|rate|fixed|financing)|(?:rate|APR).*\d+(?:\.\d+)?%/i.test(text) || RATE_FIGURE_WORDING.test(text);
+  const rateMentioned = Boolean(input.headlineRate?.trim()) || /\d+(?:\.\d+)?%\s*(?:\(|\/)?\s*(?:\d+(?:\.\d+)?%\s*)?(?:APR|rate|fixed|financing)|(?:rate|APR).*\d+(?:\.\d+)?%/i.test(text) || mentionsRate(text);
   if (rateMentioned && !input.apr?.trim()) missing.push("apr");
   if (rateMentioned && /buy[- ]?down|first[- ]year|year\s*1\b|introductory|temporarily/i.test(text)) {
     if (!input.followOnRate?.trim()) missing.push("followOnRate");
@@ -218,7 +218,7 @@ export async function saveIncentiveForCommunity(input: AdminIncentiveInput): Pro
     headlineRate: normalizeRateFigure(fields.headlineRate), followOnRate: normalizeRateFigure(fields.followOnRate), followOnPeriod: fields.followOnPeriod ?? null, apr: normalizeRateFigure(fields.apr),
     loanType: fields.loanType ?? null, downPayment: fields.downPayment ?? null, repaymentTerms: fields.repaymentTerms ?? null,
     contractBy, closeBy, contractByManual: contractBy !== null, closeByManual: closeBy !== null, expiresAt: earliest(contractBy, closeBy),
-    confirmedAt: now, active: true, held: false, holdReason: null,
+    confirmedAt: now, active: true, held: false, holdReason: null, acceptedAt: now,
   };
   let savedId = id ?? 0;
   await db.transaction(async (tx) => {
@@ -313,7 +313,9 @@ export async function acceptIncentiveHold(input: AcceptIncentiveHoldInput): Prom
   await db.transaction(async (tx) => {
     await tx.update(dealIncentives).set({ active: false }).where(eq(dealIncentives.communityId, incentive.communityId));
     await tx.update(dealIncentives).set({
-      publicText, normalizedText: normalizedText(publicText),
+      // The scrape's identity (normalizedText) stays the builder's text, so the next sync of the same text re-confirms this
+      // accepted record with the admin's wording and values instead of holding a fresh copy.
+      publicText, acceptedAt: now,
       headlineRate: normalizeRateFigure(patch.headlineRate ?? incentive.headlineRate), apr: normalizeRateFigure(patch.apr ?? incentive.apr),
       followOnRate: normalizeRateFigure(patch.followOnRate ?? incentive.followOnRate), followOnPeriod: patch.followOnPeriod ?? incentive.followOnPeriod,
       loanType: patch.loanType ?? incentive.loanType, downPayment: patch.downPayment ?? incentive.downPayment, repaymentTerms: patch.repaymentTerms ?? incentive.repaymentTerms,

@@ -637,7 +637,31 @@ function rateNear(text: string, pattern: RegExp): number | null {
 /** A rate figure with its APR beside it. */
 const APR_PAIRED_RATE = /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:[(\[]\s*\d+(?:\.\d+)?%\s*(?:APR|Annual\s+Percentage\s+Rate)|[(\[]\s*APR\s*\d+(?:\.\d+)?%|\/\s*\d+(?:\.\d+)?%\s*APR)/i;
 /** A figure written as a loan rate: "4.99% fixed", "4.99% 30-year fixed FHA", "4.99% financing", "4.99% FHA/VA". */
-export const RATE_FIGURE_WORDING = /\d+(?:\.\d+)?%\s+(?:\d{1,2}[- ]?(?:year|yr)s?\.?\s+)?(?:fixed|financing|FHA|VA|USDA|conventional)\b/i;
+export const RATE_FIGURE_WORDING = /(?<![\d.])(?:1\d|\d)(?:\.\d+)?%\s+(?:\d{1,2}[- ]?(?:year|yr)s?\.?\s+)?(?:fixed|financing|FHA|VA|USDA|conventional)\b/i;
+
+/** "Rates starting at 3.99%", "mortgage rates from 3.99%", "a rate of 3.99%". */
+const RATE_FROM_FIGURE = /\brates?\s+(?:starting\s+(?:at|from)|from|of|at)\s+(\d+(?:\.\d+)?)%/i;
+/** A percentage that is not a loan rate: a down payment, closing costs, a credit, a discount, a share of the price. */
+const NOT_A_RATE_AFTER = /^\s*(?:minimum\s+)?(?:down|of|off|toward|towards|in\s+closing|closing|seller|lender\s+credit|credit|commission|bonus|discount|cash\s+back|deposit|earnest|financing\b(?=[^.]*\b(?:USDA|VA|no\s+down|zero\s+down)))/i;
+/**
+ * Fail-safe rate mention: a percentage below 20 in a sentence that names a
+ * rate, financing, a loan, a mortgage or a loan program, unless the words after
+ * it make it a down payment, closing costs or a credit ("Get 3.99% on FHA
+ * loans" is a rate; "3.5% down" and "3% toward closing costs" are not).
+ */
+export function mentionsRate(text: string): boolean {
+  if (/\b(?:interest\s+rates?|APR|buy[- ]?down)\b/i.test(text) || RATE_FIGURE_WORDING.test(text) || RATE_FROM_FIGURE.test(text)) return true;
+  for (const sentence of text.split(/(?<=[.!?])\s+/)) {
+    if (!/\b(?:rates?|financing|loans?|mortgages?|FHA|VA|USDA|conventional)\b/i.test(sentence)) continue;
+    for (const match of Array.from(sentence.matchAll(/(\d+(?:\.\d+)?)%/g))) {
+      const value = Number(match[1]);
+      if (!Number.isFinite(value) || value <= 0 || value >= 20) continue;
+      if (NOT_A_RATE_AFTER.test(sentence.slice((match.index ?? 0) + match[0].length))) continue;
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Every figure the text states as a loan rate (an "as low as" figure, a figure
@@ -646,12 +670,14 @@ export const RATE_FIGURE_WORDING = /\d+(?:\.\d+)?%\s+(?:\d{1,2}[- ]?(?:year|yr)s
 function statedRateFigures(text: string): number[] {
   const patterns = [
     /(?:rates?\s+as\s+low\s+as|as\s+low\s+as|reduced\s+to)\s+(\d+(?:\.\d+)?)%/gi,
+    new RegExp(RATE_FROM_FIGURE.source, "gi"),
     new RegExp(APR_PAIRED_RATE.source, "gi"),
     /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:interest\s+)?rate\b(?!\s*(?:reduction|discount|buy))/gi,
     /(\d+(?:\.\d+)?)%\s+(?:\d{1,2}[- ]?(?:year|yr)s?\.?\s+)?(?:fixed|financing|FHA|VA|USDA|conventional)\b/gi,
   ];
   const out: number[] = [];
-  for (const pattern of patterns) for (const match of Array.from(text.matchAll(pattern))) { const value = numericValue(match[1]); if (value !== null) out.push(value); }
+  // A figure of 20% or more is never a loan rate ("100% financing" is no down payment).
+  for (const pattern of patterns) for (const match of Array.from(text.matchAll(pattern))) { const value = numericValue(match[1]); if (value !== null && value > 0 && value < 20) out.push(value); }
   return out;
 }
 
@@ -668,9 +694,10 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
     // "4.25% (6.051% APR)", "2.99% (APR 6.81%)", "4.99% [6.62% APR]", "4.990% (6.619% Annual Percentage Rate)", "5% Fixed / 5.805% APR".
     rateNear(text, APR_PAIRED_RATE) ??
     rateNear(text, /(?:rates?\s+as\s+low\s+as|as\s+low\s+as|reduced\s+to)\s+(\d+(?:\.\d+)?)%/i) ??
+    rateNear(text, RATE_FROM_FIGURE) ??
     // "4.99% interest rate".
     rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:interest\s+)?rate\b/i);
-  const rateMentioned = headline !== null || /\b(?:interest\s+rates?|APR|buy[- ]?down)\b/i.test(text) || RATE_FIGURE_WORDING.test(text);
+  const rateMentioned = headline !== null || mentionsRate(text);
   const rateKind = !rateMentioned ? "none" : hasTemporaryRate ? "promotional" : "fixed";
   const promotionalRatePercent = headline;
   const promotionalPeriod = firstMatch(text, /\b(first[- ]year|year\s*1|year\s+one)\b/i) ?? firstMatch(text, /\b(for\s+year\s*\d+)\b/i);
@@ -1316,11 +1343,16 @@ function remainingPrivateTerm(text: string, terms: readonly string[] | DealScrub
  * address, an e-mail address, a phone number (with or without separators
  * or a leading 1) or an NMLS id; null when there is none.
  */
+const WEB_TLDS = ["com", "net", "org", "us", "io", "info", "biz", "co", "homes", "house", "realty", "realtor", "mortgage", "loans", "bank", "finance", "lending", "tx", "site", "app", "online", "today", "live", "team", "group", "builders", "properties", "estate", "land", "llc", "inc"];
+const WEB_ADDRESS = new RegExp(`\\b[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.(?:${WEB_TLDS.join("|")})\\b`);
+const WEB_ADDRESS_UPPER = new RegExp(`\\b[A-Z0-9-]+(?:\\.[A-Z0-9-]+)*\\.(?:${WEB_TLDS.map((tld) => tld.toUpperCase()).join("|")})\\b`);
+
 export function publicTextResidue(text: string): "link" | "web address" | "e-mail address" | "phone number" | "NMLS id" | null {
   if (/\b(?:https?:\/\/|www\.)\S+/i.test(text)) return "link";
   if (/[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(text)) return "e-mail address";
-  if (/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|us|io|info|biz|co|homes|house|realty|mortgage|loans|bank|finance|lending|tx)\b/i.test(text)) return "web address";
-  if (/(?<![\d.$,])1?\d{10}(?!\d|\.\d)/.test(text) || /(?<![\d.$,])(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}(?!\d|\.\d)/.test(text)) return "phone number";
+  // A web address's top-level domain is written in lower (or all upper) case: "on select homes.Homes must close" is two sentences, not an address.
+  if (WEB_ADDRESS.test(text) || WEB_ADDRESS_UPPER.test(text)) return "web address";
+  if (/(?<![\d.$,])1?\d{10}(?!\d|\.\d)/.test(text) || /(?<![\d.$,])(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}(?!\d|\.\d)/.test(text)) return "phone number";
   if (NMLS_ID_PATTERN.test(text)) return "NMLS id";
   return null;
 }

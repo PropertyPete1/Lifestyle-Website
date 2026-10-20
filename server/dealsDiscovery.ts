@@ -7,10 +7,11 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { DAVIDSON_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { DAVIDSON_HOST, HIGHLAND_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
+import { highlandRecord } from "./dealsAdapters.highland";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -106,6 +107,12 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     index: { kind: "listing", url: `https://${DAVIDSON_HOST}/states/texas/san-antonio-market-area/`, accept: "text/html,application/xhtml+xml", entries: (body, host) => davidsonMarketLinks(body)?.map((uri) => ({ url: new URL(uri, `https://${host}/`).toString(), record: null })) ?? null },
     communityPath: /^\/states\/texas\/san-antonio-market-area\/(?!counties\/|school-districts\/|promotions\/|zip-codes\/)[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
     record: davidsonRecord,
+  },
+  {
+    // Highland's community list is rendered from a search index; the sitemap names the San Antonio market's community pages, which carry the sales office line and a map link.
+    builder: "Highland Homes", host: HIGHLAND_HOST, index: { kind: "sitemap", url: `https://${HIGHLAND_HOST}/sitemap.xml` },
+    communityPath: /^\/san-antonio\/[a-z0-9-]+\/(?!new-home-concierge$|homesites$)[a-z0-9-]+$/i,
+    record: (html) => highlandRecord(html),
   },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({
     builder: brand, host: PULTEGROUP_HOSTS[brand], index: { kind: "listing", url: pulteListingUrl(PULTEGROUP_HOSTS[brand], brand), accept: "application/json", entries: (body, host) => pulteListingEntries(body, host, brand) },

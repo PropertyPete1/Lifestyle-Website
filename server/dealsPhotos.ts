@@ -47,6 +47,7 @@ const APPROVED_IMAGE_HOSTS = new Set([
   // Homefiniti-platform builders serve photos from media.<builder>.com.
   "media.firstamericahomes.com",
   "media.coventryhomes.com",
+  "media.hhomesltd.com",
 ]);
 const ACCEPTED_IMAGE_FORMATS = new Set(["jpeg", "png", "webp", "avif", "gif", "heif"]);
 

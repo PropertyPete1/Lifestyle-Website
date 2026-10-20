@@ -87,3 +87,11 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Discovery:** the market page `/states/texas/san-antonio-market-area/` lists the communities in `pageProps.communities[].uri`; the community page's data gives the sales address (a reader-specific record parser, since the page has no schema.org record). The sitemap (900 KB, 3,500 URLs) is not used.
 - **Scrub:** Davidson Homes, Davidson; lender NorthStar Mortgage Advisors.
 - **Bot protection:** none seen.
+
+## Highland Homes reader (added 2026-10-20)
+
+- **Community source:** `https://www.highlandhomes.com/san-antonio/<city>/<community>` (research list: 16; the sitemap names 18 San Antonio market pages, one of them the `new-home-concierge` page and one in San Marcos, outside the area).
+- **Site shape:** server-rendered (about 330 KB), Cloudflare Turnstile loaded on the page but no challenge seen. Quick move-in homes are `a.homeSpec` cards: `.price` ("$649,816"), `.homeIdentifier` (street), `.homeUpgrades` ("216 Plan with 3 upgrades"), `.homeDetailItem` numeral/label pairs (beds, baths as "4/1" = four full and one half, stories, garages), `.homeSqFootage`, one `img[data-src]` on `media.hhomesltd.com`, and a `.home-tag` status ("Complete & Move-in Ready!", "Est. Completion - Nov '26"). The section says "N quick move-in homes"; fewer cards than that holds the run. Floor plans and the community list are rendered in the browser from a search index (Algolia) and are not read.
+- **Community line:** `#salesOfficeAddressDirectionsLink` ("13316 Sweet Acacia, San Antonio, TX 78245"), `<h1><strong>Briggs Ranch</strong>`, "O: 210-686-1496", and a `maps.google.com/maps?q=loc:LAT,LNG(` link; no schema.org record. Discovery reads these off the page (reader-specific record).
+- **Incentives:** a promotion overlay ("Rates as Low as 4.99% / Or up to $50,000 in savings!") linking to an outside campaign page with no terms; not read.
+- **Scrub:** Highland Homes, Highland; lender Highland HomeLoans.

@@ -425,6 +425,7 @@ export async function listCommunityDiagnostics(now = new Date()) {
       lastAttemptAt: community.lastAttemptAt?.toISOString() ?? null,
       lastSuccessfulSyncAt: community.lastSuccessfulSyncAt?.toISOString() ?? null,
       awaitingFirstSync: community.awaitingFirstSync,
+      readerAvailable: hasBuilderReader(community.builder),
       refreshDue: community.builder !== "Manual" && !community.manualMode && hasBuilderReader(community.builder) && communityRefreshDue(community.lastSuccessfulSyncAt, now, refreshEvery),
       catalogHold: catalogHold ? { reason: catalogHold, help: describeCatalogHold(catalogHold), since: community.catalogHoldSeenAt?.toISOString() ?? null, ageHours: community.catalogHoldSeenAt ? Math.round((now.getTime() - community.catalogHoldSeenAt.getTime()) / 36e5) : null } : null,
       dismissedCatalogHold: community.catalogHoldReason?.startsWith("dismissed:") ? community.catalogHoldReason.slice("dismissed:".length) : null,

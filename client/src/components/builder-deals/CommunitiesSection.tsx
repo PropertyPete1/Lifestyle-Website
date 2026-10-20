@@ -301,7 +301,7 @@ function CommunityCard({ community, diagnostics, activeIncentive, builders }: { 
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="break-words font-medium">{community.publicLabel}</p>
-            {community.awaitingFirstSync ? <Badge variant="outline">Added automatically, goes live after its first clean update</Badge> : !community.active && <Badge variant="secondary">Archived</Badge>}
+            {community.awaitingFirstSync ? <Badge variant="outline">{diagnostics && !diagnostics.readerAvailable ? `Waiting for a ${community.builder} reader` : "Added automatically, goes live after its first clean update"}</Badge> : !community.active && <Badge variant="secondary">Archived</Badge>}
             {community.paused && <Badge variant="destructive">Paused (hidden from public)</Badge>}
             {manual && <Badge className="bg-gold text-primary-foreground">Manual mode, no auto-update</Badge>}
             {diagnostics?.refreshDue && !manual && <Badge variant="outline">Refresh due</Badge>}
@@ -337,6 +337,9 @@ export function CommunitiesSection({ overview }: { overview: Overview }) {
   const builders: BuilderOption[] = buildersQuery.data ?? [];
   const byId = new Map((diagnosticsQuery.data ?? []).map((row) => [row.id, row]));
   const activeIncentive = (communityId: number) => overview.incentives.find((row) => row.communityId === communityId && row.active && !row.held) ?? null;
+  const utils = trpc.useUtils();
+  const refresh = () => { void utils.deals.admin.overview.invalidate(); void utils.deals.admin.communityDiagnostics.invalidate(); };
+  const importResearch = trpc.deals.admin.importResearchCommunities.useMutation({ onSuccess: (result) => { refresh(); toast.success(`Research list loaded: ${result.created} new, ${result.existing} already here, ${result.skipped} skipped (${result.builders} builders).`); }, onError: (error) => toast.error(error.message) });
   const discover = trpc.deals.admin.discoverCommunities.useMutation({ onSuccess: () => toast.success("Looking for new communities on every builder's site. New ones are emailed to you and appear here hidden until their first clean update."), onError: (error) => toast.error(error.message) });
   const waiting = overview.communities.filter((community) => community.awaitingFirstSync).length;
   return (
@@ -345,7 +348,7 @@ export function CommunitiesSection({ overview }: { overview: Overview }) {
       title="Communities"
       icon={Building2}
       description="Add a community, edit its mapping and names-to-hide lists, pause it (hidden from public), or remove it. Refresh now runs that community's adapter as a background job. The private builder mapping appears only in this role-gated panel."
-      action={<div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto"><Button type="button" variant="outline" className={`${TAP} w-full sm:w-auto`} disabled={discover.isPending} onClick={() => discover.mutate()}><RefreshCw className={`mr-1 h-4 w-4 ${discover.isPending ? "animate-spin" : ""}`} /> Find new communities</Button><Button type="button" className={`${TAP} ${GOLD_BUTTON} w-full sm:w-auto`} onClick={() => setAdding((value) => !value)}><Plus className="mr-1 h-4 w-4" /> {adding ? "Close form" : "Add community"}</Button></div>}
+      action={<div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto"><Button type="button" variant="outline" className={`${TAP} w-full sm:w-auto`} disabled={importResearch.isPending} onClick={() => importResearch.mutate()}>{importResearch.isPending ? "Loading..." : "Load research list"}</Button><Button type="button" variant="outline" className={`${TAP} w-full sm:w-auto`} disabled={discover.isPending} onClick={() => discover.mutate()}><RefreshCw className={`mr-1 h-4 w-4 ${discover.isPending ? "animate-spin" : ""}`} /> Find new communities</Button><Button type="button" className={`${TAP} ${GOLD_BUTTON} w-full sm:w-auto`} onClick={() => setAdding((value) => !value)}><Plus className="mr-1 h-4 w-4" /> {adding ? "Close form" : "Add community"}</Button></div>}
     >
       <div className="space-y-4">
         {waiting > 0 && <p className="text-xs text-muted-foreground" data-deals-waiting-count="true">{waiting} communit{waiting === 1 ? "y was" : "ies were"} added automatically and go{waiting === 1 ? "es" : ""} live after {waiting === 1 ? "its" : "their"} first clean update. Builders are checked every Monday, or now with Find new communities.</p>}

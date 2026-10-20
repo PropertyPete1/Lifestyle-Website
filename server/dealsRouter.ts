@@ -727,6 +727,16 @@ export const dealsRouter = router({
     addTrecFakeRow: adminProcedure.input(z.object({ fullName: z.string().trim().min(3).max(190), confirm: z.literal(true) })).mutation(async ({ input }) => (await import("./dealsTrec")).addTrecFakeRow(input.fullName)),
     /** "Refresh now": one background adapter run for this community, recorded in deal_job_runs; refused while a run is in flight. */
     refreshCommunity: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => adminCall(() => refreshCommunityInBackground(input.id))),
+    /** Load the research list (research/sa-communities.csv): every area community, hidden until its builder has a reader. */
+    importResearchCommunities: adminProcedure.mutation(async () => {
+      const { importResearchCommunities } = await import("./dealsResearchImport");
+      try {
+        const result = await importResearchCommunities();
+        return { ok: true as const, created: result.created.length, existing: result.existing, skipped: result.skipped.length, rows: result.rows, builders: result.builders };
+      } catch (error) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error instanceof Error && /ENOENT/.test(error.message) ? "The research list (research/sa-communities.csv) is not on this server." : "The research list could not be imported." });
+      }
+    }),
     /** "Find new communities now": the weekly discovery, started in the background; the result arrives by email. */
     discoverCommunities: adminProcedure.mutation(async () => {
       const { runCommunityDiscovery } = await import("./dealsDiscovery");

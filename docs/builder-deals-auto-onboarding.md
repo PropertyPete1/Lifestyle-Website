@@ -125,3 +125,13 @@ With every community on the page, both lists change shape once they are long:
   starts open. A Best Deals tap opens that home's community (clearing filters
   that hide it) and scrolls to the home.
 - Short lists (3 communities or fewer) look exactly as before.
+
+## The research list
+
+`research/sa-communities.csv` is the master list of every builder community in
+the San Antonio metro (536 rows, 77 builders, read from the builders' own sites
+on 2026-10-19). Admin, Communities, "Load research list" imports it through the
+same onboarding as discovery: every community not already in the table is
+added hidden. Running it again adds only what is new. A community whose builder
+has no reader yet shows "Waiting for a <builder> reader" in Admin and is never
+checked, held or emailed about until a reader exists.

@@ -1,5 +1,5 @@
 import {
-  WEEKLEY_HOST, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, htmlToText, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  WEEKLEY_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, htmlToText, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -14,15 +14,19 @@ import {
  * Now" or "Ready 11/2/2026", `ReadyDate`, `IsCompleted`, `Stage` 1-10,
  * `Hidden`, `Name` = plan, `Bedrooms`, `FullBaths`, `HalfBaths`, `Garages`,
  * `SquareFootage`, `Token` "/homes-ready-soon/…/<job>", `ExteriorPhotos[]`,
- * `InteriorPhotos[]`, `Elevation.Renderings[]`), `salesOffices[0]` (`Address`
- * "13222 Sweet Acacia<br />San Antonio, TX 78245", `SearchableAddress`
- * "lat,lng"), `communityAvailability` ("Active", "Close Out"), `amenities`
- * (comma list), `communityId`. The market's community list is a plain JSON
- * endpoint on the same host (`/search/CommunityData?marketId=markets/3`), and
- * so is its promotion list (`/promotion/marketpromotionslist`), each
- * promotion naming the communities it shows on. Photos sit on the official host
- * and on `assetcontentdeliveryapi.davidweekleyhomes.com`. Read-only, plain GET,
- * official host only. Everything here is private operational data.
+ * `InteriorPhotos[]`, `Elevation.Renderings[]`, `IsModel`, `LostReadyStatus`),
+ * `salesOffices[0]` (`Address` "13222 Sweet Acacia<br />San Antonio, TX
+ * 78245", `SearchableAddress` "lat,lng"), `communityAvailability` ("Active",
+ * "Close Out"), `amenities` (comma list), `communityId`, `url` (the page's
+ * own). The market's community list is a plain JSON endpoint on the same host
+ * (`/search/CommunityData?marketId=markets/3`, each community with its
+ * `ShowcaseCount` of homes for sale, read once an hour to corroborate the
+ * page's list), and so is its promotion list
+ * (`/promotion/marketpromotionslist`), each promotion naming the communities
+ * it shows on; one promotion is the offer, never several joined. Photos sit on
+ * the official host and on `assetcontentdeliveryapi.davidweekleyhomes.com`.
+ * Read-only, plain GET, official host only. Everything here is private
+ * operational data.
  *
  * Page shapes (October 2026):
  * - community: /new-homes/tx/san-antonio/<city>/<slug>        (about 930 KB)
@@ -51,7 +55,8 @@ const minimum = (value: unknown): number | null => num(obj(value)?.Minimum ?? va
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 let promoCache: { fetchedAt: number; promotions: WeekleyPromotion[] } | null = null;
-export function resetWeekleyCaches(): void { promoCache = null; }
+let listingCache: { fetchedAt: number; counts: Map<string, number> } | null = null;
+export function resetWeekleyCaches(): void { promoCache = null; listingCache = null; }
 
 /** The page's `window.pageData= {...}` object, read by matching braces outside strings; null when absent or not JSON. */
 export function parseWeekleyPageData(html: string): Json | null {
@@ -126,6 +131,10 @@ export type WeekleyPage = {
   record: WeekleyCommunityRecord | null;
   communityId: string | null;
   availability: string | null;
+  /** True when the data's own `url` is another page on the host: a same-host redirect to another community. */
+  foreignPage: boolean;
+  /** True when a plan's page sits under another community's slug: not this community's plan. */
+  foreignPlan: boolean;
   /** True when a home's page sits under another community's slug on the host: not this community's inventory. */
   foreignHome: boolean;
   homes: PrivatePlanOrHome[];
@@ -161,7 +170,12 @@ export function parseWeekleyCommunity(html: string, pageUrl: string, now: Date =
   const cityLine = city ? `${city}, ${zip ? `TX ${zip}` : "TX"}` : null;
   const hidePlanPrices = obj(firstCommunity?.HidePricing)?.HidePlanPrices === true || data.communityAvailability === "Call For Pricing";
   const hideHomePrices = obj(firstCommunity?.HidePricing)?.HideQmiPrices === true;
+  const base = `${comparablePath(community.pathname.replace(/\/+$/, ""))}/`;
+  const ownLink = str(data.url);
+  const own = ownLink ? asUrl(new URL(ownLink, community).toString()) : null;
+  const foreignPage = own !== null && sameOfficialHost(own, host) && comparablePath(own.pathname.replace(/\/+$/, "")) !== comparablePath(community.pathname.replace(/\/+$/, ""));
   const plans: PrivatePlanOrHome[] = [];
+  let foreignPlan = false;
   for (const raw of data.floorplans) {
     const plan = obj(raw);
     if (!plan) continue;
@@ -169,6 +183,8 @@ export function parseWeekleyCommunity(html: string, pageUrl: string, now: Date =
     const token = str(plan.Token) ?? str(plan.CanonicalUrl);
     const page = token ? asUrl(new URL(token, community).toString()) : null;
     if (!planName || !page || !sameOfficialHost(page, host) || plan.IsActive === false || plan.NotOnWebsite === true) continue;
+    // The plan's page sits under this community's path ("/new-homes/…/<slug>/<plan>"); another community's plan is never this one's.
+    if (!comparablePath(page.pathname).startsWith(base)) { foreignPlan = true; continue; }
     const price = num(plan.BasePrice);
     const shown = !hidePlanPrices && plan.HidePlanPrice !== true && /\$/.test(str(plan.PriceDisplay) ?? "$");
     const full = minimum(plan.FullBaths);
@@ -214,7 +230,8 @@ export function parseWeekleyCommunity(html: string, pageUrl: string, now: Date =
       privateName: street,
       privateAddress: street ? `${street}, ${homeCity ? `${homeCity}, ${homeZip ? `TX ${homeZip}` : "TX"}` : cityLine ?? "TX"}` : null,
       privatePlanName: str(home.Name),
-      status: readable && home.Ready !== false ? status.status : null,
+      // A model home is not for sale (the sync leaves a "Model" home out); a lost ready status is a hold, as documented.
+      status: !readable || home.Ready === false || (home.LostReadyStatus !== undefined && home.LostReadyStatus !== null && home.LostReadyStatus !== false && home.LostReadyStatus !== "") ? null : home.IsModel === true ? "Model" : status.status,
       price: shown && price && price > 0 ? price : null,
       bedrooms: num(home.Bedrooms),
       bathrooms: full === null ? null : full + (num(home.HalfBaths) ?? 0) * 0.5,
@@ -231,6 +248,8 @@ export function parseWeekleyCommunity(html: string, pageUrl: string, now: Date =
     record,
     communityId,
     availability: str(data.communityAvailability),
+    foreignPage,
+    foreignPlan,
     foreignHome,
     homes,
     plans,
@@ -262,7 +281,7 @@ export function parseWeekleyPromotions(body: string): WeekleyPromotion[] | null 
   return out;
 }
 
-/** The market listing's community pages (both the flat list and the neighbourhood groups), build-on-your-lot left out; null when the body is not the listing. */
+/** The market listing's community pages (both the flat list and the neighbourhood groups), build-on-your-lot and coming-soon left out; null when the body is not the listing. */
 export function weekleyListingEntries(body: string, host: string): Array<{ url: string; record: null }> | null {
   let parsed: unknown;
   try { parsed = JSON.parse(body); } catch { return null; }
@@ -272,7 +291,8 @@ export function weekleyListingEntries(body: string, host: string): Array<{ url: 
   const visit = (raw: unknown) => {
     const item = obj(raw);
     const token = item ? str(item.Token) : null;
-    if (!item || !token || item.CommunityType === 2 || /build-on-your-lot/i.test(token)) return;
+    // Build-on-your-lot programs and coming-soon communities (status 3) have no inventory page worth syncing yet.
+    if (!item || !token || item.CommunityType === 2 || num(item.CommunityStatuses) === 3 || /build-on-your-lot/i.test(token)) return;
     const url = asUrl(new URL(token, `https://${host}/`).toString());
     if (!url || !sameOfficialHost(url, host)) return;
     const key = `${url.origin}${url.pathname}`;
@@ -281,6 +301,24 @@ export function weekleyListingEntries(body: string, host: string): Array<{ url: 
   for (const item of data.Communities) visit(item);
   for (const group of arr(data.NeighborhoodGroups)) for (const item of arr(obj(group)?.Communities)) visit(item);
   return Array.from(out.values());
+}
+
+/** Each listed community's `ShowcaseCount` (homes for sale) by id, from both the flat list and the neighbourhood groups; null when the body is not the listing. */
+export function weekleyShowcaseCounts(body: string): Map<string, number> | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(body); } catch { return null; }
+  const data = obj(parsed);
+  if (!data || !Array.isArray(data.Communities)) return null;
+  const counts = new Map<string, number>();
+  const visit = (raw: unknown) => {
+    const item = obj(raw);
+    const id = item ? str(item.Id) : null;
+    const count = num(item?.ShowcaseCount);
+    if (id && count !== null && count >= 0 && !counts.has(id)) counts.set(id, count);
+  };
+  for (const item of data.Communities) visit(item);
+  for (const group of arr(data.NeighborhoodGroups)) for (const item of arr(obj(group)?.Communities)) visit(item);
+  return counts;
 }
 
 /** The community's record for discovery, from its page. */
@@ -309,8 +347,11 @@ export class DavidWeekleyAdapter implements DealAdapter {
     // The page says how the community is selling; wording the reader does not know is not read as a sold-out community.
     if (parsed.availability && !/^(?:active|close\s*out|coming\s+soon|call\s+for\s+pricing)$/i.test(parsed.availability)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (parsed.homes.length > WEEKLEY_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
-    // A home under another community's slug is never this community's inventory.
-    if (parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+    // The data must describe this community (a same-host redirect to another page does not); a home or plan under another community's slug is never this community's.
+    if (parsed.foreignPage || parsed.foreignPlan || parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+    // The market list counts each community's homes for sale; fewer homes on the page than that is a changed page, not homes sold. With the list unreachable, an empty page is not trusted.
+    const showcase = await showcaseCount(fetcher, now().getTime(), privateSnapshot, parsed.communityId);
+    if (showcase === "unavailable" ? parsed.homes.length === 0 : showcase !== null && parsed.homes.length < showcase) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     privateSnapshot.communityFacts = { fromPrice: parsed.record.priceFrom && parsed.record.priceFrom >= 50_000 ? parsed.record.priceFrom : null, schoolDistrict: parsed.facts.schoolDistrict, lotSizes: null, amenities: parsed.facts.amenities };
     for (const home of parsed.homes) { privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }
     for (const plan of parsed.plans) { privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }
@@ -322,7 +363,20 @@ export class DavidWeekleyAdapter implements DealAdapter {
   }
 }
 
-/** The market's promotion list, read once an hour; the offer is the promotions that name this community (or the whole site), as one text. */
+/** The market list, read once an hour; this community's `ShowcaseCount`, null when it is not listed or counts nothing, "unavailable" when the list cannot be read. */
+async function showcaseCount(fetcher: HtmlFetcher, now: number, snapshot: PrivateDealSnapshot, communityId: string | null): Promise<number | null | "unavailable"> {
+  if (communityId === null) return null;
+  if (!listingCache || now - listingCache.fetchedAt >= PROMO_CACHE_MS) {
+    const page = await getDocument(weekleyListingUrl(), fetcher, "application/json", WEEKLEY_HOST);
+    const counts = page.ok ? weekleyShowcaseCounts(page.text) : null;
+    if (!counts) return "unavailable";
+    listingCache = { fetchedAt: now, counts };
+  }
+  snapshot.pages.push(sourcePage("community", weekleyListingUrl(), null));
+  return listingCache.counts.get(communityId) ?? null;
+}
+
+/** The market's promotion list, read once an hour; the offer is ONE promotion naming this community (or the whole site): the one that states a rate, else the first for the community, else the first site-wide. */
 async function promotions(fetcher: HtmlFetcher, now: number, snapshot: PrivateDealSnapshot, communityId: string | null): Promise<{ text: string | null } | { hold: DealHoldReason }> {
   let list: WeekleyPromotion[];
   if (promoCache && now - promoCache.fetchedAt < PROMO_CACHE_MS) list = promoCache.promotions;
@@ -337,5 +391,7 @@ async function promotions(fetcher: HtmlFetcher, now: number, snapshot: PrivateDe
   snapshot.pages.push(sourcePage("incentive", weekleyPromotionsUrl(), null));
   const today = new Date(now).toISOString().slice(0, 10);
   const current = list.filter((promotion) => (promotion.siteWide || (communityId !== null && promotion.communityIds.includes(communityId))) && (!promotion.end || promotion.end.slice(0, 10) >= today) && (!promotion.start || promotion.start.slice(0, 10) <= today));
-  return { text: current.length ? current.map((promotion) => promotion.text).join(" ") : null };
+  // One promotion only: joining two would publish one's deadline or down payment as a term of the other's rate.
+  const chosen = current.find((promotion) => !promotion.siteWide && /\d+(?:\.\d+)?\s*%/.test(promotion.text)) ?? current.find((promotion) => /\d+(?:\.\d+)?\s*%/.test(promotion.text)) ?? current.find((promotion) => !promotion.siteWide) ?? current[0];
+  return { text: chosen?.text ?? null };
 }

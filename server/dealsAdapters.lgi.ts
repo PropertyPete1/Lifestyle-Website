@@ -1,5 +1,5 @@
 import {
-  LGI_HOST, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parseCommunityFacts, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  LGI_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parseCommunityFacts, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 import { parseNextData } from "./dealsAdapters.davidson";
@@ -15,8 +15,11 @@ import { parseNextData } from "./dealsAdapters.davidson";
  * .community.floorplans.results[]`: `floorPlanName`, `listPrice`,
  * `previousListPrice`, `numberofBedrooms`, `numberofBathrooms`,
  * `numberofCarGarage`, `numberofStories`, `sizeSqft`, `adStatus.fields.Key`,
- * `url.path`). LGI sells by floor plan; the pages name no addressed homes, so
- * the reader publishes plans only. The market page's `CommunitySearch`
+ * `url.path`, `floorPlanLeasePrice`) with `isLeasingCommunity`. LGI sells by
+ * floor plan; the pages name no addressed homes, so the reader publishes
+ * plans only, and a leasing community (rentals) publishes nothing. The
+ * page's `PandIInfo` is the payment-example assumption behind its monthly
+ * figures, not an offer, and is not read. The market page's `CommunitySearch`
  * component lists every community with coordinates, phone, city and status
  * (no street), so discovery reads each page for its address. Read-only, plain
  * GET, official host only. Everything here is private operational data.
@@ -70,7 +73,18 @@ function geoOf(lat: unknown, lng: unknown): { lat: number; lng: number } | null 
   return a !== null && b !== null && Math.abs(a) <= 90 && Math.abs(b) <= 180 && (a !== 0 || b !== 0) ? { lat: a, lng: b } : null;
 }
 
-export type LgiPage = { record: LgiCommunityRecord | null; saleStatus: string | null; plans: PrivatePlanOrHome[]; offer: string | null; amenities: string[] };
+export type LgiPage = {
+  record: LgiCommunityRecord | null;
+  saleStatus: string | null;
+  /** True when the route's own name is not the URL's community slug: another community's page (a same-host redirect). */
+  foreignPage: boolean;
+  /** True when a plan's page sits under another community's path. */
+  foreignPlan: boolean;
+  /** True when the component says the community leases its homes. */
+  leasing: boolean;
+  plans: PrivatePlanOrHome[];
+  amenities: string[];
+};
 
 /** A sold-out or not-yet-selling community has nothing to publish; any other label is a selling community. */
 export function lgiSelling(saleStatus: string | null): boolean {
@@ -87,6 +101,9 @@ export function parseLgiCommunity(html: string, pageUrl: string): LgiPage | null
   const plansList = obj(obj(search?.community)?.floorplans)?.results;
   if (!community || !fields || !search || !Array.isArray(plansList)) return null;
   const host = community.hostname;
+  const slug = comparablePath(community.pathname).split("/").filter(Boolean).at(-1) ?? "";
+  const routeName = str(route?.name) ?? str(route?.itemPath)?.split("/").filter(Boolean).at(-1) ?? null;
+  const base = `${comparablePath(community.pathname.replace(/\/+$/, ""))}/`;
   const name = str(field(fields.CommunityName));
   const record: LgiCommunityRecord | null = name ? {
     name,
@@ -98,6 +115,7 @@ export function parseLgiCommunity(html: string, pageUrl: string): LgiPage | null
     geo: geoOf(field(fields.Latitude), field(fields.Longitude)),
   } : null;
   const plans: PrivatePlanOrHome[] = [];
+  let foreignPlan = false;
   for (const raw of plansList) {
     const plan = obj(raw);
     if (!plan) continue;
@@ -105,9 +123,13 @@ export function parseLgiCommunity(html: string, pageUrl: string): LgiPage | null
     const path = str(obj(plan.url)?.path);
     const page = path ? asUrl(new URL(path, community).toString()) : null;
     if (!planName || !page || !sameOfficialHost(page, host)) continue;
+    // The plan's page sits under this community's path; another community's plan is never this one's.
+    if (!comparablePath(page.pathname).startsWith(base)) { foreignPlan = true; continue; }
     if (!/^active$/i.test(keyOf(plan.adStatus) ?? "active")) continue;
     const price = num(field(plan.listPrice));
     const previous = num(field(plan.previousListPrice));
+    // A plan priced only for lease is not for sale.
+    if (!(price && price > 0) && (num(field(plan.floorPlanLeasePrice)) ?? 0) > 0) continue;
     const image = str(obj(field(plan.primaryImage))?.src);
     const gallery: PrivateGalleryImage[] = [];
     const imageUrl = image ? asUrl(image) : null;
@@ -129,13 +151,13 @@ export function parseLgiCommunity(html: string, pageUrl: string): LgiPage | null
     });
   }
   const amenities = arr(fields.CommunityAmenities).map((item) => str(field(obj(obj(item)?.fields)?.AmenityTitle)) ?? str(obj(item)?.displayName)).filter((item): item is string => Boolean(item));
-  const example = str(field(fields.PandIInfo));
   return {
     record,
     saleStatus: keyOf(fields.SaleStatus),
+    foreignPage: routeName !== null && routeName.toLowerCase() !== slug,
+    foreignPlan,
+    leasing: search.isLeasingCommunity === true || field(search.isLeasingCommunity) === true,
     plans,
-    // "5% Fixed / 5.805% APR, 3.5% Down, FHA 30 Year" is the page's financing example; the rate parser reads its terms.
-    offer: example && /\d+(?:\.\d+)?\s*%/.test(example) ? `Financing example: ${example}.` : null,
     amenities,
   };
 }
@@ -157,6 +179,8 @@ export function lgiListingEntries(html: string, host: string): Array<{ url: stri
     const name = str(field(item?.communityName));
     const url = path ? asUrl(new URL(path, `https://${host}/`).toString()) : null;
     if (!item || !url || !sameOfficialHost(url, host) || !name) continue;
+    // A leasing community rents its homes, and a sold-out or not-yet-selling one has no page worth syncing yet; neither is onboarded.
+    if (item.isLeasingCommunity === true || field(item.isLeasingCommunity) === true || !lgiSelling(keyOf(item.saleStatus))) continue;
     out.push({ url: `${url.origin}${url.pathname}`, record: {
       name, street: null, city: str(field(item.locationIdentifier)), zip: null,
       phone: (str(field(item.phone)) ?? "").replace(/[^\d]/g, "") || null,
@@ -184,11 +208,12 @@ export class LgiHomesAdapter implements DealAdapter {
     const parsed = parseLgiCommunity(page.text, community.toString());
     // Without the community route, its floor-plan component or its sales address this is not a community page.
     if (!parsed || !parsed.record?.street) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // The data must describe this community (a same-host redirect to another page does not), and so must every plan.
+    if (parsed.foreignPage || parsed.foreignPlan) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     privateSnapshot.communityFacts = { fromPrice: parsed.record.priceFrom && parsed.record.priceFrom >= 50_000 ? parsed.record.priceFrom : null, schoolDistrict: parseCommunityFacts(page.text).schoolDistrict, lotSizes: null, amenities: parsed.amenities };
-    // LGI sells by floor plan; a sold-out or not-yet-selling community has nothing to publish.
-    if (lgiSelling(parsed.saleStatus)) {
+    // LGI sells by floor plan; a sold-out, not-yet-selling or leasing community has nothing to publish.
+    if (lgiSelling(parsed.saleStatus) && !parsed.leasing) {
       for (const plan of parsed.plans) { privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }
-      if (parsed.offer) privateSnapshot.incentive = { sourceUrl: community.toString(), text: parsed.offer, facts: parsePromotionalRate(parsed.offer) };
     }
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config));
   }

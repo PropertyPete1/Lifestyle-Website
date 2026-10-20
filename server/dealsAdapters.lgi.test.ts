@@ -22,7 +22,7 @@ const plan = (input: { name: string; price: number; was?: number; beds: number; 
   community: { id: "x", name: "fixture-wing", communityName: { value: "Fixture Wing" } },
 });
 const PLANS = [plan({ name: "Ash", price: 245_900, was: 249_900, beds: 2, baths: 2, garage: 1, sqft: 1_002 }), plan({ name: "Marek", price: 299_900, beds: 4, baths: 2.5, garage: 2, sqft: 1_820 }), plan({ name: "Retired", price: 1, beds: 3, baths: 2, garage: 2, sqft: 1_500, status: "Inactive" })];
-function communityPage(input: { plans?: ReturnType<typeof plan>[]; status?: string; office?: boolean; component?: boolean; pandi?: string | null } = {}) {
+function communityPage(input: { plans?: ReturnType<typeof plan>[]; status?: string; office?: boolean; component?: boolean; pandi?: string | null; routeName?: string; leasing?: boolean } = {}) {
   const fields: Record<string, unknown> = {
     CommunityName: { value: "Fixture Wing" }, CommunityID: { value: 597 }, Address1: input.office === false ? { value: "" } : { value: "11523 Fixture Eagles" }, City: { value: "San Antonio" }, State: { value: "TX" }, ZipCode: { value: "78223" }, Phone: { value: "(888) 384-5144" }, Email: { value: "FixtureWing@lgihomes.com" },
     Latitude: { value: 29.3088049 }, Longitude: { value: -98.4045853 }, MinListPrice: { value: 222900 }, PreviousMinListPrice: { value: 221900 }, MaxListPrice: { value: 345900 },
@@ -33,13 +33,15 @@ function communityPage(input: { plans?: ReturnType<typeof plan>[]; status?: stri
   };
   const placeholders = { "headless-main": [{ componentName: "PartialDesignDynamicPlaceholder", uid: "p1", placeholders: { "sxa-community-page-layout": [{ componentName: "LGICommunityLandingPage", uid: "c1", placeholders: { overview: [{ componentName: "CommunityOverview", uid: "o1" }], "floorplan-search": [{ componentName: "FloorPlanSearch", uid: "fs1" }] } }] } }] };
   const componentProps: Record<string, unknown> = { o1: { site: {}, community: {} } };
-  if (input.component !== false) componentProps.fs1 = { datasource: {}, community: { pandIInfo: v(fields.PandIInfo && (fields.PandIInfo as { value: unknown }).value), floorplans: { results: input.plans ?? PLANS } }, isLeasingCommunity: false };
-  return nextPage({ name: "fixture-wing", templateName: "Community Landing Page", fields, placeholders }, componentProps);
+  if (input.component !== false) componentProps.fs1 = { datasource: {}, community: { pandIInfo: v(fields.PandIInfo && (fields.PandIInfo as { value: unknown }).value), floorplans: { results: input.plans ?? PLANS } }, isLeasingCommunity: input.leasing ?? false };
+  return nextPage({ name: input.routeName ?? "fixture-wing", templateName: "Community Landing Page", fields, placeholders }, componentProps);
 }
 const marketPage = nextPage({ name: "san-antonio", templateName: "Market Landing Page", fields: {}, placeholders: { "headless-main": [{ componentName: "LGIMarketLandingPage", uid: "m1", placeholders: { "community-search": [{ componentName: "CommunitySearch", uid: "cs1" }] } }] } }, { cs1: { datasource: {}, market: {}, communities: { results: [
   { id: "1", name: "fixture-wing", url: { path: "/texas/san-antonio/fixture-wing" }, communityName: { value: "Fixture Wing" }, locationIdentifier: { value: "San Antonio" }, saleStatus: kv("Active"), latitude: v(29.3088049), longitude: v(-98.4045853), phone: { value: "(888) 384-5144" }, minListPrice: v(222900), pandIInfo: { value: "5% Fixed / 5.805% APR, 3.5% Down, FHA 30 Year" } },
   { id: "2", name: "far-fixture", url: { path: "/texas/san-antonio/far-fixture" }, communityName: { value: "Far Fixture" }, locationIdentifier: { value: "Kyle" }, saleStatus: kv("Active"), latitude: v(29.918482), longitude: v(-97.849621), phone: { value: "(855) 806-2800" }, minListPrice: v(250900) },
   { id: "3", name: "elsewhere", url: { path: "https://evil.example/texas/san-antonio/x" }, communityName: { value: "Elsewhere" }, latitude: v(29.5), longitude: v(-98.5) },
+  { id: "4", name: "rental-wing", url: { path: "/texas/san-antonio/rental-wing" }, communityName: { value: "Rental Wing" }, locationIdentifier: { value: "San Antonio" }, saleStatus: kv("Now Leasing"), latitude: v(29.4), longitude: v(-98.4), isLeasingCommunity: true },
+  { id: "5", name: "later-wing", url: { path: "/texas/san-antonio/later-wing" }, communityName: { value: "Later Wing" }, locationIdentifier: { value: "San Antonio" }, saleStatus: kv("Coming Soon"), latitude: v(29.4), longitude: v(-98.4) },
 ] } } });
 
 const site: Record<string, string> = { [COMMUNITY]: communityPage() };
@@ -54,7 +56,7 @@ const config: CommunitySourceConfig = { builder: "LGI Homes", sourceUrl: COMMUNI
 beforeEach(() => { vi.clearAllMocks(); requested.length = 0; });
 
 describe("LGI Homes reader: page data", () => {
-  it("reads the community from the route's fields and its floor plans from the FloorPlanSearch component: prices with the drop, specs, images, status; the financing example is the offer", () => {
+  it("reads the community from the route's fields and its floor plans from the FloorPlanSearch component: prices with the drop, specs, images, status; the payment example is not an offer", () => {
     const parsed = parseLgiCommunity(communityPage(), COMMUNITY)!;
     expect(parsed.record).toEqual({ name: "Fixture Wing", street: "11523 Fixture Eagles", city: "San Antonio", zip: "78223", phone: "8883845144", priceFrom: 222_900, geo: { lat: 29.3088049, lng: -98.4045853 } });
     expect(parsed.saleStatus).toBe("Active");
@@ -64,9 +66,16 @@ describe("LGI Homes reader: page data", () => {
       ["Marek", 299_900, null, null, 4, 2.5, 1_820, 2, `${CDN}/brandsite/floorplans/marek.jpg?h=568&w=920`],
     ]);
     expect(parsed.plans[0]!.sourceUrl).toBe(`${COMMUNITY}/ash`);
-    expect(parsed.offer).toBe("Financing example: 5% Fixed / 5.805% APR, 3.5% Down, FHA 30 Year.");
+    expect(parsed).toMatchObject({ foreignPage: false, foreignPlan: false, leasing: false });
     expect(parsed.amenities).toEqual(["Children's Playground", "Pool"]);
-    expect(parseLgiCommunity(communityPage({ pandi: "" }), COMMUNITY)!.offer).toBeNull();
+    // Another community's page under this URL (a same-host redirect), a plan under another community's path, a leasing community.
+    expect(parseLgiCommunity(communityPage({ routeName: "other-wing" }), COMMUNITY)!.foreignPage).toBe(true);
+    const elsewhere = { ...plan({ name: "Zinnia", price: 260_000, beds: 3, baths: 2, garage: 2, sqft: 1_400 }), url: { path: "/texas/san-antonio/other-wing/zinnia" } };
+    expect(parseLgiCommunity(communityPage({ plans: [elsewhere] }), COMMUNITY)).toMatchObject({ foreignPlan: true, plans: [] });
+    expect(parseLgiCommunity(communityPage({ leasing: true }), COMMUNITY)!.leasing).toBe(true);
+    // A plan priced only for lease is not for sale.
+    const rental = { ...plan({ name: "Rental", price: 0, beds: 3, baths: 2, garage: 2, sqft: 1_400 }), listPrice: v(0), floorPlanLeasePrice: v(1850) };
+    expect(parseLgiCommunity(communityPage({ plans: [rental] }), COMMUNITY)!.plans).toEqual([]);
     expect(parseLgiCommunity("<html><body>new layout</body></html>", COMMUNITY)).toBeNull();
     expect(parseLgiCommunity(communityPage({ component: false }), COMMUNITY)).toBeNull();
     expect(lgiComponentProps(parseNextData(communityPage()), "FloorPlanSearch")).not.toBeNull();
@@ -78,7 +87,7 @@ describe("LGI Homes reader: page data", () => {
     for (const label of ["Sold Out", "Coming Soon", "Closed"]) expect(lgiSelling(label)).toBe(false);
   });
 
-  it("lists the market page's communities with pins, phones and cities, never another host", () => {
+  it("lists the market page's communities with pins, phones and cities, never another host, a leasing or a coming-soon community", () => {
     const entries = lgiListingEntries(marketPage, "www.lgihomes.com")!;
     expect(entries.map((entry) => [entry.url, entry.record.name, entry.record.city, entry.record.phone, entry.record.priceFrom, entry.record.geo])).toEqual([
       [COMMUNITY, "Fixture Wing", "San Antonio", "8883845144", 222_900, { lat: 29.3088049, lng: -98.4045853 }],
@@ -90,15 +99,14 @@ describe("LGI Homes reader: page data", () => {
 });
 
 describe("LGI Homes reader: a community", () => {
-  it("reads the page once and publishes the plans and the financing example scrubbed; a sold-out community publishes nothing", async () => {
+  it("reads the page once and publishes the plans scrubbed, never an offer from the payment example; a sold-out or leasing community publishes nothing", async () => {
     const result = await loadOfficialDeals(config, { fetcher });
     expect(result.catalogOk).toBe(true);
     expect(requested).toEqual([COMMUNITY]);
     expect(result.private.homes).toEqual([]);
     expect(result.private.plans).toHaveLength(2);
     expect(result.private.communityFacts).toMatchObject({ fromPrice: 222_900, schoolDistrict: "Southside ISD", amenities: ["Children's Playground", "Pool"] });
-    expect(result.private.incentive?.text).toBe("Financing example: 5% Fixed / 5.805% APR, 3.5% Down, FHA 30 Year.");
-    expect(result.private.incentive?.facts).toMatchObject({ promotionalRatePercent: 5, aprPercent: 5.805, loanType: "FHA", repaymentTermYears: 30, downPaymentPercent: 3.5 });
+    expect(result.private.incentive).toBeNull();
     const json = JSON.stringify(result.public);
     for (const secret of ["Fixture", "78223", "lgihomes", "LGI"]) expect(json).not.toContain(secret);
     const soldOut = vi.fn(async () => new Response(communityPage({ status: "Sold Out" }), { status: 200, headers: { "content-type": "text/html" } }));
@@ -106,6 +114,10 @@ describe("LGI Homes reader: a community", () => {
     expect(none.holdReasons).toEqual([]);
     expect(none.private.plans).toEqual([]);
     expect(none.private.incentive).toBeNull();
+    const leasing = vi.fn(async () => new Response(communityPage({ leasing: true }), { status: 200, headers: { "content-type": "text/html" } }));
+    const rentals = await loadOfficialDeals(config, { fetcher: leasing });
+    expect(rentals.holdReasons).toEqual([]);
+    expect(rentals.private.plans).toEqual([]);
   });
 
   it("holds the run when the page is not a community page, when the plan component is gone, when the office address is missing, when the site is not LGI's, or when it cannot be read", async () => {
@@ -115,6 +127,11 @@ describe("LGI Homes reader: a community", () => {
     expect((await loadOfficialDeals(config, { fetcher: noComponent })).holdReasons).toEqual(["expected_community_container_not_found"]);
     const noOffice = vi.fn(async () => new Response(communityPage({ office: false }), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: noOffice })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    // A same-host redirect to another community's page, or a plan under another community's path, is never this community's inventory.
+    const redirected = vi.fn(async () => new Response(communityPage({ routeName: "other-wing" }), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: redirected })).holdReasons).toEqual(["invalid_inventory_response"]);
+    const foreignPlan = vi.fn(async () => new Response(communityPage({ plans: [{ ...plan({ name: "Zinnia", price: 260_000, beds: 3, baths: 2, garage: 2, sqft: 1_400 }), url: { path: "/texas/san-antonio/other-wing/zinnia" } }] }), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: foreignPlan })).holdReasons).toEqual(["invalid_inventory_response"]);
     expect((await loadOfficialDeals({ ...config, sourceUrl: "https://lgihomes.com/texas/san-antonio/fixture-wing" }, { fetcher })).holdReasons).toEqual(["unsupported_official_host"]);
     const down = vi.fn(async () => new Response("down", { status: 503, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: down })).holdReasons).toEqual(["community_fetch_failed"]);

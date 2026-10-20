@@ -65,6 +65,10 @@ describe("KB Home reader: page data", () => {
     expect(parseKbArray("LocalQMIs = [{\"a\":1}]; LocalQMIs = [{\"a\":2}];", "LocalQMIs")).toBeNull();
     expect(kbMoveInCount("<h2>Move-in Ready (3)</h2>")).toBe(3);
     expect(kbMoveInCount("<h2>Move-in ready homes to get you moving.</h2>")).toBeNull();
+    // The market navigation counts the whole market; the smaller count is the community's.
+    expect(kbMoveInCount("<nav>Move-in Ready (57)</nav><h2>Move-in Ready (3)</h2>")).toBe(3);
+    // A nearby-homes strip links other communities' homes; they are not this page's cards.
+    expect(parseKbCommunity(communityPage({ homes: [] }).replace("<h2>Move-in ready homes to get you moving.</h2>", `<a href="/new-homes-san-antonio/other-grove/mir?homesite=99">Nearby</a>`), COMMUNITY, NOW)!.renderedHomeLinks).toBe(0);
     const parsed = parseKbCommunity(communityPage(), COMMUNITY, NOW)!;
     expect(parsed.homes.map((entry) => [entry.privateAddress, entry.privatePlanName, entry.status, entry.price, entry.bedrooms, entry.bathrooms, entry.squareFeet, entry.garage, entry.homesite, entry.readyNow, entry.moveInDate, entry.gallery?.length])).toEqual([
       ["4229 Fixture Lee Ln., New Braunfels, TX 78130", "Plan 2246", "Quick Move-In (Move-In Ready)", 281_002, 4, 3, 2_246, 2, "Lot 246", true, null, 1],

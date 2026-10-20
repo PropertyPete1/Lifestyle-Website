@@ -129,6 +129,11 @@ describe("Ashton Woods reader: a community", () => {
     expect((await loadOfficialDeals(config, { fetcher: reshaped })).holdReasons).toEqual(["expected_community_container_not_found"]);
     const noBusiness = vi.fn(async () => new Response(communityPage({ business: false }), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: noBusiness })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    // A same-host redirect to another community's page is never this community's inventory; the two spellings of an apostrophe are one page.
+    const redirected = vi.fn(async () => new Response(communityPage().replace(`"url":"${COMMUNITY}"`, `"url":"${HOST}/san-antonio/other-hollow"`), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: redirected })).holdReasons).toEqual(["invalid_inventory_response"]);
+    const spelled = vi.fn(async () => new Response(communityPage().replace(`"url":"${COMMUNITY}"`, `"url":"${HOST}/san-antonio/fixture-60%27s"`), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals({ ...config, sourceUrl: `${HOST}/san-antonio/fixture-60's` }, { fetcher: spelled })).holdReasons).toEqual([]);
     // The card class renamed while the cards still carry their ids: a changed shape, never three sold homes.
     const renamed = vi.fn(async () => new Response(communityPage().replaceAll("js-property-card", "js-listing-card"), { status: 200, headers: { "content-type": "text/html" } }));
     const held = await loadOfficialDeals(config, { fetcher: renamed });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DavidWeekleyAdapter, parseWeekleyCommunity, parseWeekleyPageData, parseWeekleyPromotions, resetWeekleyCaches, weekleyListingEntries, weekleyPromotionsUrl, weekleyRecord, weekleyStatus } from "./dealsAdapters.weekley";
+import { DavidWeekleyAdapter, parseWeekleyCommunity, parseWeekleyPageData, parseWeekleyPromotions, resetWeekleyCaches, weekleyListingEntries, weekleyListingUrl, weekleyPromotionsUrl, weekleyRecord, weekleyShowcaseCounts, weekleyStatus } from "./dealsAdapters.weekley";
 import { DEAL_ADAPTERS, loadOfficialDeals, type CommunitySourceConfig } from "./dealsAdapters";
 
 /**
@@ -35,11 +35,11 @@ const HOMES = [
   qmi({ street: "13223 Fixture Willow", job: "24230008", price: 383_990, label: "Ready 11/2/2026", date: "2026-11-02T00:00:00", plan: "Cassia", beds: 3, baths: 2, half: 0, sqft: 1_652, stage: 8 }),
   qmi({ street: "4207 Fixture Bend", job: "24230036", price: 419_480, label: "Ready Now", date: "2026-10-05T00:00:00", plan: "Dahlia", beds: 4, baths: 3, half: 1, sqft: 2_433, stage: 10 }),
 ];
-function communityPage(input: { homes?: ReturnType<typeof qmi>[]; plans?: ReturnType<typeof plan>[]; availability?: string; office?: boolean; qmis?: boolean; data?: boolean } = {}) {
+function communityPage(input: { homes?: ReturnType<typeof qmi>[]; plans?: ReturnType<typeof plan>[]; availability?: string; office?: boolean; qmis?: boolean; data?: boolean; url?: string } = {}) {
   const data: Record<string, unknown> = {
     communityName: "Fixture Ranch – Select Classic Series", communityNumber: "24230000", communityType: "Normal", communityAvailability: input.availability ?? "Active", isEncore: false, communityFromPrice: "$365s", basePrice: 365480, communityId: "communities/22915",
     salesOffices: input.office === false ? [] : [{ Address: "13222 Fixture Acacia<br />San Antonio, TX 78245", SearchableAddress: "29.3929823888344,-98.7576751930276", Hours: "Monday - Saturday 10:00 AM - 7:00 PM" }],
-    amenities: "Golf Course within 5 miles,Home Owners Association,Park,Playground,Pool", marketCode: "SAN", city: "San Antonio", state: "TX", url: COMMUNITY,
+    amenities: "Golf Course within 5 miles,Home Owners Association,Park,Playground,Pool", marketCode: "SAN", city: "San Antonio", state: "TX", url: input.url ?? COMMUNITY,
     floorplans: input.plans ?? PLANS, imageUrl: `${HOST}/media/CommunityImage/x.jpg`,
   };
   if (input.qmis !== false) data.quickMoveIns = input.homes ?? HOMES;
@@ -50,19 +50,21 @@ ${input.data === false ? "" : `<script>window.pageData= ${JSON.stringify(data)};
 }
 const listing = JSON.stringify({ Communities: [
   { Id: "communities/13442", Token: "/new-homes/tx/san-antonio/san-antonio/build-on-your-lot-san-antonio", Name: "Build on Your Lot", CommunityType: 2, City: { Name: "San Antonio" }, Latitude: 29.69, Longitude: -98.45 },
-  { Id: "communities/22915", Token: "/new-homes/tx/san-antonio/san-antonio/fixture-ranch-45", Name: "Fixture Ranch – Select Classic Series", CommunityType: 1, CommunityStatuses: 1, City: { Name: "San Antonio" }, Latitude: 29.3929823888344, Longitude: -98.7576751930276, BasePrice: 365480, CommunityPhoneNumber: "(210) 399-2074" },
+  { Id: "communities/22915", Token: "/new-homes/tx/san-antonio/san-antonio/fixture-ranch-45", Name: "Fixture Ranch – Select Classic Series", CommunityType: 1, CommunityStatuses: 1, City: { Name: "San Antonio" }, Latitude: 29.3929823888344, Longitude: -98.7576751930276, BasePrice: 365480, CommunityPhoneNumber: "(210) 399-2074", ShowcaseCount: 3 },
   { Id: "communities/99", Token: "https://evil.example/new-homes/tx/san-antonio/x/y", Name: "Elsewhere", CommunityType: 1 },
+  { Id: "communities/100", Token: "/new-homes/tx/san-antonio/san-antonio/later-ranch", Name: "Later Ranch", CommunityType: 1, CommunityStatuses: 3, ShowcaseCount: 0 },
 ], NeighborhoodGroups: [{ NeighborhoodName: "Fixture Ranch", Communities: [
   { Id: "communities/22915", Token: "/new-homes/tx/san-antonio/san-antonio/fixture-ranch-45", Name: "Fixture Ranch – Select Classic Series", CommunityType: 1 },
-  { Id: "communities/22916", Token: "/new-homes/tx/san-antonio/san-antonio/fixture-ranch-60", Name: "Fixture Ranch – Signature Legacy Series", CommunityType: 1 },
+  { Id: "communities/22916", Token: "/new-homes/tx/san-antonio/san-antonio/fixture-ranch-60", Name: "Fixture Ranch – Signature Legacy Series", CommunityType: 1, ShowcaseCount: 0 },
 ] }] });
 const promotionsBody = JSON.stringify([
   { Description: "David Weekley Homes is honoring active medical personnel, firefighters, police officers, military service men and women, and teachers with $2,000 in flex dollars.", Token: "/promo/hometown-heroes-san-antonio", StartDate: "2026-01-05T00:00:00", EndDate: "2027-01-01T00:00:00", IsSiteWide: false, IsMarketEligible: true, ShowOnCommunityIds: ["communities/13442", "communities/22915", "communities/22916"], Disclaimer: "See a Sales Consultant for details. Call 210-399-2074 or visit www.davidweekleyhomes.com/promo." },
   { Description: "Join our free Build on Your Lot Seminar!", Token: "/promo/build-on-your-lot-seminar-san", StartDate: "2026-08-24T00:00:00Z", EndDate: "2026-10-25T00:00:00", IsSiteWide: false, ShowOnCommunityIds: ["communities/13442"] },
   { Description: "Expired savings.", Token: "/promo/old", StartDate: "2026-01-01T00:00:00", EndDate: "2026-09-30T00:00:00", IsSiteWide: false, ShowOnCommunityIds: ["communities/22915"] },
 ]);
+const ratePromotion = { Description: "4.99% (5.42% APR) 30-year fixed FHA rate with 3.5% down on select homes.", Token: "/promo/rate", StartDate: "2026-10-01T00:00:00", EndDate: "2026-12-31T00:00:00", IsSiteWide: true, ShowOnCommunityIds: [] };
 
-const site: Record<string, { body: string; type?: string }> = { [COMMUNITY]: { body: communityPage() }, [weekleyPromotionsUrl()]: { body: promotionsBody, type: "application/json" } };
+const site: Record<string, { body: string; type?: string }> = { [COMMUNITY]: { body: communityPage() }, [weekleyListingUrl()]: { body: listing, type: "application/json" }, [weekleyPromotionsUrl()]: { body: promotionsBody, type: "application/json" } };
 const requested: string[] = [];
 const fetcher = vi.fn(async (input: string) => {
   requested.push(input);
@@ -110,9 +112,20 @@ describe("David Weekley reader: page data", () => {
       qmi({ street: "4 Not Ready", job: "4", price: 400_000, label: "Ready Now", date: "2026-07-31T00:00:00", plan: "x", beds: 3, baths: 2, half: 0, sqft: 1_900, stage: 3, ready: false }),
     ] }), COMMUNITY, NOW)!;
     expect(odd.homes.map((home) => home.status)).toEqual([null, null, null]);
+    // A model home is not for sale; a lost ready status is a hold; the data's own url and the plan tokens must be this community's.
+    const model = { ...qmi({ street: "5 Model Way", job: "5", price: 400_000, label: "Ready Now", date: "2026-07-31T00:00:00", plan: "x", beds: 3, baths: 2, half: 0, sqft: 1_900, stage: 10 }), IsModel: true };
+    const lost = { ...qmi({ street: "6 Lost Way", job: "6", price: 400_000, label: "Ready Now", date: "2026-07-31T00:00:00", plan: "x", beds: 3, baths: 2, half: 0, sqft: 1_900, stage: 10 }), LostReadyStatus: "Lost" };
+    expect(parseWeekleyCommunity(communityPage({ homes: [model, lost] }), COMMUNITY, NOW)!.homes.map((home) => home.status)).toEqual(["Model", null]);
+    expect(parsed).toMatchObject({ foreignPage: false, foreignPlan: false });
+    expect(parseWeekleyCommunity(communityPage({ url: `${HOST}/new-homes/tx/san-antonio/san-antonio/other-ranch-60` }), COMMUNITY, NOW)!.foreignPage).toBe(true);
+    expect(parseWeekleyCommunity(communityPage({ url: `${HOST}/new-homes/tx/san-antonio/san-antonio/fixture-ranch-45/` }), COMMUNITY, NOW)!.foreignPage).toBe(false);
+    const elsewhere = { ...plan({ name: "Zinnia", price: 300_000, beds: 3, baths: 2, half: 0, sqft: 1_500 }), Token: "/new-homes/tx/san-antonio/san-antonio/other-ranch-60/zinnia" };
+    expect(parseWeekleyCommunity(communityPage({ plans: [elsewhere] }), COMMUNITY, NOW)).toMatchObject({ foreignPlan: true, plans: [] });
+    expect(weekleyShowcaseCounts(listing)).toEqual(new Map([["communities/22915", 3], ["communities/100", 0], ["communities/22916", 0]]));
+    expect(weekleyShowcaseCounts("<html>")).toBeNull();
   });
 
-  it("lists the market's communities from the JSON endpoint, build-on-your-lot and other hosts left out, each once; reads the promotions with their communities", () => {
+  it("lists the market's communities from the JSON endpoint, build-on-your-lot, coming-soon and other hosts left out, each once; reads the promotions with their communities", () => {
     expect(weekleyListingEntries(listing, "www.davidweekleyhomes.com")!.map((entry) => entry.url)).toEqual([COMMUNITY, `${HOST}/new-homes/tx/san-antonio/san-antonio/fixture-ranch-60`]);
     expect(weekleyListingEntries("<html>", "www.davidweekleyhomes.com")).toBeNull();
     expect(weekleyListingEntries("{\"Other\":[]}", "www.davidweekleyhomes.com")).toBeNull();
@@ -127,7 +140,7 @@ describe("David Weekley reader: a community", () => {
   it("reads the page and the promotion list once an hour, publishes homes and plans scrubbed, and attaches the promotion naming this community", async () => {
     const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
     expect(result.holdReasons).toEqual([]);
-    expect(requested).toEqual([COMMUNITY, weekleyPromotionsUrl()]);
+    expect(requested).toEqual([COMMUNITY, weekleyListingUrl(), weekleyPromotionsUrl()]);
     expect(result.private.homes).toHaveLength(3);
     expect(result.private.plans).toHaveLength(2);
     expect(result.private.communityFacts).toMatchObject({ fromPrice: 365_480, amenities: ["Golf Course within 5 miles", "Home Owners Association", "Park", "Playground", "Pool"] });
@@ -137,7 +150,7 @@ describe("David Weekley reader: a community", () => {
     const json = JSON.stringify(result.public);
     for (const secret of ["Fixture", "78245", "davidweekleyhomes", "Weekley", "Alan", "24230018"]) expect(json).not.toContain(secret);
     expect(result.public.homes.map((home) => home.status)).toEqual(["Quick Move-In (Move-In Ready)", "Quick Move-In (November 2026)", "Quick Move-In (Move-In Ready)"]);
-    // A second community within the hour reuses the promotion list.
+    // A second community within the hour reuses the market list and the promotion list.
     requested.length = 0;
     const other = `${HOST}/new-homes/tx/san-antonio/san-antonio/fixture-ranch-60`;
     site[other] = { body: communityPage().replace(/communities\/22915/g, "communities/22916").replace(/fixture-ranch-45/g, "fixture-ranch-60") };
@@ -149,11 +162,24 @@ describe("David Weekley reader: a community", () => {
     const third = await loadOfficialDeals({ ...config, sourceUrl: other }, { fetcher, now: () => new Date("2026-10-20T12:40:00Z") });
     expect(third.private.incentive).toBeNull();
     delete site[other];
-    // A close-out community with nothing left is a community with no homes and no plans.
-    const closeOut = vi.fn(async (input: string) => input === COMMUNITY ? new Response(communityPage({ homes: [], plans: [], availability: "Close Out" }), { status: 200, headers: { "content-type": "text/html" } }) : fetcher(input));
+    // A close-out community with nothing left is a community with no homes and no plans, when the market list counts none for it.
+    const closeOut = vi.fn(async (input: string) => input === COMMUNITY ? new Response(communityPage({ homes: [], plans: [], availability: "Close Out" }).replace(/communities\/22915/g, "communities/22916"), { status: 200, headers: { "content-type": "text/html" } }) : fetcher(input));
     const empty = await loadOfficialDeals(config, { fetcher: closeOut, now: () => NOW });
     expect(empty.holdReasons).toEqual([]);
     expect(empty.private.homes).toEqual([]);
+  });
+
+  it("takes ONE promotion as the offer: the community's own naming a rate, else a site-wide rate, else the community's first; never two joined", async () => {
+    const withRate = vi.fn(async (input: string) => input === weekleyPromotionsUrl() ? new Response(JSON.stringify([...JSON.parse(promotionsBody), ratePromotion]), { status: 200, headers: { "content-type": "application/json" } }) : fetcher(input));
+    const result = await loadOfficialDeals(config, { fetcher: withRate, now: () => NOW });
+    expect(result.private.incentive?.text).toBe("4.99% (5.42% APR) 30-year fixed FHA rate with 3.5% down on select homes.");
+    // The heroes promotion's wording never reaches the rate's record.
+    expect(result.private.incentive?.text).not.toMatch(/flex dollars/);
+    expect(result.private.incentive?.facts).toMatchObject({ promotionalRatePercent: 4.99, aprPercent: 5.42, contractDeadline: null });
+    resetWeekleyCaches();
+    const communityRate = { ...ratePromotion, Description: "5.25% (5.6% APR) 30-year fixed conventional rate with 5% down.", IsSiteWide: false, ShowOnCommunityIds: ["communities/22915"] };
+    const both = vi.fn(async (input: string) => input === weekleyPromotionsUrl() ? new Response(JSON.stringify([ratePromotion, ...JSON.parse(promotionsBody), communityRate]), { status: 200, headers: { "content-type": "application/json" } }) : fetcher(input));
+    expect((await loadOfficialDeals(config, { fetcher: both, now: () => NOW })).private.incentive?.text).toBe("5.25% (5.6% APR) 30-year fixed conventional rate with 5% down.");
   });
 
   it("holds the run when the page is not a community page, when the home array is gone, when the availability wording is unknown, when the site is not Weekley's, or when it cannot be read; a missing promotion list holds the offer only", async () => {
@@ -168,6 +194,21 @@ describe("David Weekley reader: a community", () => {
     // A home whose page lives under another community's slug is not this community's inventory.
     const foreign = vi.fn(async () => new Response(communityPage().replace("/homes-ready-soon/tx/san-antonio/san-antonio/fixture-ranch-45/24230008", "/homes-ready-soon/tx/san-antonio/san-antonio/other-ranch-60/24230008"), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: foreign, now: () => NOW })).holdReasons).toEqual(["invalid_inventory_response"]);
+    // A same-host redirect to another community's page, or a plan under another community's slug, is never this community's inventory.
+    const redirected = vi.fn(async () => new Response(communityPage({ url: `${HOST}/new-homes/tx/san-antonio/san-antonio/other-ranch-60` }), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: redirected, now: () => NOW })).holdReasons).toEqual(["invalid_inventory_response"]);
+    const foreignPlan = vi.fn(async () => new Response(communityPage().replace("/new-homes/tx/san-antonio/san-antonio/fixture-ranch-45/cassia", "/new-homes/tx/san-antonio/san-antonio/other-ranch-60/cassia"), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: foreignPlan, now: () => NOW })).holdReasons).toEqual(["invalid_inventory_response"]);
+    // The market list counts three homes for sale here: a page listing fewer changed shape; with the list unreachable an empty page is not trusted, a full one is.
+    resetWeekleyCaches();
+    const fewer = vi.fn(async (input: string) => input === COMMUNITY ? new Response(communityPage({ homes: HOMES.slice(0, 1) }), { status: 200, headers: { "content-type": "text/html" } }) : fetcher(input));
+    expect((await loadOfficialDeals(config, { fetcher: fewer, now: () => NOW })).holdReasons).toEqual(["incomplete_inventory"]);
+    resetWeekleyCaches();
+    const noListing = vi.fn(async (input: string) => input === weekleyListingUrl() ? new Response("gone", { status: 404, headers: { "content-type": "text/html" } }) : input === COMMUNITY ? new Response(communityPage({ homes: [] }), { status: 200, headers: { "content-type": "text/html" } }) : fetcher(input));
+    expect((await loadOfficialDeals(config, { fetcher: noListing, now: () => NOW })).holdReasons).toEqual(["incomplete_inventory"]);
+    const noListingFull = vi.fn(async (input: string) => input === weekleyListingUrl() ? new Response("gone", { status: 404, headers: { "content-type": "text/html" } }) : fetcher(input));
+    expect((await loadOfficialDeals(config, { fetcher: noListingFull, now: () => NOW })).holdReasons).toEqual([]);
+    resetWeekleyCaches();
     const oddAvailability = vi.fn(async () => new Response(communityPage({ availability: "Sold Out" }), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: oddAvailability })).holdReasons).toEqual(["expected_community_container_not_found"]);
     expect((await loadOfficialDeals({ ...config, sourceUrl: "https://davidweekleyhomes.com/new-homes/tx/san-antonio/san-antonio/fixture-ranch-45" }, { fetcher })).holdReasons).toEqual(["unsupported_official_host"]);

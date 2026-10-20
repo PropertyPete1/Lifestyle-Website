@@ -29,6 +29,9 @@ describe("the landing page's offer teaser", () => {
     expect(incentiveTeaser("4.99% (6.1% APR) on homes that close by 12/31.")).toBe("4.99% (6.1% APR) on homes.");
     expect(incentiveTeaser("4.99% (6.1% APR) on 4/5 homes in the community.")).toBe("4.99% (6.1% APR) on 4/5 homes in the community.");
     expect(incentiveTeaser("4.99% (6.1% APR) on 3/2 and 4/3 homes.")).toBe("4.99% (6.1% APR) on 3/2 and 4/3 homes.");
+    // Two deadline clauses joined by "and" both wait for sign-up, and the "and" goes with the second.
+    expect(incentiveTeaser("Purchase by 10/31 and close by 12/18/26 for 4.99%.")).toBe("Purchase for 4.99%.");
+    expect(incentiveTeaser("Contracts by 10/31 and closing by 11/30 get 5.5% financing.")).toBe("Get 5.5% financing.");
     expect(incentiveTeaser("4.99% (6.1% APR) on lots between 1/2 and 1 acre.")).toBe("4.99% (6.1% APR) on lots between 1/2 and 1 acre.");
     // "May 1 day" is a count, not a date.
     expect(incentiveTeaser("At 4.99% (6.1% APR) you may 1 day regret waiting.")).toBe("At 4.99% (6.1% APR) you may 1 day regret waiting.");

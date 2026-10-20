@@ -1,5 +1,5 @@
 import {
-  ASHTON_HOST, asUrl, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
+  ASHTON_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 import { jsonLdRecords } from "./dealsAdapters.homefiniti";
@@ -102,7 +102,21 @@ function gallery(card: readonly HtmlElement[]): PrivateGalleryImage[] {
   return out;
 }
 
-export type AshtonPage = { record: AshtonCommunityRecord | null; homes: PrivatePlanOrHome[]; plans: PrivatePlanOrHome[] };
+export type AshtonPage = {
+  record: AshtonCommunityRecord | null;
+  /** True when the business record's own `url` is another page on the host: a same-host redirect to another community. */
+  foreignPage: boolean;
+  homes: PrivatePlanOrHome[];
+  plans: PrivatePlanOrHome[];
+};
+
+/** The business record's own page URL, when the record names one on the official host. */
+export function ashtonRecordUrl(html: string, host: string): URL | null {
+  const record = jsonLdRecords(html).find((item) => (Array.isArray(item["@type"]) ? item["@type"] : [item["@type"]]).includes("HomeAndConstructionBusiness"));
+  const link = record ? str(record.url) : null;
+  const url = link ? asUrl(link) : null;
+  return url && sameOfficialHost(url, host) ? url : null;
+}
 
 /** Every property card on the page, homes and plans apart; null when the page has no card at all or no community record. */
 export function parseAshtonCommunity(html: string, pageUrl: string, now: Date = new Date()): AshtonPage | null {
@@ -113,6 +127,8 @@ export function parseAshtonCommunity(html: string, pageUrl: string, now: Date = 
   const cards = descendants(root).filter((element) => elementClass(element, "js-property-card"));
   if (!record || !cards.length) return null;
   const host = community.hostname;
+  const own = ashtonRecordUrl(html, host);
+  const foreignPage = own !== null && comparablePath(own.pathname.replace(/\/+$/, "")) !== comparablePath(community.pathname.replace(/\/+$/, ""));
   const homes: PrivatePlanOrHome[] = [];
   const plans: PrivatePlanOrHome[] = [];
   for (const card of cards) {
@@ -165,7 +181,7 @@ export function parseAshtonCommunity(html: string, pageUrl: string, now: Date = 
       readyNow: status.readyNow, moveInDate: status.moveInDate, gallery: images,
     });
   }
-  return { record, homes, plans };
+  return { record, foreignPage, homes, plans };
 }
 
 /** The text lines of a fragment, split at line breaks. */
@@ -217,6 +233,8 @@ export class AshtonWoodsAdapter implements DealAdapter {
     const parsed = parseAshtonCommunity(page.text, community.toString(), now());
     // Without the business record or a single property card this is not a community page (a sold-out page shape is a live check).
     if (!parsed) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // The page must be this community's (a same-host redirect to another one is not).
+    if (parsed.foreignPage) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     // The page's own count of homes: the "data-property-id" cards; fewer homes read than cards means the card markup changed.
     const cardCount = (page.text.match(/\bdata-property-id="/g) ?? []).length;
     if (parsed.homes.length < cardCount) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

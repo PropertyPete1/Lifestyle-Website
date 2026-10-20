@@ -165,6 +165,9 @@ describe("Toll Brothers reader: a community", () => {
     expect((await loadOfficialDeals(config, { fetcher: foreign, now: () => NOW })).holdReasons).toEqual(["invalid_inventory_response"]);
     const redirected = vi.fn(async () => new Response(communityPage().replace(`"pricedFromInt":414995,"url":"${COMMUNITY}"`, `"pricedFromInt":414995,"url":"${HOST}/luxury-homes-for-sale/Texas/Other-Community"`), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: redirected, now: () => NOW })).holdReasons).toEqual(["invalid_inventory_response"]);
+    // An apostrophe spelled "%27" in the page data and "'" in the configured URL (or the reverse) is the same page.
+    const spelled = vi.fn(async () => new Response(communityPage().split(COMMUNITY).join(`${HOST}/luxury-homes-for-sale/Texas/Fixture-60%27s`), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals({ ...config, sourceUrl: `${HOST}/luxury-homes-for-sale/Texas/Fixture-60's` }, { fetcher: spelled, now: () => NOW })).holdReasons).not.toContain("invalid_inventory_response");
     // No homes and a site plan that agrees: a community with plans only.
     const none = vi.fn(async () => new Response(communityPage({ homes: [], sitePlanHomes: 0 }), { status: 200, headers: { "content-type": "text/html" } }));
     const plansOnly = await loadOfficialDeals(config, { fetcher: none, now: () => NOW });

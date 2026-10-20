@@ -1,5 +1,5 @@
 import {
-  KBHOME_HOST, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parseCommunityFacts, sameOfficialHost, sourcePage, successfulResult,
+  KBHOME_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parseCommunityFacts, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 import { jsonLdRecords } from "./dealsAdapters.homefiniti";
@@ -74,8 +74,9 @@ export function parseKbArray(html: string, name: string): unknown[] | null {
 
 /** "Move-in Ready (3)" on the page: how many homes the page says it shows; null when the page does not say. */
 export function kbMoveInCount(html: string): number | null {
-  const match = /Move-?in\s+Ready\s*\((\d+)\)/i.exec(html);
-  return match ? Number(match[1]) : null;
+  // The page may count twice ("Move-in Ready (57)" in the market navigation, "(3)" over the community's own list); the smaller is the community's.
+  const counts = Array.from(html.matchAll(/Move-?in\s+Ready\s*\((\d+)\)/gi)).map((match) => Number(match[1]));
+  return counts.length ? Math.min(...counts) : null;
 }
 
 /**
@@ -165,7 +166,7 @@ export function parseKbCommunity(html: string, pageUrl: string, now: Date = new 
   const planList = parseKbArray(html, "FloorPlanList");
   if (!community || !qmis || !planList) return null;
   const host = community.hostname;
-  const base = `${community.pathname.replace(/\/+$/, "")}/`.toLowerCase();
+  const base = `${comparablePath(community.pathname.replace(/\/+$/, ""))}/`;
   let foreignHome = false;
   const record = kbRecord(html);
   const cityLine = record?.city ? `${record.city}, ${record.zip ? `TX ${record.zip}` : "TX"}` : null;
@@ -203,7 +204,7 @@ export function parseKbCommunity(html: string, pageUrl: string, now: Date = new 
     const link = str(home.pageUrl);
     const page = link ? asUrl(new URL(link, community).toString()) : null;
     // The home's page must sit under this community's own path.
-    const underCommunity = Boolean(page && sameOfficialHost(page, host) && page.pathname.toLowerCase().startsWith(base));
+    const underCommunity = Boolean(page && sameOfficialHost(page, host) && comparablePath(page.pathname).startsWith(base));
     if (page && sameOfficialHost(page, host) && !underCommunity) foreignHome = true;
     const readable = Boolean(street && underCommunity);
     const price = num(home.price);
@@ -227,7 +228,8 @@ export function parseKbCommunity(html: string, pageUrl: string, now: Date = new 
       gallery: gallery(home.websitePhotos, host, false),
     });
   }
-  const renderedHomeLinks = new Set(Array.from(html.matchAll(/href="([^"]*\/mir\?homesite=(\d+))"/gi)).map((match) => match[2]!)).size;
+  // Only home links under this community's own path count (a nearby-homes strip links other communities' homes).
+  const renderedHomeLinks = new Set(Array.from(html.matchAll(/href="([^"]*\/mir\?homesite=(\d+))"/gi)).filter((match) => { const page = asUrl(new URL(decodeHtmlEntities(match[1]!), community).toString()); return page && sameOfficialHost(page, host) && comparablePath(page.pathname).startsWith(base); }).map((match) => match[2]!)).size;
   return { record, homes, plans, foreignHome, renderedHomeLinks, moveInCount: kbMoveInCount(html) };
 }
 

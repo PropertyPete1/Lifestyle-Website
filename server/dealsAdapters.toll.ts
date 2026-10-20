@@ -1,8 +1,9 @@
 import {
-  NMLS_ID_PATTERN_ALL, TOLL_HOST, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  NMLS_ID_PATTERN_ALL, TOLL_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 import { parseNextData } from "./dealsAdapters.davidson";
+import { normalizedDealSourceKey } from "../shared/deals";
 
 /**
  * TOLL BROTHERS reader. The community page is Next.js (pages router); its
@@ -178,7 +179,7 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
   const homes: PrivatePlanOrHome[] = [];
   let shapeIntact = true;
   let foreignHome = false;
-  const base = `${community.pathname.replace(/\/+$/, "")}/`.toLowerCase();
+  const base = `${comparablePath(community.pathname.replace(/\/+$/, ""))}/`;
   for (const raw of models) {
     const model = obj(raw);
     if (!model) continue;
@@ -210,7 +211,7 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
       const homeLink = str(home.url);
       const homePage = homeLink ? asUrl(homeLink) : null;
       // The home must belong here: the community id when given, and a page under this community's own path.
-      const underCommunity = Boolean(homePage && sameOfficialHost(homePage, host) && homePage.pathname.toLowerCase().startsWith(base));
+      const underCommunity = Boolean(homePage && sameOfficialHost(homePage, host) && comparablePath(homePage.pathname).startsWith(base));
       if (homePage && sameOfficialHost(homePage, host) && !underCommunity) foreignHome = true;
       const ownCommunity = (communityId === null || home.communityId === undefined || String(home.communityId) === communityId) && underCommunity;
       const readable = Boolean(street && homePage && sameOfficialHost(homePage, host) && ownCommunity);
@@ -295,8 +296,9 @@ export class TollBrothersAdapter implements DealAdapter {
     // Without the community component, its plan list or its sales office this is not a community page.
     if (!parsed || !parsed.record?.street) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The data must describe this community (a same-host redirect to another page does not), with every model's home list in place.
+    // The two spellings of an apostrophe ("'" and "%27") are one page, as they are one source key.
     const ownPage = parsed.pageUrl ? asUrl(parsed.pageUrl) : null;
-    if (ownPage && ownPage.pathname.replace(/\/+$/, "").toLowerCase() !== community.pathname.replace(/\/+$/, "").toLowerCase()) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+    if (ownPage && normalizedDealSourceKey(`${ownPage.origin}${ownPage.pathname}`) !== normalizedDealSourceKey(`${community.origin}${community.pathname}`)) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     if (!parsed.shapeIntact) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The site plan counts the homes for sale; fewer homes in the data than that means the home list changed shape, not that homes sold.
     if (parsed.sitePlanHomes !== null && parsed.homes.length < parsed.sitePlanHomes) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

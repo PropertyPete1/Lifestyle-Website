@@ -337,6 +337,11 @@ function normalizePathname(pathname: string): string {
   return `${pathname.replace(/\/+$/, "") || "/"}/`;
 }
 
+/** A URL path for comparison: percent escapes decoded ("%27" and "'" are one spelling), lower case; an undecodable path is kept as written. */
+export function comparablePath(pathname: string): string {
+  try { return decodeURIComponent(pathname).toLowerCase(); } catch { return pathname.toLowerCase(); }
+}
+
 export function sameOfficialHost(url: URL, expectedHost: string): boolean {
   return url.protocol === "https:" && !url.port && !url.username && !url.password && url.hostname.toLowerCase() === expectedHost;
 }

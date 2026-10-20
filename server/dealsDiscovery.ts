@@ -27,16 +27,33 @@ const MAX_SITEMAP_DOCUMENTS = 32;
 export type DiscoveryReader = {
   builder: Exclude<BuilderId, "Manual">;
   host: string;
-  sitemap: string;
+  /** Where the builder lists its community pages: its sitemap, or (when the sitemap is too large or missing) its own market listing. */
+  index: { kind: "sitemap"; url: string } | { kind: "listing"; url: string; accept: string; paths: (body: string) => string[] | null };
   /** Path of a community page in the builder's San Antonio market. */
   communityPath: RegExp;
 };
 
+/** D.R. Horton's San Antonio market listing: `{ CommunityData: [{ commPageLink: "/texas/san-antonio/<city>/<community>", ... }] }`. */
+export function drhListingPaths(body: string): string[] | null {
+  try {
+    const parsed = JSON.parse(body) as { CommunityData?: Array<{ commPageLink?: unknown }> };
+    if (!Array.isArray(parsed.CommunityData)) return null;
+    return parsed.CommunityData.flatMap((entry) => typeof entry.commPageLink === "string" ? [entry.commPageLink] : []);
+  } catch {
+    return null;
+  }
+}
+
 export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
-  { builder: "Chesmar", host: "www.chesmar.com", sitemap: "https://www.chesmar.com/sitemap.xml", communityPath: /^\/texas\/san-antonio-new-homes\/[a-z0-9-]+\/[^/]+\/?$/i },
+  { builder: "Chesmar", host: "www.chesmar.com", index: { kind: "sitemap", url: "https://www.chesmar.com/sitemap.xml" }, communityPath: /^\/texas\/san-antonio-new-homes\/[a-z0-9-]+\/[^/]+\/?$/i },
   {
-    builder: "M/I Homes", host: "www.mihomes.com", sitemap: "https://www.mihomes.com/Sitemap/sitemap.xml",
+    builder: "M/I Homes", host: "www.mihomes.com", index: { kind: "sitemap", url: "https://www.mihomes.com/Sitemap/sitemap.xml" },
     communityPath: /^\/new-homes\/texas\/greater-san-antonio\/(?!communities\/|plans-ready-to-build\/|quick-move-in-homes\/|model-homes-to-tour\/)[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
+  },
+  {
+    // The sitemap is a 17 MB file of 40,000 URLs; the market listing the community finder reads is 70 KB and complete.
+    builder: "D.R. Horton", host: "www.drhorton.com", index: { kind: "listing", url: "https://www.drhorton.com/api/comms/direct/texas/san-antonio", accept: "application/json", paths: drhListingPaths },
+    communityPath: /^\/texas\/san-antonio\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
   },
 ];
 
@@ -93,6 +110,8 @@ function jsonLdObjects(html: string): JsonObject[] {
 }
 
 const text = (value: unknown) => typeof value === "string" ? decodeHtmlEntities(value).replace(/\s+/g, " ").trim() : "";
+/** "SAN ANTONIO" -> "San Antonio"; a city already in mixed case is left alone. */
+const cityCase = (value: string) => value === value.toUpperCase() && /[A-Z]/.test(value) ? value.toLowerCase().replace(/(^|[\s-])([a-z])/g, (_, lead: string, letter: string) => lead + letter.toUpperCase()) : value;
 
 /** "$289,990 - $512,990" or "From $289,990" -> 289990. */
 export function priceFromRange(value: unknown): number | null {
@@ -110,30 +129,42 @@ export type CommunityRecord = { name: string; street: string | null; city: strin
  * distance from downtown here; they are never stored.
  */
 export function communityRecordFromHtml(html: string): CommunityRecord | null {
+  const candidates: CommunityRecord[] = [];
   for (const object of jsonLdObjects(html)) {
     const type = Array.isArray(object["@type"]) ? (object["@type"] as unknown[]).map(String) : [String(object["@type"] ?? "")];
     if (!type.some((value) => BUSINESS_TYPES.test(value)) || type.includes("Organization")) continue;
-    const address = (Array.isArray(object.address) ? object.address[0] : object.address) as JsonObject | undefined;
+    const rawAddress = (Array.isArray(object.address) ? object.address[0] : object.address) as JsonObject | undefined;
     const name = text(object.name);
-    if (!address || typeof address !== "object" || !name) continue;
-    const zip = /\b(\d{5})(?:-\d{4})?\b/.exec(text(address.postalCode))?.[1] ?? null;
-    const region = text(address.addressRegion);
+    if (!rawAddress || typeof rawAddress !== "object" || !name) continue;
+    // Some sites write the address keys in lower case ("addresslocality"); the record is the same.
+    const address = Object.fromEntries(Object.entries(rawAddress).map(([key, value]) => [key.toLowerCase(), value]));
+    const zip = /\b(\d{5})(?:-\d{4})?\b/.exec(text(address.postalcode))?.[1] ?? null;
+    const region = text(address.addressregion);
     if (region && !/^(?:TX|Texas)$/i.test(region)) continue;
     const geoObject = object.geo as JsonObject | undefined;
-    const lat = Number(geoObject?.latitude);
-    const lng = Number(geoObject?.longitude);
+    const lat = Number(geoObject?.latitude ?? object.latitude);
+    const lng = Number(geoObject?.longitude ?? object.longitude);
     const phone = text(object.telephone).replace(/[^\d+]/g, "") || null;
-    return {
+    candidates.push({
       name,
-      street: text(address.streetAddress) || null,
-      city: text(address.addressLocality) || null,
+      street: text(address.streetaddress) || null,
+      city: cityCase(text(address.addresslocality)) || null,
       zip,
       phone,
       priceFrom: priceFromRange(object.priceRange),
       geo: Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat !== 0 || lng !== 0) ? { lat, lng } : null,
-    };
+    });
   }
-  return null;
+  if (!candidates.length) return null;
+  // A "Place" record named after the page title ("Houses For Sale in … | Blue Ridge Ranch | D.R. Horton") is the page, not the community:
+  // the record with a plain name wins, and takes coordinates, phone and price from the others when it has none.
+  const named = candidates.find((candidate) => !/\s\|\s/.test(candidate.name)) ?? candidates[0]!;
+  return {
+    ...named,
+    geo: named.geo ?? candidates.find((candidate) => candidate.geo)?.geo ?? null,
+    phone: named.phone ?? candidates.find((candidate) => candidate.phone)?.phone ?? null,
+    priceFrom: named.priceFrom ?? candidates.find((candidate) => candidate.priceFrom)?.priceFrom ?? null,
+  };
 }
 
 export type BuilderDiscovery = {
@@ -146,13 +177,22 @@ export type BuilderDiscovery = {
 };
 
 /** One builder's San Antonio area communities, read from its own site, one page at a time. */
+/** The builder's community page URLs from its index; null when the index cannot be read whole. */
+async function indexedUrls(reader: DiscoveryReader, fetcher: HtmlFetcher): Promise<string[] | null> {
+  if (reader.index.kind === "sitemap") return officialSitemapUrls(reader.index.url, reader.host, fetcher);
+  const page = await getDocument(reader.index.url, fetcher, reader.index.accept, reader.host);
+  if (!page.ok) return null;
+  const paths = reader.index.paths(page.text);
+  return paths ? paths.map((path) => new URL(path, `https://${reader.host}/`).toString()) : null;
+}
+
 export async function discoverBuilderCommunities(reader: DiscoveryReader, fetcher: HtmlFetcher = fetch): Promise<BuilderDiscovery> {
   const result: BuilderDiscovery = { builder: reader.builder, ok: false, communities: [], skipped: [] };
-  const urls = await officialSitemapUrls(reader.sitemap, reader.host, fetcher);
+  const urls = await indexedUrls(reader, fetcher);
   if (!urls) return { ...result, reason: "sitemap_unreadable" };
   const pages = Array.from(new Set(urls.flatMap((raw) => {
     const url = asUrl(raw);
-    return url && sameOfficialHost(url, reader.host) && reader.communityPath.test(url.pathname) ? [url.toString()] : [];
+    return url && sameOfficialHost(url, reader.host) && reader.communityPath.test(url.pathname) ? [`${url.origin}${url.pathname}`] : [];
   }))).slice(0, MAX_COMMUNITY_PAGES);
   for (const url of pages) {
     const page = await getDocument(url, fetcher, "text/html,application/xhtml+xml", reader.host);

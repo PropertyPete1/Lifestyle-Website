@@ -1,12 +1,13 @@
 import { dealScrubTerms, emptyDealScrubConfig, hasPrivateTerm, normalizedText, parseDealScrubConfig, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
 import { applyScrubExclusions } from "./dealsScrub";
 import { PerryHomesAdapter } from "./dealsAdapters.perry";
+import { DrHortonAdapter } from "./dealsAdapters.drhorton";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -213,8 +214,9 @@ export interface DealAdapter {
 const CHESMAR_HOST = "www.chesmar.com";
 const MI_HOST = "www.mihomes.com";
 export const PERRY_HOST = "www.perryhomes.com";
+export const DRHORTON_HOST = "www.drhorton.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -636,7 +638,7 @@ function extractFirstHeading(html: string): string | null {
   return heading || null;
 }
 
-interface HtmlElement {
+export interface HtmlElement {
   tag: string;
   attributes: Record<string, string>;
   children: HtmlElement[];
@@ -645,7 +647,7 @@ interface HtmlElement {
 }
 
 /** Limited server-only tree: quoted >/<, nested same-name elements, void tags and raw scripts. */
-function parseHtmlElements(html: string): HtmlElement | null {
+export function parseHtmlElements(html: string): HtmlElement | null {
   if (html.length > 8_000_000) return null;
   const root: HtmlElement = { tag: "root", attributes: {}, children: [], contentStart: 0, contentEnd: html.length };
   const stack = [root];
@@ -689,15 +691,15 @@ function parseHtmlElements(html: string): HtmlElement | null {
   return root;
 }
 
-function descendants(element: HtmlElement): HtmlElement[] {
+export function descendants(element: HtmlElement): HtmlElement[] {
   return element.children.flatMap((child) => [child, ...descendants(child)]);
 }
 
-function elementClass(element: HtmlElement, token: string): boolean {
+export function elementClass(element: HtmlElement, token: string): boolean {
   return (element.attributes.class ?? "").split(/\s+/).includes(token);
 }
 
-function elementText(element: HtmlElement, html: string): string {
+export function elementText(element: HtmlElement, html: string): string {
   return htmlToText(html.slice(element.contentStart, element.contentEnd));
 }
 
@@ -1639,11 +1641,13 @@ class ManualAdapter implements DealAdapter {
 
 /** Generic registry. Callers select only by config.builder; no builder-specific network logic is exposed. */
 let perryAdapter: DealAdapter | null = null;
+let drHortonAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
   // Readers in their own modules import this one's helpers, so they are made on first use, after every module has loaded.
   get "Perry Homes"() { return (perryAdapter ??= new PerryHomesAdapter()); },
+  get "D.R. Horton"() { return (drHortonAdapter ??= new DrHortonAdapter()); },
   Manual: new ManualAdapter(),
 };
 

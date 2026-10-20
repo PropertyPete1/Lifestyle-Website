@@ -457,7 +457,7 @@ describe("admin gating", () => {
 
   it("serves the builder choices (adapter hosts plus Manual) to admins only, so no builder name has to live in the client bundle", async () => {
     const builders = await admin().builders();
-    expect(builders.map((builder) => builder.id)).toEqual(["Chesmar", "M/I Homes", "Perry Homes", "Manual"]);
+    expect(builders.map((builder) => builder.id)).toEqual(["Chesmar", "M/I Homes", "Perry Homes", "D.R. Horton", "Manual"]);
     expect(builders.find((builder) => builder.id === "M/I Homes")).toMatchObject({ host: "www.mihomes.com", manual: false });
     expect(builders.find((builder) => builder.id === "Manual")).toMatchObject({ host: null, manual: true });
     await expect(dealsRouter.createCaller(makeCtx("user")).admin.builders()).rejects.toMatchObject({ code: "FORBIDDEN" });

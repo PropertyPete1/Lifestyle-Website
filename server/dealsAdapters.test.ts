@@ -135,7 +135,7 @@ function miDocuments(total = 15): Record<string, string> {
 
 describe("deals adapters", () => {
   it("registers the required generic builder adapters", () => {
-    expect(Object.keys(DEAL_ADAPTERS).sort()).toEqual(["Chesmar", "M/I Homes", "Manual", "Perry Homes"]);
+    expect(Object.keys(DEAL_ADAPTERS).sort()).toEqual(["Chesmar", "D.R. Horton", "M/I Homes", "Manual", "Perry Homes"]);
     expect(DEAL_ADAPTERS["Perry Homes"].builder).toBe("Perry Homes");
   });
 

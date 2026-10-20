@@ -39,3 +39,16 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Facts:** the community page text carries the school district ("... ISD"); the from-price is a band ("From the $560s") and is left to the research list / the homes.
 - **Incentives:** Perry's offers are site-wide banners with a separate terms page; none is read as a community incentive.
 - **Holds:** an unreadable or reshaped page, a sitemap off the official host, or more than 150 pages under one community (never truncated).
+
+## D.R. Horton reader (added 2026-10-20)
+
+- **Community source:** `https://www.drhorton.com/texas/san-antonio/<city>/<community>` (the research list has 33; the market listing has 57, a few in other markets' paths such as `/texas/san-marcos/seguin/...`, which the reader accepts on the official host).
+- **Site shape:** Sitecore, server-rendered. The community page carries every home for sale and every floor plan as cards (443 KB), so one page is the whole inventory. `#relatedmovein` and `#floorplans` carry `data-currentindex` / `data-totalitems`; when they differ the rest sits behind `moveinreadyapi/getrelated`, which the reader does not call: it holds `incomplete_inventory` instead. Live pages render everything (66 of 66 at the largest community, Redbird Ranch).
+- **Home card:** `a.available-home-card` with `href=".../qmis/<address-slug>"`; `h2` price with `<del>was $…</del>` and an estimated-payment widget (ignored), `h3` street, stats "3 Bed | 2 Bath | 2 Garage" and "1 Story | 1,489 Sq. Ft. | Lot 20". A home under contract is the same card with class `disabled`, no href and "Under Contract" in place of the price. D.R. Horton publishes no move-in date; a home for sale is "Quick Move-In (For Sale)".
+- **Plan card:** `a.CoveoResultLink[href*="/floor-plans/"]`, `h2` name ("The Alamo"), `h3` "Starting in the $242s" (the band's low end is the plan price).
+- **Home page:** `.PropertyGallery img[data-lazy]` under the home's own media folder `…/<lot>-<address-slug>/…`; `fp-*` floor-plan drawings, `interior_features_*` sheets and other homes' folders are skipped; thumbnail sizing (`w=`, `thn=`, `as=`) is removed. The stats line ends "| The Caroline floor plan" (the plan name).
+- **Records:** a `Place` record named after the page title with lower-case address keys and top-level `latitude`/`longitude`, then a `LocalBusiness` record with the community name and sales address (city in capitals). Discovery takes the plain-named record and borrows the coordinates.
+- **Discovery:** no usable sitemap (`/sitemaps/website.xml` is 17 MB, 42,000 URLs, `http://` scheme); the community finder's `GET /api/comms/direct/texas/san-antonio` (70 KB JSON, `CommunityData[].commPageLink`) lists the market, including communities 50+ miles out (Kyle, Buda, Austin), which the 45-mile check drops.
+- **Scrub:** builder names plus the product lines ("Express Series", "Emerald Homes", "Freedom Homes", "Tradition Series"); lender DHI Mortgage.
+- **Incentives:** the Red Tag Event is a site-wide banner with its own terms page; none is read as a community incentive.
+- **Bot protection:** Cloudflare (Turnstile is loaded on the page); the browser pane reads the pages, the cloud has not been tried. A challenge page comes back as `community_fetch_failed` and holds the run.

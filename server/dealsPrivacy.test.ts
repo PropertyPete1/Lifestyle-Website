@@ -28,6 +28,10 @@ describe("Builder Deals privacy boundary", () => {
     const builder = { builder: ["Centex Homes", "Centex"], lender: ["Pulte Mortgage"], community: [], plan: [], street: [], other: [] };
     expect(scrubPrivateNames("Save up to $43,000 on select Centex homes, built by Centex with financing through Pulte Mortgage.", builder)).toBe("Save up to $43,000 on select homes, built by the builder with financing through the builder's lender.");
     expect(scrubPrivateNames("When you purchase a new Centex® home, you receive $2,000.", builder)).toBe("When you purchase a new home, you receive $2,000.");
+    // "of" is not a lead: the builder's own name after it keeps "the builder". A replacement that opens a sentence is capitalised.
+    const davidson = { builder: ["Davidson Homes", "Davidson"], lender: ["NorthStar Mortgage"], community: [], plan: [], street: [], other: [] };
+    expect(scrubPrivateNames("Experience the quality of Davidson Homes. NorthStar Mortgage is an Equal Opportunity Lender.", davidson)).toBe("Experience the quality of the builder. The builder's lender is an Equal Opportunity Lender.");
+    expect(scrubPrivateNames("Davidson Homes builds here.", davidson)).toBe("The builder builds here.");
   });
 
   it("keeps the only shareable Deals metadata generic and landing-only", () => {

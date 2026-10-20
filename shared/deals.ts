@@ -174,13 +174,16 @@ export function scrubPrivateNames(
       ? new RegExp(`(?<![a-z0-9])(?:the\\s+${escaped}(?:\\s+plans?)?(?![a-z0-9])|${escaped}\\s+plans?(?![a-z0-9]))`, "gi")
       : new RegExp(boundary, "gi");
     // "select Centex homes" reads as "select homes", not "select the builder"; "a Centex home" as "a home"; "by Centex" keeps "by the builder".
+    // "of" is not a lead: "the quality of Davidson Homes" names the builder, and keeps "the builder".
     if (category === "builder") {
       const base = escaped.replace(/\\s\+homes$/i, "").replace(/ homes$/i, "");
-      out = out.replace(new RegExp(`(?<=(?:^|[^a-z0-9])(?:select|new|a|our|all|any|these|those|every|each|of)\\s+)${base}(?:\\s+homes)?(?:®|™)?\\s+(homes?|communit(?:y|ies)|neighborhoods?)(?![a-z0-9])`, "gi"), (_match, noun: string) => noun);
+      out = out.replace(new RegExp(`(?<=(?:^|[^a-z0-9])(?:select|new|a|our|all|any|these|those|every|each)\\s+)${base}(?:\\s+homes)?(?:®|™)?\\s+(homes?|communit(?:y|ies)|neighborhoods?)(?![a-z0-9])`, "gi"), (_match, noun: string) => noun);
     }
     out = out.replace(pattern, replacements[category]);
   }
-  return out;
+  // In prose, a replacement that opens the text or a sentence is capitalised like the name it replaced; a label or list item ("this community clubhouse") is not prose.
+  if (options.planField || !/[.!?](?:\s|$)/.test(out)) return out;
+  return out.replace(/(^|[.!?]\s+)(the builder|this community|this plan|this street)(?![a-z])/g, (_match, lead: string, phrase: string) => `${lead}${phrase[0]!.toUpperCase()}${phrase.slice(1)}`);
 }
 
 /**

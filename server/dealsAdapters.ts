@@ -580,7 +580,7 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   if (namesContractDeadline && !contractDeadline?.isoDate) holdReasons.push("missing_contract_deadline");
   if (namesClosingDeadline && !closingDeadline?.isoDate) holdReasons.push("missing_closing_deadline");
   // An adjustable-rate offer ("5/1 ARM", "adjustable rate mortgage") is never published as a plain rate without a look.
-  if (rateKind !== "none" && /\bARM\b|\badjustable[- ]rate|\b\d\/\d\s+ARM\b/.test(text)) holdReasons.push("adjustable_rate");
+  if (rateKind !== "none" && (/\bARM\b/.test(text) || /\b\d{1,2}\/\d\s+arm\b|\badjustable[- ]rate|\brate\s+adjusts|\binitial\s+(?:interest\s+)?rate\b/i.test(text))) holdReasons.push("adjustable_rate");
 
   return {
     normalizedText: normalizedText(text),
@@ -731,7 +731,9 @@ export function cardAroundLink(html: string, root: HtmlElement, path: string, op
   const parents = new Map<HtmlElement, HtmlElement>();
   for (const element of all) for (const child of element.children) parents.set(child, element);
   const normalized = path.replace(/\/+$/, "");
-  const anchor = all.find((element) => element.tag === "a" && element.attributes.href && decodeHtmlEntities(element.attributes.href).split(/[?#]/)[0]!.replace(/\/+$/, "").endsWith(normalized));
+  // The home's link may appear more than once (a featured strip, a map list, its card): each is tried; the walks that find a
+  // status must agree, or the home has none (two different badges next to one home's links is not a status, it is a guess).
+  const anchors = all.filter((element) => element.tag === "a" && element.attributes.href && decodeHtmlEntities(element.attributes.href).split(/[?#]/)[0]!.replace(/\/+$/, "").endsWith(normalized));
   const maxLength = options.maxStatusLength ?? 40;
   // The walk stops at the first ancestor that also holds another home's link: beyond it lies the list, and a neighbour's status is not this home's.
   // Readers that know every home's path pass the others; otherwise another page in the same folder counts as a neighbour.
@@ -743,11 +745,16 @@ export function cardAroundLink(html: string, root: HtmlElement, path: string, op
     if (others) return others.some((other) => href.endsWith(other));
     return href.includes(directory) && href.slice(href.indexOf(directory) + directory.length).length > 0;
   })();
+  const found: Array<{ status: string | null; previousPrice: number | null; fields: Record<string, string | null>; card: HtmlElement | null }> = [];
+  for (const anchor of anchors) {
   let node: HtmlElement | undefined = anchor;
   for (let depth = 0; node && depth < 8; depth++) {
     const inside = descendants(node);
     if (inside.some(siblingLink)) break;
-    const status = inside.find((element) => options.statusClasses.some((token) => elementClass(element, token)) && elementText(element, html).length <= maxLength);
+    const statuses = inside.filter((element) => options.statusClasses.some((token) => elementClass(element, token)) && elementText(element, html).length <= maxLength);
+    // Two status elements under one ancestor means the walk has left the card: this home's status is not among them.
+    if (statuses.length > 1) break;
+    const status = statuses[0];
     if (status) {
       let previous: RegExpExecArray | null = null;
       let card: HtmlElement | undefined = node;
@@ -765,11 +772,15 @@ export function cardAroundLink(html: string, root: HtmlElement, path: string, op
         }
         fields[name] = found ? elementText(found, html) || null : null;
       }
-      return { status: elementText(status, html) || null, previousPrice: previous ? Number(previous[1]!.replace(/,/g, "")) : null, fields, card: node };
+      found.push({ status: elementText(status, html) || null, previousPrice: previous ? Number(previous[1]!.replace(/,/g, "")) : null, fields, card: node });
+      break;
     }
     node = parents.get(node);
   }
-  return { status: null, previousPrice: null, fields: {}, card: null };
+  }
+  if (!found.length) return { status: null, previousPrice: null, fields: {}, card: null };
+  const agree = found.every((item) => (item.status ?? "").toLowerCase() === (found[0]!.status ?? "").toLowerCase());
+  return agree ? found[0]! : { status: null, previousPrice: null, fields: {}, card: null };
 }
 
 function classText(elements: readonly HtmlElement[], html: string, token: string): string | null {
@@ -1080,6 +1091,15 @@ async function mapWithConcurrency<T, R>(
   return output;
 }
 
+/**
+ * A lender's NMLS identifier in any of its spellings: "NMLS 1791", "NMLS #1791",
+ * "NMLS ID No. 1791", "NMLSR ID 1791", "NMLS Unique Identifier 1791",
+ * "N.M.L.S. 1791", "NMLS Consumer Access 1791". Stripped from disclaimers
+ * before they are kept, and treated as residue in any public text.
+ */
+export const NMLS_ID_PATTERN = /\(?\bN\.?M\.?L\.?S\.?R?\b(?:[\s#:.]*(?:ID|No\.?|#|number|unique\s+identifier|consumer\s+access))*[\s#:.]*\d{3,}\)?/i;
+export const NMLS_ID_PATTERN_ALL = new RegExp(NMLS_ID_PATTERN.source, "gi");
+
 /** A street address starts with a house number and continues with words; an H1 such as "New Homes in San Antonio" does not. */
 const STREET_ADDRESS_PATTERN = /^\d{1,6}[A-Za-z]?\s+[A-Za-z][A-Za-z0-9.'’#-]*(?:[\s,]+[A-Za-z0-9.'’#-]+)*$/;
 export function looksLikeStreetAddress(value: string | null | undefined): value is string {
@@ -1136,7 +1156,7 @@ export function toPublicSafeText(
   const scrubbed = scrubPrivateNames(htmlToText(input), categories, { planField });
   if (!scrubbed || /\b(?:https?:\/\/|www\.)\S+/i.test(scrubbed)) return null;
   // A lender's NMLS number names the lender as surely as its name does.
-  if (/\bNMLS\b[\s#:.]*(?:ID|No)?[\s#:.]*\d{3,}/i.test(scrubbed)) return null;
+  if (NMLS_ID_PATTERN.test(scrubbed)) return null;
   // Residue is judged per category: a bare plan word such as "Magnolia trees"
   // outside a plan field is verbatim text, not a private name.
   return remainingPrivateTerm(scrubbed, categories, planField) ? null : scrubbed;

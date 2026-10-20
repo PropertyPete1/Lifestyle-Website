@@ -119,12 +119,19 @@ function cardFacts(html: string, root: HtmlElement, path: string, otherHomePaths
 }
 
 /** The sync publishes a home as a quick move-in only when its status says so; every home on the "available homes" list is one. */
-export function homefinitiStatus(cardStatus: string | null): { status: string; readyNow: boolean } {
-  const label = (cardStatus ?? "").trim();
+/**
+ * The card's status word, from a closed list: ready words, "Under Construction",
+ * sold words and "Model". Any other wording, or none, gives no status, so the
+ * sync holds the run instead of publishing a home that may not be for sale.
+ */
+export function homefinitiStatus(cardStatus: string | null): { status: string | null; readyNow: boolean } {
+  const label = (cardStatus ?? "").replace(/\s+/g, " ").trim();
+  if (!label) return { status: null, readyNow: false };
   if (/sold|under\s+contract|pending/i.test(label)) return { status: "Sold", readyNow: false };
   if (/model/i.test(label)) return { status: "Model Home", readyNow: false };
-  if (/move[- ]?in\s+ready|ready\s+now|available\s+now|completed?/i.test(label)) return { status: "Quick Move-In (Move-In Ready)", readyNow: true };
-  return { status: label ? `Quick Move-In (${label})` : "Quick Move-In", readyNow: false };
+  if (/^(?:move[- ]?in\s+ready|ready\s+now|available\s+now|completed?|quick\s+move[- ]?in)!?$/i.test(label)) return { status: "Quick Move-In (Move-In Ready)", readyNow: true };
+  if (/^under\s+construction!?$/i.test(label)) return { status: "Quick Move-In (Under Construction)", readyNow: false };
+  return { status: null, readyNow: false };
 }
 
 export class HomefinitiAdapter implements DealAdapter {
@@ -153,17 +160,41 @@ export class HomefinitiAdapter implements DealAdapter {
     if (records.homes.length > HOMEFINITI_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     const root = parseHtmlElements(page.text);
     if (!root) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
-    // More home cards on the page than home records means the records changed shape, not that homes sold.
-    const cardCount = descendants(root).filter((element) => STATUS_CLASSES.some((token) => elementClass(element, token)) && elementText(element, page.text).length <= 40).length;
-    if (cardCount > records.homes.length) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // A home record of another community on the same host (a "nearby homes" block) is never this community's inventory.
+    const communitySlug = community.pathname.split("/").filter(Boolean).at(-1)?.toLowerCase() ?? "";
+    if (records.homes.some((home) => !new URL(home.sourceUrl).pathname.toLowerCase().split("/").includes(communitySlug))) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+    // More home cards on the page than home records means the records changed shape, not that homes sold. A card is a status
+    // element with links into this community near it, counted once per set of links (a featured strip repeats a card's home);
+    // a community-wide badge ("Now Selling") has no such link and is not a card.
+    const all = descendants(root);
+    const parents = new Map<HtmlElement, HtmlElement>();
+    for (const element of all) for (const child of element.children) parents.set(child, element);
+    const communityDepth = community.pathname.split("/").filter(Boolean).length;
+    const linksIntoCommunity = (scope: HtmlElement) => Array.from(new Set(descendants(scope).flatMap((item) => {
+      if (item.tag !== "a" || !item.attributes.href) return [];
+      const path = decodeHtmlEntities(item.attributes.href).split(/[?#]/)[0]!.toLowerCase().replace(/\/+$/, "");
+      return path.split("/").includes(communitySlug) && path.split("/").filter(Boolean).length > communityDepth ? [path] : [];
+    }))).sort();
+    const isStatus = (element: HtmlElement) => STATUS_CLASSES.some((token) => elementClass(element, token)) && elementText(element, page.text).length <= 40;
+    const cards = new Set<string>();
+    for (const element of all.filter(isStatus)) {
+      let scope: HtmlElement | undefined = element;
+      for (let up = 0; scope && up < 4; up++, scope = parents.get(scope)) {
+        // The card is the nearest block that links to a home and holds this one status; a block holding several is the list.
+        if (descendants(scope).filter(isStatus).length > 1) break;
+        const links = linksIntoCommunity(scope);
+        if (links.length) { cards.add(links.join(" ")); break; }
+      }
+    }
+    if (cards.size > records.homes.length) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     privateSnapshot.communityFacts = parseCommunityFacts(page.text);
     const homePaths = records.homes.map((home) => new URL(home.sourceUrl).pathname);
     for (const record of records.homes) {
       const { kind: _kind, ...home } = record;
       const card = cardFacts(page.text, root, new URL(home.sourceUrl).pathname, homePaths);
-      // A home listed without a card is not on the page the visitor sees: a layout change holds the run rather than publishing a guess.
-      if (!card.status) return failedResult(config, fetchedAt, privateSnapshot, ["unlabelled_home_status"]);
+      // A home listed without a card, or with a status word the reader does not know, is not published on a guess: the run is held.
       const status = homefinitiStatus(card.status);
+      if (!status.status) return failedResult(config, fetchedAt, privateSnapshot, ["unlabelled_home_status"]);
       privateSnapshot.homes.push({
         ...home, status: status.status, readyNow: status.readyNow,
         previousPrice: card.previousPrice && home.price && card.previousPrice > home.price ? card.previousPrice : null,

@@ -1,5 +1,5 @@
 import {
-  DAVIDSON_HOST, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  DAVIDSON_HOST, NMLS_ID_PATTERN_ALL, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -82,7 +82,22 @@ export type DavidsonPage = {
 };
 
 /** One Davidson community page; null when it is not one (no community in the page data). */
-export function parseDavidsonCommunity(html: string, pageUrl: string): DavidsonPage | null {
+/**
+ * The home's status words: "Active" is for sale, sold words are sold, and any
+ * other wording (or none) gives no status, so the run is held rather than
+ * publishing a home that is not for sale. `overrideMls` is read the same way.
+ */
+export function davidsonStatus(status: string | null, overrideMls: string | null): { sold: boolean; readyNow: boolean; known: boolean } {
+  const label = (status ?? "").trim();
+  const override = (overrideMls ?? "").trim().toLowerCase();
+  if (/sold|pending|contract/i.test(label) || /sold|pending|contract/.test(override)) return { sold: true, readyNow: false, known: true };
+  const readyNow = /^moveinready$/.test(override) || /move[- ]?in\s+ready/i.test(label);
+  const knownOverride = override === "" || override === "nooverride" || override === "moveinready";
+  const known = /^active$/i.test(label) && knownOverride;
+  return { sold: false, readyNow, known };
+}
+
+export function parseDavidsonCommunity(html: string, pageUrl: string, now: Date = new Date()): DavidsonPage | null {
   const url = asUrl(pageUrl);
   const data = parseNextData(html);
   const props = obj(obj(data?.props)?.pageProps);
@@ -100,22 +115,23 @@ export function parseDavidsonCommunity(html: string, pageUrl: string): DavidsonP
     if (!home) continue;
     const street = str(home.title)?.replace(/\.$/, "") ?? null;
     const slug = slugOf(home.slug);
-    if (!street || !slug) continue;
     const price = num(home.price);
     const old = num(home.oldPrice);
-    const status = str(home.status) ?? "";
-    const sold = /sold|pending|contract/i.test(status);
-    const readyNow = /move\s*in\s*ready|moveinready/i.test(str(home.overrideMls) ?? "") || /move[- ]?in\s+ready/i.test(status);
+    const { sold, readyNow, known } = davidsonStatus(str(home.status), str(home.overrideMls));
     const completion = /^(\d{4})-(\d{2})/.exec(str(home.estCompletionMonth) ?? "");
-    const moveInDate = !sold && !readyNow && completion ? `${MONTHS[Number(completion[2]) - 1]} ${completion[1]}` : null;
+    // A completion month already past is a stale estimate, not a move-in date.
+    const current = completion && (Number(completion[1]) > now.getUTCFullYear() || (Number(completion[1]) === now.getUTCFullYear() && Number(completion[2]) >= now.getUTCMonth() + 1));
+    const moveInDate = !sold && !readyNow && completion && current && MONTHS[Number(completion[2]) - 1] ? `${MONTHS[Number(completion[2]) - 1]} ${completion[1]}` : null;
     const baths = (num(home.baths) ?? 0) + (num(home.halfBaths) ?? 0) * 0.5;
     const lot = str(home.lotId);
+    // An entry the reader cannot name stays in the list without a status: the sync holds the run instead of sweeping the home to sold.
+    const readable = Boolean(street && slug);
     homes.push({
-      sourceUrl: `${url.origin}${base}/available-homes/${slug}/`,
+      sourceUrl: readable ? `${url.origin}${base}/available-homes/${slug}/` : `${url.origin}${base}/available-homes/unreadable-${homes.length}/`,
       privateName: street,
-      privateAddress: `${street}, ${cityLine}`,
+      privateAddress: street ? `${street}, ${cityLine}` : null,
       privatePlanName: str(obj(home.floorPlanPicker)?.title),
-      status: sold ? "Sold" : readyNow ? "Quick Move-In (Move-In Ready)" : moveInDate ? `Quick Move-In (${moveInDate})` : "Quick Move-In",
+      status: !readable || !known ? null : sold ? "Sold" : readyNow ? "Quick Move-In (Move-In Ready)" : moveInDate ? `Quick Move-In (${moveInDate})` : "Quick Move-In",
       price: price && price > 0 ? price : null,
       previousPrice: old && price && old > price ? old : null,
       priceDrop: old && price && old > price ? old - price : null,
@@ -173,16 +189,22 @@ function blocksText(blocks: unknown): string[] {
  * promotional-rate parser sees the rate, APR, loan type, down payment and the
  * deadline. Null when the page carries no promotion.
  */
-export function parseDavidsonPromotion(html: string): { text: string; title: string | null; eventEnd: string | null; communities: string[] } | null {
+export function parseDavidsonPromotion(html: string): { text: string; title: string | null; eventEnd: string | null; communities: string[]; hasRegions: boolean } | null {
   const data = parseNextData(html);
   const promo = obj(obj(obj(data?.props)?.pageProps)?.promo);
   if (!promo) return null;
   const title = str(promo.title);
   const parts = [title, ...blocksText(promo.content), ...blocksText(promo.finePrint)].filter((part): part is string => Boolean(part));
-  // Links, phone numbers and form copy say nothing about the offer.
-  const text = parts.join(" ").replace(/\b(?:https?:\/\/|www\.)\S+/gi, " ").replace(/\(?\b\d{3}\)?[-. ]\d{3}[-. ]\d{4}\b/g, " ").replace(/\s+/g, " ").trim();
-  const communities = arr(promo.regions).flatMap((region) => arr(obj(region)?.communities).map((community) => str(obj(community)?.title) ?? str(community) ?? "")).filter(Boolean);
-  return text ? { text, title, eventEnd: str(promo.eventEnd), communities } : null;
+  // Links, phone numbers, the lender's NMLS id and form copy say nothing about the offer.
+  const text = parts.join(" ")
+    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, " ")
+    .replace(/\(?\b\d{3}\)?[-. ]\d{3}[-. ]\d{4}\b/g, " ")
+    .replace(NMLS_ID_PATTERN_ALL, " ")
+    .replace(/\b(?:Visit|Call|Fill out the form)(?:\s+or\s+(?:call|visit))?\s+(?:for|to)\s+(?:details|learn more|more information)\.?/gi, " ")
+    .replace(/\s+([,.;:!?])/g, "$1").replace(/\s+/g, " ").trim();
+  const hasRegions = Array.isArray(promo.regions);
+  const communities = arr(promo.regions).flatMap((region) => arr(obj(region)?.communities).map((community) => str(obj(community)?.title) ?? str(obj(obj(community)?.community)?.title) ?? str(community) ?? "")).filter(Boolean);
+  return text ? { text, title, eventEnd: str(promo.eventEnd), communities, hasRegions } : null;
 }
 
 export class DavidsonAdapter implements DealAdapter {
@@ -199,7 +221,7 @@ export class DavidsonAdapter implements DealAdapter {
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", DAVIDSON_HOST);
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
-    const parsed = parseDavidsonCommunity(page.text, community.toString());
+    const parsed = parseDavidsonCommunity(page.text, community.toString(), now());
     if (!parsed) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (parsed.homes.length > DAVIDSON_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     privateSnapshot.communityFacts = { fromPrice: parsed.facts.fromPrice && parsed.facts.fromPrice >= 50_000 ? parsed.facts.fromPrice : null, schoolDistrict: parsed.facts.schoolDistrict, lotSizes: null, amenities: parsed.facts.amenities };
@@ -227,6 +249,8 @@ async function promotion(path: string, fetcher: HtmlFetcher, now: number, snapsh
     if (!page.ok) return { hold: page.redirectedOffOfficialHost ? "unsupported_official_host" : "incentive_fetch_failed" };
     const promo = parseDavidsonPromotion(page.text);
     if (!promo) return { hold: "expected_incentive_container_not_found" };
+    // A regions list that names no community is a changed shape, not an offer for everyone.
+    if (promo.hasRegions && promo.communities.length === 0) return { hold: "expected_incentive_container_not_found" };
     parsed = { text: promo.text, communities: promo.communities };
     promoCache = { path: url.pathname, parsed, fetchedAt: now };
   }

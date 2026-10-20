@@ -15,6 +15,16 @@ describe("the landing page's offer teaser", () => {
     expect(incentiveTeaser("5.5% FHA rate on select homes through October 31, 2026.")).toBe("5.5% FHA rate on select homes.");
     expect(incentiveTeaser("Offer ends 11/8/2026: 5.5% FHA rate on select homes.")).toBe("5.5% FHA rate on select homes.");
     expect(incentiveTeaser("Contracts written between 10/12/2026 and 11/8/2026 get 5.5% (6.1% APR).")).toBe("Get 5.5% (6.1% APR).");
+    // A month abbreviation with its day is not a sentence end; "4/2.5" and "Lamar 5" are figures and names; "contracts" stays after a preposition.
+    expect(incentiveTeaser("Rates as low as 4.99% on select homes through Dec. 31. Other terms apply.")).toBe("Rates as low as 4.99% on select homes.");
+    expect(incentiveTeaser("4.99% (6.051% APR) on 4/2.5 homes closing by 11/30.")).toBe("4.99% (6.051% APR) on 4/2.5 homes.");
+    expect(incentiveTeaser("Save $20,000 at Lamar 5 Ranch.")).toBe("Save $20,000 at Lamar 5 Ranch.");
+    expect(incentiveTeaser("Rate available on contracts through 10.31.26.")).toBe("Rate available on contracts.");
+    expect(incentiveTeaser("Must close by 11/30.")).toBe("");
+    // A day/month without a year is a date only after a lead word: "Rated 4/5" is not.
+    expect(incentiveTeaser("Rated 4/5 on 2% rate buydowns.")).toBe("Rated 4/5 on 2% rate buydowns.");
+    // An adjustable-rate offer says so on the card even when the chosen sentence does not.
+    expect(incentiveTeaser("Rates as low as 4.5% + $10,000 Flex Cash! Financing is a 5/1 ARM through the lender.")).toBe("Rates as low as 4.5% + $10,000 Flex Cash (adjustable rate).");
   });
 
   it("removes month-year, dashed, dotted, ISO and 'the 30th of' dates whole, and leaves loan-program fractions alone", () => {

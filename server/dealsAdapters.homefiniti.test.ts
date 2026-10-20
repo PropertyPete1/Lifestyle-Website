@@ -114,7 +114,9 @@ describe("Homefiniti reader: records", () => {
     expect(homefinitiStatus("Sold")).toEqual({ status: "Sold", readyNow: false });
     expect(homefinitiStatus("Under Contract")).toEqual({ status: "Sold", readyNow: false });
     expect(homefinitiStatus("Model Home")).toEqual({ status: "Model Home", readyNow: false });
-    expect(homefinitiStatus(null)).toEqual({ status: "Quick Move-In", readyNow: false });
+    // Wording the reader does not know, or none, is no status: the run is held rather than published as available.
+    expect(homefinitiStatus(null)).toEqual({ status: null, readyNow: false });
+    for (const word of ["Coming Soon", "Reserved", "Not Available", "Hold", "Off Market", "Unreleased", ""]) expect(homefinitiStatus(word)).toEqual({ status: null, readyNow: false });
     const market = `<a href="/new-homes/tx/san-antonio/available-homes/">All</a><a href="/new-homes/tx/cibolo/buffalo-fixture/">Buffalo</a><a href="/new-homes/tx/cibolo/buffalo-fixture/?x=1">Buffalo again</a><a href="/new-homes/tx/new-braunfels/build-on-your-lot-2/">BOYL</a><a href="https://www.coventryhomes.com/new-homes/tx/schertz/homestead-65/">Homestead 65</a><a href="https://evil.example/new-homes/tx/a/b/">x</a><a href="/new-homes/tx/san-antonio/">Market</a>`;
     expect(homefinitiMarketLinks(market, "www.coventryhomes.com")).toEqual(["https://www.coventryhomes.com/new-homes/tx/cibolo/buffalo-fixture/", "https://www.coventryhomes.com/new-homes/tx/schertz/homestead-65/"]);
   });
@@ -155,6 +157,25 @@ describe("Homefiniti reader: a community", () => {
     // One card lost its status: a neighbour's status is never borrowed, so the run is held.
     const oneUnlabelled = vi.fn(async () => new Response(communityPage().replace('<div class="status-text"> Move-In Ready </div>', ""), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: oneUnlabelled })).holdReasons).toEqual(["unlabelled_home_status"]);
+    // A card whose status word the reader does not know is not published as available.
+    const unknownWord = vi.fn(async () => new Response(communityPage().replace("Under Construction", "Coming Soon"), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: unknownWord })).holdReasons).toEqual(["unlabelled_home_status"]);
+    // The sold home's link also appears in a featured strip above the list (no badge of its own): its card still decides, never the first badge on the page.
+    const strip = (badge: string) => `<section class="featured"><div class="card">${badge}<a href="/new-homes/tx/san-antonio/fixture-meadows/birch/2314-fixture-way/">Featured</a></div></section>`;
+    const featured = vi.fn(async () => new Response(communityPage().replace("<h2>AVAILABLE HOMES</h2>", `${strip("")}<h2>AVAILABLE HOMES</h2>`), { status: 200, headers: { "content-type": "text/html" } }));
+    const withStrip = await loadOfficialDeals(config, { fetcher: featured });
+    expect(withStrip.holdReasons).toEqual([]);
+    expect(withStrip.private.homes.map((home) => home.status)).toEqual(["Quick Move-In (Under Construction)", "Quick Move-In (Move-In Ready)", "Sold"]);
+    // Two badges next to one home's links that disagree are no status at all: the run is held.
+    const disagreeing = vi.fn(async () => new Response(communityPage().replace("<h2>AVAILABLE HOMES</h2>", `${strip('<div class="status-text"> Move-In Ready </div>')}<h2>AVAILABLE HOMES</h2>`), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: disagreeing })).holdReasons).toEqual(["unlabelled_home_status"]);
+    // A community-wide badge in the same class is not a home card; a badge with a link into the community's homes is.
+    const badge = vi.fn(async () => new Response(communityPage().replace("<h1>FIXTURE MEADOWS</h1>", `<h1>FIXTURE MEADOWS</h1><span class="status">Now Selling</span>`), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: badge })).holdReasons).toEqual([]);
+    // A home record of another community on this host is not this community's inventory.
+    const nearby = ld({ "@type": ["Product", "SingleFamilyResidence"], name: "9 Other Way", url: `${FAH}/new-homes/tx/san-antonio/other-fixture/vail/9-other-way/`, address: { streetAddress: "9 Other Way", addressLocality: "San Antonio", postalCode: "78224" }, offers: { price: "300000.00", url: `${FAH}/new-homes/tx/san-antonio/other-fixture/vail/9-other-way/` }, numberOfBedrooms: 3 });
+    const otherCommunity = vi.fn(async () => new Response(communityPage().replace("</head>", `${nearby}</head>`), { status: 200, headers: { "content-type": "text/html" } }));
+    expect((await loadOfficialDeals(config, { fetcher: otherCommunity })).holdReasons).toEqual(["invalid_inventory_response"]);
     // The home records gone but the cards still there: a changed record shape, never three sold homes.
     const noRecords = vi.fn(async () => new Response(communityPage().replace(/"@type":\["Product","SingleFamilyResidence"\]/g, "\"@type\":[\"Thing\"]"), { status: 200, headers: { "content-type": "text/html" } }));
     const held = await loadOfficialDeals(config, { fetcher: noRecords });

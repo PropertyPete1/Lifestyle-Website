@@ -1,5 +1,5 @@
 import {
-  PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, htmlToText, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  NMLS_ID_PATTERN_ALL, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, htmlToText, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -212,13 +212,14 @@ function cleanDisclaimer(attr: string): string {
   return text
     // The licensing line (NMLS lookup links) closes the disclaimer; the copyright sentence and the date tag say nothing about the offer.
     .replace(/\bLicensing information:[\s\S]*$/i, " ")
-    .replace(/\(?\bNMLS\s*(?:ID|#|No\.?)?\s*#?\s*\d+\)?/gi, " ")
+    .replace(NMLS_ID_PATTERN_ALL, " ")
     .replace(/(?:&copy;|©|\(c\))\s*\d{4}.{0,120}?All rights reserved\.?/gi, " ")
     .replace(/(?:&copy;|©|\(c\))\s*\d{4}[^.]*\./gi, " ")
     .replace(/\[[A-Za-z]+\s+\d{4}\]/g, " ")
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, " ")
     .replace(/\b[a-z0-9.-]+\.(?:com|org|net)\/\S*/gi, " ")
     .replace(/^\s*Disclaimer\s+/i, "")
+    .replace(/\s+([,.;:!?])/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
 }

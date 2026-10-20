@@ -167,6 +167,11 @@ describe("deals adapters", () => {
     expect(facts.holdReasons).toEqual(["missing_follow_on_rate", "missing_follow_on_period"]);
     const withTerm = parsePromotionalRate("First year: 4.25% Rate / 6.051% APR; 5.25% for years 2-30 on a 30-year loan.");
     expect(withTerm.holdReasons).toEqual(["missing_loan_type", "missing_down_payment"]);
+    // An adjustable-rate offer is held however it is spelled.
+    for (const wording of ["5/1 ARM", "5/1 Arm", "Adjustable Rate Mortgage", "Adjustable-Rate", "ADJUSTABLE RATE", "7/6 ARM", "the rate adjusts annually", "4.5% initial interest rate"]) {
+      expect(parsePromotionalRate(`4.5% (6.38% APR) FHA, 3.5% down, 30-year, ${wording}.`).holdReasons).toContain("adjustable_rate");
+    }
+    expect(parsePromotionalRate("4.5% (6.38% APR) FHA 30-year fixed, 3.5% down; arm yourself with savings.").holdReasons).not.toContain("adjustable_rate");
     // Dates are only required when the source actually names a contract or closing deadline.
   });
 
@@ -185,8 +190,11 @@ describe("deals adapters", () => {
   });
 
   it("uses the shared scrubber and refuses output when a short private term cannot safely be scrubbed", () => {
-    expect(toPublicSafeText("Secret Grove offers Hidden Plan.", config)).toBe("this community offers this community.");
+    expect(toPublicSafeText("Secret Grove offers Hidden Plan.", config)).toBe("This community offers this community.");
     expect(toPublicSafeText("AUX is private", { ...config, scrubList: ["AUX"] })).toBeNull();
+    // A lender's NMLS id in any spelling names the lender.
+    for (const id of ["NMLS 1791", "NMLS #1791", "NMLS ID No. 1791", "NMLSR ID 1791", "NMLS Unique Identifier 1791", "N.M.L.S. 1791", "NMLS Consumer Access 1791"]) expect(toPublicSafeText(`Financing through our lender (${id}).`, config)).toBeNull();
+    expect(toPublicSafeText("Financing through our lender.", config)).toBe("Financing through our lender.");
   });
 
   it("scrubs plan names only in plan fields or in the 'the X' / 'X plan' forms and keeps other words verbatim", () => {
@@ -247,7 +255,7 @@ describe("deals adapters", () => {
     expect(result.private.discoveredScrubConfig?.street).toEqual([]);
     expect(result.private.discoveredScrubConfig?.plan).toEqual(["Hidden Plan"]);
     // Without an exclusion the heading is still a discovered private name, so the incentive text is scrubbed, not held.
-    expect(result.public.incentive?.text).toContain("this community: ask about our fall savings");
+    expect(result.public.incentive?.text).toContain("This community: ask about our fall savings");
     expect(result.public.incentive?.text).not.toContain("New Homes in San Antonio");
 
     const relaxed = await loadOfficialDeals({ ...source, excludedTerms: ["New Homes in San Antonio"] }, { fetcher: fixtureFetcher(documents) });

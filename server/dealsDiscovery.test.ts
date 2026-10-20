@@ -150,6 +150,9 @@ describe("reading a builder's own records", () => {
       ...drhRecords("Fixture Ranch", "3702 Fixture Terrace", "San Antonio", "78222"),
     ]);
     expect(communityRecordFromHtml(featuredFirst)).toMatchObject({ name: "Fixture Ranch", street: "3702 Fixture Terrace" });
+    // Without a business record there is no community on the page: a lone residence record is a featured home, never the community.
+    const residenceOnly = page([{ "@type": "SingleFamilyResidence", name: "5919 Granite Fixture", address: { streetAddress: "5919 Granite Fixture", addressLocality: "San Antonio", postalCode: "78222" }, geo: { latitude: 29.37, longitude: -98.37 } }]);
+    expect(communityRecordFromHtml(residenceOnly)).toBeNull();
     expect(priceFromRange("From $1,250,000")).toBe(1_250_000);
     expect(priceFromRange("$$")).toBeNull();
   });
@@ -200,6 +203,13 @@ describe("discovery", () => {
     const davidson = await discoverBuilderCommunities(reader("Davidson Homes"), fetcher);
     expect(davidson.communities.map((community) => [community.name, community.address, community.salesPhone, community.priceFrom])).toEqual([["Fixture Meadows", "10326 Fixture Jct, San Antonio, TX 78224", "2105550400", 260_990]]);
     expect(davidson.skipped).toEqual([{ url: `${DAV}/states/texas/san-antonio-market-area/kyle/far-fixture/`, reason: "outside_area" }]);
+    // A page whose record has no coordinates cannot pass the area check and is not added on faith.
+    const placed = site[`${DAV}/states/texas/san-antonio-market-area/kyle/far-fixture/`]!;
+    site[`${DAV}/states/texas/san-antonio-market-area/kyle/far-fixture/`] = { body: placed.body.replace(/"coordinates":\{[^}]*\}/g, "\"coordinates\":null").replace(/"salesOfficeGeocode":\{[^}]*\}/g, "\"salesOfficeGeocode\":null") };
+    const unplaced = await discoverBuilderCommunities(reader("Davidson Homes"), fetcher);
+    expect(unplaced.communities.map((community) => community.name)).toEqual(["Fixture Meadows"]);
+    expect(unplaced.skipped).toEqual([{ url: `${DAV}/states/texas/san-antonio-market-area/kyle/far-fixture/`, reason: "no_community_record" }]);
+    site[`${DAV}/states/texas/san-antonio-market-area/kyle/far-fixture/`] = placed;
 
     // Highland: the sitemap's San Antonio market pages, each read for its office line and map link; the concierge page, home pages and other markets are left.
     requested.length = 0;

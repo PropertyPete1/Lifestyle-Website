@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DavidsonAdapter, davidsonMarketLinks, davidsonRecord, parseDavidsonCommunity, parseDavidsonPromotion, parseNextData, resetDavidsonCaches, sanityImageUrl } from "./dealsAdapters.davidson";
+import { DavidsonAdapter, davidsonMarketLinks, davidsonRecord, davidsonStatus, parseDavidsonCommunity, parseDavidsonPromotion, parseNextData, resetDavidsonCaches, sanityImageUrl } from "./dealsAdapters.davidson";
 import { DEAL_ADAPTERS, loadOfficialDeals, type CommunitySourceConfig } from "./dealsAdapters";
 
 /**
@@ -60,7 +60,8 @@ beforeEach(() => { vi.clearAllMocks(); requested.length = 0; resetDavidsonCaches
 
 describe("Davidson Homes reader: page data", () => {
   it("reads the community's homes and plans from the page data: address with the office's city and ZIP, prices, specs, lot, move-in, photos without the floor plan", () => {
-    const parsed = parseDavidsonCommunity(communityPage, COMMUNITY)!;
+    const NOW = new Date("2026-10-20T12:00:00Z");
+    const parsed = parseDavidsonCommunity(communityPage, COMMUNITY, NOW)!;
     expect(parsed.homes.map((home) => [home.privateAddress, home.privatePlanName, home.status, home.price, home.previousPrice, home.priceDrop, home.bedrooms, home.bathrooms, home.squareFeet, home.homesite, home.moveInDate, home.gallery?.length])).toEqual([
       ["2535 Fixture Pearl Dr, San Antonio, TX 78224", "The Colorado B", "Quick Move-In (Move-In Ready)", 289_990, 303_030, 13_040, 4, 2, 1_590, "Lot 46-23", null, 2],
       ["2527 Fixture Pearl Dr, San Antonio, TX 78224", "The San Marcos D", "Quick Move-In (December 2026)", 348_370, null, null, 5, 3.5, 2_438, "Lot 44-23", "December 2026", 2],
@@ -73,13 +74,33 @@ describe("Davidson Homes reader: page data", () => {
     expect(parsed.facts).toMatchObject({ name: "Fixture Meadows", street: "10326 Fixture Jct", city: "San Antonio", zip: "78224", phone: "2105550400", geo: { lat: 29.3119, lng: -98.5503 }, fromPrice: 260_990, schoolDistrict: "Southside ISD", amenities: ["Community pool", "Playscape", "Near Loop 410"] });
     expect(parsed.promotionPath).toBe(PROMO);
     expect(parseDavidsonCommunity("<html><body>new layout</body></html>", COMMUNITY)).toBeNull();
+    // Status words: "Active" is for sale, sold words are sold, anything else or none gives no status (the sync holds the run); overrideMls likewise.
+    expect(davidsonStatus("Active", "nooverride")).toEqual({ sold: false, readyNow: false, known: true });
+    expect(davidsonStatus("active", null)).toEqual({ sold: false, readyNow: false, known: true });
+    expect(davidsonStatus("Active", "moveinready")).toEqual({ sold: false, readyNow: true, known: true });
+    expect(davidsonStatus("Under Contract", "nooverride")).toEqual({ sold: true, readyNow: false, known: true });
+    expect(davidsonStatus("Active", "undercontract")).toEqual({ sold: true, readyNow: false, known: true });
+    for (const word of ["Inactive", "Coming Soon", "Model", "Reserved", "", null]) expect(davidsonStatus(word, "nooverride").known).toBe(false);
+    expect(davidsonStatus("Active", "comingsoon").known).toBe(false);
+    const withStatuses = (statuses: Array<string | null>, overrides: Array<string | null> = []) => nextPage({ community: { ...community, availableHomes: community.availableHomes.map((entry, index) => { const copy: Record<string, unknown> = { ...entry, status: statuses[index] ?? entry.status, overrideMls: overrides[index] ?? entry.overrideMls }; if (statuses[index] === null) delete copy.status; return copy; }) }, city: { title: "San Antonio" } }, "/x");
+    expect(parseDavidsonCommunity(withStatuses(["Inactive", "Active", null]), COMMUNITY, NOW)!.homes.map((home) => home.status)).toEqual([null, "Quick Move-In (December 2026)", null]);
+    expect(parseDavidsonCommunity(withStatuses([], ["undercontract", "comingsoon"]), COMMUNITY, NOW)!.homes.map((home) => home.status)).toEqual(["Sold", null, "Sold"]);
+    // An entry whose title or slug key moved stays in the list without a status: never dropped, so never swept to sold.
+    const renamed = nextPage({ community: { ...community, availableHomes: community.availableHomes.map((entry) => ({ ...entry, title: undefined, name: entry.title })) }, city: { title: "San Antonio" } }, "/x");
+    const unreadable = parseDavidsonCommunity(renamed, COMMUNITY, NOW)!;
+    expect(unreadable.homes).toHaveLength(3);
+    expect(unreadable.homes.map((home) => [home.status, home.privateName])).toEqual([[null, null], [null, null], [null, null]]);
+    expect(new Set(unreadable.homes.map((home) => home.sourceUrl)).size).toBe(3);
+    // A completion month already past is no move-in date.
+    const stale = nextPage({ community: { ...community, availableHomes: [{ ...community.availableHomes[1]!, estCompletionMonth: "2025-03-01" }] }, city: { title: "San Antonio" } }, "/x");
+    expect(parseDavidsonCommunity(stale, COMMUNITY, NOW)!.homes[0]).toMatchObject({ status: "Quick Move-In", moveInDate: null });
     expect(parseDavidsonCommunity(nextPage({ community: { title: "x" } }, "/x"), COMMUNITY)).toBeNull();
     expect(parseNextData("<html></html>")).toBeNull();
     expect(sanityImageUrl("image-abc-100x50-png", { id: "p", dataset: "d" })).toBe("https://cdn.sanity.io/images/p/d/abc-100x50.png");
     expect(sanityImageUrl("file-abc", { id: "p", dataset: "d" })).toBeNull();
   });
 
-  it("reads the promotion page's offer as one text, listing the communities it applies to, and the market page's community links", () => {
+  it("reads the promotion page's offer as one text, listing the communities it applies to, and the market page's community links", async () => {
     const promo = parseDavidsonPromotion(promoPage)!;
     expect(promo.title).toBe("Rates as low as 4.5% + $10,000 Flex Cash!");
     expect(promo.communities).toEqual(["Fixture Meadows", "Royal Fixture"]);
@@ -87,6 +108,19 @@ describe("Davidson Homes reader: page data", () => {
     expect(promo.text).toContain("3.5% down");
     expect(promo.text).not.toMatch(/https?:|\(210\) 796-9092/);
     expect(parseDavidsonPromotion(communityPage)).toBeNull();
+    // The lender's NMLS id and form copy are stripped from the offer text; a regions list that names no community is a changed shape.
+    const withNmls = promoPage.replace("Advisors!*", "Advisors (NMLS ID No. 1791)!* Fill out the form or call to learn more.");
+    expect(parseDavidsonPromotion(withNmls)!.text).not.toMatch(/1791|NMLS|Fill out the form/);
+    const nested = promoPage.replace("\"communities\":[{\"title\":\"Fixture Meadows\"},{\"title\":\"Royal Fixture\"}]", "\"communities\":[{\"community\":{\"title\":\"Fixture Meadows\"}}]");
+    expect(parseDavidsonPromotion(nested)!.communities).toEqual(["Fixture Meadows"]);
+    const nameless = promoPage.replace("\"communities\":[{\"title\":\"Fixture Meadows\"},{\"title\":\"Royal Fixture\"}]", "\"communities\":[]");
+    expect(parseDavidsonPromotion(nameless)).toMatchObject({ hasRegions: true, communities: [] });
+    resetDavidsonCaches();
+    const namelessFetcher = vi.fn(async (input: string) => input.endsWith(PROMO) ? new Response(nameless, { status: 200, headers: { "content-type": "text/html" } }) : fetcher(input));
+    const heldOffer = await loadOfficialDeals(config, { fetcher: namelessFetcher });
+    expect(heldOffer.incentiveHoldReasons).toEqual(["expected_incentive_container_not_found"]);
+    expect(heldOffer.private.incentive).toBeNull();
+    resetDavidsonCaches();
     expect(davidsonMarketLinks(marketPage)).toEqual(["/states/texas/san-antonio-market-area/san-antonio/fixture-meadows/", "/states/texas/san-antonio-market-area/kyle/far-fixture/"]);
     expect(davidsonMarketLinks(communityPage)).toBeNull();
     expect(davidsonRecord(communityPage, COMMUNITY)).toEqual({ name: "Fixture Meadows", street: "10326 Fixture Jct", city: "San Antonio", zip: "78224", phone: "2105550400", priceFrom: 260_990, geo: { lat: 29.3119, lng: -98.5503 } });

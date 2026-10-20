@@ -223,7 +223,8 @@ export function communityRecordFromHtml(html: string): CommunityRecord | null {
       geo: Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat !== 0 || lng !== 0) ? { lat, lng } : null,
     });
   }
-  if (!candidates.length) return null;
+  // Without a business record there is no community on the page: a lone place or residence record is a featured home, never the community under that home's address.
+  if (!candidates.some((candidate) => candidate.business)) return null;
   // A "Place" record named after the page title ("Houses For Sale in … | Blue Ridge Ranch | D.R. Horton") is the page, not the community:
   // the record with a plain name wins, and takes coordinates, phone and price from the others when it has none.
   // A business record (the community) wins over a place or residence record (a featured home); among those, a plain name over a page title.
@@ -279,9 +280,9 @@ export async function discoverBuilderCommunities(reader: DiscoveryReader, fetche
       record = reader.record ? reader.record(page.text, url) : communityRecordFromHtml(page.text);
     }
     if (!record) { result.skipped.push({ url, reason: "no_community_record" }); continue; }
-    // A record handed over by a listing must place the community; one without coordinates cannot pass the area check and is not added on faith.
-    if (listed && !record.geo) { result.skipped.push({ url, reason: "no_community_record" }); continue; }
-    if (record.geo && milesBetween(DOWNTOWN_SAN_ANTONIO, record.geo) > DISCOVERY_RADIUS_MILES) { result.skipped.push({ url, reason: "outside_area" }); continue; }
+    // Every record must place the community: one without coordinates cannot pass the area check and is not added on faith.
+    if (!record.geo) { result.skipped.push({ url, reason: "no_community_record" }); continue; }
+    if (milesBetween(DOWNTOWN_SAN_ANTONIO, record.geo) > DISCOVERY_RADIUS_MILES) { result.skipped.push({ url, reason: "outside_area" }); continue; }
     const address = [record.street, record.city, record.zip ? `TX ${record.zip}` : "TX"].filter(Boolean).join(", ");
     result.communities.push({
       builder: reader.builder,

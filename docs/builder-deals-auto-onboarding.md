@@ -15,6 +15,9 @@ name, sales address and phone (and a price range when there is one).
   stops that builder's run.
 - Communities more than 45 miles from downtown (San Marcos, for example) are
   skipped. The page's coordinates are used for that check only, never stored.
+  A record without coordinates, from a listing or a page, is skipped too:
+  nothing is added on faith. A page with no business record (only a featured
+  home's residence record) has no community on it.
 - A builder whose sitemap cannot be read adds nothing that week and is named in
   the email; the other builders carry on. So does a builder whose onboarding
   fails part-way (its lease is released all the same).

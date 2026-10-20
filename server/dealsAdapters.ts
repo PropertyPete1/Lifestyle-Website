@@ -688,7 +688,7 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   if (namesContractDeadline && !contractDeadline?.isoDate) holdReasons.push("missing_contract_deadline");
   if (namesClosingDeadline && !closingDeadline?.isoDate) holdReasons.push("missing_closing_deadline");
   // An adjustable-rate or stepped offer ("5/1 ARM", "adjustable rate mortgage", "fixed for 5 years then adjusts annually", a balloon, "then 6.5%") is never published as a plain rate without a look.
-  if (rateKind !== "none" && (/\bARM\b/.test(text) || /\b\d{1,2}\/\d\s+arm\b|\badjustable[- ]rate|\brate\s+adjusts|\binitial\s+(?:interest\s+)?rate\b|\b(?:then|and|will)\s+adjusts?\b|\badjusts?\s+(?:annually|yearly|every|after|thereafter)\b|\bballoon\b|\bthen\s+\d{1,2}(?:\.\d+)?\s*%/i.test(text))) holdReasons.push("adjustable_rate");
+  if (rateKind !== "none" && (/\bARM\b/.test(text) || /\b\d{1,2}\/\d\s+arm\b|\badjustable[- ]rate|\brate\s+adjusts|\binitial\s+(?:interest\s+)?rate\b|\brate\b[^.!?]{0,80}\b(?:then|and|will)\s+adjusts?\b|\badjusts?\s+(?:annually|yearly|every|after|thereafter)\b|\bballoon\b|\bthen\s+\d{1,2}(?:\.\d+)?\s*%/i.test(text))) holdReasons.push("adjustable_rate");
 
   return {
     normalizedText: normalizedText(text),

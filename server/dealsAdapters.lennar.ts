@@ -241,7 +241,8 @@ export function parseLennarCommunity(html: string, pageUrl: string): LennarPage 
   const record = mpc ? recordOf(cache, mpc) : null;
   if (!mpc || !record) return null;
   const own = linkOf(mpc.url, community);
-  const foreignPage = own !== null && sameOfficialHost(own, host) && pagePath(own) !== pagePath(community);
+  // The row's own URL must be this page on the official host: none, another host or scheme, or another path is another page.
+  const foreignPage = own === null || !sameOfficialHost(own, host) || pagePath(own) !== pagePath(community);
   const base = `${pagePath(community)}/`;
   const underPage = (url: URL) => sameOfficialHost(url, host) && `${pagePath(url)}/`.startsWith(base) && pagePath(url) !== pagePath(community);
   const collections = collectionsOf(cache, mpc).filter((row) => str(row.soAddress) || str(row.address));
@@ -345,8 +346,8 @@ export class LennarAdapter implements DealAdapter {
     if (!parsed || parsed.collections === 0) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The page must be this community's (a same-host redirect to another one is not), and so must its homes and plans.
     if (parsed.foreignPage || parsed.foreignHome || parsed.foreignPlan) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
-    // The homesite table heading counts the homes for sale: a page listing homes without it has changed shape; a count the data does not match is a partial read.
-    if (parsed.homes.length > 0 && parsed.homesAvailable === null) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // The homesite table heading counts the homes for sale and is on every page, "No homes available" included: a page without it has changed shape; a count the data does not match is a partial read.
+    if (parsed.homesAvailable === null) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (parsed.homesAvailable !== null && parsed.homesAvailable !== parsed.homes.length) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     if (parsed.homes.length > LENNAR_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     const facts = parseCommunityFacts(page.text);

@@ -86,12 +86,17 @@ export function parseEmpireWidgets(html: string): EmpireWidget[] {
 }
 
 /**
- * The home's status: a move-in-ready home is ready now; one under
- * construction names the month of a move-in day to come (a passed or
- * missing day is an undated quick move-in); a sold home is sold; anything
- * else gives no status (the run is held).
+ * The home's status: a sold sale status (or a "Sold" move-in text) is sold
+ * and any other sale word gives no status; otherwise a move-in-ready home is
+ * ready now, one under construction names the month of a move-in day to come
+ * (a passed or missing day is an undated quick move-in), a sold one is sold,
+ * and anything else gives no status (the run is held).
  */
-export function empireStatus(unitStatus: string | null, moveInDay: string | null, now: Date): { status: string | null; readyNow: boolean; moveInDate: string | null } {
+export function empireStatus(unitStatus: string | null, moveInDay: string | null, now: Date, saleStatus: string | null = null, moveInText: string | null = null): { status: string | null; readyNow: boolean; moveInDate: string | null } {
+  // The sale status moves apart from construction: a sold row is sold whatever its construction status says; any other sale word (Pending, Reserved) is unknown.
+  const sale = (saleStatus ?? "").replace(/[\s_-]+/g, "").toLowerCase();
+  if (sale === "sold" || /^\s*sold\b/i.test(moveInText ?? "")) return { status: "Sold", readyNow: false, moveInDate: null };
+  if (sale) return { status: null, readyNow: false, moveInDate: null };
   const value = (unitStatus ?? "").replace(/[\s_-]+/g, "").toLowerCase();
   if (value === "moveinready") return { status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null };
   if (value === "sold") return { status: "Sold", readyNow: false, moveInDate: null };
@@ -179,7 +184,10 @@ export function parseEmpireCommunity(html: string, pageUrl: string): EmpirePage 
   }
   const banner = all.find((node) => elementClass(node, "banner-promotion-single"));
   const promo = banner ? cleanOfferText(elementText(banner, html).replace(/\bRequest Information\b.*$/i, "")) || null : null;
-  const campaignLink = all.map((node) => node.tag === "a" ? asUrl(decodeHtmlEntities(node.attributes.href ?? "")) : null).find((link): link is URL => link !== null && sameOfficialHost(link, host) && /campaign|offers?|promotion/i.test(link.pathname)) ?? null;
+  // The campaign page: a link in the banner itself first, else the market's own campaign/offers/promotion page (another market's page is never this community's terms).
+  const market = /^\/us\/texas\/san-antonio\//i;
+  const campaignOf = (nodes: HtmlElement[]) => nodes.map((node) => node.tag === "a" ? asUrl(decodeHtmlEntities(node.attributes.href ?? "")) : null).find((link): link is URL => link !== null && sameOfficialHost(link, host) && market.test(link.pathname) && /campaign|offers?|promotion/i.test(link.pathname)) ?? null;
+  const campaignLink = (banner ? campaignOf(descendants(banner)) : null) ?? campaignOf(all);
   return { record, community: quick?.community ?? null, hasPlansWidget: widgets.some((widget) => /plan/i.test(widget.display)), foreignPage, cardUrls, promo, campaignUrl: campaignLink ? `${pageUrlOf(campaignLink)}/` : null };
 }
 
@@ -198,6 +206,8 @@ function cleanOfferText(value: string): string {
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, " ")
     .replace(/\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, " ")
     .replace(/\(?\b\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b/g, " ")
+    // A loan officer named beside the lender ("; A. Person, NMLS #743526") is a private name, not a term.
+    .replace(/;\s*[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,3},?\s*NMLS\s*(?:ID\s*)?#?\s*\d+/g, " ")
     .replace(NMLS_ID_PATTERN_ALL, " ")
     .replace(/\*+/g, " ")
     .replace(/\(\s*\)/g, " ")
@@ -244,9 +254,11 @@ export function empireHomes(listing: EmpireListing, pageUrl: string, record: Emp
     if (seen.has(pagePath(url))) continue;
     seen.add(pagePath(url));
     if (str(row.is_active) === "0") continue;
+    // A rental row is not a home for sale.
+    if (str(row.is_rental) === "1") continue;
     const street = str(row.unit_address);
     const readable = looksLikeStreetAddress(street);
-    const status = empireStatus(str(row.unit_status), str(row.move_in_date_day), now);
+    const status = empireStatus(str(row.unit_status), str(row.move_in_date_day), now, str(row.unit_sale_status), str(row.move_in_date));
     const price = positive(row.price);
     const previous = positive(row.previus_price) ?? positive(row.previous_price);
     const cut = previous !== null && price !== null && previous > price;
@@ -375,7 +387,7 @@ export class EmpireHomesAdapter implements DealAdapter {
       privateSnapshot.pages.push(sourcePage("inventory", plansUrl, null));
       const planListing = parseEmpireListing(plansBody.text);
       if (!planListing) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
-      if (planListing.lastPage !== null && planListing.lastPage > 1) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+      if ((planListing.lastPage !== null && planListing.lastPage > 1) || (planListing.total !== null && planListing.total !== planListing.rows.length)) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
       const read = empirePlans(planListing, community.toString());
       if (read.foreignPlan) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
       plans = read.plans;

@@ -169,6 +169,8 @@ describe("Lennar reader: page data", () => {
     expect(override?.homes[0]?.privateAddress).toBe("8707 Fixture Crest, San Antonio, TX 78254");
     expect(parseLennarCommunity(communityPage({ mpcid: null }), COMMUNITY)?.record.name).toBe("Fixture Ranch");
     expect(parseLennarCommunity(communityPage({ mpcUrl: "/new-homes/texas/san-antonio/san-antonio/fixture-creek" }), COMMUNITY)).toMatchObject({ foreignPage: true });
+    expect(parseLennarCommunity(communityPage({ mpcUrl: "https://lennar.com/new-homes/texas/san-antonio/san-antonio/fixture-ranch" }), COMMUNITY)).toMatchObject({ foreignPage: true });
+    expect(parseLennarCommunity(communityPage({ mpcUrl: "" }), COMMUNITY)).toMatchObject({ foreignPage: true });
     expect(parseLennarCommunity(communityPage({ homes: [{ ...HOMES[0]!, url: "/new-homes/texas/san-antonio/san-antonio/fixture-creek/eventide-collection/rio/1" }] }), COMMUNITY)).toMatchObject({ foreignHome: true, homes: [] });
     expect(parseLennarCommunity(communityPage({ homes: [{ ...HOMES[0]!, url: "https://evil.example/x" }] }), COMMUNITY)).toMatchObject({ foreignHome: true });
     expect(parseLennarCommunity(communityPage({ plans: [{ ...PLANS[0]!, url: "/new-homes/texas/san-antonio/san-antonio/fixture-creek/eventide-collection/rio" }] }), COMMUNITY)).toMatchObject({ foreignPlan: true, plans: [] });
@@ -217,8 +219,9 @@ describe("Lennar reader: adapter", () => {
     expect(result.catalogOk).toBe(true);
     expect(result.private.homes).toEqual([]);
     expect(result.private.plans).toHaveLength(1);
+    // Without the heading nothing is read as empty: the page has changed shape.
     const noHeading = await loadOfficialDeals(config, { fetcher: html(communityPage({ homes: [], heading: null, plans: [PLANS[0]!] })), now: () => NOW });
-    expect(noHeading.catalogOk).toBe(true);
+    expect(noHeading.holdReasons).toEqual(["expected_community_container_not_found"]);
   });
 
   it("holds when the page is not a community page, when no collection sells yet, when the row or its links are another community's, when the heading's count and the data disagree or the heading is missing, and when the site or the read fails; a home with an unknown status has none (the sync holds it)", async () => {

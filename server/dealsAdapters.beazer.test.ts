@@ -175,6 +175,16 @@ describe("Beazer reader: page data", () => {
     expect(parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, DisplayStartDate: "2026-09-23T00:00:00", DisplayEndDate: "11/01/2026" }] }), COMMUNITY, NOW)).toMatchObject({ offerUnreadable: false });
     expect(parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, DisplayStartDate: "2026-09-23T00:00:00", DisplayEndDate: "11/01/2026" }] }), COMMUNITY, NOW)!.offer).toMatch(/^Lock In 4\.99%/);
     expect(parseBeazerCommunity(communityPage(), COMMUNITY, NOW)).toMatchObject({ offerUnreadable: false });
+    // An outlined Content row is read; a reference the payload lacks at any hop (Content, the disclaimer list, an entry, its link, its block) is unreadable.
+    const longContent = `<p><strong>Lock In 4.99%!</strong></p><p>4.99% Limited Time 5/1 ARM [6.62% APR] with Choice Lender!*</p><p>${"Marketing copy. ".repeat(70)}</p>`;
+    expect(parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, Content: "$2b" }], extraRows: [["2b", longContent]] }), COMMUNITY, NOW)!.offer).toMatch(/^Lock In 4\.99%! 4\.99% Limited Time 5\/1 ARM \[6\.62% APR\] with Choice Lender! Marketing copy\./);
+    expect(parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, Content: "$7e" }] }), COMMUNITY, NOW)).toMatchObject({ offer: null, offerUnreadable: true });
+    expect(parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, Disclaimer: "$7e" }] }), COMMUNITY, NOW)).toMatchObject({ offer: null, offerUnreadable: true });
+    expect(parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, Disclaimer: ["$7e"] }] }), COMMUNITY, NOW)).toMatchObject({ offer: null, offerUnreadable: true });
+    expect(parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, Disclaimer: [{ ContentLink: "$7e" }] }] }), COMMUNITY, NOW)).toMatchObject({ offer: null, offerUnreadable: true });
+    expect(parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, Disclaimer: [{ ContentLink: { Expanded: "$7e" } }] }] }), COMMUNITY, NOW)).toMatchObject({ offer: null, offerUnreadable: true });
+    // A disclaimer block outlined by reference and carried in the payload reads.
+    expect(parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, Disclaimer: [{ ContentLink: { Expanded: "$7d" } }] }], extraRows: [["7d", { __typename: "DisclaimerBlock", Text: "$29", Title: "Disclaimer" }]] }), COMMUNITY, NOW)!.offer).toMatch(/close per contract by 12\/07\/2026/);
     // The page's own row is the one whose URL is the page, even when another community's row streams first; a row URL on another host or scheme is another page.
     const nearby = { ...communityRow({ url: `${HOST}/san-antonio-TX/san-antonio/fixture-creek` }), CommunityName: "Fixture Creek", ProductLines: { __typename: "QueryRef", ProductLinePage: { __typename: "ProductLinePageOutput", items: [{ __typename: "ProductLinePage", StreetAddress: "100 Creek Row", City: "San Antonio", PostalCode: "78253" }] } } };
     expect(parseBeazerCommunity(communityPage({ extraRows: [["18", { nearbyCommunities: [nearby] }]] }), COMMUNITY, NOW)).toMatchObject({ foreignPage: false, record: { name: "Fixture Meadows", street: "6614 Fixture Glen" } });

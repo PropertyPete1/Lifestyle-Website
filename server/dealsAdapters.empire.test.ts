@@ -104,6 +104,11 @@ describe("Empire reader: the page", () => {
     expect(empireStatus("Sold", "", NOW)).toMatchObject({ status: "Sold" });
     expect(empireStatus("Reserved", "", NOW)).toEqual({ status: null, readyNow: false, moveInDate: null });
     expect(empireStatus(null, null, NOW)).toMatchObject({ status: null });
+    // The sale status decides first: sold is sold whatever construction says; another sale word is unknown; a "Sold" move-in text is sold too.
+    expect(empireStatus("MoveInReady", "2025-07-27", NOW, "Sold")).toMatchObject({ status: "Sold", readyNow: false });
+    expect(empireStatus("UnderConstruction", "2026-12-15", NOW, "Pending")).toEqual({ status: null, readyNow: false, moveInDate: null });
+    expect(empireStatus("MoveInReady", "", NOW, "", "Sold")).toMatchObject({ status: "Sold" });
+    expect(empireStatus("MoveInReady", "", NOW, "", "Move-in Ready")).toMatchObject({ readyNow: true });
   });
 
   it("reads the sales office (name from the map label, street and ZIP from the map's caption, phone, pin from the map's center), the widgets, the cards, the banner and the campaign link", () => {
@@ -117,6 +122,10 @@ describe("Empire reader: the page", () => {
     expect(parseEmpireCommunity(communityPage({ widgets: null, cards: [] }), COMMUNITY)).toMatchObject({ community: null, hasPlansWidget: false, cardUrls: [] });
     expect(parseEmpireCommunity(communityPage({ widgets: [detail("quick_delivery_homes", "Fixture Agave", `${HOST}/us/texas/san-antonio/fixture-creek/`)] }), COMMUNITY)).toMatchObject({ foreignPage: true });
     expect(parseEmpireCommunity(communityPage({ promo: false, campaign: null }), COMMUNITY)).toMatchObject({ promo: null, campaignUrl: null });
+    // Another market's promotions page ahead of the market's link is never this community's campaign; the market's own link is, wherever it sits.
+    const foreignNav = communityPage().replace("<header>", `<header><nav><a href="${HOST}/us/texas/houston/promotions/">Houston Promotions</a><a href="${HOST}/ca/ontario/offers/">Offers</a></nav>`);
+    expect(parseEmpireCommunity(foreignNav, COMMUNITY)?.campaignUrl).toBe(CAMPAIGN);
+    expect(parseEmpireCommunity(communityPage({ campaign: `${HOST}/us/texas/houston/promotions/` }), COMMUNITY)?.campaignUrl).toBeNull();
     expect(parseEmpireCommunity(communityPage({ map: null }), COMMUNITY)).toBeNull();
     expect(parseEmpireCommunity("<html><body>new layout</body></html>", COMMUNITY)).toBeNull();
     expect(empireRecord(communityPage(), COMMUNITY)?.name).toBe("Fixture Agave");
@@ -126,7 +135,8 @@ describe("Empire reader: the page", () => {
   it("reads the campaign page's footnote without its phone numbers and NMLS ids", () => {
     const footnote = parseEmpireCampaign(campaignPage());
     expect(footnote).toMatch(/^Disclaimer: Offer valid on select move-in ready homes.*must close by December 31st\./);
-    expect(footnote).not.toMatch(/40561|743526|NMLS/);
+    expect(footnote).not.toMatch(/40561|743526|NMLS|A\. Person/);
+    expect(footnote).toMatch(/Alta Home Lending\s*\(?\)?\s*as lender/);
     expect(parseEmpireCampaign(campaignPage(null))).toBeNull();
   });
 
@@ -157,6 +167,11 @@ describe("Empire reader: the listing", () => {
     const foreign = empireHomes(parseEmpireListing(listing([homeRow({ ...HOMES[0]!, permalink: `${HOST}/us/texas/san-antonio/fixture-creek/listing/x/` }), homeRow({ ...HOMES[1]!, active: "0" })]))!, COMMUNITY, parseEmpireCommunity(communityPage(), COMMUNITY)!.record, NOW);
     expect(foreign).toMatchObject({ foreignHome: true, homes: [] });
     expect(empireHomes(parseEmpireListing(listing([homeRow({ ...HOMES[0]!, status: "Reserved" })]))!, COMMUNITY, parseEmpireCommunity(communityPage(), COMMUNITY)!.record, NOW).homes[0]?.status).toBeNull();
+    // A row sold in its sale status is sold whatever its construction status; a rental row is not a home for sale.
+    const record = parseEmpireCommunity(communityPage(), COMMUNITY)!.record;
+    expect(empireHomes(parseEmpireListing(listing([{ ...homeRow(HOMES[0]!), unit_sale_status: "Sold" }]))!, COMMUNITY, record, NOW).homes[0]).toMatchObject({ status: "Sold", readyNow: false });
+    expect(empireHomes(parseEmpireListing(listing([{ ...homeRow(HOMES[1]!), unit_sale_status: "Pending" }]))!, COMMUNITY, record, NOW).homes[0]?.status).toBeNull();
+    expect(empireHomes(parseEmpireListing(listing([{ ...homeRow(HOMES[0]!), is_rental: "1", price: "2450" }, homeRow(HOMES[1]!)]))!, COMMUNITY, record, NOW).homes.map((home) => home.privateName)).toEqual(["4954 Fixture Way"]);
     expect(parseEmpireListing("<html>not json</html>")).toBeNull();
     expect(parseEmpireListing(JSON.stringify({ success: false, data: { data: [] } }))).toBeNull();
     expect(parseEmpireListing(JSON.stringify({ success: true, data: { rows: [] } }))).toBeNull();
@@ -228,6 +243,7 @@ describe("Empire reader: adapter", () => {
     expect((await load({ [PLANS_URL]: null })).holdReasons).toEqual(["community_fetch_failed"]);
     expect((await load({ [PLANS_URL]: "<html>maintenance</html>" })).holdReasons).toEqual(["expected_community_container_not_found"]);
     expect((await load({ [PLANS_URL]: listing(PLANS.map(planRow), { last_page: 3 }) })).holdReasons).toEqual(["incomplete_inventory"]);
+    expect((await load({ [PLANS_URL]: listing(PLANS.map(planRow), { total: 9 }) })).holdReasons).toEqual(["incomplete_inventory"]);
     expect((await load({ [PLANS_URL]: listing([planRow({ ...PLANS[0]!, permalink: `${HOST}/us/texas/san-antonio/fixture-creek/home-plans/blanco-1/` })]) })).holdReasons).toEqual(["invalid_inventory_response"]);
     expect((await load({ [COMMUNITY]: null })).holdReasons).toEqual(["community_fetch_failed"]);
     expect((await loadOfficialDeals({ ...config, sourceUrl: "https://www.empirehomes.com/us/texas/san-antonio/fixture-agave/" }, { fetcher })).holdReasons).toEqual(["unsupported_official_host"]);

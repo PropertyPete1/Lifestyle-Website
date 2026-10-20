@@ -174,6 +174,8 @@ describe("deals adapters", () => {
     expect(parsePromotionalRate("4.5% (6.38% APR) FHA 30-year fixed, 3.5% down; arm yourself with savings.").holdReasons).not.toContain("adjustable_rate");
     // "fixed for 5 years then adjusts" reads the fixed period as no plain term: the hold stands and the publishable flag is off.
     expect(parsePromotionalRate("4.99% (6.62% APR) FHA financing, 3.5% down payment, rate fixed for 5 years then adjusts annually for years 6-30 based on the index plus margin.").publishable).toBe(false);
+    // Boilerplate "subject to change and adjust at any time" names no stepped rate.
+    expect(parsePromotionalRate("4.5% (6.38% APR) FHA 30-year fixed, 3.5% down. Prices, plans and incentives are subject to change and adjust at any time.").holdReasons).not.toContain("adjustable_rate");
     // Dates are only required when the source actually names a contract or closing deadline.
   });
 

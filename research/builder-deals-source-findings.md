@@ -629,6 +629,30 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   segment (`/styles/<style>/public/`) and a `-WxH` / `-resized` / `-scaled`
   suffix set aside.
 
+### Round-18 corrections (2026-10-20)
+
+- Lennar: the homesite-table heading is required on every page ("No homes
+  available" included): a page without it holds rather than reading as an
+  empty community; the masterplan row's own URL must be the page on the
+  official host (none, another host or scheme holds).
+- Empire: a non-blank `unit_sale_status` decides first ("Sold" → sold; any
+  other word → no status, the sync holds), as does a "Sold" `move_in_date`;
+  `is_rental: "1"` rows are not homes for sale; the plans listing's `total`
+  must match its rows; the campaign link is taken from the banner first,
+  else from the market's own `/us/texas/san-antonio/` pages only (another
+  market's promotions page never supplies the footnote; with no link the
+  offer holds); a loan officer named beside the lender ("; A. Person, NMLS
+  #…") is removed from the offer text (Beazer too).
+- Beazer: an offer's `Content` outlined as a text row is resolved; a `$<id>`
+  left unresolved at any hop (Content, the disclaimer list, an entry, its
+  link, its block, its text) holds the offer.
+- Rate parser: the "and/then/will adjust" guard needs rate wording in the
+  same sentence, so "subject to change and adjust at any time" boilerplate
+  does not hold a plain fixed rate.
+- Hakes, by design: a selling community whose page later shows a
+  "Coming Soon" hero without tabs reads as empty and the sync retires its
+  homes (the site no longer lists them), as any builder's emptied page does.
+
 ## Lennar reader (added 2026-10-20)
 
 - Site: `www.lennar.com` (Next.js pages router). The community page
@@ -679,7 +703,9 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   rate, figure or term ("Current offers and promotions vary by homesite
   and community. See a New Home Consultant"). The reader records no
   incentive; Lennar's deals are the per-home price cuts (`wasPrice` →
-  `price`), carried as each home's previous price and drop.
+  `price`), read into the private row's previous price and drop. The sync
+  derives the stored and public "price drop" from its own price history
+  (as for every reader), so a cut shows once the sync has seen both prices.
 - Discovery: the market page `/new-homes/texas/san-antonio` (about 890 KB,
   same `__NEXT_DATA__`) holds 41 `MpcType` rows for the market with each
   one's collections (`CommunityType` with `address`, `zipCode`,

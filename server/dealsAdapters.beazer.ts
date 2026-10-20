@@ -338,11 +338,22 @@ export function parseBeazerCommunity(html: string, pageUrl: string, now: Date = 
     if (from === false || through === false) { offerUnreadable = true; return false; }
     return (from === null || from <= now.getTime()) && (through === null || through >= now.getTime());
   }).map((item) => {
-    const content = typeof item.Content === "string" ? htmlToText(item.Content) : "";
-    const disclaimers = arr(item.Disclaimer).map((entry) => resolveBeazerRef(rows, obj(resolveBeazerRef(rows, obj(resolveBeazerRef(rows, obj(resolveBeazerRef(rows, entry))?.ContentLink))?.Expanded))?.Text));
-    // A disclaimer still written as a "$<id>" reference points at a row the payload does not carry: the offer's terms are unreadable.
-    if (disclaimers.some((text) => typeof text === "string" && /^\$[0-9a-f]+(?::|$)/.test(text))) { offerUnreadable = true; return ""; }
-    return cleanOfferText([content, ...disclaimers.map((text) => typeof text === "string" ? htmlToText(text) : "")].filter(Boolean).join(" ").slice(0, 6_000));
+    // Any value still written as a "$<id>" reference after resolution points at a row the payload does not carry: the offer's terms are unreadable.
+    const dangling = (value: unknown) => typeof value === "string" && /^\$[0-9a-f]+(?::|$)/.test(value);
+    const contentValue = resolveBeazerRef(rows, item.Content);
+    const disclaimerList = resolveBeazerRef(rows, item.Disclaimer);
+    if (dangling(contentValue) || dangling(disclaimerList)) { offerUnreadable = true; return ""; }
+    const content = typeof contentValue === "string" ? htmlToText(contentValue) : "";
+    const disclaimers: string[] = [];
+    for (const raw of arr(disclaimerList)) {
+      const entry = resolveBeazerRef(rows, raw);
+      const link = resolveBeazerRef(rows, obj(entry)?.ContentLink);
+      const expanded = resolveBeazerRef(rows, obj(link)?.Expanded);
+      const text = resolveBeazerRef(rows, obj(expanded)?.Text);
+      if (dangling(entry) || dangling(link) || dangling(expanded) || dangling(text)) { offerUnreadable = true; return ""; }
+      if (typeof text === "string") disclaimers.push(htmlToText(text));
+    }
+    return cleanOfferText([content, ...disclaimers].filter(Boolean).join(" ").slice(0, 6_000));
   }).filter((text) => text && /\d+(?:\.\d+)?\s*%|\$\s*[\d,]{4,}/.test(text));
   const offer = current.find((text) => /\d+(?:\.\d+)?\s*%\s*(?:\(|\[|\/|APR|interest|rate|fixed|limited)/i.test(text)) ?? current[0] ?? null;
   return { record, foreignPage, comingSoon: row.HasVIPList === true, homes, foreignHome, hasHomesGrid, plansSayHomes, plans, foreignPlan, offer, offerUnreadable };
@@ -354,6 +365,8 @@ function cleanOfferText(value: string): string {
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, " ")
     .replace(/\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, " ")
     .replace(/\(?\b\d{3}\)?[-. ]?\d{3}[-. ]?\d{4}\b/g, " ")
+    // A loan officer named beside the lender ("; A. Person, NMLS #743526") is a private name, not a term.
+    .replace(/;\s*[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){0,3},?\s*NMLS\s*(?:ID\s*)?#?\s*\d+/g, " ")
     .replace(NMLS_ID_PATTERN_ALL, " ")
     .replace(/\*+/g, " ")
     .replace(/\(\s*\)/g, " ")

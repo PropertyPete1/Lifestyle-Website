@@ -27,6 +27,9 @@ import { DISCOVERY_READERS, communityRecordFromHtml, discoverBuilderCommunities,
 const CH = "https://www.chesmar.com";
 const MI = "https://www.mihomes.com";
 const DRH = "https://www.drhorton.com";
+const SIT = "https://www.sitterlehomes.com";
+const sitterleList = `<html><body><div class="single-result-container"><div class="result--info-container"><a class="result--title" href="${SIT}/communities/fixture-ranch/">Fixture Ranch</a><p class="result--city">San Antonio, TX 78254</p></div></div><div class="single-result-container"><div class="result--info-container"><a class="result--title" href="${SIT}/communities/far-fixture/">Far Fixture</a><p class="result--city">Magnolia, TX 77354</p></div></div></body></html>`;
+const sitterlePage = (name: string, street: string, city: string, zip: string, geo: string) => `<html><body><div class="comm-page-address">${street}, ${city}, TX ${zip}, U.S.A.</div><a href="https://www.google.com/maps/dir//X/@${geo},18z/data=!4m8">Directions</a><div id="community-name"><div class="elementor-shortcode">${name}</div></div><div id="comm--filters-content"><div class="comm--listings-container"></div></div></body></html>`;
 const LGI = "https://www.lgihomes.com";
 const lgiNext = (route: Record<string, unknown>, componentProps: Record<string, unknown>) => `<html><body><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { page: { layout: { sitecore: { route } } }, dictionary: {}, componentProps } } })}</script></body></html>`;
 const lgiMarket = lgiNext({ name: "san-antonio", fields: {}, placeholders: { "headless-main": [{ componentName: "LGIMarketLandingPage", uid: "m1", placeholders: { "community-search": [{ componentName: "CommunitySearch", uid: "cs1" }] } }] } }, { cs1: { communities: { results: [
@@ -132,6 +135,9 @@ const site: Record<string, { status?: number; body: string; type?: string; locat
   [`${TOLL}/luxury-homes/San-Antonio-TX`]: { body: tollListing },
   [`${DWH}/search/CommunityData?marketId=markets/3`]: { body: weekleyListing, type: "application/json" },
   [`${LGI}/texas/san-antonio`]: { body: lgiMarket },
+  [`${SIT}/communities/`]: { body: sitterleList },
+  [`${SIT}/communities/fixture-ranch/`]: { body: sitterlePage("Fixture Ranch", "10103 Fixture Zimmer", "San Antonio", "78254", "29.5371268,-98.7423396") },
+  [`${SIT}/communities/far-fixture/`]: { body: sitterlePage("Far Fixture", "1 Far Rd", "Magnolia", "77354", "30.21,-95.75") },
   [`${LGI}/texas/san-antonio/fixture-wing`]: { body: lgiPage("Fixture Wing", "11523 Fixture Eagles", "San Antonio", "78223", [29.3088, -98.4046]) },
   [`${LGI}/texas/san-antonio/far-fixture`]: { body: lgiPage("Far Fixture", "1 Far Rd", "Kyle", "78640", [29.918, -97.85]) },
   [`${AW}/ashton-woods/get-division-community-map/13`]: { body: ashtonListing, type: "application/json" },
@@ -262,6 +268,12 @@ describe("discovery", () => {
     expect(highland.skipped).toEqual([{ url: `${HH}/san-antonio/san-marcos/far-fixture`, reason: "outside_area" }]);
     expect(requested.filter((url) => /concierge|760-026|dallas/.test(url))).toEqual([]);
 
+    // Sitterle: the communities page names every Texas community; each page gives the address and pin, and the 45-mile rule drops Houston's.
+    requested.length = 0;
+    const sitterle = await discoverBuilderCommunities(reader("Sitterle Homes"), fetcher);
+    expect(sitterle.communities.map((community) => [community.name, community.address])).toEqual([["Fixture Ranch", "10103 Fixture Zimmer, San Antonio, TX 78254"]]);
+    expect(sitterle.skipped).toEqual([{ url: `${SIT}/communities/far-fixture/`, reason: "outside_area" }]);
+
     // LGI: the market page's Next.js data lists the communities with pins; each page gives the sales address.
     requested.length = 0;
     const lgi = await discoverBuilderCommunities(reader("LGI Homes"), fetcher);
@@ -317,14 +329,14 @@ describe("discovery", () => {
   it("adds new communities hidden, leaves the ones already there alone, and emails what it found", async () => {
     db.seed(dealCommunities, { builder: "Chesmar", privateName: "Sienna Lakes", sourceUrl: `${CH}/texas/san-antonio-new-homes/san-antonio/sienna-lakes`, privateAddress: "9010 Arroyo Grove, San Antonio, TX 78263", publicLabel: "Southeast San Antonio | Half-Acre Lots and Lakes", areaLabel: "Southeast San Antonio", amenities: "[]", reelCode: "sl1", scrubList: "{}", active: true, paused: false, manualMode: false });
     const run = await runCommunityDiscovery(fetcher);
-    expect(run).toMatchObject({ created: 17, builders: [{ builder: "Chesmar", ok: true, found: 2, created: 1, existing: 1 }, { builder: "M/I Homes", ok: true, found: 1, created: 1 }, { builder: "D.R. Horton", ok: true, found: 1, created: 1 }, { builder: "First America Homes", ok: true, found: 1, created: 1 }, { builder: "Coventry Homes", ok: true, found: 1, created: 1 }, { builder: "Davidson Homes", ok: true, found: 1, created: 1 }, { builder: "Highland Homes", ok: true, found: 1, created: 1 }, { builder: "KB Home", ok: true, found: 1, created: 1 }, { builder: "Toll Brothers", ok: true, found: 2, created: 2 }, { builder: "David Weekley Homes", ok: true, found: 1, created: 1 }, { builder: "Ashton Woods", ok: true, found: 2, created: 2 }, { builder: "LGI Homes", ok: true, found: 1, created: 1 }, { builder: "Century Communities", ok: true, found: 1, created: 1 }, { builder: "Pulte", ok: true, found: 1, created: 1 }, { builder: "Centex", ok: true, found: 1, created: 1 }, { builder: "Del Webb", ok: true, found: 0, created: 0 }] });
+    expect(run).toMatchObject({ created: 18, builders: [{ builder: "Chesmar", ok: true, found: 2, created: 1, existing: 1 }, { builder: "M/I Homes", ok: true, found: 1, created: 1 }, { builder: "D.R. Horton", ok: true, found: 1, created: 1 }, { builder: "First America Homes", ok: true, found: 1, created: 1 }, { builder: "Coventry Homes", ok: true, found: 1, created: 1 }, { builder: "Davidson Homes", ok: true, found: 1, created: 1 }, { builder: "Highland Homes", ok: true, found: 1, created: 1 }, { builder: "KB Home", ok: true, found: 1, created: 1 }, { builder: "Toll Brothers", ok: true, found: 2, created: 2 }, { builder: "David Weekley Homes", ok: true, found: 1, created: 1 }, { builder: "Ashton Woods", ok: true, found: 2, created: 2 }, { builder: "LGI Homes", ok: true, found: 1, created: 1 }, { builder: "Sitterle Homes", ok: true, found: 1, created: 1 }, { builder: "Century Communities", ok: true, found: 1, created: 1 }, { builder: "Pulte", ok: true, found: 1, created: 1 }, { builder: "Centex", ok: true, found: 1, created: 1 }, { builder: "Del Webb", ok: true, found: 0, created: 0 }] });
     const added = db.rows(dealCommunities).filter((row) => row.awaitingFirstSync);
-    expect(added.map((row) => [row.privateName, row.active, row.areaLabel])).toEqual([["Esperanza 60's", false, "Boerne"], ["Paloma Park", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Meadows", false, "Greater San Antonio"], ["Buffalo Fixture", false, "Greater San Antonio"], ["Fixture Meadows", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Heights - Heritage Collection", false, "New Braunfels"], ["Toll Brothers at Fixture Ranch", false, "Greater San Antonio"], ["Regency at Fixture - Flamenco Collection", false, "Boerne"], ["Fixture Ranch – Select Classic Series", false, "Greater San Antonio"], ["Fixture Hollow", false, "Greater San Antonio"], ["Appointment Fixture", false, "Greater San Antonio"], ["Fixture Wing", false, "Greater San Antonio"], ["Fixture Grove", false, "Greater San Antonio"], ["Fixture Ridge", false, "Greater San Antonio"], ["Fixture Ridge", false, "Greater San Antonio"]]);
+    expect(added.map((row) => [row.privateName, row.active, row.areaLabel])).toEqual([["Esperanza 60's", false, "Boerne"], ["Paloma Park", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Meadows", false, "Greater San Antonio"], ["Buffalo Fixture", false, "Greater San Antonio"], ["Fixture Meadows", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Heights - Heritage Collection", false, "New Braunfels"], ["Toll Brothers at Fixture Ranch", false, "Greater San Antonio"], ["Regency at Fixture - Flamenco Collection", false, "Boerne"], ["Fixture Ranch – Select Classic Series", false, "Greater San Antonio"], ["Fixture Hollow", false, "Greater San Antonio"], ["Appointment Fixture", false, "Greater San Antonio"], ["Fixture Wing", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Grove", false, "Greater San Antonio"], ["Fixture Ridge", false, "Greater San Antonio"], ["Fixture Ridge", false, "Greater San Antonio"]]);
     // The exact coordinates on the builder's page are never stored.
     expect(JSON.stringify(db.rows(dealCommunities))).not.toMatch(/29\.79|98\.73|29\.52/);
     expect(mocks.sendBuilderDealsEmail).toHaveBeenCalledTimes(1);
     const email = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { subject: string; content: string };
-    expect(email.subject).toBe("Builder Deals: 17 new communities found");
+    expect(email.subject).toBe("Builder Deals: 18 new communities found");
     expect(email.content).toContain("Esperanza 60's (Chesmar)");
     expect(email.content).toContain("Paloma Park (M/I Homes)");
     expect(email.content).toContain("Fixture Ranch (D.R. Horton)");
@@ -337,16 +349,16 @@ describe("discovery", () => {
   it("adds nothing for a builder whose sitemap cannot be read, says so, and carries on with the rest", async () => {
     const broken = vi.fn(async (input: string) => input.startsWith(CH) ? new Response("<html>maintenance</html>", { status: 200, headers: { "content-type": "text/html" } }) : fetcher(input));
     const run = await runCommunityDiscovery(broken);
-    expect(run).toMatchObject({ created: 16, builders: [{ builder: "Chesmar", ok: false, reason: "sitemap_unreadable", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "First America Homes", ok: true, created: 1 }, { builder: "Coventry Homes", ok: true, created: 1 }, { builder: "Davidson Homes", ok: true, created: 1 }, { builder: "Highland Homes", ok: true, created: 1 }, { builder: "KB Home", ok: true, created: 1 }, { builder: "Toll Brothers", ok: true, created: 2 }, { builder: "David Weekley Homes", ok: true, created: 1 }, { builder: "Ashton Woods", ok: true, created: 2 }, { builder: "LGI Homes", ok: true, created: 1 }, { builder: "Century Communities", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
+    expect(run).toMatchObject({ created: 17, builders: [{ builder: "Chesmar", ok: false, reason: "sitemap_unreadable", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "First America Homes", ok: true, created: 1 }, { builder: "Coventry Homes", ok: true, created: 1 }, { builder: "Davidson Homes", ok: true, created: 1 }, { builder: "Highland Homes", ok: true, created: 1 }, { builder: "KB Home", ok: true, created: 1 }, { builder: "Toll Brothers", ok: true, created: 2 }, { builder: "David Weekley Homes", ok: true, created: 1 }, { builder: "Ashton Woods", ok: true, created: 2 }, { builder: "LGI Homes", ok: true, created: 1 }, { builder: "Sitterle Homes", ok: true, created: 1 }, { builder: "Century Communities", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
     const email = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { content: string };
     expect(email.content).toContain("Could not read Chesmar's site list this time");
   });
 
   it("reads each builder under its lease, so a lane or Refresh now never reads the same site at the same time, and releases it after", async () => {
     const run = await runCommunityDiscovery(fetcher);
-    expect(run).toMatchObject({ created: 18 });
+    expect(run).toMatchObject({ created: 19 });
     const leases = db.rows(dealJobRuns).filter((row) => row.jobName.startsWith("builder-deals-lane-"));
-    expect(leases.map((row) => [row.jobName, row.status]).sort()).toEqual([["builder-deals-lane-Ashton Woods", "ok"], ["builder-deals-lane-Centex", "ok"], ["builder-deals-lane-Century Communities", "ok"], ["builder-deals-lane-Chesmar", "ok"], ["builder-deals-lane-Coventry Homes", "ok"], ["builder-deals-lane-D.R. Horton", "ok"], ["builder-deals-lane-David Weekley Homes", "ok"], ["builder-deals-lane-Davidson Homes", "ok"], ["builder-deals-lane-Del Webb", "ok"], ["builder-deals-lane-First America Homes", "ok"], ["builder-deals-lane-Highland Homes", "ok"], ["builder-deals-lane-KB Home", "ok"], ["builder-deals-lane-LGI Homes", "ok"], ["builder-deals-lane-M/I Homes", "ok"], ["builder-deals-lane-Pulte", "ok"], ["builder-deals-lane-Toll Brothers", "ok"]]);
+    expect(leases.map((row) => [row.jobName, row.status]).sort()).toEqual([["builder-deals-lane-Ashton Woods", "ok"], ["builder-deals-lane-Centex", "ok"], ["builder-deals-lane-Century Communities", "ok"], ["builder-deals-lane-Chesmar", "ok"], ["builder-deals-lane-Coventry Homes", "ok"], ["builder-deals-lane-D.R. Horton", "ok"], ["builder-deals-lane-David Weekley Homes", "ok"], ["builder-deals-lane-Davidson Homes", "ok"], ["builder-deals-lane-Del Webb", "ok"], ["builder-deals-lane-First America Homes", "ok"], ["builder-deals-lane-Highland Homes", "ok"], ["builder-deals-lane-KB Home", "ok"], ["builder-deals-lane-LGI Homes", "ok"], ["builder-deals-lane-M/I Homes", "ok"], ["builder-deals-lane-Pulte", "ok"], ["builder-deals-lane-Sitterle Homes", "ok"], ["builder-deals-lane-Toll Brothers", "ok"]]);
     // Leases were released: another holder gets them right away.
     const lease = await leaseBuilder("Chesmar");
     expect(lease).not.toBeNull();
@@ -359,7 +371,7 @@ describe("discovery", () => {
     // The lease was taken a moment ago, so the wait (twenty minutes, advanced by the fake sleep) ends well inside its two-hour life.
     let clock = Date.now();
     const run = await runCommunityDiscovery(fetcher, { now: () => clock, sleep: async (ms) => { clock += ms; } });
-    expect(run).toMatchObject({ created: 16, builders: [{ builder: "Chesmar", ok: false, reason: "builder_busy", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "First America Homes", ok: true, created: 1 }, { builder: "Coventry Homes", ok: true, created: 1 }, { builder: "Davidson Homes", ok: true, created: 1 }, { builder: "Highland Homes", ok: true, created: 1 }, { builder: "KB Home", ok: true, created: 1 }, { builder: "Toll Brothers", ok: true, created: 2 }, { builder: "David Weekley Homes", ok: true, created: 1 }, { builder: "Ashton Woods", ok: true, created: 2 }, { builder: "LGI Homes", ok: true, created: 1 }, { builder: "Century Communities", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
+    expect(run).toMatchObject({ created: 17, builders: [{ builder: "Chesmar", ok: false, reason: "builder_busy", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "First America Homes", ok: true, created: 1 }, { builder: "Coventry Homes", ok: true, created: 1 }, { builder: "Davidson Homes", ok: true, created: 1 }, { builder: "Highland Homes", ok: true, created: 1 }, { builder: "KB Home", ok: true, created: 1 }, { builder: "Toll Brothers", ok: true, created: 2 }, { builder: "David Weekley Homes", ok: true, created: 1 }, { builder: "Ashton Woods", ok: true, created: 2 }, { builder: "LGI Homes", ok: true, created: 1 }, { builder: "Sitterle Homes", ok: true, created: 1 }, { builder: "Century Communities", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
     expect(requested.some((url) => url.startsWith(CH))).toBe(false);
     await held!.release();
   });
@@ -367,7 +379,7 @@ describe("discovery", () => {
   it("reports a builder whose onboarding throws and still finishes the others and the email", async () => {
     mocks.onboardFailure = "Chesmar";
     const run = await runCommunityDiscovery(fetcher);
-    expect(run).toMatchObject({ created: 16, builders: [{ builder: "Chesmar", ok: false, reason: "onboarding_failed", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "First America Homes", ok: true, created: 1 }, { builder: "Coventry Homes", ok: true, created: 1 }, { builder: "Davidson Homes", ok: true, created: 1 }, { builder: "Highland Homes", ok: true, created: 1 }, { builder: "KB Home", ok: true, created: 1 }, { builder: "Toll Brothers", ok: true, created: 2 }, { builder: "David Weekley Homes", ok: true, created: 1 }, { builder: "Ashton Woods", ok: true, created: 2 }, { builder: "LGI Homes", ok: true, created: 1 }, { builder: "Century Communities", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
+    expect(run).toMatchObject({ created: 17, builders: [{ builder: "Chesmar", ok: false, reason: "onboarding_failed", created: 0 }, { builder: "M/I Homes", ok: true, created: 1 }, { builder: "D.R. Horton", ok: true, created: 1 }, { builder: "First America Homes", ok: true, created: 1 }, { builder: "Coventry Homes", ok: true, created: 1 }, { builder: "Davidson Homes", ok: true, created: 1 }, { builder: "Highland Homes", ok: true, created: 1 }, { builder: "KB Home", ok: true, created: 1 }, { builder: "Toll Brothers", ok: true, created: 2 }, { builder: "David Weekley Homes", ok: true, created: 1 }, { builder: "Ashton Woods", ok: true, created: 2 }, { builder: "LGI Homes", ok: true, created: 1 }, { builder: "Sitterle Homes", ok: true, created: 1 }, { builder: "Century Communities", ok: true, created: 1 }, { builder: "Pulte", ok: true, created: 1 }, { builder: "Centex", ok: true, created: 1 }, { builder: "Del Webb", ok: true, created: 0 }] });
     expect(mocks.sendBuilderDealsEmail).toHaveBeenCalledTimes(1);
     // The failed builder's lease was released despite the error.
     const lease = await leaseBuilder("Chesmar");
@@ -383,7 +395,7 @@ describe("discovery", () => {
     expect(await runCommunityDiscovery(fetcher, { now: () => started.getTime() + 60_000 })).toEqual({ skipped: "already_running" });
     expect(requested).toEqual([]);
     const later = await runCommunityDiscovery(fetcher, { now: () => started.getTime() + 4 * 60 * 60_000 });
-    expect(later).toMatchObject({ created: 18 });
+    expect(later).toMatchObject({ created: 19 });
     expect(db.rows(dealJobRuns).filter((row) => row.jobName === "builder-deals-discovery-run")).toHaveLength(1);
     expect(db.rows(dealJobRuns).find((row) => row.jobName === "builder-deals-discovery-run")).toMatchObject({ status: "ok" });
 

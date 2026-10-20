@@ -54,6 +54,7 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "www.davidweekleyhomes.com",
   "assetcontentdeliveryapi.davidweekleyhomes.com",
   "awh.widen.net",
+  "www.sitterlehomes.com",
   // LGI Homes serves its photos from Sitecore's edge CDN (…/lgihomesinc…/…); the path is checked below.
   "edge.sitecorecloud.io",
 ]);

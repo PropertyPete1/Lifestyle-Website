@@ -143,6 +143,14 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Market list (discovery):** the market page's `CommunitySearch` component props: `communities.results[]` with `url.path`, `communityName`, `locationIdentifier` (city), `latitude`, `longitude`, `phone`, `saleStatus`, `minListPrice`; no street, so each page is read for its address.
 - **Scrub:** LGI Homes, LGI, Terrata Homes, CompleteHome; lenders LGI Mortgage Solutions, CalCon Mutual Mortgage, One Trust Home Loans.
 
+## Sitterle Homes reader (added 2026-10-20)
+
+- **Community source:** `https://www.sitterlehomes.com/communities/<slug>/` (the communities page lists about 30 communities across Houston, Austin and San Antonio; discovery reads each page and the 45-mile rule keeps the area's — Davis Ranch, Kinder Gale, Sunday Creek, Enchanted Bluff, Cibolo Crossing, Nolte Farms, Lakeview and the like).
+- **Site shape:** WordPress with Elementor, server-rendered (about 300 KB). The listing block `#comm--filters-content .comm--listings-container` holds one `.comm--listing-container` per home (`inventory`: "Available Now"; `construction`: "Est. Completion: Fall 2026") and per plan (`plan`). A home card: `a.result--title` (street, link to `/listings/<street>-<plan>-<community>/`), "in <Community>", "Price: $526,730" struck through (`.custom-strikethrough`) with "Reduced Price: $445,000" when reduced, "Plan: <strong>Ozona</strong>", "Estimated Completion: <span class=comm--custom-note>…</span>", mini-stats Beds/Baths/Car Garage/Sq. Ft. A plan card: "<Name> Plan", "Price: $480,000", "From 1,852 Sq. Ft.", Beds/Baths/Car Garage/Stories. The reader holds when fewer homes read than home cards, when a card says "in" another community, or when the name, address block or listing block is missing. Completion wording: "Available Now", seasons ("Fall 2026") and months; a past one is a stale estimate (no date); other wording has no status (held).
+- **Community record:** `#community-name` and `.comm-page-address` ("10103 Zimmer, San Antonio, TX 78254, U.S.A."; some lack the ZIP), the map pin from the Google Maps directions link ("…/@29.5371268,-98.7423396,18z"). The communities page's `.single-result-container` cards give name, link and city line only.
+- **Incentives:** a payment calculator and no offer terms; nothing read.
+- **Scrub:** Sitterle Homes, Sitterle.
+
 ## Meritage Homes: deferred
 
 - `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.

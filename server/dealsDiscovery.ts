@@ -7,7 +7,7 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { ASHTON_HOST, CENTURY_HOST, LGI_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { ASHTON_HOST, CENTURY_HOST, LGI_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
@@ -17,6 +17,7 @@ import { tollListingEntries, tollListingUrl } from "./dealsAdapters.toll";
 import { weekleyListingEntries, weekleyListingUrl, weekleyRecord } from "./dealsAdapters.weekley";
 import { ashtonListingEntries, ashtonListingUrl, ashtonRecord } from "./dealsAdapters.ashton";
 import { lgiListingEntries, lgiListingUrl, lgiRecord } from "./dealsAdapters.lgi";
+import { sitterleListingEntries, sitterleListingUrl, sitterleRecord } from "./dealsAdapters.sitterle";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -151,6 +152,13 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     index: { kind: "listing", url: lgiListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => lgiListingEntries(body, host) },
     communityPath: /^\/texas\/san-antonio\/[a-z0-9-]+\/?$/i,
     record: lgiRecord,
+  },
+  {
+    // Sitterle: the communities page lists all three Texas markets with a city line; each page gives the sales address and map pin, and the 45-mile rule keeps the area's.
+    builder: "Sitterle Homes", host: SITTERLE_HOST,
+    index: { kind: "listing", url: sitterleListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => sitterleListingEntries(body, host) },
+    communityPath: /^\/communities\/(?!comm_|feed$|page\/)[a-z0-9-]+\/?$/i,
+    record: (html) => sitterleRecord(html),
   },
   { builder: "Century Communities", host: CENTURY_HOST, index: { kind: "sitemap", url: `https://${CENTURY_HOST}/sitemap.xml` }, communityPath: /^\/find-your-new-home\/texas\/san-antonio-metro\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({

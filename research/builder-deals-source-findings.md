@@ -136,6 +136,13 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Scrub:** Ashton Woods Homes, Ashton Woods, Starlight Homes (the sister brand); lender Velocio Mortgage, Velocio.
 - **Live check:** a sold-out parent page's shape is unknown; with no property card at all the reader holds.
 
+## LGI Homes reader (added 2026-10-20)
+
+- **Community source:** `https://www.lgihomes.com/texas/san-antonio/<slug>` (the market page lists 9 communities: Sunset Oaks in Kyle and TRACE in San Marcos fall to the 45-mile rule or are sold out).
+- **Site shape:** Sitecore JSS on Next.js (same platform as Meritage, but here the data is server-rendered into `__NEXT_DATA__`). The community sits in `pageProps.page.layout.sitecore.route.fields`: `CommunityName`, `Address1`, `City`, `ZipCode`, `Phone`, `Latitude`, `Longitude`, `SaleStatus.fields.Key` ("Active", "Sold Out", "Reduced Pricing!", "Immediate Move-in"), `MinListPrice`, `PandIInfo` ("5% Fixed / 5.805% APR, 3.5% Down, FHA 30 Year"), `CommunityAmenities[]`. The floor plans are the `FloorPlanSearch` component's props (found by `componentName` through the route's placeholders, then `componentProps[uid].community.floorplans.results[]`): `floorPlanName`, `listPrice`, `previousListPrice`, `numberofBedrooms/Bathrooms/CarGarage/Stories`, `sizeSqft`, `adStatus.fields.Key`, `url.path`, `primaryImage.src` (edge.sitecorecloud.io/lgihomes…). LGI sells by floor plan: no addressed homes on the pages, so the reader publishes plans only (inactive plans and sold-out or coming-soon communities publish nothing). The financing example becomes the offer text ("Financing example: …"); the rate parser reads the rate, APR, down payment, FHA and 30-year term from it. The market-wide disclaimer (a 4.99% ARM on select inventory, NMLS ids) is not read.
+- **Market list (discovery):** the market page's `CommunitySearch` component props: `communities.results[]` with `url.path`, `communityName`, `locationIdentifier` (city), `latitude`, `longitude`, `phone`, `saleStatus`, `minListPrice`; no street, so each page is read for its address.
+- **Scrub:** LGI Homes, LGI, Terrata Homes, CompleteHome; lenders LGI Mortgage Solutions, CalCon Mutual Mortgage, One Trust Home Loans.
+
 ## Meritage Homes: deferred
 
 - `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.

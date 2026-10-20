@@ -54,6 +54,8 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "www.davidweekleyhomes.com",
   "assetcontentdeliveryapi.davidweekleyhomes.com",
   "awh.widen.net",
+  // LGI Homes serves its photos from Sitecore's edge CDN (…/lgihomesinc…/…); the path is checked below.
+  "edge.sitecorecloud.io",
 ]);
 const ACCEPTED_IMAGE_FORMATS = new Set(["jpeg", "png", "webp", "avif", "gif", "heif"]);
 
@@ -277,6 +279,7 @@ export function safeDealImageUrl(raw: string): URL {
   }
   // A shared image CDN is approved for the builder's own account only.
   if (url.hostname.toLowerCase() === "res.cloudinary.com" && !url.pathname.startsWith("/perryhomes/")) throw new PhotoProcessingError("unapproved_source");
+  if (url.hostname.toLowerCase() === "edge.sitecorecloud.io" && !/^\/lgihomes/i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   return url;
 }
 

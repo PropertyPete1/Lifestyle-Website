@@ -11,12 +11,13 @@ import { KbHomeAdapter } from "./dealsAdapters.kbhome";
 import { TollBrothersAdapter } from "./dealsAdapters.toll";
 import { DavidWeekleyAdapter } from "./dealsAdapters.weekley";
 import { AshtonWoodsAdapter } from "./dealsAdapters.ashton";
+import { LgiHomesAdapter } from "./dealsAdapters.lgi";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -237,8 +238,9 @@ export const KBHOME_HOST = "www.kbhome.com";
 export const TOLL_HOST = "www.tollbrothers.com";
 export const WEEKLEY_HOST = "www.davidweekleyhomes.com";
 export const ASHTON_HOST = "www.ashtonwoods.com";
+export const LGI_HOST = "www.lgihomes.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -546,7 +548,8 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const hasTemporaryRate = /\b(?:buy[- ]?down|first[- ]year|year\s*1|temporarily|introductory)\b/i.test(text);
   const headline = rateNear(text, /(?:first[- ]year|year\s*1)[\s\S]{0,100}?(\d+(?:\.\d+)?)%/i) ??
     rateNear(text, /(?:rates?\s+as\s+low\s+as|as\s+low\s+as|reduced\s+to)\s+(\d+(?:\.\d+)?)%/i) ??
-    rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:\(\s*\d+(?:\.\d+)?%\s*APR|\/\s*\d+(?:\.\d+)?%\s*APR|(?:interest\s+)?rate\b)/i);
+    // "4.25% (6.051% APR)", "5% Fixed / 5.805% APR", "4.99% interest rate".
+    rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:\(\s*\d+(?:\.\d+)?%\s*APR|\/\s*\d+(?:\.\d+)?%\s*APR|(?:interest\s+)?rate\b)/i);
   const rateMentioned = headline !== null || /\b(?:interest\s+rates?|APR|buy[- ]?down)\b|\d+(?:\.\d+)?%\s*(?:fixed|financing)/i.test(text);
   const rateKind = !rateMentioned ? "none" : hasTemporaryRate ? "promotional" : "fixed";
   const promotionalRatePercent = headline;
@@ -1139,6 +1142,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "Toll Brothers") { config.builder.push("Toll Brothers", "Toll Brothers Inc"); config.lender.push("Toll Brothers Mortgage Company", "Toll Brothers Mortgage", "TBI Mortgage"); }
   if (builder === "David Weekley Homes") { config.builder.push("David Weekley Homes", "David Weekley", "Weekley Homes", "Weekley"); config.lender.push("Priority Home Mortgage"); }
   if (builder === "Ashton Woods") { config.builder.push("Ashton Woods Homes", "Ashton Woods", "Starlight Homes"); config.lender.push("Velocio Mortgage", "Velocio"); }
+  if (builder === "LGI Homes") { config.builder.push("LGI Homes", "LGI", "Terrata Homes", "CompleteHome"); config.lender.push("LGI Mortgage Solutions", "CalCon Mutual Mortgage", "One Trust Home Loans", "OneTrust Home Loans"); }
   if (builder === "Highland Homes") { config.builder.push("Highland Homes", "Highland"); config.lender.push("Highland HomeLoans", "Highland Home Loans"); }
   if (builder === "Davidson Homes") { config.builder.push("Davidson Homes", "Davidson"); config.lender.push("NorthStar Mortgage Advisors", "NorthStar Mortgage", "NorthStar"); }
   if (builder === "First America Homes") { config.builder.push("First America Homes", "First America"); }
@@ -1784,6 +1788,7 @@ let kbHomeAdapter: DealAdapter | null = null;
 let tollAdapter: DealAdapter | null = null;
 let weekleyAdapter: DealAdapter | null = null;
 let ashtonAdapter: DealAdapter | null = null;
+let lgiAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
@@ -1802,6 +1807,7 @@ export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   get "Toll Brothers"() { return (tollAdapter ??= new TollBrothersAdapter()); },
   get "David Weekley Homes"() { return (weekleyAdapter ??= new DavidWeekleyAdapter()); },
   get "Ashton Woods"() { return (ashtonAdapter ??= new AshtonWoodsAdapter()); },
+  get "LGI Homes"() { return (lgiAdapter ??= new LgiHomesAdapter()); },
   Manual: new ManualAdapter(),
 };
 

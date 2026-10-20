@@ -494,6 +494,27 @@ describe("round 33: a rate card's own APR, skipped assistance tiles, the buyer's
   });
 });
 
+describe("round 34: a named payer, separated card tiles, the primary counted, tile labels after a down payment", () => {
+  it("assistance paid by a named builder or program is never the loan's down payment; the buyer's own is", () => {
+    for (const text of ["Pulte pays 5% down payment! 4.99% (5.62% APR) 30-year fixed conventional loan.", "Seller-paid 5% down payment! 4.99% (5.62% APR) 30-year fixed conventional loan.", "4.99% (5.62% APR) on a 30-year fixed FHA loan. Texas Homebuyer Program pays 5% down payment."]) {
+      expect(parsePromotionalRate(text).downPaymentPercent, text).toBeNull();
+    }
+    expect(parsePromotionalRate("Pulte pays 5% down payment! 4.99% (5.62% APR) 30-year fixed conventional loan with a down payment of 3.5%.").downPaymentPercent).toBe(3.5);
+    expect(parsePromotionalRate("You pay 3.5% down on a 4.99% (5.62% APR) 30-year fixed FHA loan.").downPaymentPercent).toBe(3.5);
+  });
+
+  it("a separated or reordered rate card beside a second APR holds; a comparison read first holds too", () => {
+    for (const text of ["Rate 4.99% / APR 5.62% Down Payment 3.5% Term 30-Year Fixed FHA. National average 6.71% APR.", "Interest Rate 4.99% Term 30-Year Fixed APR 5.62% Down Payment 3.5% Loan Type FHA. Today's average: 6.71% APR.", "Without Buydown: APR 6.12% With Buydown: APR 5.95% 4.99% first year, 5.99% years 2-30, 30-year fixed FHA, 3.5% down payment."]) {
+      expect(parsePromotionalRate(text).holdReasons, text).toContain("apr_check");
+    }
+  });
+
+  it("a tile label after a down payment is not assistance", () => {
+    expect(parsePromotionalRate("Rate 4.99% APR 5.62% Down Payment 3.5% Credit Score 620+ 30-Year Fixed FHA")).toMatchObject({ downPaymentPercent: 3.5, holdReasons: [] });
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed. FHA Down Payment 3.5% Credit Score 580. Conventional loans 5% down.").holdReasons).toContain("ambiguous_rate");
+  });
+});
+
 describe("a run that did not read the offer source", () => {
   it("leaves the community's hold line as it was", async () => {
     const id = seedCommunity();

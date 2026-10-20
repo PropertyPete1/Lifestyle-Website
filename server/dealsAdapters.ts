@@ -723,7 +723,11 @@ function aprFigure(text: string, rates: ReadonlyArray<number | null>): { value: 
       return !nextTileValue && !labelledOther && !/^\d+(?:\.\d+)?%\*?\s*(?:\d{1,2}[- ]?(?:year|yr)s?\s+)?(?:fixed\s+)?(?:interest\s+)?(?:rate|fixed)\b/i.test(from);
     }),
   ];
-  const several = new Set(statedApr.map((candidate) => candidate.value.toFixed(3))).size > 1;
+  // The primary itself always counts; and a label-first APR (outside every value-first span) that differs from a plain
+  // value-first primary holds: a card whose Rate and APR tiles are separated ("Rate 4.99% / APR 5.62%") beside a market APR.
+  const looseLabelFirst = labelFirst.filter((candidate) => !valueFirstSpans.some(([start, end]) => candidate.label >= start && candidate.label < end));
+  const plainStructural = structural !== null && !cardAprs.includes(structural);
+  const several = new Set([...(primary ? [primary] : []), ...statedApr].map((candidate) => candidate.value.toFixed(3))).size > 1 || (plainStructural && looseLabelFirst.some((candidate) => candidate.value !== structural!.value));
   // An APR sits above the lowest rate and not far above the highest (a seller-paid buydown's APR is computed on the composite
   // rate, so it can sit below the note rate). When the layout read cannot be an APR (at or below every rate, or more than three
   // points above them, like a down payment tile), another reading that fits is taken, but the offer is held for a look.
@@ -908,16 +912,14 @@ function downPaymentFigure(text: string, aprIndex: number | null, rate: number |
     allAt.add(at);
     // "5% down payment (and closing cost) assistance", "5% down-payment grant", "5% down payment incentive": help toward a
     // down payment, not the loan's down payment.
-    if (/^\s*(?:(?:and|&|or|\/)\s*closing\s+costs?\s*)?(?:assistance|grants?|gifts?|match|matched|matching|program|help|support|incentives?|credits?|savings?|reimbursements?|contributions?|rebates?|bonus|allowance|paid|covered|not\s+required)\b/i.test(after) || /\b(?:(?:we(?:'ll|\s+will)?|builder|seller|lender|they)\s+(?:will\s+)?(?:pay|pays|paying|cover|covers|covering|match|matches|matching|reimburse|reimburses|contribute|contributes)\s+(?:up\s+to\s+)?(?:your\s+|the\s+|a\s+)?|(?:pay|pays|cover|covers|match|matches|reimburse|reimburses|contribute|contributes)\s+(?:up\s+to\s+(?:your\s+)?|your\s+))$/i.test(before) || /^\s*(?:and|&|or|\/)\s*closing\s+costs?\b/i.test(after) || /^\s*\S*\s*(?:assistance|grants?|gift)\b/i.test(clause.slice(0, 30))) continue;
-    // "Rate 4.99% APR 5.62% Down Payment 3.5%": the figure read as the APR (by position) is not a down payment.
-    if (aprIndex !== null && at === aprIndex) continue;
+    if (/^\s*(?:(?:and|&|or|\/)\s*closing\s+costs?\s*)?(?:assistance|grants?|gifts?|match|matched|matching|program|help|support|incentives?|credits?|savings?|reimbursements?|contributions?|rebates?|bonus|allowance|paid|covered|not\s+required)\b/i.test(after) || (/\b(?:pay|pays|paying|paid|cover|covers|covering|covered|match|matches|matching|reimburse|reimburses|contribute|contributes)[- ]+(?:up\s+to\s+)?(?:your\s+|the\s+|a\s+)?$/i.test(before) && !/(?:^|[.!?;:|]\s*|\b(?:you|buyers?|homebuyers?|purchasers?|only|just|(?:need|have)\s+to)\s+)(?:pay|pays|cover|covers)\s+(?:just\s+|only\s+)?$/i.test(before)) || /^\s*(?:and|&|or|\/)\s*closing\s+costs?\b/i.test(after) || /^\s*\S*\s*(?:assistance|grants?|gift)\b/i.test(clause.slice(0, 30))) continue;
     if (/\brate\s*[:=]?\s*$/i.test(before) && value !== null && value === rate) continue;
     if (value !== null) { found.push(value); foundAt.add(at); }
   }
   // The label-first down payment ("with a down payment of 3.5%", "Down Payment: 3.5%"), unless that label is the trailing label of
   // a value-first tile ("10% Down Payment 3% Seller Credit": the 3% belongs to the next tile).
   let labelFirstValue: number | null = null;
-  for (const match of Array.from(text.matchAll(/\b(?:min(?:imum|\.)?\s+)?down(?:[- ]payment)?\s*(?:of\s+|is\s+|as\s+low\s+as\s+|[:=]\s*)?(?:just\s+|only\s+)?(\d+(?:\.\d+)?)%(?!\s*(?:assistance|grants?|gifts?|paid|covered|matched|reimbursed|credits?|incentives?|savings?|contributions?|rebates?|bonus|allowance)\b)/gi))) {
+  for (const match of Array.from(text.matchAll(/\b(?:min(?:imum|\.)?\s+)?down(?:[- ]payment)?\s*(?:of\s+|is\s+|as\s+low\s+as\s+|[:=]\s*)?(?:just\s+|only\s+)?(\d+(?:\.\d+)?)%(?!\s*(?:assistance|grants?|gifts?|paid|covered|matched|reimbursed)\b)/gi))) {
     const start = match.index ?? 0;
     const sliceStart = Math.max(0, start - 14);
     const lead = /(\d+(?:\.\d+)?)%\*?\s*(?:min(?:imum|\.)?\s+)?$/i.exec(text.slice(sliceStart, start));

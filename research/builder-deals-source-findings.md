@@ -1013,3 +1013,9 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 
 - **Down payment assistance:** the skip also covers matched, savings, reimbursement, contribution, rebate, bonus, allowance, paid and covered, plus a pay/cover/match/reimburse/contribute verb before the figure. The label-first loan down payment ("with a down payment of 3.5%", "Down Payment: 3.5%", "down payment as low as 3.5%") is always read. It conflicts with a different value-first figure (holding `ambiguous_rate`), unless it is the trailing label of a tile already read ("10% Down Payment 3% Seller Credit").
 - **Comparison APRs:** label-first APRs count toward the two-APRs hold ("Market APR: 6.71% | … | APR: 5.62%"), except a figure that belongs to another tile ("APR 6% Max Seller Contribution") or is itself a rate ("5.62% APR 4.99% interest rate").
+
+## Round 33 corrections
+
+- **Rate cards:** in a label-first card ("Rate 4.99% APR 5.62% …") the figure after "APR" is the card's own APR. It is the primary read, always counts toward the two-APRs hold, and its position is excluded from the down payment. Any other APR on the page (market comparison, a footnote restating it, a points option) holds `apr_check`.
+- **Two-APRs count:** a label-first APR whose "APR" word belongs to a value-first figure ("5.81% APR 6% Max Seller Contribution") is never counted. Neither is one labelled as a down payment or credit tile. A space-separated label-first comparison ("National Average APR: 6.92% Our APR: 5.62%") counts.
+- **Down payment:** the label after any value-first "N% down" figure (accepted or skipped as assistance) belongs to that tile and never takes the next tile's figure. A pay/cover verb marks assistance only after a third party (we, builder, seller, lender) or before "your"/"up to". The buyer's own "you pay 3.5% down" is the down payment. A label-first figure followed by paid/covered/matched/reimbursed/credit and similar is assistance.

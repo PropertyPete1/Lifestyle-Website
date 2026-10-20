@@ -472,6 +472,28 @@ describe("round 32: assistance verbs and nouns, label-first loan down payment, l
   });
 });
 
+describe("round 33: a rate card's own APR, skipped assistance tiles, the buyer's own down payment", () => {
+  it("a label-first rate card keeps its own APR and down payment; any other APR on the page holds", () => {
+    for (const text of ["Rate 4.99% APR 5.62% Down Payment 3.5% Term 30-Year Fixed FHA. Today's average: 6.71% APR.", "Rate 4.99% APR 5.62% Down Payment 3.5% Term 30-Year Fixed FHA. With points, 5.48% APR."]) {
+      const facts = parsePromotionalRate(text);
+      expect(facts, text).toMatchObject({ aprPercent: 5.62, downPaymentPercent: 3.5 });
+      expect(facts.holdReasons, text).toContain("apr_check");
+    }
+    for (const text of ["3.99% First-Year Rate 5.81% APR 6% Max Seller Contribution 4.99% Years 2-30 30-Year Fixed Conventional 5% Down", "4.99% Rate 5.62% APR 3.5% Down Payment 6% Seller Contribution 30-Year Fixed FHA", "Interest Rate 4.75% APR 5% Down Payment 10% 30-Year Fixed Conventional"]) {
+      expect(parsePromotionalRate(text).holdReasons, text).toEqual([]);
+    }
+    expect(parsePromotionalRate("National Average APR: 6.92% Our APR: 5.62% Our Rate: 4.99% Term: 30-Year Fixed FHA Down Payment: 3.5%").holdReasons).toContain("apr_check");
+  });
+
+  it("a skipped assistance tile's label never takes the next tile's figure; the buyer's own 'pay N% down' is a down payment", () => {
+    for (const text of ["Builder Pays 5% Down Payment 3% Closing Costs 4.99% Rate 5.62% APR 30-Year Fixed FHA", "Seller Covers 3.5% Down Payment 2% Seller Credit 4.99% (5.62% APR) 30-Year Fixed FHA", "Down payment of 5% paid for you! 4.99% (5.62% APR) 30-year fixed conventional loan."]) {
+      expect(parsePromotionalRate(text).downPaymentPercent, text).toBeNull();
+    }
+    expect(parsePromotionalRate("You pay 3.5% down on a 4.99% (5.62% APR) 30-year fixed FHA loan.").downPaymentPercent).toBe(3.5);
+    expect(parsePromotionalRate("4.99% (5.62% APR) 30-year fixed FHA. You pay 3.5% down; conventional buyers 5% down.").holdReasons).toContain("ambiguous_rate");
+  });
+});
+
 describe("a run that did not read the offer source", () => {
   it("leaves the community's hold line as it was", async () => {
     const id = seedCommunity();

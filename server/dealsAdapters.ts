@@ -655,15 +655,19 @@ function aprFigure(text: string, rates: ReadonlyArray<number | null>): { value: 
   const NEXT_FIGURE = /^\*?\s*[:=]?\s*(?:is\s+|of\s+)?\d+(?:\.\d+)?%/;
   const NOT_AN_APR_AFTER = /^\*?\s*(?:min(?:imum|\.)?\s+)?(?:down|points?|discount|closing|credit|toward|towards|of\b|off\b)/i;
   const valueFirst: Array<{ value: number; index: number }> = [];
-  const labelFirst: Array<{ value: number; index: number }> = [];
+  const labelFirst: Array<{ value: number; index: number; label: number }> = [];
+  // Where each value-first "N% APR" sits: an "APR" label inside one is that figure's label, not a label-first APR.
+  const valueFirstSpans: Array<[number, number]> = [];
   let structural: { value: number; index: number } | null = null;
   // Value-first "N% APR" figures that are a rate tile's value in a label-first card ("Rate 4.99% APR 5.62%"): not APRs.
   const tileRates = new Set<number>();
+  const cardAprs: Array<{ value: number; index: number }> = [];
   for (const match of Array.from(text.matchAll(/(\d+(?:\.\d+)?)%\s*(?:annual\s+percentage\s+rate|apr)\b/gi))) {
     const at = match.index ?? 0;
     const value = numericValue(match[1]);
     if (value === null) continue;
     valueFirst.push({ value, index: at });
+    valueFirstSpans.push([at, at + match[0].length]);
     if (structural) continue;
     const before = text.slice(Math.max(0, at - 60), at);
     const after = text.slice(at + match[0].length);
@@ -677,7 +681,18 @@ function aprFigure(text: string, rates: ReadonlyArray<number | null>): { value: 
     // A "Rate" label with a figure before it in the same run of tile text ("3.99% First Year Interest Rate 5.81% APR",
     // "4.99% Years 2 - 30 Rate 5.81% APR") labels that earlier figure (the previous tile): this APR is value-first.
     const rateLabelBefore = /\b(?:interest\s+)?rate\s*[:=]?\s*$/i.test(before) && !/\bpercentage\s+rate\s*[:=]?\s*$/i.test(before) && !/\d%\*?[A-Za-z0-9/\- ]*\brate\s*[:=]?\s*$/i.test(before);
-    if (rateLabelBefore && next !== null && (nextLabelWithFigure || nextTile || (endsCard && !NOT_AN_APR_AFTER.test(rest)))) { tileRates.add(at); continue; }
+    if (rateLabelBefore && next !== null && (nextLabelWithFigure || nextTile || (endsCard && !NOT_AN_APR_AFTER.test(rest)))) {
+      tileRates.add(at);
+      // The card's own APR is the figure right after "APR" ("Rate 4.99% APR 5.62%"): it is this offer's APR, always counted.
+      const figure = /(\d+(?:\.\d+)?)%$/.exec(next[0]);
+      const cardValue = figure ? numericValue(figure[1]) : null;
+      if (figure && cardValue !== null) {
+        const card = { value: cardValue, index: at + match[0].length + next[0].length - figure[0].length };
+        cardAprs.push(card);
+        if (!structural) structural = card;
+      }
+      continue;
+    }
     structural = { value, index: at };
   }
   for (const match of Array.from(text.matchAll(/\b(?:APR|ANNUAL\s+PERCENTAGE\s+RATE)\s*(?:\(APR\)\s*)?(?::|=|is|of)?\s*(\d+(?:\.\d+)?)%/gi))) {
@@ -686,7 +701,7 @@ function aprFigure(text: string, rates: ReadonlyArray<number | null>): { value: 
     const nextLabel = /^\*?\s*[A-Za-z][A-Za-z.\- ]{0,25}?\s*[:=]?\s*\d+(?:\.\d+)?%/.test(after);
     if (!nextLabel && (NOT_AN_APR_AFTER.test(after) || NOT_A_RATE_AFTER.test(after) || NOT_A_RATE_SHARE.test(after))) continue;
     const value = numericValue(match[1]);
-    if (value !== null) labelFirst.push({ value, index: (match.index ?? 0) + match[0].length - match[1]!.length - 1 });
+    if (value !== null) labelFirst.push({ value, index: (match.index ?? 0) + match[0].length - match[1]!.length - 1, label: match.index ?? 0 });
   }
   const primary = structural ?? labelFirst[0] ?? null;
   // Two different APRs stated value-first ("(5.95% APR) … standard rate 5.99% (6.12% APR)", one APR per buydown step): which
@@ -696,7 +711,17 @@ function aprFigure(text: string, rates: ReadonlyArray<number | null>): { value: 
   const statedApr = [
     ...valueFirst.filter((candidate) => !tileRates.has(candidate.index)),
     // … nor one that is itself a rate ("5.62% APR 4.99% interest rate": that 4.99% is the rate).
-    ...labelFirst.filter((candidate) => !/^\d+(?:\.\d+)?%\*?\s*(?!FHA|VA|USDA|APR)[A-Z][a-z]/.test(text.slice(candidate.index)) && !/^\d+(?:\.\d+)?%\*?\s*(?:\d{1,2}[- ]?(?:year|yr)s?\s+)?(?:fixed\s+)?(?:interest\s+)?(?:rate|fixed)\b/i.test(text.slice(candidate.index))),
+    ...cardAprs,
+    ...labelFirst.filter((candidate) => {
+      // "5.81% APR 6% Max Seller Contribution": that "APR" labels the 5.81% before it; the 6% is the next tile's value.
+      if (valueFirstSpans.some(([start, end]) => candidate.label >= start && candidate.label < end)) return false;
+      const from = text.slice(candidate.index);
+      // "APR 6% Max Seller Contribution 30-Year": the next label has no figure of its own, so that 6% is the next tile's value.
+      const nextTileValue = /^\d+(?:\.\d+)?%\*?\s*(?!FHA|VA|USDA|APR)[A-Z][a-z]/.test(from) && !/^\d+(?:\.\d+)?%\*?\s*[A-Za-z][A-Za-z.\- ]{0,25}?\s*[:=]?\s*\d+(?:\.\d+)?%/.test(from);
+      // "APR 3.5% Down Payment 6% …": that 3.5% is the down payment tile's value, not an APR.
+      const labelledOther = NOT_AN_APR_AFTER.test(from.replace(/^\d+(?:\.\d+)?%/, "")) || NOT_A_RATE_SHARE.test(from.replace(/^\d+(?:\.\d+)?%/, ""));
+      return !nextTileValue && !labelledOther && !/^\d+(?:\.\d+)?%\*?\s*(?:\d{1,2}[- ]?(?:year|yr)s?\s+)?(?:fixed\s+)?(?:interest\s+)?(?:rate|fixed)\b/i.test(from);
+    }),
   ];
   const several = new Set(statedApr.map((candidate) => candidate.value.toFixed(3))).size > 1;
   // An APR sits above the lowest rate and not far above the highest (a seller-paid buydown's APR is computed on the composite
@@ -871,15 +896,19 @@ function firstRateFigure(text: string): number | null {
 function downPaymentFigure(text: string, aprIndex: number | null, rate: number | null): { value: number | null; conflict: boolean } {
   const found: number[] = [];
   const foundAt = new Set<number>();
+  const allAt = new Set<number>();
   for (const match of Array.from(text.matchAll(/(?<![\d.])(\d+(?:\.\d+)?)%\*?\s+(?:min(?:imum|\.)?\s+)?down(?:[- ]payment)?\b/gi))) {
     const at = match.index ?? 0;
     const before = text.slice(Math.max(0, at - 30), at);
     const after = text.slice(at + match[0].length);
     const clause = after.split(/[.;!?]/)[0] ?? "";
     const value = numericValue(match[1]);
+    // "Rate 4.99% APR 5.62% Down Payment 3.5%": the figure read as the APR (by position) is not a down payment.
+    if (aprIndex !== null && at === aprIndex) continue;
+    allAt.add(at);
     // "5% down payment (and closing cost) assistance", "5% down-payment grant", "5% down payment incentive": help toward a
     // down payment, not the loan's down payment.
-    if (/^\s*(?:(?:and|&|or|\/)\s*closing\s+costs?\s*)?(?:assistance|grants?|gifts?|match|matched|matching|program|help|support|incentives?|credits?|savings?|reimbursements?|contributions?|rebates?|bonus|allowance|paid|covered|not\s+required)\b/i.test(after) || /\b(?:pay|pays|paying|paid|cover|covers|covering|match|matches|matching|reimburse|reimburses|contribute|contributes)\s+(?:up\s+to\s+)?(?:your\s+|the\s+|a\s+)?$/i.test(before) || /^\s*(?:and|&|or|\/)\s*closing\s+costs?\b/i.test(after) || /^\s*\S*\s*(?:assistance|grants?|gift)\b/i.test(clause.slice(0, 30))) continue;
+    if (/^\s*(?:(?:and|&|or|\/)\s*closing\s+costs?\s*)?(?:assistance|grants?|gifts?|match|matched|matching|program|help|support|incentives?|credits?|savings?|reimbursements?|contributions?|rebates?|bonus|allowance|paid|covered|not\s+required)\b/i.test(after) || /\b(?:(?:we(?:'ll|\s+will)?|builder|seller|lender|they)\s+(?:will\s+)?(?:pay|pays|paying|cover|covers|covering|match|matches|matching|reimburse|reimburses|contribute|contributes)\s+(?:up\s+to\s+)?(?:your\s+|the\s+|a\s+)?|(?:pay|pays|cover|covers|match|matches|reimburse|reimburses|contribute|contributes)\s+(?:up\s+to\s+(?:your\s+)?|your\s+))$/i.test(before) || /^\s*(?:and|&|or|\/)\s*closing\s+costs?\b/i.test(after) || /^\s*\S*\s*(?:assistance|grants?|gift)\b/i.test(clause.slice(0, 30))) continue;
     // "Rate 4.99% APR 5.62% Down Payment 3.5%": the figure read as the APR (by position) is not a down payment.
     if (aprIndex !== null && at === aprIndex) continue;
     if (/\brate\s*[:=]?\s*$/i.test(before) && value !== null && value === rate) continue;
@@ -888,12 +917,12 @@ function downPaymentFigure(text: string, aprIndex: number | null, rate: number |
   // The label-first down payment ("with a down payment of 3.5%", "Down Payment: 3.5%"), unless that label is the trailing label of
   // a value-first tile ("10% Down Payment 3% Seller Credit": the 3% belongs to the next tile).
   let labelFirstValue: number | null = null;
-  for (const match of Array.from(text.matchAll(/\b(?:min(?:imum|\.)?\s+)?down(?:[- ]payment)?\s*(?:of\s+|is\s+|as\s+low\s+as\s+|[:=]\s*)?(?:just\s+|only\s+)?(\d+(?:\.\d+)?)%(?!\s*(?:assistance|grants?))/gi))) {
+  for (const match of Array.from(text.matchAll(/\b(?:min(?:imum|\.)?\s+)?down(?:[- ]payment)?\s*(?:of\s+|is\s+|as\s+low\s+as\s+|[:=]\s*)?(?:just\s+|only\s+)?(\d+(?:\.\d+)?)%(?!\s*(?:assistance|grants?|gifts?|paid|covered|matched|reimbursed|credits?|incentives?|savings?|contributions?|rebates?|bonus|allowance)\b)/gi))) {
     const start = match.index ?? 0;
     const sliceStart = Math.max(0, start - 14);
     const lead = /(\d+(?:\.\d+)?)%\*?\s*(?:min(?:imum|\.)?\s+)?$/i.exec(text.slice(sliceStart, start));
     // The label right after an accepted value-first down payment ("10% Down Payment 3% Seller Credit") is that tile's label.
-    if (lead && foundAt.has(sliceStart + lead.index)) continue;
+    if (lead && allAt.has(sliceStart + lead.index)) continue;
     labelFirstValue = numericValue(match[1]);
     break;
   }

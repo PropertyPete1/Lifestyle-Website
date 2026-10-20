@@ -148,10 +148,17 @@ export type TexasHomesPage = {
   plans: PrivatePlanOrHome[];
 };
 
-/** A logo image's path on the official host, decoded and lower-cased for comparison; null when it is elsewhere. */
+/**
+ * A logo image's file name on the official host, for comparison: Drupal
+ * renders the same file through image styles (`/styles/<style>/public/…`)
+ * and resized copies (`…-300x200.png`, `…-resized.png`), so the path's
+ * style segment and a size suffix are set aside; null when it is elsewhere.
+ */
 function logoPath(src: string, base: URL): string | null {
   const url = asUrl(new URL(decodeHtmlEntities(src), base).toString());
-  return url && sameOfficialHost(url, base.hostname) ? comparablePath(url.pathname) : null;
+  if (!url || !sameOfficialHost(url, base.hostname)) return null;
+  const path = comparablePath(url.pathname).replace(/\/styles\/[^/]+\/public\//, "/");
+  return path.replace(/(-\d+x\d+|-resized|-scaled)(\.[a-z0-9]+)$/i, "$2");
 }
 
 /** The community on the page; null when the page has no heading. */

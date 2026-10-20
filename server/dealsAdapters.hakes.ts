@@ -59,9 +59,10 @@ const pageUrlOf = (url: URL): string => `${url.origin}${url.pathname.replace(/\/
 
 /**
  * "Move-In Ready" is ready; "Dec 2026" names a month (a past one is a stale
- * estimate: no date); without a readable label the card's `data-move-in-date`
+ * estimate: no date); without a label the card's `data-move-in-date`
  * decides (passed → ready, else its month); sold wording is sold; anything
- * else gives no status (the run is held).
+ * else, a label with a month name the reader does not know included, gives
+ * no status (the run is held).
  */
 export function hakesStatus(label: string | null, moveInDate: string | null, now: Date): { status: string | null; readyNow: boolean; moveInDate: string | null } {
   const text = (label ?? "").replace(/\s+/g, " ").trim();
@@ -70,8 +71,10 @@ export function hakesStatus(label: string | null, moveInDate: string | null, now
   const dated = /^(?:est\.?(?:imated)?\s+)?(?:available\s+|ready\s+)?([A-Za-z]+)\.?,?\s+(\d{4})$/i.exec(text);
   let month = dated ? monthIndex(dated[1]!) : null;
   let year = dated ? Number(dated[2]) : null;
-  if (!text || (dated && month === null)) {
-    // No label (or an unreadable month name): the card's own date.
+  // A label the reader cannot read ("Early 2027", "Reserved") gives no status: the card's own date decides only when there is no label at all.
+  if (dated && month === null) return { status: null, readyNow: false, moveInDate: null };
+  if (!text) {
+    // No label: the card's own date.
     const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec((moveInDate ?? "").trim());
     if (!iso) return { status: null, readyNow: false, moveInDate: null };
     const date = Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
@@ -89,6 +92,18 @@ export function hakesStatus(label: string | null, moveInDate: string | null, now
 export type HakesCommunityRecord = { name: string; street: string | null; city: string | null; zip: string | null; phone: string | null; priceFrom: number | null; geo: { lat: number; lng: number } | null };
 
 const businessRecord = (html: string): Json | null => jsonLdRecords(html).find((item) => (Array.isArray(item["@type"]) ? item["@type"] : [item["@type"]]).some((type) => /^homeandconstructionbusiness$/i.test(String(type)))) ?? null;
+
+/** True when the hero's detail cells say the community is coming soon (it has no homes tab yet). */
+export function hakesComingSoon(html: string): boolean {
+  const root = parseHtmlElements(html);
+  const details = root ? descendants(root).find((item) => elementClass(item, "object-details")) : null;
+  return details ? descendants(details).filter((item) => elementClass(item, "cell")).some((cell) => /^\s*coming\s+soon\s*!?\s*$/i.test(elementText(cell, html))) : false;
+}
+
+/** The record for discovery: none for a coming-soon page (it is listed once it opens). */
+export function hakesDiscoveryRecord(html: string): HakesCommunityRecord | null {
+  return hakesComingSoon(html) ? null : hakesRecord(html);
+}
 
 /** The community's schema.org business record: name without the brand prefix, sales address, phone and pin; null when the page has none. */
 export function hakesRecord(html: string): HakesCommunityRecord | null {
@@ -202,6 +217,8 @@ export type HakesPage = {
   foreignPlan: boolean;
   /** The hero's school district cell, when the page has one. */
   schoolDistrict: string | null;
+  /** True when the hero says the community is coming soon: a tab-less page is then an empty community, not a changed one. */
+  comingSoon: boolean;
 };
 
 /** The community on the page; null when the page has no business record. */
@@ -290,7 +307,7 @@ export function parseHakesCommunity(html: string, pageUrl: string, now: Date = n
   const details = all.find((item) => elementClass(item, "object-details"));
   const districtCell = details ? descendants(details).filter((item) => elementClass(item, "cell")).map((cell) => elementText(cell, html)).find((text) => /\b(?:ISD|CISD|Independent School District|School District)\b/.test(text)) : undefined;
   const schoolDistrict = districtCell ? /((?:[A-Z][A-Za-z.'-]+\s+){1,4}(?:ISD|CISD|Independent School District|School District))/.exec(districtCell)?.[1]?.trim() ?? null : null;
-  return { record, foreignPage, hasTabs: Boolean(tabs), hasHomesTab, homes, residenceUrls: residences.map((residence) => residence.url), plans, foreignHome, foreignPlan, schoolDistrict };
+  return { record, foreignPage, hasTabs: Boolean(tabs), hasHomesTab, homes, residenceUrls: residences.map((residence) => residence.url), plans, foreignHome, foreignPlan, schoolDistrict, comingSoon: hakesComingSoon(html) };
 }
 
 /** The market page's community links; null when there are none. Each page is read for its record. */
@@ -320,8 +337,8 @@ export class HakesBrothersAdapter implements DealAdapter {
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseHakesCommunity(page.text, community.toString(), now());
-    // Without the business record, its sales address and the home-designs tabs this is not a community page.
-    if (!parsed || !parsed.record?.street || !parsed.hasTabs) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // Without the business record, its sales address and the home-designs tabs this is not a community page — unless the hero says it is coming soon, when it is an empty one.
+    if (!parsed || !parsed.record?.street || (!parsed.hasTabs && !parsed.comingSoon)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The page must be this community's (a same-host redirect to another one is not), and so must its homes and plans.
     if (parsed.foreignPage || parsed.foreignHome || parsed.foreignPlan) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     // The cards and the residence records must name the same home pages; a quick move-in tab with no cards is a changed page.

@@ -65,7 +65,7 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "www.texas-homes.com",
   // Hakes Brothers serves its photos from its media library (…/storage/app/medialibrary/…); the path is checked below.
   "www.hakesbrothers.com",
-  // Beazer serves its photos from its DAM and CMS hosts.
+  // Beazer serves its photos from its DAM (…/images/…) and CMS (…/contentassets/…, …/globalassets/…) hosts; the path is checked below.
   "cmp.beazer.com",
   "cms.beazer.com",
   "www.beazer.com",
@@ -304,6 +304,7 @@ export function safeDealImageUrl(raw: string): URL {
   if (url.hostname.toLowerCase() === "www.texas-homes.com" && !/^\/sites\/default\/files\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "www.hakesbrothers.com" && !/^\/storage\/app\/medialibrary\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "cdn.lennar.com" && !/^\/api\/images\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
+  if (/^(?:cmp|cms|www)\.beazer\.com$/i.test(url.hostname) && !/^\/(?:images|contentassets|globalassets)\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "empirehomes.com" && !/^\/wp-content\/uploads\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   return url;
 }

@@ -592,6 +592,43 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   Beazer Mortgage Choice, Mortgage Choice, Cardinal Financial Company,
   Cardinal Financial, Choice Lender.
 
+### Beazer: round-17 corrections (2026-10-20)
+
+- The Flight payload is read as UTF-8 bytes: a `T` row's declared length is
+  its text's byte length on the wire (React's `emitTextChunk`; the live
+  Veranda page's row 1b is 1,305 characters and 0x520 = 1,312 bytes, and
+  the next row's head follows the text directly). The reader used to count
+  code units, so one curly quote in an outlined disclaimer would renumber
+  the next row. Hint rows have no id (`:HL["/_next/static/media/…woff2",
+  "font",…]`, 10 of the Veranda page's 100 rows) and are skipped; any other
+  line that is not `<id>:…`, a text row that overruns the payload, or more
+  than 5,000 rows holds the page (`expected_community_container_not_found`).
+- The page's own row is the `CommunityDetailPage` whose `Url` is the page
+  (a nearby-communities list may stream another community's row first); a
+  row URL on another host or scheme is another page (`invalid_inventory_
+  response`).
+- A grid whose `title` or `cards` arrives as a `$<id>` reference (React
+  outlines a value referenced twice) is resolved before the grid test.
+- An offer whose disclaimer stays a `$<id>` reference (the row is missing
+  from the payload) or whose display window is not a date holds the offer
+  (`expected_incentive_container_not_found`) instead of publishing "$29" or
+  dropping it; windows are compared as dates, so "11/01/2026" reads.
+- Photos are taken from `cmp.beazer.com/images/`, `cms.beazer.com/
+  contentassets/` or `/globalassets/` (and the same paths on www.) only;
+  `dealsPhotos.ts` checks the same, so a `/_next/image` proxy is refused.
+- Discovery skips `HasVIPList: true` rows (a VIP-list community has no
+  office until it opens; it is listed then), as View Homes skips `soon`.
+- Rate parser: "fixed for N years then adjusts", "adjusts annually /
+  thereafter", a balloon and "then N%" hold `adjustable_rate`, so a stepped
+  rate never publishes as an N-year fixed one.
+- Hakes: a card label with a month name the reader does not know ("Early
+  2027") gives no status (the card's date decides only without a label); a
+  hero cell "Coming Soon" marks a coming-soon page, which discovery leaves
+  until it opens and the reader takes as an empty community (no hold).
+- Texas Homes: the logo tie compares the file name with Drupal's image-style
+  segment (`/styles/<style>/public/`) and a `-WxH` / `-resized` / `-scaled`
+  suffix set aside.
+
 ## Lennar reader (added 2026-10-20)
 
 - Site: `www.lennar.com` (Next.js pages router). The community page

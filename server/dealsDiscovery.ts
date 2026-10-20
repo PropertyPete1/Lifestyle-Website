@@ -25,7 +25,7 @@ import { LEGEND_API_HOST, legendListingEntries, legendListingUrl } from "./deals
 import { dreesDiscoveryEntries } from "./dealsAdapters.drees";
 import { viewHomesListingEntries, viewHomesListingUrl } from "./dealsAdapters.viewhomes";
 import { texasHomesListingEntries, texasHomesListingUrl, texasHomesRecord } from "./dealsAdapters.texashomes";
-import { hakesListingEntries, hakesListingUrl, hakesRecord } from "./dealsAdapters.hakes";
+import { hakesDiscoveryRecord, hakesListingEntries, hakesListingUrl } from "./dealsAdapters.hakes";
 import { beazerListingEntries, beazerListingUrl, beazerRecord } from "./dealsAdapters.beazer";
 import { lennarListingEntries, lennarListingUrl, lennarRecord } from "./dealsAdapters.lennar";
 import { empireRecord, empireRegionLinks, empireRegionUrl } from "./dealsAdapters.empire";
@@ -218,11 +218,11 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     record: texasHomesRecord,
   },
   {
-    // Hakes Brothers: the market page links every community; each page's business record gives the sales address, phone and pin.
+    // Hakes Brothers: the market page links every community; each page's business record gives the sales address, phone and pin (a coming-soon page is listed once it opens).
     builder: "Hakes Brothers", host: HAKES_HOST,
     index: { kind: "listing", url: hakesListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => hakesListingEntries(body, host) },
     communityPath: /^\/san-antonio\/[a-z0-9-]+\/?$/i,
-    record: (html) => hakesRecord(html),
+    record: (html) => hakesDiscoveryRecord(html),
   },
   {
     // Beazer: the site's own metro search lists every community with its pin and city; each page gives the sales office's street.

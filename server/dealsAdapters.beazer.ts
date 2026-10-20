@@ -43,6 +43,8 @@ export const BEAZER_MAX_HOMES = 150;
 export const BEAZER_SAN_ANTONIO_METRO_ID = "55228d07-f388-4656-9b45-c4671017e201";
 export const beazerListingUrl = () => `https://${BEAZER_HOST}/api/get-communities-per-area?skip=0&limit=100&orderBy=FeatureOrder%3AASC&filters=%7B%7D&ancestorMainId=${BEAZER_SAN_ANTONIO_METRO_ID}`;
 export const BEAZER_PHOTO_HOSTS = ["cmp.beazer.com", "cms.beazer.com", "www.beazer.com"] as const;
+/** The photo paths on those hosts: the DAM's `/images/`, the CMS's content and global assets (never a `/_next/image` proxy). */
+export const BEAZER_PHOTO_PATH = /^\/(?:images|contentassets|globalassets)\//i;
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 type Json = Record<string, unknown>;
@@ -59,40 +61,53 @@ const positive = (value: unknown): number | null => { const parsed = num(value);
 const pagePath = (url: URL): string => comparablePath(url.pathname.replace(/\/+$/, ""));
 const pageUrlOf = (url: URL): string => `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
 
-/** The page's server-component rows by id: parsed JSON, or the text of a `T` row; null when the page carries none. */
+/**
+ * The page's server-component rows by id: parsed JSON, or the text of a
+ * `T` row; null when the page carries none, or when a row cannot be read
+ * (a head that is not `<id>:`, a text row that overruns the payload, more
+ * rows than a page has). The payload is handled as UTF-8 bytes: a `T`
+ * row's declared length is its text's byte length on the wire (the live
+ * Veranda page's row 1b: 1,305 characters, 0x520 = 1,312 bytes), and the
+ * next row's head follows the text directly.
+ */
 export function parseBeazerFlight(html: string): Map<string, unknown> | null {
   const pieces: string[] = [];
   for (const match of Array.from(html.matchAll(/self\.__next_f\.push\(\[1,"((?:[^"\\]|\\.)*)"\]\)/g))) {
     try { pieces.push(JSON.parse(`"${match[1]!}"`) as string); } catch { return null; }
   }
   if (!pieces.length) return null;
-  const flight = pieces.join("");
+  const flight = Buffer.from(pieces.join(""), "utf8");
   const rows = new Map<string, unknown>();
   let position = 0;
   let count = 0;
-  while (position < flight.length && count++ < 5_000) {
-    const head = /^([0-9a-f]+):/.exec(flight.slice(position, position + 12));
+  while (position < flight.length) {
+    if (count++ >= 5_000) return null;
+    // A hint row has no id (":HL[…]"); the live Veranda page (2026-10-20) carried 10 such rows among 100.
+    const head = /^([0-9a-f]*):/.exec(flight.subarray(position, position + 12).toString("latin1"));
     if (!head) {
-      const newline = flight.indexOf("\n", position);
+      // A blank line between rows is nothing; anything else is a payload the reader does not know.
+      const newline = flight.indexOf(0x0a, position);
+      const gap = flight.subarray(position, newline < 0 ? flight.length : newline).toString("utf8");
+      if (gap.trim()) return null;
       if (newline < 0) break;
       position = newline + 1;
       continue;
     }
     const id = head[1]!;
     position += head[0].length;
-    const kind = flight[position];
+    const kind = String.fromCharCode(flight[position] ?? 0);
     if (kind === "T") {
-      // "<id>:T<hex length>,<text>"
-      const comma = flight.indexOf(",", position);
-      const length = comma > position ? parseInt(flight.slice(position + 1, comma), 16) : NaN;
-      if (!Number.isFinite(length)) return null;
-      rows.set(id, flight.slice(comma + 1, comma + 1 + length));
+      // "<id>:T<hex byte length>,<text>"
+      const comma = flight.indexOf(0x2c, position);
+      const length = comma > position + 1 ? parseInt(flight.subarray(position + 1, comma).toString("latin1"), 16) : NaN;
+      if (!Number.isFinite(length) || comma + 1 + length > flight.length) return null;
+      rows.set(id, flight.subarray(comma + 1, comma + 1 + length).toString("utf8"));
       position = comma + 1 + length;
-      if (flight[position] === "\n") position++;
+      if (flight[position] === 0x0a) position++;
       continue;
     }
-    const newline = flight.indexOf("\n", position);
-    const line = newline < 0 ? flight.slice(position) : flight.slice(position, newline);
+    const newline = flight.indexOf(0x0a, position);
+    const line = flight.subarray(position, newline < 0 ? flight.length : newline).toString("utf8");
     position = newline < 0 ? flight.length : newline + 1;
     if (kind === "I" || kind === "H" || kind === "E") continue;
     try { rows.set(id, JSON.parse(line)); } catch { /* a row the reader does not need */ }
@@ -176,7 +191,7 @@ function recordOf(community: Json): BeazerCommunityRecord | null {
 
 function photoUrl(value: unknown, host: string): string | null {
   const url = typeof value === "string" ? asUrl(decodeHtmlEntities(value)) : null;
-  if (!url || url.protocol !== "https:" || !(BEAZER_PHOTO_HOSTS as readonly string[]).includes(url.hostname.toLowerCase()) || /floor\s*plan|floorplan|site\s*plan|\.pdf$|\.svg$/i.test(url.pathname)) return null;
+  if (!url || url.protocol !== "https:" || !(BEAZER_PHOTO_HOSTS as readonly string[]).includes(url.hostname.toLowerCase()) || !BEAZER_PHOTO_PATH.test(url.pathname) || /floor\s*plan|floorplan|site\s*plan|\.pdf$|\.svg$/i.test(url.pathname)) return null;
   void host;
   url.search = "";
   url.hash = "";
@@ -212,6 +227,8 @@ export type BeazerPage = {
   plans: PrivatePlanOrHome[];
   foreignPlan: boolean;
   offer: string | null;
+  /** True when a current offer's disclaimer or display window cannot be read: the offer is held, never published without its terms. */
+  offerUnreadable: boolean;
 };
 
 /** The community on the page; null when the payload carries no community row. */
@@ -220,19 +237,24 @@ export function parseBeazerCommunity(html: string, pageUrl: string, now: Date = 
   const rows = parseBeazerFlight(html);
   if (!community || !rows) return null;
   const host = community.hostname;
-  const row = findAll(rows, (node) => node.__typename === "CommunityDetailPage" && node.CommunityID !== undefined && typeof node.Url === "string")[0];
+  // The page's own row is the one whose URL is the page (a nearby-communities list may stream other rows first); the first stands in for a redirected page.
+  const candidates = findAll(rows, (node) => node.__typename === "CommunityDetailPage" && node.CommunityID !== undefined && typeof node.Url === "string");
+  const row = candidates.find((node) => { const url = asUrl(String(node.Url)); return url !== null && sameOfficialHost(url, host) && pagePath(url) === pagePath(community); }) ?? candidates[0];
   const record = row ? recordOf(row) : null;
   if (!row || !record) return null;
+  // The row's own URL must be this page on the official host: another path, host or scheme is another page.
   const own = asUrl(String(row.Url));
-  const foreignPage = own !== null && sameOfficialHost(own, host) && pagePath(own) !== pagePath(community);
+  const foreignPage = own === null || !sameOfficialHost(own, host) || pagePath(own) !== pagePath(community);
   const base = `${pagePath(community)}/`;
   const homes: PrivatePlanOrHome[] = [];
   let foreignHome = false;
   let hasHomesGrid = false;
   const seen = new Set<string>();
-  for (const grid of findAll(rows, (node) => typeof node.title === "string" && /quick\s*move/i.test(node.title) && Array.isArray(node.cards))) {
+  // A grid's title or cards may arrive as a reference to another row (React outlines a value referenced twice).
+  const grids = findAll(rows, (node) => typeof resolveBeazerRef(rows, node.title) === "string" && /quick\s*move/i.test(String(resolveBeazerRef(rows, node.title))) && Array.isArray(resolveBeazerRef(rows, node.cards)));
+  for (const grid of grids) {
     hasHomesGrid = true;
-    for (const card of arr(grid.cards)) {
+    for (const card of arr(resolveBeazerRef(rows, grid.cards))) {
       const home = obj(resolveBeazerRef(rows, obj(resolveBeazerRef(rows, obj(resolveBeazerRef(rows, card))?.ContentLink))?.Expanded));
       if (!home || home.__typename !== "HomeDetailPage") continue;
       const link = str(home.Url);
@@ -302,18 +324,28 @@ export function parseBeazerCommunity(html: string, pageUrl: string, now: Date = 
   }
   // The community's current offers: the rate-naming one first, else the first; each is its content and its disclaimer.
   const offers = findAll(rows, (node) => Array.isArray(node.activeOffersCurrently)).flatMap((node) => arr(node.activeOffersCurrently));
+  let offerUnreadable = false;
+  // A display window is a date; one the reader cannot read holds the offer rather than dropping or showing it.
+  const windowDate = (value: unknown): number | null | false => {
+    const text = str(value);
+    if (!text) return null;
+    const time = Date.parse(text);
+    return Number.isFinite(time) ? time : false;
+  };
   const current = offers.map((item) => obj(resolveBeazerRef(rows, item))).filter((item): item is Json => item !== null && item.IsActive !== false).filter((item) => {
-    const from = str(item.DisplayStartDate);
-    const through = str(item.DisplayEndDate);
-    const nowIso = now.toISOString();
-    return (!from || from <= nowIso) && (!through || through >= nowIso);
+    const from = windowDate(item.DisplayStartDate);
+    const through = windowDate(item.DisplayEndDate);
+    if (from === false || through === false) { offerUnreadable = true; return false; }
+    return (from === null || from <= now.getTime()) && (through === null || through >= now.getTime());
   }).map((item) => {
     const content = typeof item.Content === "string" ? htmlToText(item.Content) : "";
-    const disclaimers = arr(item.Disclaimer).map((entry) => resolveBeazerRef(rows, obj(resolveBeazerRef(rows, obj(resolveBeazerRef(rows, obj(resolveBeazerRef(rows, entry))?.ContentLink))?.Expanded))?.Text)).map((text) => typeof text === "string" ? htmlToText(text) : "");
-    return cleanOfferText([content, ...disclaimers].filter(Boolean).join(" ").slice(0, 6_000));
+    const disclaimers = arr(item.Disclaimer).map((entry) => resolveBeazerRef(rows, obj(resolveBeazerRef(rows, obj(resolveBeazerRef(rows, obj(resolveBeazerRef(rows, entry))?.ContentLink))?.Expanded))?.Text));
+    // A disclaimer still written as a "$<id>" reference points at a row the payload does not carry: the offer's terms are unreadable.
+    if (disclaimers.some((text) => typeof text === "string" && /^\$[0-9a-f]+(?::|$)/.test(text))) { offerUnreadable = true; return ""; }
+    return cleanOfferText([content, ...disclaimers.map((text) => typeof text === "string" ? htmlToText(text) : "")].filter(Boolean).join(" ").slice(0, 6_000));
   }).filter((text) => text && /\d+(?:\.\d+)?\s*%|\$\s*[\d,]{4,}/.test(text));
   const offer = current.find((text) => /\d+(?:\.\d+)?\s*%\s*(?:\(|\[|\/|APR|interest|rate|fixed|limited)/i.test(text)) ?? current[0] ?? null;
-  return { record, foreignPage, comingSoon: row.HasVIPList === true, homes, foreignHome, hasHomesGrid, plansSayHomes, plans, foreignPlan, offer };
+  return { record, foreignPage, comingSoon: row.HasVIPList === true, homes, foreignHome, hasHomesGrid, plansSayHomes, plans, foreignPlan, offer, offerUnreadable };
 }
 
 /** Links, e-mail addresses, phone numbers, NMLS ids and footnote marks go from the offer text. */
@@ -346,6 +378,8 @@ export function beazerListingEntries(body: string, host: string): Array<{ url: s
     const url = link ? asUrl(link) : null;
     const record = row ? recordOf(row) : null;
     if (!row || !url || !sameOfficialHost(url, host) || !record) continue;
+    // A VIP-list community is not selling yet (no office on its page): it is listed once it opens.
+    if (row.HasVIPList === true) continue;
     const key = pageUrlOf(url);
     if (!out.has(key)) out.set(key, { url: key, record });
   }
@@ -380,7 +414,8 @@ export class BeazerAdapter implements DealAdapter {
     for (const home of parsed.homes) { privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }
     for (const plan of parsed.plans) { privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }
     const incentiveHolds: DealHoldReason[] = [];
-    if (parsed.offer) privateSnapshot.incentive = { sourceUrl: community.toString(), text: parsed.offer, facts: parsePromotionalRate(parsed.offer) };
+    if (parsed.offerUnreadable) incentiveHolds.push("expected_incentive_container_not_found");
+    else if (parsed.offer) privateSnapshot.incentive = { sourceUrl: community.toString(), text: parsed.offer, facts: parsePromotionalRate(parsed.offer) };
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));
   }
 }

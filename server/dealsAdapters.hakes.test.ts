@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { HakesBrothersAdapter, hakesListingEntries, hakesRecord, hakesResidences, hakesStatus, parseHakesCommunity } from "./dealsAdapters.hakes";
+import { HakesBrothersAdapter, hakesComingSoon, hakesDiscoveryRecord, hakesListingEntries, hakesRecord, hakesResidences, hakesStatus, parseHakesCommunity } from "./dealsAdapters.hakes";
 import { DEAL_ADAPTERS, loadOfficialDeals, type CommunitySourceConfig } from "./dealsAdapters";
 import { normalizedDealSourceKey } from "../shared/deals";
 
@@ -28,13 +28,13 @@ const HOMES: Home[] = [
   { street: "152 Fixture Ct", label: "Dec 2026", date: "2026-12-15", price: 315_990, original: 339_867, sqft: 2_290, beds: "5+", baths: "3.5", lot: 33 },
   { street: "2907 Fixture St", label: "Sep 2026", date: "2026-09-03", price: 319_990, original: null, sqft: 2_020, beds: "4", baths: "2.5 - 3", garage: "3", lot: 9 },
 ];
-type PageInput = { business?: string | null; homes?: Home[] | null; cards?: string[]; residences?: string[]; plans?: string[]; tabs?: boolean };
+type PageInput = { business?: string | null; homes?: Home[] | null; cards?: string[]; residences?: string[]; plans?: string[]; tabs?: boolean; status?: string };
 function communityPage(input: PageInput = {}) {
   const homes = input.homes === undefined ? HOMES : input.homes;
   const cards = input.cards ?? (homes ?? []).map(homeCard);
   const residences = input.residences ?? (homes ?? []).map(residence);
   const tabs = input.tabs === false ? "" : `<section id="homes" class="section--block" data-magellan-target="homes"><div class="grid-container"><h2 class="h1">Find Your New Home Design</h2><div class="flex-container"><ul id="home-tabs" class="tabs margin-top-3" data-tabs><li class="tabs-title is-active"><a href="#home-designs" aria-selected="true">Home Designs</a></li>${homes === null ? "" : `<li class="tabs-title"><a href="#quick-move-in-homes">Quick Move-In</a></li>`}</ul></div><div class="tabs-content margin-top-3" data-tabs-content="home-tabs"><div id="home-designs" class="tabs-panel is-active"><h3 class="h2">View plans available to build.</h3><div class="margin-top-1 grid-x grid-margin-x">${(input.plans ?? [planCard("Sophora", "$259,490"), planCard("Bandera", "$312,990", undefined, cells("2,440", "4 - 6", "2.5 - 3", "2")), planCard("Poinsettia", null)]).join("")}</div></div>${homes === null ? "" : `<div id="quick-move-in-homes" class="tabs-panel"><h3 class="h2">Move in sooner.</h3><div class="margin-top-1 grid-x grid-margin-x">${cards.join("")}</div></div>`}</div></div></section>`;
-  return `<!DOCTYPE html><html><head><title>New Homes in Mico TX | Fixture Woods | Hakes Brothers</title>${ld({ "@context": "http://schema.org", "@type": "BreadcrumbList", itemListElement: [] })}${residences.join("")}${input.business === null ? "" : input.business ?? business()}</head><body><header><nav><a href="${HOST}/san-antonio">San Antonio</a><a href="${HOST}/san-antonio/fixture-ridge">Fixture Ridge</a></nav></header><main><div class="grid-container"><h1>Fixture Woods</h1><p class="headline community__price-min h2"> Starting at $294,990 <br><a class="link-primary" data-open="starting-price-disclaimer-modal" role="button"> Homesite premium may apply* </a></p><div class="object-details"><div class="cell"><strong> Now Selling </strong></div><div class="cell"><strong>Medina Valley ISD</strong></div><div class="cell"><strong>Medina County</strong></div></div><p>Fixture Woods is a planned community near Medina Lake. The calculator automatically assumes a 10% down payment and a 6.5% interest rate.</p></div>${tabs}<section id="siteplan"><div class="siteplan-legend__item">Quick Move-In</div><div class="siteplan-legend__item">Sold</div></section><section id="contact"><a href="tel:+1-210-555-0142">(210) 555-0142</a><a href="https://www.google.com/maps/dir/?api=1&amp;destination=293+Fixture+Wy%2C+Mico%2C+TX+78056">293 Fixture Wy, Mico, TX 78056 | Get Directions</a></section></main><footer>&copy; 2026 Hakes Brothers</footer></body></html>`;
+  return `<!DOCTYPE html><html><head><title>New Homes in Mico TX | Fixture Woods | Hakes Brothers</title>${ld({ "@context": "http://schema.org", "@type": "BreadcrumbList", itemListElement: [] })}${residences.join("")}${input.business === null ? "" : input.business ?? business()}</head><body><header><nav><a href="${HOST}/san-antonio">San Antonio</a><a href="${HOST}/san-antonio/fixture-ridge">Fixture Ridge</a></nav></header><main><div class="grid-container"><h1>Fixture Woods</h1><p class="headline community__price-min h2"> Starting at $294,990 <br><a class="link-primary" data-open="starting-price-disclaimer-modal" role="button"> Homesite premium may apply* </a></p><div class="object-details"><div class="cell"><strong> ${input.status ?? "Now Selling"} </strong></div><div class="cell"><strong>Medina Valley ISD</strong></div><div class="cell"><strong>Medina County</strong></div></div><p>Fixture Woods is a planned community near Medina Lake. The calculator automatically assumes a 10% down payment and a 6.5% interest rate.</p></div>${tabs}<section id="siteplan"><div class="siteplan-legend__item">Quick Move-In</div><div class="siteplan-legend__item">Sold</div></section><section id="contact"><a href="tel:+1-210-555-0142">(210) 555-0142</a><a href="https://www.google.com/maps/dir/?api=1&amp;destination=293+Fixture+Wy%2C+Mico%2C+TX+78056">293 Fixture Wy, Mico, TX 78056 | Get Directions</a></section></main><footer>&copy; 2026 Hakes Brothers</footer></body></html>`;
 }
 const marketPage = `<html><head>${residence(HOMES[0]!)}</head><body><a href="${HOST}/san-antonio/fixture-woods">Fixture Woods</a><a href="/san-antonio/fixture-ridge/">Fixture Ridge</a><a href="${HOST}/san-antonio/fixture-woods/home/118-fixture-ct">118</a><a href="${HOST}/el-paso/far-fixture">Far</a><a href="https://evil.example/san-antonio/x">x</a><a href="${HOST}/san-antonio">San Antonio</a></body></html>`;
 
@@ -63,6 +63,8 @@ describe("Hakes Brothers reader: statuses", () => {
     expect(hakesStatus(null, "soon", NOW).status).toBeNull();
     expect(hakesStatus("Sold", "2026-10-19", NOW)).toEqual({ status: "Sold", readyNow: false, moveInDate: null });
     for (const label of ["Coming Soon", "Model Home", "Reserved", "Dec 2099", "Octember 2026"]) expect(hakesStatus(label, null, NOW).status, label).toBeNull();
+    // A label with a month name the reader does not know never defers to the card's date.
+    for (const label of ["Early 2027", "Spring 2027", "Pending 2027", "Octember 2026"]) expect(hakesStatus(label, "2026-12-15", NOW).status, label).toBeNull();
   });
 });
 
@@ -97,7 +99,13 @@ describe("Hakes Brothers reader: page data", () => {
     expect(parseHakesCommunity(communityPage({ cards: [homeCard({ ...HOMES[0]!, community: "fixture-ridge" })] }), COMMUNITY, NOW)).toMatchObject({ foreignHome: true, homes: [] });
     expect(parseHakesCommunity(communityPage({ plans: [planCard("Zinnia", "$1", `${HOST}/san-antonio/fixture-ridge/home-design/zinnia`)] }), COMMUNITY, NOW)).toMatchObject({ foreignPlan: true, plans: [] });
     expect(parseHakesCommunity(communityPage({ business: null }), COMMUNITY, NOW)).toBeNull();
-    expect(parseHakesCommunity(communityPage({ tabs: false }), COMMUNITY, NOW)).toMatchObject({ hasTabs: false });
+    expect(parseHakesCommunity(communityPage({ tabs: false }), COMMUNITY, NOW)).toMatchObject({ hasTabs: false, comingSoon: false });
+    // A coming-soon hero: the page parses as an empty community; discovery leaves it until it opens.
+    const soon = communityPage({ tabs: false, homes: null, plans: [], status: "Coming Soon" });
+    expect(hakesComingSoon(soon)).toBe(true);
+    expect(parseHakesCommunity(soon, COMMUNITY, NOW)).toMatchObject({ hasTabs: false, comingSoon: true, homes: [], plans: [] });
+    expect(hakesDiscoveryRecord(soon)).toBeNull();
+    expect(hakesDiscoveryRecord(communityPage())).toMatchObject({ name: "Fixture Woods" });
     expect(hakesListingEntries(marketPage, "www.hakesbrothers.com")!.map((entry) => entry.url)).toEqual([COMMUNITY, `${HOST}/san-antonio/fixture-ridge`]);
     expect(hakesListingEntries("<html><body>new layout</body></html>", "www.hakesbrothers.com")).toBeNull();
   });
@@ -136,6 +144,10 @@ describe("Hakes Brothers reader: adapter", () => {
     expect((await load("<html><body>new layout</body></html>")).holdReasons).toEqual(["expected_community_container_not_found"]);
     expect((await load(communityPage({ business: business(COMMUNITY, null) }))).holdReasons).toEqual(["expected_community_container_not_found"]);
     expect((await load(communityPage({ tabs: false }))).holdReasons).toEqual(["expected_community_container_not_found"]);
+    const soon = await load(communityPage({ tabs: false, homes: null, plans: [], status: "Coming Soon" }));
+    expect(soon.catalogOk).toBe(true);
+    expect(soon.private.homes).toEqual([]);
+    expect(soon.private.plans).toEqual([]);
     expect((await load(communityPage({ business: business(`${HOST}/san-antonio/fixture-ridge`) }))).holdReasons).toEqual(["invalid_inventory_response"]);
     expect((await load(communityPage({ cards: [homeCard({ ...HOMES[0]!, community: "fixture-ridge" })] }))).holdReasons).toEqual(["invalid_inventory_response"]);
     expect((await load(communityPage({ plans: [planCard("Zinnia", "$1", `${HOST}/san-antonio/fixture-ridge/home-design/zinnia`)] }))).holdReasons).toEqual(["invalid_inventory_response"]);

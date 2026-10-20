@@ -413,11 +413,12 @@ describe("discovery", () => {
     expect(hakes.skipped).toEqual([{ url: `${HAK}/san-antonio/far-fixture`, reason: "outside_area" }]);
     expect(requested).toEqual([`${HAK}/san-antonio`, `${HAK}/san-antonio/fixture-woods`, `${HAK}/san-antonio/far-fixture`]);
 
-    // Beazer: the site's metro search lists every community with its pin and city; each page gives the sales office's street; Kyle is out.
+    // Beazer: the site's metro search lists every selling community with its pin and city; each page gives the sales office's street.
     requested.length = 0;
     const beazer = await discoverBuilderCommunities(reader("Beazer Homes"), fetcher);
     expect(beazer.communities.map((community) => [community.name, community.sourceUrl, community.address, community.salesPhone])).toEqual([["Fixture Meadows", `${BZ}/san-antonio-TX/san-antonio/fixture-meadows`, "6614 Fixture Glen, San Antonio, TX 78253", "2105550142"]]);
-    expect(beazer.skipped).toEqual([{ url: `${BZ}/san-antonio-TX/kyle/far-fixture`, reason: "outside_area" }]);
+    // The VIP-list (coming soon) row is not listed at all: it has no office until it opens.
+    expect(beazer.skipped).toEqual([]);
 
     // Lennar: the market page's own data carries every masterplan's record (street from its collection), so no page is read; Lubbock's is out, a coming-soon one is not listed.
     requested.length = 0;

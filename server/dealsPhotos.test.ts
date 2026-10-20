@@ -52,6 +52,9 @@ describe("Builder Deals private photo primitives", () => {
     expect(() => safeDealImageUrl("https://www.hakesbrothers.com/san-antonio/x.jpg")).toThrow("unapproved_source");
     expect(safeDealImageUrl("https://cdn.lennar.com/api/images/contentassets/abc/x.jpg").hostname).toBe("cdn.lennar.com");
     expect(() => safeDealImageUrl("https://cdn.lennar.com/other/x.jpg")).toThrow("unapproved_source");
+    expect(safeDealImageUrl("https://cmp.beazer.com/images/x.jpg").hostname).toBe("cmp.beazer.com");
+    expect(safeDealImageUrl("https://cms.beazer.com/contentassets/abc/x.jpg").hostname).toBe("cms.beazer.com");
+    expect(() => safeDealImageUrl("https://www.beazer.com/_next/image?url=x")).toThrow("unapproved_source");
     expect(safeDealImageUrl("https://empirehomes.com/wp-content/uploads/2025/10/x.jpg").hostname).toBe("empirehomes.com");
     expect(() => safeDealImageUrl("https://empirehomes.com/us/texas/x.jpg")).toThrow("unapproved_source");
   });

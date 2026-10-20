@@ -12,7 +12,7 @@ import { normalizedDealSourceKey } from "../shared/deals";
 const HOST = "https://www.beazer.com";
 const COMMUNITY = `${HOST}/san-antonio-TX/san-antonio/fixture-meadows`;
 const NOW = new Date("2026-10-20T15:00:00Z");
-const DISCLAIMER = "<p>*Offer available on a pool of limited funds available only through Cardinal Financial Company, Limited Partnership NMLS #66247 for select Quick Move-In homes located in San Antonio. Homes must be contracted between 10/07/2026 and 12/07/2026 and close per contract by 12/07/2026. FHA 5/1 Adjustable Rate Mortgage with an initial interest rate of 4.990% (6.619% Annual Percentage Rate(APR)). Interest rate remains fixed for the first five years then adjusts annually years 6-30. Call 210-555-0142 or see www.beazer.com for details.</p>";
+const DISCLAIMER = "<p>*Offer available on a pool of limited funds – the buyer’s choice of Beazer® homes – available only through Cardinal Financial Company, Limited Partnership NMLS #66247 for select Quick Move-In homes located in San Antonio. Homes must be contracted between 10/07/2026 and 12/07/2026 and close per contract by 12/07/2026. FHA 5/1 Adjustable Rate Mortgage with an initial interest rate of 4.990% (6.619% Annual Percentage Rate(APR)). Interest rate remains fixed for the first five years then adjusts annually years 6-30. Call 210-555-0142 or see www.beazer.com for details.</p>";
 const image = (url: string) => ({ __typename: "ContentAreaItemModelSearch", ContentLink: { __typename: "ContentModelReferenceSearch", ProviderName: "dam", Expanded: { __typename: "DAMImageAsset", Url: url, Name: url.split("/").pop() } } });
 type Home = { street: string; plan: string; homesite: string; availability: string | null; price: number; beds?: number; baths?: number; sqft?: number; active?: boolean; model?: boolean; url?: string; city?: string; zip?: string };
 const homeRow = (home: Home) => ({
@@ -65,7 +65,7 @@ const OFFERS = [
 function communityPage(input: PageInput = {}) {
   const homes = input.homes === undefined ? HOMES : input.homes;
   const grids = input.grids ?? (homes === null ? [] : [homes.map((home) => ({ ContentLink: { Expanded: homeRow(home) } }))]);
-  const tabs = [{ title: "Home plans", cards: (input.plans ?? PLANS).map((plan, index) => ({ ContentLink: { Expanded: { _concreteType: "PlanDetailPage", __typename: "PlanDetailPage", ContentLink: `$19:props:extraData:communityDetailPage:Plans:PlanDetailPage:items:${index}:ContentLink`, PlanName: `$19:props:extraData:communityDetailPage:Plans:PlanDetailPage:items:${index}:PlanName` } } })), anchorLink: "#home-plans" }, ...grids.map((cards) => ({ title: "Quick move-in homes", cards, anchorLink: "#quick-move-ins" }))];
+  const tabs = [{ title: "Home plans", cards: (input.plans ?? PLANS).map((plan, index) => ({ ContentLink: { Expanded: { _concreteType: "PlanDetailPage", __typename: "PlanDetailPage", ContentLink: `$19:props:extraData:communityDetailPage:Plans:PlanDetailPage:items:${index}:ContentLink`, PlanName: `$19:props:extraData:communityDetailPage:Plans:PlanDetailPage:items:${index}:PlanName` } } })), anchorLink: "#home-plans" }, ...grids.map((cards) => ({ title: "Quick move-in homes", cards: Array.isArray(cards) && cards.length === 1 && typeof cards[0] === "string" ? cards[0] : cards, anchorLink: "#quick-move-ins" }))];
   const rows: Array<[string, unknown]> = [
     ["0", ["$", "$L1", null, { children: ["$", "$L19", null, {}] }]],
     ["19", ["$", "$L2", null, { extraData: { communityDetailPage: communityRow(input), activeOffersCurrently: input.offers === undefined ? OFFERS : input.offers ?? [] }, children: ["$", "$L1a", null, {}] }]],
@@ -73,7 +73,7 @@ function communityPage(input: PageInput = {}) {
     ...(input.extraRows ?? []),
   ];
   const texts: Array<[string, string]> = [["29", DISCLAIMER], ["2a", "<p>*Offer valid only on contracts for to-be-built homes signed between 9.01.26 and 10.31.26 in San Antonio, TX. See a New Home Counselor for details.</p>"]];
-  const lines = [...rows.map(([id, value]) => `${id}:${JSON.stringify(value)}`), "2:I[\"1234\",[],\"\"]", ...texts.map(([id, text]) => `${id}:T${text.length.toString(16)},${text}`)];
+  const lines = [...rows.map(([id, value]) => `${id}:${JSON.stringify(value)}`), "2:I[\"1234\",[],\"\"]", ...texts.map(([id, text]) => `${id}:T${Buffer.byteLength(text, "utf8").toString(16)},${text}`)];
   const flight = `${lines.join("\n")}\n`;
   const half = Math.floor(flight.length / 2);
   const pushes = [flight.slice(0, half), flight.slice(half)].map((piece) => `<script>self.__next_f.push([1,${JSON.stringify(piece)}])</script>`);
@@ -124,6 +124,20 @@ describe("Beazer reader: the payload", () => {
   });
 });
 
+describe("Beazer reader: the payload (bytes)", () => {
+  it("reads a text row by its UTF-8 byte length (the wire's), a hint row with no id, and holds a payload it cannot read (an unknown line, an overrunning text row)", () => {
+    const text = "<p>The buyer’s choice – Beazer® homes</p>";
+    const flight = `:HL["/_next/static/media/x.woff2","font",{"crossOrigin":""}]\n0:["$","$L1",null,{}]\n29:T${Buffer.byteLength(text, "utf8").toString(16)},${text}19:{"a":1}\n`;
+    const rows = parseBeazerFlight(`<script>self.__next_f.push([1,${JSON.stringify(flight)}])</script>`)!;
+    expect(rows.get("29")).toBe(text);
+    expect(rows.get("19")).toEqual({ a: 1 });
+    expect(rows.has("")).toBe(false);
+    expect(parseBeazerFlight(`<script>self.__next_f.push([1,${JSON.stringify(`0:["$","$L1",null,{}]\n29:T${text.length.toString(16)},${text}19:{"a":1}\n`)}])</script>`)).toBeNull();
+    expect(parseBeazerFlight(`<script>self.__next_f.push([1,${JSON.stringify("0:[1]\nnot a row\n")}])</script>`)).toBeNull();
+    expect(parseBeazerFlight(`<script>self.__next_f.push([1,${JSON.stringify("0:[1]\n\n1:[2]\n")}])</script>`)!.size).toBe(2);
+  });
+});
+
 describe("Beazer reader: page data", () => {
   it("reads the community row (office, pin, minimum price), the quick move-in cards (status, price, specs, plan, homesite, photos on the DAM hosts), the plans for sale (hidden and inactive left out, price from the elevations) and the current rate offer with its disclaimer", () => {
     const page = parseBeazerCommunity(communityPage(), COMMUNITY, NOW)!;
@@ -139,7 +153,7 @@ describe("Beazer reader: page data", () => {
       [`${COMMUNITY}/travis`, "Travis", 332_990, 3, 2, 1_504, ["https://cmp.beazer.com/images/travis-0.jpg", "https://cmp.beazer.com/images/travis-1.jpg"]],
       [`${COMMUNITY}/austin`, "Austin", 341_990, 3, 2, 1_599, ["https://cmp.beazer.com/images/austin-0.jpg", "https://cmp.beazer.com/images/austin-1.jpg"]],
     ]);
-    expect(page.offer).toBe("Lock In 4.99%! 4.99% Limited Time 5/1 ARM [6.62% APR] with Choice Lender! Offer available on a pool of limited funds available only through Cardinal Financial Company, Limited Partnership for select Quick Move-In homes located in San Antonio. Homes must be contracted between 10/07/2026 and 12/07/2026 and close per contract by 12/07/2026. FHA 5/1 Adjustable Rate Mortgage with an initial interest rate of 4.990% (6.619% Annual Percentage Rate(APR)). Interest rate remains fixed for the first five years then adjusts annually years 6-30. Call or see for details.");
+    expect(page.offer).toBe("Lock In 4.99%! 4.99% Limited Time 5/1 ARM [6.62% APR] with Choice Lender! Offer available on a pool of limited funds – the buyer’s choice of Beazer® homes – available only through Cardinal Financial Company, Limited Partnership for select Quick Move-In homes located in San Antonio. Homes must be contracted between 10/07/2026 and 12/07/2026 and close per contract by 12/07/2026. FHA 5/1 Adjustable Rate Mortgage with an initial interest rate of 4.990% (6.619% Annual Percentage Rate(APR)). Interest rate remains fixed for the first five years then adjusts annually years 6-30. Call or see for details.");
     expect(page.offer).not.toMatch(/NMLS|66247|555-0142|beazer\.com/);
   });
 
@@ -154,9 +168,23 @@ describe("Beazer reader: page data", () => {
     expect(parseBeazerCommunity(communityPage({ offers: [OFFERS[0]!, OFFERS[2]!] }), COMMUNITY, NOW)!.offer).toBe("Personalized savings, your way! Receive up to $35,000 towards design options and closing costs! Offer valid only on contracts for to-be-built homes signed between 9.01.26 and 10.31.26 in San Antonio, TX. See a New Home Counselor for details.");
     expect(parseBeazerCommunity(communityPage({ offers: [OFFERS[2]!] }), COMMUNITY, NOW)!.offer).toBeNull();
     expect(parseBeazerCommunity(communityPage({ offers: null }), COMMUNITY, NOW)!.offer).toBeNull();
+    // An offer whose disclaimer points at a row the payload lacks, or whose window is not a date, is unreadable: held, never joined as "$29".
+    const dangling = parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, Disclaimer: [{ __typename: "ContentAreaItemModelSearch", ContentLink: { __typename: "ContentModelReferenceSearch", Expanded: { __typename: "DisclaimerBlock", Text: "$7f", Title: "Disclaimer" } } }] }] }), COMMUNITY, NOW)!;
+    expect(dangling).toMatchObject({ offer: null, offerUnreadable: true });
+    expect(parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, DisplayStartDate: "soon", DisplayEndDate: "later" }] }), COMMUNITY, NOW)).toMatchObject({ offer: null, offerUnreadable: true });
+    expect(parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, DisplayStartDate: "2026-09-23T00:00:00", DisplayEndDate: "11/01/2026" }] }), COMMUNITY, NOW)).toMatchObject({ offerUnreadable: false });
+    expect(parseBeazerCommunity(communityPage({ offers: [{ ...OFFERS[1]!, DisplayStartDate: "2026-09-23T00:00:00", DisplayEndDate: "11/01/2026" }] }), COMMUNITY, NOW)!.offer).toMatch(/^Lock In 4\.99%/);
+    expect(parseBeazerCommunity(communityPage(), COMMUNITY, NOW)).toMatchObject({ offerUnreadable: false });
+    // The page's own row is the one whose URL is the page, even when another community's row streams first; a row URL on another host or scheme is another page.
+    const nearby = { ...communityRow({ url: `${HOST}/san-antonio-TX/san-antonio/fixture-creek` }), CommunityName: "Fixture Creek", ProductLines: { __typename: "QueryRef", ProductLinePage: { __typename: "ProductLinePageOutput", items: [{ __typename: "ProductLinePage", StreetAddress: "100 Creek Row", City: "San Antonio", PostalCode: "78253" }] } } };
+    expect(parseBeazerCommunity(communityPage({ extraRows: [["18", { nearbyCommunities: [nearby] }]] }), COMMUNITY, NOW)).toMatchObject({ foreignPage: false, record: { name: "Fixture Meadows", street: "6614 Fixture Glen" } });
+    expect(parseBeazerCommunity(communityPage({ url: "https://beazer.com/san-antonio-TX/san-antonio/fixture-meadows" }), COMMUNITY, NOW)).toMatchObject({ foreignPage: true });
+    expect(parseBeazerCommunity(communityPage({ url: "http://www.beazer.com/san-antonio-TX/san-antonio/fixture-meadows" }), COMMUNITY, NOW)).toMatchObject({ foreignPage: true });
+    // A grid whose cards arrive as a reference to another row is still the grid.
+    expect(parseBeazerCommunity(communityPage({ grids: [["$7a" as unknown as never]], extraRows: [["7a", HOMES.map((home) => ({ ContentLink: { Expanded: homeRow(home) } }))]] }), COMMUNITY, NOW)!.homes).toHaveLength(3);
     expect(parseBeazerCommunity("<html><body>new layout</body></html>", COMMUNITY, NOW)).toBeNull();
     expect(beazerRecord(communityPage(), COMMUNITY)).toMatchObject({ street: "6614 Fixture Glen" });
-    expect(beazerListingEntries(listing(), "www.beazer.com")!.map((entry) => [entry.url, entry.record.name, entry.record.street, entry.record.city, entry.record.priceFrom, entry.record.geo])).toEqual([[COMMUNITY, "Fixture Meadows", null, "San Antonio", 358_990, { lat: 29.4997036, lng: -98.7811012 }], [`${HOST}/san-antonio-TX/san-antonio/fixture-creek`, "Fixture Creek", null, "San Antonio", null, { lat: 53.135945, lng: 8.941838 }]]);
+    expect(beazerListingEntries(listing(), "www.beazer.com")!.map((entry) => [entry.url, entry.record.name, entry.record.street, entry.record.city, entry.record.priceFrom, entry.record.geo])).toEqual([[COMMUNITY, "Fixture Meadows", null, "San Antonio", 358_990, { lat: 29.4997036, lng: -98.7811012 }]]);
     expect(beazerListingEntries("<html>", "www.beazer.com")).toBeNull();
     expect(beazerListingEntries("{}", "www.beazer.com")).toBeNull();
     expect(beazerListingUrl()).toContain("ancestorMainId=55228d07");
@@ -206,6 +234,16 @@ describe("Beazer reader: adapter", () => {
     expect((await loadOfficialDeals({ ...config, sourceUrl: "https://beazer.com/san-antonio-TX/san-antonio/fixture-meadows" }, { fetcher })).holdReasons).toEqual(["unsupported_official_host"]);
     const down = vi.fn(async () => new Response("busy", { status: 503, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: down })).holdReasons).toEqual(["community_fetch_failed"]);
+  });
+
+  it("holds the offer only when its disclaimer points at a row the payload lacks", async () => {
+    const dangling = { ...OFFERS[1]!, Disclaimer: [{ __typename: "ContentAreaItemModelSearch", ContentLink: { __typename: "ContentModelReferenceSearch", Expanded: { __typename: "DisclaimerBlock", Text: "$7f", Title: "Disclaimer" } } }] };
+    const result = await loadOfficialDeals(config, { fetcher: html(communityPage({ offers: [dangling] })), now: () => NOW });
+    expect(result.catalogOk).toBe(true);
+    expect(result.incentiveHoldReasons).toEqual(["expected_incentive_container_not_found"]);
+    expect(result.private.incentive).toBeNull();
+    expect(result.public.incentive).toBeNull();
+    expect(result.private.homes).toHaveLength(3);
   });
 
   it("holds a community with more homes for sale than the cap", async () => {

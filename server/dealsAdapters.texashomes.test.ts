@@ -132,6 +132,9 @@ describe("Texas Homes reader: quick move-in list", () => {
     // A row carrying another community's logo is not this community's; without a logo to check, rows are taken as the filter gives them.
     expect(parseTexasHomesListing(listPage([ROWS[0]!, { ...ROWS[1]!, logo: `${HOST}/sites/default/files/2024-05/fixture-grove-logo.png` }]), texasHomesHomesUrl(ID), NOW, "TX", "/sites/default/files/2021-07/fixture-acres-logo.png")).toMatchObject({ foreignHome: true, available: 1 });
     expect(parseTexasHomesListing(listPage([ROWS[0]!, { ...ROWS[1]!, logo: `${HOST}/sites/default/files/2024-05/fixture-grove-logo.png` }]), texasHomesHomesUrl(ID), NOW, "TX", null)).toMatchObject({ foreignHome: false, available: 2 });
+    // The same logo through a Drupal image style or a resized copy is the same logo.
+    expect(parseTexasHomesListing(listPage([{ ...ROWS[0]!, logo: `${HOST}/sites/default/files/styles/thumbnail/public/2021-07/fixture-acres-logo.png?itok=abc` }, { ...ROWS[1]!, logo: `${HOST}/sites/default/files/2021-07/fixture-acres-logo-300x200.png` }]), texasHomesHomesUrl(ID), NOW, "TX", "/sites/default/files/2021-07/fixture-acres-logo.png")).toMatchObject({ foreignHome: false, available: 2 });
+    expect(parseTexasHomesCommunity(communityPage({ logo: "/sites/default/files/styles/large/public/2021-07/fixture-acres-logo.png?itok=x" }), COMMUNITY)).toMatchObject({ logo: "/sites/default/files/2021-07/fixture-acres-logo.png" });
     expect(parseTexasHomesListing(listPage(ROWS, false, null), texasHomesHomesUrl(ID), NOW, "TX")).toMatchObject({ selectedNeighborhoodId: null });
     // A row with no availability element at all has no status (held), where a blank one is an undated quick move-in.
     expect(parseTexasHomesListing(listPage([{ ...ROWS[0]!, noDate: true }]), texasHomesHomesUrl(ID), NOW, "TX")!.homes[0]!.status).toBeNull();

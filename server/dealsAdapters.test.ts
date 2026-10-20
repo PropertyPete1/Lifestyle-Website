@@ -168,10 +168,12 @@ describe("deals adapters", () => {
     const withTerm = parsePromotionalRate("First year: 4.25% Rate / 6.051% APR; 5.25% for years 2-30 on a 30-year loan.");
     expect(withTerm.holdReasons).toEqual(["missing_loan_type", "missing_down_payment"]);
     // An adjustable-rate offer is held however it is spelled.
-    for (const wording of ["5/1 ARM", "5/1 Arm", "Adjustable Rate Mortgage", "Adjustable-Rate", "ADJUSTABLE RATE", "7/6 ARM", "the rate adjusts annually", "4.5% initial interest rate"]) {
+    for (const wording of ["5/1 ARM", "5/1 Arm", "Adjustable Rate Mortgage", "Adjustable-Rate", "ADJUSTABLE RATE", "7/6 ARM", "the rate adjusts annually", "4.5% initial interest rate", "rate fixed for 5 years then adjusts annually for years 6-30", "fixed for 7 years with a balloon payment", "4.5% for 5 years, then 6.5% for the remaining term"]) {
       expect(parsePromotionalRate(`4.5% (6.38% APR) FHA, 3.5% down, 30-year, ${wording}.`).holdReasons).toContain("adjustable_rate");
     }
     expect(parsePromotionalRate("4.5% (6.38% APR) FHA 30-year fixed, 3.5% down; arm yourself with savings.").holdReasons).not.toContain("adjustable_rate");
+    // "fixed for 5 years then adjusts" reads the fixed period as no plain term: the hold stands and the publishable flag is off.
+    expect(parsePromotionalRate("4.99% (6.62% APR) FHA financing, 3.5% down payment, rate fixed for 5 years then adjusts annually for years 6-30 based on the index plus margin.").publishable).toBe(false);
     // Dates are only required when the source actually names a contract or closing deadline.
   });
 

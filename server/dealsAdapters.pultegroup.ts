@@ -76,13 +76,33 @@ export function pulteCommunityId(pathname: string): number | null {
 
 const MONTHS: Record<string, string> = { jan: "January", feb: "February", mar: "March", apr: "April", may: "May", jun: "June", jul: "July", aug: "August", sep: "September", sept: "September", oct: "October", nov: "November", dec: "December" };
 
-/** "Oct 2026" -> "October 2026"; "Available Now" -> null (ready now). */
-export function pulteMoveIn(dateAvailable: string | null): { readyNow: boolean; moveInDate: string | null } {
-  if (!dateAvailable) return { readyNow: false, moveInDate: null };
-  if (/available\s+now|move[- ]?in\s+ready|ready\s+now/i.test(dateAvailable)) return { readyNow: true, moveInDate: null };
+/**
+ * "Oct 2026" -> "October 2026"; "Available Now" -> ready now; an empty value
+ * -> a home for sale with no date. Any other wording ("Under Contract",
+ * "Coming Soon", "TBD") is `unknown`: the home gets no status, so the sync
+ * holds the run instead of publishing it as available.
+ */
+export function pulteMoveIn(dateAvailable: string | null): { readyNow: boolean; moveInDate: string | null; unknown: boolean } {
+  if (!dateAvailable) return { readyNow: false, moveInDate: null, unknown: false };
+  if (/^(?:available\s+now|move[- ]?in\s+ready|ready\s+now|available)$/i.test(dateAvailable.trim())) return { readyNow: true, moveInDate: null, unknown: false };
   const month = /^([A-Za-z]{3,9})\.?\s+(\d{4})$/.exec(dateAvailable.trim());
-  if (month) { const name = MONTHS[month[1]!.toLowerCase().slice(0, 4)] ?? MONTHS[month[1]!.toLowerCase().slice(0, 3)]; if (name) return { readyNow: false, moveInDate: `${name} ${month[2]}` }; }
-  return { readyNow: false, moveInDate: dateAvailable.trim() };
+  if (month) { const name = MONTHS[month[1]!.toLowerCase().slice(0, 4)] ?? MONTHS[month[1]!.toLowerCase().slice(0, 3)]; if (name) return { readyNow: false, moveInDate: `${name} ${month[2]}`, unknown: false }; }
+  return { readyNow: false, moveInDate: null, unknown: true };
+}
+
+/** A sale date the platform really set: a valid past date from this century. .NET's default "0001-01-01" and a future date are not sales. */
+export function pulteSoldDate(value: unknown, now: Date = new Date()): boolean {
+  const text = str(value);
+  if (!text) return false;
+  const time = Date.parse(text);
+  return Number.isFinite(time) && time >= Date.UTC(2000, 0, 1) && time <= now.getTime() + 24 * 3600_000;
+}
+
+/** A flag the platform writes as a boolean or as the strings "true"/"false". */
+export function flag(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value.trim().toLowerCase() === "true" ? true : value.trim().toLowerCase() === "false" ? false : null;
+  return null;
 }
 
 function gallery(images: unknown, representative: boolean): PrivateGalleryImage[] {
@@ -107,7 +127,7 @@ function gallery(images: unknown, representative: boolean): PrivateGalleryImage[
 export type PulteHome = PrivatePlanOrHome & { kind: "home" | "plan"; communityId: number | null };
 
 /** One record of /api/plan/qmiplans. Null when it lacks the fields a home needs. */
-export function parsePulteQmi(entry: Record<string, unknown>, host: string): PulteHome | null {
+export function parsePulteQmi(entry: Record<string, unknown>, host: string, now: Date = new Date()): PulteHome | null {
   const pageUrl = str(entry.inventoryPageURL);
   const address = entry.address && typeof entry.address === "object" ? entry.address as Record<string, unknown> : null;
   const street = address ? str(address.street1) : null;
@@ -119,7 +139,7 @@ export function parsePulteQmi(entry: Record<string, unknown>, host: string): Pul
   const previous = listPrice && price && listPrice > price ? listPrice : null;
   const city = address ? str(address.city) : null;
   const zip = address ? str(address.zipCode) : null;
-  const sold = str(entry.soldDate) !== null;
+  const sold = pulteSoldDate(entry.soldDate, now);
   const moveIn = pulteMoveIn(str(entry.dateAvailable));
   const lot = str(entry.lotBlock);
   return {
@@ -129,7 +149,7 @@ export function parsePulteQmi(entry: Record<string, unknown>, host: string): Pul
     privateName: street,
     privateAddress: [street, [city, zip ? `TX ${zip}` : "TX"].filter(Boolean).join(", ")].filter(Boolean).join(", "),
     privatePlanName: str(entry.planName),
-    status: sold ? "Sold" : moveIn.readyNow ? "Quick Move-In (Move-In Ready)" : moveIn.moveInDate ? `Quick Move-In (${moveIn.moveInDate})` : "Quick Move-In",
+    status: sold ? "Sold" : moveIn.unknown ? null : moveIn.readyNow ? "Quick Move-In (Move-In Ready)" : moveIn.moveInDate ? `Quick Move-In (${moveIn.moveInDate})` : "Quick Move-In",
     price,
     previousPrice: previous,
     priceDrop: previous ? (discount && discount > 0 ? discount : previous - price!) : null,
@@ -192,6 +212,7 @@ function cleanDisclaimer(attr: string): string {
   return text
     // The licensing line (NMLS lookup links) closes the disclaimer; the copyright sentence and the date tag say nothing about the offer.
     .replace(/\bLicensing information:[\s\S]*$/i, " ")
+    .replace(/\(?\bNMLS\s*(?:ID|#|No\.?)?\s*#?\s*\d+\)?/gi, " ")
     .replace(/(?:&copy;|©|\(c\))\s*\d{4}.{0,120}?All rights reserved\.?/gi, " ")
     .replace(/(?:&copy;|©|\(c\))\s*\d{4}[^.]*\./gi, " ")
     .replace(/\[[A-Za-z]+\s+\d{4}\]/g, " ")
@@ -264,26 +285,37 @@ export class PulteGroupAdapter implements DealAdapter {
     if (qmis.length > PULTEGROUP_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     privateSnapshot.pages.push(sourcePage("inventory", qmiUrl, null), sourcePage("inventory", plansUrl, null));
     for (const entry of qmis) {
-      const home = parsePulteQmi(entry, this.host);
+      const home = parsePulteQmi(entry, this.host, now());
       // A record for another community, or one without the fields a home needs, means the endpoint changed shape.
-      if (!home || (home.communityId !== null && home.communityId !== id)) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+      if (!home || home.communityId !== id) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
       const { kind: _kind, communityId: _communityId, ...item } = home;
       privateSnapshot.homes.push(item);
     }
     for (const entry of plans) {
-      if (entry.isSoldOut === true || entry.isFutureRelease === true || entry.isPlanActive === false) continue;
+      if (flag(entry.isSoldOut) === true || flag(entry.isFutureRelease) === true || flag(entry.isPlanActive) === false) continue;
       const plan = parsePultePlan(entry, this.host);
-      if (!plan || (plan.communityId !== null && plan.communityId !== id)) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+      if (!plan || plan.communityId !== id) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
       const { kind: _kind, communityId: _communityId, ...item } = plan;
       privateSnapshot.plans.push(item);
     }
     // The brand's market offers sit on every home and plan page; one page an hour per brand is read for them.
-    const offerPage = privateSnapshot.homes[0]?.sourceUrl ?? privateSnapshot.plans[0]?.sourceUrl ?? null;
+    // A sold home's page may be gone, so homes still for sale come first, then plans; a page that cannot be read gives way to the next.
+    const candidates = [...privateSnapshot.homes.filter((home) => home.status !== "Sold"), ...privateSnapshot.plans, ...privateSnapshot.homes.filter((home) => home.status === "Sold")].map((item) => item.sourceUrl).slice(0, 3);
     const incentiveHolds: DealHoldReason[] = [];
-    if (offerPage) {
+    let offerHold: DealHoldReason | null = null;
+    for (const offerPage of candidates) {
       const offer = await marketOffer(this.host, offerPage, fetcher, now().getTime(), privateSnapshot);
-      if ("hold" in offer) incentiveHolds.push(offer.hold);
-      else if (offer.offer) privateSnapshot.incentive = { sourceUrl: offer.offer.sourceUrl, text: offer.offer.text, facts: parsePromotionalRate(offer.offer.text) };
+      // A page that was read but carries no carousel says more than one that could not be read; a redirect off the host ends the search.
+      if ("hold" in offer) { if (offerHold !== "expected_incentive_container_not_found") offerHold = offer.hold; if (offer.hold === "unsupported_official_host") break; continue; }
+      offerHold = null;
+      if (offer.offer) privateSnapshot.incentive = { sourceUrl: offer.offer.sourceUrl, text: offer.offer.text, facts: parsePromotionalRate(offer.offer.text) };
+      break;
+    }
+    if (offerHold) incentiveHolds.push(offerHold);
+    // A community with nothing listed has no page of its own to read; the brand's offer read within the hour still applies to it.
+    if (!candidates.length) {
+      const cached = offersCache.get(this.host);
+      if (cached && now().getTime() - cached.fetchedAt < CACHE_MS && cached.offer) privateSnapshot.incentive = { sourceUrl: cached.offer.sourceUrl, text: cached.offer.text, facts: parsePromotionalRate(cached.offer.text) };
     }
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));
   }

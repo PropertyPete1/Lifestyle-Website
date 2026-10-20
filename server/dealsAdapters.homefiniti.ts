@@ -172,6 +172,9 @@ export class HomefinitiAdapter implements DealAdapter {
     if (records.homes.length > HOMEFINITI_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     const root = parseHtmlElements(page.text);
     if (!root) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // More home cards on the page than home records means the records changed shape, not that homes sold.
+    const cardCount = descendants(root).filter((element) => STATUS_CLASSES.some((token) => elementClass(element, token)) && elementText(element, page.text).length <= 40).length;
+    if (cardCount > records.homes.length) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     privateSnapshot.communityFacts = parseCommunityFacts(page.text);
     for (const record of records.homes) {
       const { kind: _kind, ...home } = record;

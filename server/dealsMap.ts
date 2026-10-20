@@ -204,8 +204,10 @@ export function mapCommunityIdFromPath(raw: string | undefined): number | null {
  * public JSON carries no row id (every other public handle is opaque too). The
  * key is the server's cookie secret; without one the handle is still not the id.
  */
+/** Without a cookie secret (a misconfigured deployment) the handles are keyed per process: still not computable from a row id, just not stable across restarts. */
+const FALLBACK_MAP_KEY = crypto.randomBytes(32).toString("hex");
 export function publicMapHandle(communityId: number): string {
-  return crypto.createHmac("sha256", process.env.JWT_SECRET || "deals-map").update(`deals-map:${communityId}`).digest("base64url").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 16);
+  return crypto.createHmac("sha256", process.env.JWT_SECRET || FALLBACK_MAP_KEY).update(`deals-map:${communityId}`).digest("base64url").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 16);
 }
 
 export function publicMapHandleFromPath(raw: string | undefined): string | null {

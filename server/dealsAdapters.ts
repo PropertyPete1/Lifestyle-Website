@@ -4,12 +4,13 @@ import { PerryHomesAdapter } from "./dealsAdapters.perry";
 import { DrHortonAdapter } from "./dealsAdapters.drhorton";
 import { PulteGroupAdapter } from "./dealsAdapters.pultegroup";
 import { HomefinitiAdapter } from "./dealsAdapters.homefiniti";
+import { DavidsonAdapter } from "./dealsAdapters.davidson";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -76,7 +77,9 @@ export type DealHoldReason =
   | "missing_follow_on_period"
   | "missing_down_payment"
   | "missing_contract_deadline"
-  | "missing_closing_deadline";
+  | "missing_closing_deadline"
+  /** The offer is an adjustable-rate loan (an ARM): the headline rate is a starting rate, so the admin reads the terms before it shows. */
+  | "adjustable_rate";
 
 export interface DeadlineFact {
   /** What the official page said; it is not guessed or expanded. */
@@ -221,8 +224,9 @@ export const DRHORTON_HOST = "www.drhorton.com";
 export const PULTEGROUP_HOSTS = { Pulte: "www.pulte.com", Centex: "www.centex.com", "Del Webb": "www.delwebb.com" } as const;
 /** Builders on the Homefiniti site platform (schema.org home records on the community page); each has its own host. */
 export const HOMEFINITI_HOSTS = { "First America Homes": "www.firstamericahomes.com", "Coventry Homes": "www.coventryhomes.com" } as const;
+export const DAVIDSON_HOST = "www.davidsonhomes.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -571,6 +575,8 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   }
   if (namesContractDeadline && !contractDeadline?.isoDate) holdReasons.push("missing_contract_deadline");
   if (namesClosingDeadline && !closingDeadline?.isoDate) holdReasons.push("missing_closing_deadline");
+  // An adjustable-rate offer ("5/1 ARM", "adjustable rate mortgage") is never published as a plain rate without a look.
+  if (rateKind !== "none" && /\bARM\b|\badjustable[- ]rate|\b\d\/\d\s+ARM\b/.test(text)) holdReasons.push("adjustable_rate");
 
   return {
     normalizedText: normalizedText(text),
@@ -1032,6 +1038,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "M/I Homes") { config.builder.push("M/I Homes", "M/I"); config.lender.push("M/I Financial, LLC", "M/I Financial"); }
   if (builder === "Chesmar") { config.builder.push("Chesmar Homes", "Chesmar"); config.lender.push("HomeAmerican Mortgage Corporation", "HomeAmerican Mortgage", "HomeAmerican", "HMC"); }
   if (builder === "Perry Homes") { config.builder.push("Perry Homes", "Perry"); config.lender.push("Parkstone Mortgage", "Parkstone", "Crestmark Mortgage", "Crestmark"); }
+  if (builder === "Davidson Homes") { config.builder.push("Davidson Homes", "Davidson"); config.lender.push("NorthStar Mortgage Advisors", "NorthStar Mortgage", "NorthStar"); }
   if (builder === "First America Homes") { config.builder.push("First America Homes", "First America"); }
   if (builder === "Coventry Homes") { config.builder.push("Coventry Homes", "Coventry", "DFH Coventry", "Dream Finders Homes", "Dream Finders"); }
   if (builder === "Pulte" || builder === "Centex" || builder === "Del Webb") { config.builder.push("PulteGroup", "Pulte Homes", "Pulte", "Centex Homes", "Centex", "Del Webb"); config.lender.push("Pulte Mortgage LLC", "Pulte Mortgage"); }
@@ -1069,6 +1076,8 @@ export function toPublicSafeText(
   categories.other.push(...extraPrivateTerms.filter((term) => !known.has(term)));
   const scrubbed = scrubPrivateNames(htmlToText(input), categories, { planField });
   if (!scrubbed || /\b(?:https?:\/\/|www\.)\S+/i.test(scrubbed)) return null;
+  // A lender's NMLS number names the lender as surely as its name does.
+  if (/\bNMLS\b[\s#:.]*(?:ID|No)?[\s#:.]*\d{3,}/i.test(scrubbed)) return null;
   // Residue is judged per category: a bare plan word such as "Magnolia trees"
   // outside a plan field is verbatim text, not a private name.
   return remainingPrivateTerm(scrubbed, categories, planField) ? null : scrubbed;
@@ -1666,6 +1675,7 @@ let perryAdapter: DealAdapter | null = null;
 let drHortonAdapter: DealAdapter | null = null;
 const pulteGroupAdapters: Partial<Record<keyof typeof PULTEGROUP_HOSTS, DealAdapter>> = {};
 const homefinitiAdapters: Partial<Record<keyof typeof HOMEFINITI_HOSTS, DealAdapter>> = {};
+let davidsonAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
@@ -1677,6 +1687,7 @@ export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   get "Del Webb"() { return (pulteGroupAdapters["Del Webb"] ??= new PulteGroupAdapter("Del Webb")); },
   get "First America Homes"() { return (homefinitiAdapters["First America Homes"] ??= new HomefinitiAdapter("First America Homes")); },
   get "Coventry Homes"() { return (homefinitiAdapters["Coventry Homes"] ??= new HomefinitiAdapter("Coventry Homes")); },
+  get "Davidson Homes"() { return (davidsonAdapter ??= new DavidsonAdapter()); },
   Manual: new ManualAdapter(),
 };
 

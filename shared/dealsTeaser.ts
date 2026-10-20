@@ -5,12 +5,23 @@
  * tested without a database.
  */
 const MONTH = "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\.?";
-const DATE = `(?:\\d{1,2}\\/\\d{1,2}(?:\\/\\d{2,4})?|${MONTH}\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?|\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH}(?:,?\\s+\\d{4})?)`;
+/**
+ * Date forms a builder writes: 11/30, 10/31/26, 11-30-2026, 11.30.2026,
+ * 2026-11-30, October 31, Oct. 31st, 2026, 31 October 2026, the 30th of
+ * November, May 2026, end of October 2026. A bare day/month slash needs a year
+ * (so "2/1 buydown" and "1/2 acre" stay), and a month-year never leaves its
+ * year behind.
+ */
+const DAY = "\\d{1,2}(?:st|nd|rd|th)?(?!\\d)";
+const YEAR = "(?:20\\d{2}|\\d{2}(?!\\d))";
+const DATE = `(?:\\d{1,2}[\\/.-]\\d{1,2}[\\/.-]${YEAR}|20\\d{2}-\\d{2}-\\d{2}(?!\\d)|${MONTH}\\s+${DAY}(?:,?\\s+20\\d{2})?|(?:the\\s+)?${DAY}\\s+(?:of\\s+)?${MONTH}(?:,?\\s+20\\d{2})?|(?:the\\s+)?(?:end|start|beginning|middle)\\s+of\\s+${MONTH}(?:\\s+20\\d{2})?|${MONTH}\\s+20\\d{2}(?!\\d))`;
+/** A day/month without a year, only where a lead word or connector makes it a date ("closing by 11/30"). */
+const SHORT_DATE = `(?:\\d{1,2}\\/\\d{1,2}(?![\\d\\/])(?!\\s*-?\\s*(?:acre|buydown|ARM\\b|option|lot)))`;
 /** "closing by 11/30", "through October 31", "between 10/12/2026 and 11/8/2026", "by 10/31/26" and the like. */
 const LEAD = "(?:(?:must\\s+)?clos(?:e|ing)(?:\\s+on)?|contracts?(?:\\s+(?:written|signed|accepted))?|valid|(?:offer\\s+)?(?:ends?|expires?)|accepted(?:\\s+by\\s+builder)?|available|good)";
-const CONNECTOR = "(?:by|through|thru|until|till|before|on\\s+or\\s+before|no\\s+later\\s+than|between|from|starting|beginning|on)";
-const DATE_CLAUSE = new RegExp(`\\s*(?:,\\s*)?(?:${LEAD}\\s+(?:${CONNECTOR}\\s+)?|${CONNECTOR}\\s+)${DATE}(?:\\s*(?:and|to|through|-|–)\\s*${DATE})?`, "gi");
-const BARE_DATE = new RegExp(`\\s*\\(?${DATE}\\)?`, "gi");
+const CONNECTOR = "(?:by|through|thru|until|till|before|on\\s+or\\s+before|no\\s+later\\s+than|between|from|starting|beginning|on|in)";
+const DATE_CLAUSE = new RegExp(`\\s*(?:,\\s*)?(?:${LEAD}\\s+(?:${CONNECTOR}\\s+)?|${CONNECTOR}\\s+)(?:${DATE}|${SHORT_DATE})(?:\\s*(?:and|to|through|-|–)\\s*(?:${DATE}|${SHORT_DATE}))?`, "gi");
+const BARE_DATE = new RegExp(`\\s*\\(?(?<![\\d.$])${DATE}\\)?`, "gi");
 export const TEASER_MAX = 220;
 
 export function incentiveTeaser(publicText: string): string {

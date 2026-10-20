@@ -152,6 +152,11 @@ describe("Homefiniti reader: a community", () => {
     expect((await loadOfficialDeals(config, { fetcher: noBusiness })).holdReasons).toEqual(["expected_community_container_not_found"]);
     const noCards = vi.fn(async () => new Response(communityPage({ cards: false }), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: noCards })).holdReasons).toEqual(["unlabelled_home_status"]);
+    // The home records gone but the cards still there: a changed record shape, never three sold homes.
+    const noRecords = vi.fn(async () => new Response(communityPage().replace(/"@type":\["Product","SingleFamilyResidence"\]/g, "\"@type\":[\"Thing\"]"), { status: 200, headers: { "content-type": "text/html" } }));
+    const held = await loadOfficialDeals(config, { fetcher: noRecords });
+    expect(held.holdReasons).toEqual(["expected_community_container_not_found"]);
+    expect(held.public.homes).toEqual([]);
     expect((await loadOfficialDeals({ ...config, sourceUrl: "https://firstamericahomes.com/new-homes/tx/san-antonio-metro/san-antonio/fixture-meadows/" }, { fetcher })).holdReasons).toEqual(["unsupported_official_host"]);
     expect((await loadOfficialDeals({ ...config, sourceUrl: "https://www.coventryhomes.com/new-homes/tx/cibolo/x/" }, { fetcher })).holdReasons).toEqual(["unsupported_official_host"]);
     const down = vi.fn(async () => new Response("down", { status: 503, headers: { "content-type": "text/html" } }));

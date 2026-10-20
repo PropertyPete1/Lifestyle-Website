@@ -210,6 +210,32 @@ describe("D.R. Horton reader: a community", () => {
     expect((await loadOfficialDeals(config, { fetcher: challenge })).holdReasons).toEqual(["community_fetch_failed"]);
   });
 
+  it("never mistakes a card the reader cannot read for a sold home: fewer cards than the block says, a restyled card, or a card without a street all hold the run", async () => {
+    // The card class renamed: the block still says 3 homes, the reader finds none.
+    const restyled = vi.fn(async (input: string) => input === COMMUNITY ? new Response(communityPage().replaceAll("available-home-card", "listing-card"), { status: 200, headers: { "content-type": "text/html" } }) : fetcher(input));
+    const held = await loadOfficialDeals(config, { fetcher: restyled });
+    expect(held.holdReasons).toEqual(["expected_community_container_not_found"]);
+    expect(held.public.homes).toEqual([]);
+    // A card without its street: the card stays, unnamed and without a status, so the sync holds (unlabelled_home_status) instead of sweeping.
+    const noStreet = communityPage().replace("<h3>5934 Basalt Fixture</h3>", "<div>5934 Basalt Fixture</div>");
+    const cards = parseDrhCommunityCards(noStreet, COMMUNITY)!.filter((card) => card.kind === "home");
+    expect(cards).toHaveLength(3);
+    expect(cards[1]).toMatchObject({ status: null, privateName: null, price: null, detailPath: null });
+    const unlabelled = vi.fn(async (input: string) => input === COMMUNITY ? new Response(noStreet, { status: 200, headers: { "content-type": "text/html" } }) : fetcher(input));
+    const result = await loadOfficialDeals(config, { fetcher: unlabelled });
+    expect(result.private.homes.some((home) => home.status === null)).toBe(true);
+    // Counts are read whatever the quoting or the element.
+    expect(drhListingCounts(`<section id='relatedmovein' data-currentindex='4' data-totalitems='4'></section>`)).toEqual({ homes: { rendered: 4, total: 4 }, plans: null });
+    // No homes block at all is not a community page.
+    const noBlock = vi.fn(async (input: string) => input === COMMUNITY ? new Response(communityPage().replace('id="relatedmovein"', 'id="somethingelse"'), { status: 200, headers: { "content-type": "text/html" } }) : fetcher(input));
+    expect((await loadOfficialDeals(config, { fetcher: noBlock })).holdReasons).toEqual(["expected_community_container_not_found"]);
+  });
+
+  it("reads the plan name from this home's own stats line, not from a similar-homes card elsewhere on the page", () => {
+    const page = site[`${COMMUNITY}/qmis/5919-granite-fixture`]!.replace("<main>", "<main><div class=\"related\"><p>| The Alamo floor plan</p></div>");
+    expect(parseDrhHomeDetail(page, `${COMMUNITY}/qmis/5919-granite-fixture`)).toMatchObject({ planName: "The Caroline" });
+  });
+
   it("is an adapter the registry knows", () => {
     expect(new DrHortonAdapter().builder).toBe("D.R. Horton");
     expect(DEAL_ADAPTERS["D.R. Horton"].builder).toBe("D.R. Horton");

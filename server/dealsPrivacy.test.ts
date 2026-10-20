@@ -24,6 +24,10 @@ describe("Builder Deals privacy boundary", () => {
     const scrubbed = scrubPrivateNames("Sienna Lakes by Chesmar", privateTerms);
     expect(hasPrivateTerm(scrubbed, privateTerms)).toBe(false);
     expect(hasPrivateTerm("Visit 7711 Hanging Basket", privateTerms)).toBe(true);
+    // A builder's name before "homes" or "community" drops out; elsewhere it reads "the builder".
+    const builder = { builder: ["Centex Homes", "Centex"], lender: ["Pulte Mortgage"], community: [], plan: [], street: [], other: [] };
+    expect(scrubPrivateNames("Save up to $43,000 on select Centex homes, built by Centex with financing through Pulte Mortgage.", builder)).toBe("Save up to $43,000 on select homes, built by the builder with financing through the builder's lender.");
+    expect(scrubPrivateNames("When you purchase a new Centex® home, you receive $2,000.", builder)).toBe("When you purchase a new home, you receive $2,000.");
   });
 
   it("keeps the only shareable Deals metadata generic and landing-only", () => {

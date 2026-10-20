@@ -47,10 +47,10 @@ function cardStats(text: string): { bedrooms: number | null; bathrooms: number |
 /** The listing blocks' own counts: the page renders every item when currentindex equals totalitems; otherwise more sit behind an API. */
 export function drhListingCounts(html: string): { homes: { rendered: number; total: number } | null; plans: { rendered: number; total: number } | null } {
   const counts = (id: string) => {
-    const match = new RegExp(`<div\\b[^>]*\\bid="${id}"[^>]*>`, "i").exec(html);
+    const match = new RegExp(`<[a-z][a-z0-9]*\\b[^>]*\\bid=(["']?)${id}\\1[^>]*>`, "i").exec(html);
     if (!match) return null;
-    const rendered = /data-currentindex="(\d+)"/.exec(match[0]);
-    const total = /data-totalitems="(\d+)"/.exec(match[0]);
+    const rendered = /data-currentindex=["']?(\d+)/.exec(match[0]);
+    const total = /data-totalitems=["']?(\d+)/.exec(match[0]);
     return rendered && total ? { rendered: Number(rendered[1]), total: Number(total[1]) } : null;
   };
   return { homes: counts("relatedmovein"), plans: counts("floorplans") };
@@ -101,7 +101,8 @@ export function parseDrhCommunityCards(html: string, communityUrl: string): DrhC
     const href = anchor.attributes.href ? decodeHtmlEntities(anchor.attributes.href) : null;
     const detail = href ? asUrl(new URL(href, community).toString()) : null;
     const streetText = street ? normalize(elementText(street, html)) : "";
-    if (!streetText) continue;
+    // A card the reader cannot read is still a card: it stays, unnamed and without a status, so the sync holds the run instead of marking homes sold.
+    if (!streetText) { cards.push({ kind: "home", detailPath: null, sourceUrl: `${community.origin}${community.pathname.replace(/\/+$/, "")}/qmis/unreadable-${cards.length}`, privateName: null, privateAddress: null, privatePlanName: null, status: null, price: null, readyNow: false, ...cardStats(text), gallery: [] }); continue; }
     const image = /url\(\s*['"]?([^'")]+)['"]?\s*\)/.exec(descendants(anchor).find((element) => elementClass(element, "card-image"))?.attributes.style ?? "");
     cards.push({
       kind: "home",
@@ -178,7 +179,9 @@ export function parseDrhHomeDetail(html: string, pageUrl: string): { gallery: Pr
     images.push({ sourceUrl: full.toString(), caption: null, width: null, height: null, srcSet: null });
   }
   const text = htmlToText(html);
-  const plan = /\|\s*((?:The\s+)?[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){0,3})\s+floor\s+plan\b/.exec(text);
+  // The stats line of this home: "1,489 Sq. Ft. | Lot 20 | The Caroline floor plan"; a similar-homes card elsewhere on the page names another plan.
+  const statsLine = /[\d,]{3,6}\s*Sq\.?\s*Ft\.?\s*\|\s*Lot\s+[A-Za-z0-9-]+\s*\|\s*((?:The\s+)?[A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){0,3})\s+floor\s+plan\b/.exec(text);
+  const plan = statsLine ?? null;
   const priceBlock = /\$\s*[\d,]{6,}(?:\s*was\s+\$\s*[\d,]{6,})?/.exec(text);
   const was = priceBlock ? /was\s+\$\s*([\d,]{6,})/i.exec(priceBlock[0]) : null;
   return {
@@ -208,6 +211,10 @@ export class DrHortonAdapter implements DealAdapter {
     // The page says how many items each block holds; anything not rendered sits behind an API this reader does not call.
     const counts = drhListingCounts(page.text);
     if ((counts.homes && counts.homes.rendered < counts.homes.total) || (counts.plans && counts.plans.rendered < counts.plans.total)) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+    // The block says how many homes it holds; fewer cards parsed than that means the card markup changed, not that homes sold.
+    const parsedHomes = cards.filter((card) => card.kind === "home").length;
+    if (counts.homes && parsedHomes < counts.homes.total) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    if (!counts.homes) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     privateSnapshot.communityFacts = parseCommunityFacts(page.text);
     const homes = cards.filter((card) => card.kind === "home");
     const forSale = homes.filter((card) => card.detailPath);

@@ -83,6 +83,7 @@ export const CATALOG_HOLD_REASON_HELP: Partial<Record<DealHoldReason, string>> =
   unlabelled_home_status: "A home card's status could not be read, so nothing was published or marked sold this run.",
   refresh_failed: "The reader hit an unexpected error on this community's pages; nothing was published or marked sold.",
   private_text_remaining: "A private name survived scrubbing; add it to the names to hide or exclude a false positive.",
+  adjustable_rate: "The offer is an adjustable-rate loan (ARM): the headline rate is a starting rate. Read the terms, then accept or edit the wording.",
 };
 
 /** One line per stored reason (the sync joins several with ", "); unknown reasons fall back to the raw code. */

@@ -2,13 +2,15 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { dealCommunities, dealJobRuns } from "../drizzle/schema";
 import { DOWNTOWN_SAN_ANTONIO, milesBetween } from "../shared/dealsArea";
+import { normalizedDealSourceKey } from "../shared/deals";
 import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { DAVIDSON_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
+import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -38,6 +40,8 @@ export type DiscoveryReader = {
   index: { kind: "sitemap"; url: string } | { kind: "listing"; url: string; accept: string; entries: (body: string, host: string) => ListingEntry[] | null };
   /** Path of a community page in the builder's San Antonio market. */
   communityPath: RegExp;
+  /** Reads the community's record from its page when the site has no schema.org record (default: communityRecordFromHtml). */
+  record?: (html: string, pageUrl: string) => CommunityRecord | null;
 };
 
 export type ListingEntry = { url: string; record: CommunityRecord | null };
@@ -59,10 +63,11 @@ export function drhListingEntries(body: string, host: string): ListingEntry[] | 
  * no page is read (the pages run past 8 MB). Entries of the other brands point
  * at their own hosts and are left to those readers.
  */
-export function pulteListingEntries(body: string, host: string): ListingEntry[] | null {
+export function pulteListingEntries(body: string, host: string, brand?: string): ListingEntry[] | null {
   const listings = parsePulteListing(body);
   if (!listings) return null;
-  return listings.filter((entry) => entry.isCommunityActive).map((entry) => ({
+  // Only this brand's entries: the same community is listed once per brand, each on its own host, and a relative page URL is no proof of brand.
+  return listings.filter((entry) => entry.isCommunityActive && (!brand || entry.brandName.toLowerCase() === brand.toLowerCase())).map((entry) => ({
     url: new URL(entry.pageURL, `https://${host}/`).toString(),
     record: {
       name: entry.name.trim(),
@@ -71,6 +76,7 @@ export function pulteListingEntries(body: string, host: string): ListingEntry[] 
       zip: /^\d{5}/.exec(entry.address?.zipCode ?? "")?.[0] ?? null,
       phone: entry.salesPhoneNumber?.replace(/[^\d+]/g, "") || null,
       priceFrom: entry.startingFromPrice && entry.startingFromPrice >= 50_000 ? entry.startingFromPrice : null,
+      // A (0, 0) coordinate is a blank, not a place; without coordinates the area check cannot pass, so the entry is left out below.
       geo: entry.latitude !== null && entry.longitude !== null && (entry.latitude !== 0 || entry.longitude !== 0) ? { lat: entry.latitude, lng: entry.longitude } : null,
     },
   }));
@@ -94,8 +100,15 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     index: { kind: "listing", url: "https://www.coventryhomes.com/new-homes/tx/san-antonio/", accept: "text/html,application/xhtml+xml", entries: (body, host) => homefinitiMarketLinks(body, host).map((url) => ({ url, record: null })) },
     communityPath: /^\/new-homes\/tx\/[a-z0-9-]+\/(?!available-homes\/|floorplans\/|build-on-your-lot)[a-z0-9-]+\/?$/i,
   },
+  {
+    // Davidson's market page lists the area's communities in its Next.js data; the community page (no schema.org record) gives the sales address.
+    builder: "Davidson Homes", host: DAVIDSON_HOST,
+    index: { kind: "listing", url: `https://${DAVIDSON_HOST}/states/texas/san-antonio-market-area/`, accept: "text/html,application/xhtml+xml", entries: (body, host) => davidsonMarketLinks(body)?.map((uri) => ({ url: new URL(uri, `https://${host}/`).toString(), record: null })) ?? null },
+    communityPath: /^\/states\/texas\/san-antonio-market-area\/(?!counties\/|school-districts\/|promotions\/|zip-codes\/)[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
+    record: davidsonRecord,
+  },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({
-    builder: brand, host: PULTEGROUP_HOSTS[brand], index: { kind: "listing", url: pulteListingUrl(PULTEGROUP_HOSTS[brand], brand), accept: "application/json", entries: pulteListingEntries },
+    builder: brand, host: PULTEGROUP_HOSTS[brand], index: { kind: "listing", url: pulteListingUrl(PULTEGROUP_HOSTS[brand], brand), accept: "application/json", entries: (body, host) => pulteListingEntries(body, host, brand) },
     communityPath: /^\/homes\/texas\/san-antonio\/[a-z0-9-]+\/[a-z0-9-]+-\d{4,8}\/?$/i,
   })),
 ];
@@ -131,6 +144,8 @@ export async function officialSitemapUrls(index: string, host: string, fetcher: 
 
 type JsonObject = Record<string, unknown>;
 const BUSINESS_TYPES = /^(?:LocalBusiness|HomeAndConstructionBusiness|GeneralContractor|RealEstateAgent|Place|Residence|ApartmentComplex|SingleFamilyResidence|Accommodation)$/;
+/** A business record is the community itself; a place or residence record may be a featured home. */
+const ORGANIZATION_LIKE = /^(?:LocalBusiness|HomeAndConstructionBusiness|GeneralContractor|RealEstateAgent)$/;
 
 function jsonLdObjects(html: string): JsonObject[] {
   const objects: JsonObject[] = [];
@@ -172,10 +187,11 @@ export type CommunityRecord = { name: string; street: string | null; city: strin
  * distance from downtown here; they are never stored.
  */
 export function communityRecordFromHtml(html: string): CommunityRecord | null {
-  const candidates: CommunityRecord[] = [];
+  const candidates: Array<CommunityRecord & { business: boolean }> = [];
   for (const object of jsonLdObjects(html)) {
     const type = Array.isArray(object["@type"]) ? (object["@type"] as unknown[]).map(String) : [String(object["@type"] ?? "")];
     if (!type.some((value) => BUSINESS_TYPES.test(value)) || type.includes("Organization")) continue;
+    const business = type.some((value) => ORGANIZATION_LIKE.test(value));
     const rawAddress = (Array.isArray(object.address) ? object.address[0] : object.address) as JsonObject | undefined;
     const name = text(object.name);
     if (!rawAddress || typeof rawAddress !== "object" || !name) continue;
@@ -189,6 +205,7 @@ export function communityRecordFromHtml(html: string): CommunityRecord | null {
     const lng = Number(geoObject?.longitude ?? object.longitude);
     const phone = text(object.telephone).replace(/[^\d+]/g, "") || null;
     candidates.push({
+      business,
       name,
       street: text(address.streetaddress) || null,
       city: cityCase(text(address.addresslocality)) || null,
@@ -201,7 +218,9 @@ export function communityRecordFromHtml(html: string): CommunityRecord | null {
   if (!candidates.length) return null;
   // A "Place" record named after the page title ("Houses For Sale in … | Blue Ridge Ranch | D.R. Horton") is the page, not the community:
   // the record with a plain name wins, and takes coordinates, phone and price from the others when it has none.
-  const named = candidates.find((candidate) => !/\s\|\s/.test(candidate.name)) ?? candidates[0]!;
+  // A business record (the community) wins over a place or residence record (a featured home); among those, a plain name over a page title.
+  const plain = (candidate: CommunityRecord) => !/\s\|\s/.test(candidate.name);
+  const { business: _business, ...named } = candidates.find((candidate) => candidate.business && plain(candidate)) ?? candidates.find((candidate) => candidate.business) ?? candidates.find(plain) ?? candidates[0]!;
   return {
     ...named,
     geo: named.geo ?? candidates.find((candidate) => candidate.geo)?.geo ?? null,
@@ -235,22 +254,25 @@ export async function discoverBuilderCommunities(reader: DiscoveryReader, fetche
   const result: BuilderDiscovery = { builder: reader.builder, ok: false, communities: [], skipped: [] };
   const entries = await indexedEntries(reader, fetcher);
   if (!entries) return { ...result, reason: "sitemap_unreadable" };
-  const pages = new Map<string, CommunityRecord | null>();
+  // One page per community however the index spells it (trailing slash, case): the first spelling is the one read.
+  const pages = new Map<string, { url: string; record: CommunityRecord | null }>();
   for (const entry of entries) {
     const url = asUrl(entry.url);
     if (!url || !sameOfficialHost(url, reader.host) || !reader.communityPath.test(url.pathname)) continue;
-    const key = `${url.origin}${url.pathname}`;
-    if (!pages.has(key)) pages.set(key, entry.record);
+    const key = normalizedDealSourceKey(`${url.origin}${url.pathname}`);
+    if (!pages.has(key)) pages.set(key, { url: `${url.origin}${url.pathname}`, record: entry.record });
     if (pages.size >= MAX_COMMUNITY_PAGES) break;
   }
-  for (const [url, listed] of Array.from(pages)) {
+  for (const { url, record: listed } of Array.from(pages.values())) {
     let record = listed;
     if (!record) {
       const page = await getDocument(url, fetcher, "text/html,application/xhtml+xml", reader.host);
       if (!page.ok) { result.skipped.push({ url, reason: "page_unreadable" }); continue; }
-      record = communityRecordFromHtml(page.text);
+      record = reader.record ? reader.record(page.text, url) : communityRecordFromHtml(page.text);
     }
     if (!record) { result.skipped.push({ url, reason: "no_community_record" }); continue; }
+    // A record handed over by a listing must place the community; one without coordinates cannot pass the area check and is not added on faith.
+    if (listed && !record.geo) { result.skipped.push({ url, reason: "no_community_record" }); continue; }
     if (record.geo && milesBetween(DOWNTOWN_SAN_ANTONIO, record.geo) > DISCOVERY_RADIUS_MILES) { result.skipped.push({ url, reason: "outside_area" }); continue; }
     const address = [record.street, record.city, record.zip ? `TX ${record.zip}` : "TX"].filter(Boolean).join(", ");
     result.communities.push({

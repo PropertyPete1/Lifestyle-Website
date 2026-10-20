@@ -17,6 +17,18 @@ describe("the landing page's offer teaser", () => {
     expect(incentiveTeaser("Contracts written between 10/12/2026 and 11/8/2026 get 5.5% (6.1% APR).")).toBe("Get 5.5% (6.1% APR).");
   });
 
+  it("removes month-year, dashed, dotted, ISO and 'the 30th of' dates whole, and leaves loan-program fractions alone", () => {
+    expect(incentiveTeaser("Rates as low as 4.99% (6.1% APR) valid through May 2026.")).toBe("Rates as low as 4.99% (6.1% APR).");
+    expect(incentiveTeaser("Rates as low as 4.99% (6.1% APR) through the end of October 2026.")).toBe("Rates as low as 4.99% (6.1% APR).");
+    expect(incentiveTeaser("Offer expires December 2026: 5.5% FHA rate on select homes.")).toBe("5.5% FHA rate on select homes.");
+    expect(incentiveTeaser("5.5% FHA rate on select homes, must close by 11-30-2026.")).toBe("5.5% FHA rate on select homes.");
+    expect(incentiveTeaser("5.5% FHA rate on select homes closing by 11.30.2026.")).toBe("5.5% FHA rate on select homes.");
+    expect(incentiveTeaser("5.5% FHA rate on select homes until 2026-11-30.")).toBe("5.5% FHA rate on select homes.");
+    expect(incentiveTeaser("5.5% FHA rate on select homes through the 30th of November.")).toBe("5.5% FHA rate on select homes.");
+    expect(incentiveTeaser("Get a 2/1 buydown with a 1/0 option: 4.99% (6.1% APR) year one on 1/2 acre lots.")).toBe("Get a 2/1 buydown with a 1/0 option: 4.99% (6.1% APR) year one on 1/2 acre lots.");
+    expect(incentiveTeaser("Year 1: 4.25% (6.051% APR). 5.25% (6.051% APR) for years 2-30.")).toBe("Year 1: 4.25% (6.051% APR).");
+  });
+
   it("falls back to the first sentence when no sentence names a rate, and never runs long", () => {
     expect(incentiveTeaser("Up to $10,000 toward closing costs on select homes. Must close by 12/31/2026.")).toBe("Up to $10,000 toward closing costs on select homes.");
     expect(incentiveTeaser("")).toBe("");

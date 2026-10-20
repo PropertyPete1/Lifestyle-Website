@@ -173,6 +173,11 @@ export function scrubPrivateNames(
     const pattern = category === "plan" && !options.planField
       ? new RegExp(`(?<![a-z0-9])(?:the\\s+${escaped}(?:\\s+plans?)?(?![a-z0-9])|${escaped}\\s+plans?(?![a-z0-9]))`, "gi")
       : new RegExp(boundary, "gi");
+    // "select Centex homes" reads as "select homes", not "select the builder"; "a Centex home" as "a home"; "by Centex" keeps "by the builder".
+    if (category === "builder") {
+      const base = escaped.replace(/\\s\+homes$/i, "").replace(/ homes$/i, "");
+      out = out.replace(new RegExp(`(?<=(?:^|[^a-z0-9])(?:select|new|a|our|all|any|these|those|every|each|of)\\s+)${base}(?:\\s+homes)?(?:®|™)?\\s+(homes?|communit(?:y|ies)|neighborhoods?)(?![a-z0-9])`, "gi"), (_match, noun: string) => noun);
+    }
     out = out.replace(pattern, replacements[category]);
   }
   return out;

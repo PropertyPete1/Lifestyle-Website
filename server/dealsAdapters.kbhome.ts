@@ -73,11 +73,13 @@ export function parseKbArray(html: string, name: string): unknown[] | null {
 }
 
 /** "Move-in Ready (3)" on the page: how many homes the page says it shows; null when the page does not say. */
-export function kbMoveInCount(html: string): number | null {
-  // The page may count twice ("Move-in Ready (57)" in the market navigation, "(3)" over the community's own list); the smaller is the community's.
-  // A zero count elsewhere on the page (another market's navigation) says nothing about this community.
-  const counts = Array.from(html.matchAll(/Move-?in\s+Ready\s*\((\d+)\)/gi)).map((match) => Number(match[1])).filter((count) => count > 0);
-  return counts.length ? Math.min(...counts) : null;
+export function kbMoveInCount(html: string, emptyList = false): number | null {
+  // The page may count twice ("Move-in Ready (57)" in the market navigation, "(3)" over the community's own list): the smaller is the
+  // community's; a "(0)" corroborates an empty list, and says nothing beside a list that is not empty.
+  const counts = Array.from(html.matchAll(/Move-?in\s+Ready\s*\((\d+)\)/gi)).map((match) => Number(match[1]));
+  if (emptyList && counts.includes(0)) return 0;
+  const positive = counts.filter((count) => count > 0);
+  return positive.length ? Math.min(...positive) : null;
 }
 
 /**
@@ -231,7 +233,7 @@ export function parseKbCommunity(html: string, pageUrl: string, now: Date = new 
   }
   // Only home links under this community's own path count (a nearby-homes strip links other communities' homes).
   const renderedHomeLinks = new Set(Array.from(html.matchAll(/href="([^"]*\/mir\?homesite=(\d+))"/gi)).filter((match) => { const page = asUrl(new URL(decodeHtmlEntities(match[1]!), community).toString()); return page && sameOfficialHost(page, host) && comparablePath(page.pathname).startsWith(base); }).map((match) => match[2]!)).size;
-  return { record, homes, plans, foreignHome, renderedHomeLinks, moveInCount: kbMoveInCount(html) };
+  return { record, homes, plans, foreignHome, renderedHomeLinks, moveInCount: kbMoveInCount(html, homes.length === 0 && renderedHomeLinks === 0) };
 }
 
 export class KbHomeAdapter implements DealAdapter {

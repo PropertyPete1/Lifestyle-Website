@@ -36,9 +36,10 @@ export function drbCommunityPath(url: URL): { state: string; region: string; slu
 
 export const drbCommunityPageUrl = (slug: string) => `https://${DRB_HOST}/drbhomes/find-your-home/communities/${DRB_REGION.state}/${DRB_REGION.region}/${slug}`;
 
+// The site host is read lazily: this module and dealsAdapters.ts import each other, and the registry loads first in production.
 export const DRB_BRAND: NdgBrand = {
   builder: "DRB Homes",
-  host: DRB_HOST,
+  get host() { return DRB_HOST; },
   apiHost: DRB_API_HOST,
   assetHost: DRB_ASSET_HOST,
   listingUrl: () => ndgApiUrl(DRB_BRAND, `public-drb/community?searchField=communityRegion&searchValue=${encodeURIComponent(DRB_REGION.searchValue)}&state=${DRB_REGION.state}&region=${DRB_REGION.region}&page=1&limit=1000`),

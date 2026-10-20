@@ -17,12 +17,13 @@ import { ScottFelderAdapter } from "./dealsAdapters.scottfelder";
 import { DrbHomesAdapter } from "./dealsAdapters.drb";
 import { StarlightAdapter } from "./dealsAdapters.starlight";
 import { LegendHomesAdapter } from "./dealsAdapters.legend";
+import { DreesAdapter } from "./dealsAdapters.drees";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "DRB Homes" | "Starlight Homes" | "Legend Homes" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "David Weekley Homes" | "Ashton Woods" | "LGI Homes" | "Sitterle Homes" | "Scott Felder Homes" | "DRB Homes" | "Starlight Homes" | "Legend Homes" | "Drees Custom Homes" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -249,8 +250,9 @@ export const SCOTTFELDER_HOST = "www.scottfelderhomes.com";
 export const DRB_HOST = "www.drbhomes.com";
 export const STARLIGHT_HOST = "www.starlighthomes.com";
 export const LEGEND_HOST = "www.livelegendhomes.com";
+export const DREES_HOST = "www.dreeshomes.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST, "DRB Homes": DRB_HOST, "Starlight Homes": STARLIGHT_HOST, "Legend Homes": LEGEND_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST, "David Weekley Homes": WEEKLEY_HOST, "Ashton Woods": ASHTON_HOST, "LGI Homes": LGI_HOST, "Sitterle Homes": SITTERLE_HOST, "Scott Felder Homes": SCOTTFELDER_HOST, "DRB Homes": DRB_HOST, "Starlight Homes": STARLIGHT_HOST, "Legend Homes": LEGEND_HOST, "Drees Custom Homes": DREES_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -381,6 +383,54 @@ export async function getDocument(
   }
 }
 
+/**
+ * A read-only JSON query, for the few builder sites whose own pages load
+ * their listings with a POST search (Drees). Same guards as a GET: official
+ * host only, no credentials, no redirect off the host, one retry on a server
+ * error. It is never a form: the body names a page or filter, nothing else.
+ */
+export async function postJsonDocument(
+  url: string,
+  fetcher: HtmlFetcher,
+  body: Record<string, unknown>,
+  expectedHost: string,
+): Promise<{ ok: true; text: string } | { ok: false; redirectedOffOfficialHost: boolean; status: number | null }> {
+  for (let attempt = 0; ; attempt++) {
+    const result = await postJsonOnce(url, fetcher, body, expectedHost);
+    if (result.ok || result.redirectedOffOfficialHost || !result.retryable || attempt >= 1) return result.ok ? result : { ok: false, redirectedOffOfficialHost: result.redirectedOffOfficialHost, status: result.status };
+    await new Promise((resolve) => setTimeout(resolve, FETCH_RETRY_DELAY_MS));
+  }
+}
+
+async function postJsonOnce(
+  url: string,
+  fetcher: HtmlFetcher,
+  body: Record<string, unknown>,
+  expectedHost: string,
+): Promise<{ ok: true; text: string } | { ok: false; redirectedOffOfficialHost: boolean; retryable: boolean; status: number | null }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const target = asUrl(url);
+    if (!target || !sameOfficialHost(target, expectedHost)) return { ok: false, redirectedOffOfficialHost: true, retryable: false, status: null };
+    // A POST is never followed through a redirect: the answer is the page's own or nothing.
+    const response = await fetcher(target.toString(), {
+      method: "POST", redirect: "manual", signal: controller.signal, body: JSON.stringify(body),
+      headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "LifestyleDesignRealtyDeals/1.0 (read-only official-page parser)" },
+    });
+    if (response.url && !sameOfficialHost(new URL(response.url), expectedHost)) return { ok: false, redirectedOffOfficialHost: true, retryable: false, status: response.status };
+    if ([301, 302, 303, 307, 308].includes(response.status)) return { ok: false, redirectedOffOfficialHost: true, retryable: false, status: response.status };
+    if (!response.ok) return { ok: false, redirectedOffOfficialHost: false, retryable: response.status === 429 || response.status >= 500, status: response.status };
+    const text = await response.text();
+    if (text.length > 8_000_000) return { ok: false, redirectedOffOfficialHost: false, retryable: false, status: response.status };
+    return { ok: true, text };
+  } catch {
+    return { ok: false, redirectedOffOfficialHost: false, retryable: true, status: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function getDocumentOnce(
   url: string,
   fetcher: HtmlFetcher,
@@ -429,6 +479,9 @@ export function decodeHtmlEntities(value: string): string {
     nbsp: " ",
     ndash: "–",
     mdash: "—",
+    copy: "©",
+    reg: "®",
+    trade: "™",
   };
   // A numeric entity past U+10FFFF is not a character; it is kept as written rather than throwing.
   const codePoint = (whole: string, code: number) => Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
@@ -561,12 +614,14 @@ function rateNear(text: string, pattern: RegExp): number | null {
 export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const text = normalizeIncentiveText(input);
   // "2/1 Program … year one … year two" is a temporary buydown as surely as "buydown" is.
-  const hasTemporaryRate = /\b(?:buy[- ]?down|first[- ]year|year\s*1|year\s+(?:one|two)|temporarily|introductory|\d\/\d\s+(?:program|rate\s+program))\b/i.test(text);
-  const headline = rateNear(text, /\brate\s+(?:that\s+applies\s+)?(?:for|to|in|during)\s+(?:the\s+)?(?:first[- ]year|year\s*(?:1|one))\s+(?:is|of|:)?\s*(\d+(?:\.\d+)?)%/i) ??
-    rateNear(text, /(?:first[- ]year|year\s*1)[\s\S]{0,100}?(\d+(?:\.\d+)?)%/i) ??
+  // "year one/two" counts only as rate wording ("rate … for year one", "year one is N%"), not in an HOA-dues or warranty sentence.
+  const hasTemporaryRate = /\b(?:buy[- ]?down|first[- ]year|year\s*1|temporarily|introductory|\d\/\d\s+(?:program|rate\s+program))\b/i.test(text) || /\brate[^.]{0,60}\byear\s+(?:one|two)\b|\byear\s+(?:one|two)\s+is\s+\d+(?:\.\d+)?%/i.test(text);
+  // "the rate for year one is 2% lower" names a discount, not a rate.
+  const headline = rateNear(text, /\brate\s+(?:that\s+applies\s+)?(?:for|to|in|during)\s+(?:the\s+)?(?:first[- ]year|year\s*(?:1|one))\s+(?:is|of|:)?\s*(\d+(?:\.\d+)?)%(?!\s*(?:lower|less|below|off|decrease|reduction|discount|under))/i) ??
+    rateNear(text, /(?:first[- ]year|year\s*1)[\s\S]{0,100}?(\d+(?:\.\d+)?)%(?!\s*(?:lower|less|below|off|decrease|reduction|discount|under))/i) ??
     rateNear(text, /(?:rates?\s+as\s+low\s+as|as\s+low\s+as|reduced\s+to)\s+(\d+(?:\.\d+)?)%/i) ??
-    // "4.25% (6.051% APR)", "5% Fixed / 5.805% APR", "4.99% interest rate".
-    rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:\(\s*\d+(?:\.\d+)?%\s*APR|\/\s*\d+(?:\.\d+)?%\s*APR|(?:interest\s+)?rate\b)/i);
+    // "4.25% (6.051% APR)", "2.99% (APR 6.81%)", "5% Fixed / 5.805% APR", "4.99% interest rate".
+    rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:fixed\s*)?(?:\(\s*\d+(?:\.\d+)?%\s*APR|\(\s*APR\s*\d+(?:\.\d+)?%|\/\s*\d+(?:\.\d+)?%\s*APR|(?:interest\s+)?rate\b)/i);
   const rateMentioned = headline !== null || /\b(?:interest\s+rates?|APR|buy[- ]?down)\b|\d+(?:\.\d+)?%\s*(?:fixed|financing)/i.test(text);
   const rateKind = !rateMentioned ? "none" : hasTemporaryRate ? "promotional" : "fixed";
   const promotionalRatePercent = headline;
@@ -579,7 +634,7 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
     rateNear(text, /(?:years?\s*2\s*(?:-|to|through)\s*\d+|after\s+(?:the\s+)?first\s+year|(?:beginning|starting)\s+(?:in\s+)?year\s+(?:three|3|two|2)|years?\s+(?:three|3)\s+(?:onward|and\s+beyond|through\s+\d+))(?:(?!\b(?:down|payments?|APR)\b)[\s\S]){0,80}?(\d+(?:\.\d+)?)%(?!\s*(?:minimum\s+)?down\b)/i);
   const aprPercent = rateNear(text, /(\d+(?:\.\d+)?)%\s*(?:annual\s+percentage\s+rate|apr)\b/i) ??
     rateNear(text, /\b(?:APR|ANNUAL\s+PERCENTAGE\s+RATE)\s*(?::|=|is)?\s*(\d+(?:\.\d+)?)%/i);
-  const repaymentTermYears = numberMatch(text, /\b(\d{1,2})(?:[- ]year|\s*yr)\b/i);
+  const repaymentTermYears = numberMatch(text, /\b(\d{1,2})(?:[- ]?year|[- ]?yr)s?\b/i);
   const loanType = firstMatch(text, /\b(FHA|VA|USDA|conventional|jumbo)\b/i);
   const downPaymentPercent = numberMatch(text, /(\d+(?:\.\d+)?)%\s+(?:minimum\s+)?down(?:\s+payment)?\b/i) ?? (/\bno\s+down\s+payment\b/i.test(text) ? 0 : null);
   const contractDeadline = findContractDeadline(text);
@@ -1162,6 +1217,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "Starlight Homes") { config.builder.push("Starlight Homes", "Starlight", "Ashton Woods"); config.lender.push("Velocio Mortgage", "Velocio", "Trailblazer Mortgage", "Trailblazer"); }
   if (builder === "LGI Homes") { config.builder.push("LGI Homes", "LGI", "Terrata Homes", "CompleteHome"); config.lender.push("LGI Mortgage Solutions", "CalCon Mutual Mortgage", "One Trust Home Loans", "OneTrust Home Loans"); }
   if (builder === "Sitterle Homes") { config.builder.push("Sitterle Homes", "Sitterle"); }
+  if (builder === "Drees Custom Homes") { config.builder.push("Drees Custom Homes", "Drees Homes", "The Drees Company", "Drees"); config.lender.push("First Equity Mortgage", "First Equity"); }
   if (builder === "Legend Homes") { config.builder.push("Legend Homes", "Legend Home", "Camillo Companies", "Camillo"); }
   if (builder === "DRB Homes") { config.builder.push("DRB Homes", "DRB Group", "DRB Elevate", "DRB"); }
   if (builder === "Scott Felder Homes") { config.builder.push("Scott Felder Homes", "Scott Felder"); config.lender.push("Southern Lending", "First Continental Mortgage", "First Continental"); }
@@ -1204,7 +1260,7 @@ export function toPublicSafeText(
   categories.other.push(...extraPrivateTerms.filter((term) => !known.has(term)));
   const scrubbed = scrubPrivateNames(htmlToText(input), categories, { planField });
   // A link, a bare domain ("TollBrothersMortgage.com") or a phone number, with or without separators, is residue.
-  if (!scrubbed || /\b(?:https?:\/\/|www\.)\S+/i.test(scrubbed) || /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|us|io|info|biz)\b/i.test(scrubbed) || /(?<![\d.$,])\d{10}(?![\d.])/.test(scrubbed) || /(?<![\d.$,])\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}(?![\d.])/.test(scrubbed)) return null;
+  if (!scrubbed || /\b(?:https?:\/\/|www\.)\S+/i.test(scrubbed) || /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|us|io|info|biz)\b/i.test(scrubbed) || /(?<![\d.$,])\d{10}(?!\d|\.\d)/.test(scrubbed) || /(?<![\d.$,])\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}(?!\d|\.\d)/.test(scrubbed)) return null;
   // A lender's NMLS number names the lender as surely as its name does.
   if (NMLS_ID_PATTERN.test(scrubbed)) return null;
   // Residue is judged per category: a bare plan word such as "Magnolia trees"
@@ -1817,6 +1873,7 @@ let scottFelderAdapter: DealAdapter | null = null;
 let drbAdapter: DealAdapter | null = null;
 let starlightAdapter: DealAdapter | null = null;
 let legendAdapter: DealAdapter | null = null;
+let dreesAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
@@ -1841,6 +1898,7 @@ export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   get "DRB Homes"() { return (drbAdapter ??= new DrbHomesAdapter()); },
   get "Starlight Homes"() { return (starlightAdapter ??= new StarlightAdapter()); },
   get "Legend Homes"() { return (legendAdapter ??= new LegendHomesAdapter()); },
+  get "Drees Custom Homes"() { return (dreesAdapter ??= new DreesAdapter()); },
   Manual: new ManualAdapter(),
 };
 

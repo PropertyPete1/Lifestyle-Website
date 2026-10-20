@@ -135,7 +135,7 @@ function miDocuments(total = 15): Record<string, string> {
 
 describe("deals adapters", () => {
   it("registers the required generic builder adapters", () => {
-    expect(Object.keys(DEAL_ADAPTERS).sort()).toEqual(["Ashton Woods", "Centex", "Century Communities", "Chesmar", "Coventry Homes", "D.R. Horton", "DRB Homes", "David Weekley Homes", "Davidson Homes", "Del Webb", "First America Homes", "Highland Homes", "KB Home", "LGI Homes", "Legend Homes", "M/I Homes", "Manual", "Perry Homes", "Pulte", "Scott Felder Homes", "Sitterle Homes", "Starlight Homes", "Toll Brothers"]);
+    expect(Object.keys(DEAL_ADAPTERS).sort()).toEqual(["Ashton Woods", "Centex", "Century Communities", "Chesmar", "Coventry Homes", "D.R. Horton", "DRB Homes", "David Weekley Homes", "Davidson Homes", "Del Webb", "Drees Custom Homes", "First America Homes", "Highland Homes", "KB Home", "LGI Homes", "Legend Homes", "M/I Homes", "Manual", "Perry Homes", "Pulte", "Scott Felder Homes", "Sitterle Homes", "Starlight Homes", "Toll Brothers"]);
     expect(DEAL_ADAPTERS["Perry Homes"].builder).toBe("Perry Homes");
   });
 
@@ -189,6 +189,19 @@ describe("deals adapters", () => {
     expect(crossing.holdReasons).toEqual(["missing_contract_deadline"]);
   });
 
+  it("reads 'year one/two/three' and '2/1 Program' wording as a temporary buydown only when it is rate wording, never a discount as the rate, and '(APR N%)' as the APR", () => {
+    const buydown = parsePromotionalRate("2.99% (APR 6.81%) 30-YR Fixed FHA loan 3.5% down payment required. 2/1 Program includes a 2% decrease on the interest rate for year one and a 1% decrease in the interest rate for year two. The interest rate that applies to year one is 2.99%. Beginning in year three, the fixed rate of 4.99% applies to the remainder of the loan life.");
+    expect(buydown).toMatchObject({ rateKind: "promotional", promotionalRatePercent: 2.99, promotionalPeriod: "year one", followOnRatePercent: 4.99, aprPercent: 6.81, loanType: "FHA", repaymentTermYears: 30, downPaymentPercent: 3.5, publishable: true });
+    // "year two" in an HOA sentence is not a buydown; a fixed-rate offer stays fixed and publishable.
+    const hoa = parsePromotionalRate("4.99% (5.50% APR) 30-year fixed FHA rate with 3.5% down on select homes. Builder pays the HOA dues for year two.");
+    expect(hoa).toMatchObject({ rateKind: "fixed", promotionalRatePercent: 4.99, publishable: true });
+    // "the rate for year one is 2% lower" is a discount, not the rate.
+    const discount = parsePromotionalRate("2/1 buydown on select homes: the interest rate for year one is 2% lower than the note rate. Note rate 4.99% (6.81% APR) 30-year fixed FHA, 3.5% down payment. Beginning in year three, the fixed rate of 4.99% applies.");
+    expect(discount.promotionalRatePercent).not.toBe(2);
+    // The Starlight headline form without the "year one is" sentence still names the rate.
+    expect(parsePromotionalRate("2.99% (APR 6.81%) 30-YR Fixed FHA loan 3.5% down payment required.").promotionalRatePercent).toBe(2.99);
+  });
+
   it("uses the shared scrubber and refuses output when a short private term cannot safely be scrubbed", () => {
     expect(toPublicSafeText("Secret Grove offers Hidden Plan.", config)).toBe("This community offers this community.");
     expect(toPublicSafeText("AUX is private", { ...config, scrubList: ["AUX"] })).toBeNull();
@@ -199,6 +212,8 @@ describe("deals adapters", () => {
     expect(toPublicSafeText("See TollBrothersMortgage.com for details.", config)).toBeNull();
     expect(toPublicSafeText("Call 8775000508 today.", config)).toBeNull();
     for (const phone of ["(210) 555-0142", "210-555-0142", "210.555.0142", "210 555 0142"]) expect(toPublicSafeText(`Call ${phone} to book.`, config)).toBeNull();
+    // A phone number that ends a sentence is residue too.
+    for (const text of ["Call (210) 555-0142.", "Call 210.555.0142. Thanks.", "Call 8775000508."]) expect(toPublicSafeText(text, config)).toBeNull();
     expect(toPublicSafeText("Homes from $1,234,567 in the 78255 area.", config)).toBe("Homes from $1,234,567 in the 78255 area.");
   });
 

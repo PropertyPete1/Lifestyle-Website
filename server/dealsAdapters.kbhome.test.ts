@@ -68,6 +68,10 @@ describe("KB Home reader: page data", () => {
     // The market navigation counts the whole market; the smaller count is the community's.
     expect(kbMoveInCount("<nav>Move-in Ready (57)</nav><h2>Move-in Ready (3)</h2>")).toBe(3);
     expect(kbMoveInCount("<nav>Move-in Ready (0)</nav><h2>Move-in Ready (5)</h2>")).toBe(5);
+    // A "(0)" beside the market's count corroborates an empty list; beside a list with homes it says nothing.
+    expect(kbMoveInCount("<nav>Move-in Ready (57)</nav><h2>Move-in Ready (0)</h2>", true)).toBe(0);
+    expect(kbMoveInCount("<nav>Move-in Ready (57)</nav><h2>Move-in Ready (0)</h2>", false)).toBe(57);
+    expect(parseKbCommunity(communityPage({ homes: [] }).replace("<h2>Move-in ready homes to get you moving.</h2>", "<nav>Move-in Ready (57)</nav><h2>Move-in Ready (0)</h2>"), COMMUNITY, NOW)!.moveInCount).toBe(0);
     // A nearby-homes strip links other communities' homes; they are not this page's cards.
     expect(parseKbCommunity(communityPage({ homes: [] }).replace("<h2>Move-in ready homes to get you moving.</h2>", `<a href="/new-homes-san-antonio/other-grove/mir?homesite=99">Nearby</a>`), COMMUNITY, NOW)!.renderedHomeLinks).toBe(0);
     const parsed = parseKbCommunity(communityPage(), COMMUNITY, NOW)!;

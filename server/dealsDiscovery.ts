@@ -7,7 +7,7 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { ASHTON_HOST, CENTURY_HOST, DRB_HOST, LEGEND_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { ASHTON_HOST, CENTURY_HOST, DRB_HOST, DREES_HOST, LEGEND_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
@@ -22,6 +22,7 @@ import { scottFelderListingEntries, scottFelderListingUrl, scottFelderRecord } f
 import { DRB_API_HOST, drbListingEntries, drbListingUrl } from "./dealsAdapters.drb";
 import { starlightListingEntries, starlightListingUrl, starlightRecord } from "./dealsAdapters.starlight";
 import { LEGEND_API_HOST, legendListingEntries, legendListingUrl } from "./dealsAdapters.legend";
+import { dreesDiscoveryEntries } from "./dealsAdapters.drees";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -48,7 +49,7 @@ export type DiscoveryReader = {
    * sitemap is too large or missing) its own market listing. A listing entry
    * may carry the community's record itself; then its page is not read.
    */
-  index: { kind: "sitemap"; url: string } | { kind: "listing"; url: string; accept: string; /** The listing's own host when the builder's API is not its site (default: the site). */ host?: string; entries: (body: string, host: string) => ListingEntry[] | null };
+  index: { kind: "sitemap"; url: string } | { kind: "listing"; url: string; accept: string; /** The listing's own host when the builder's API is not its site (default: the site). */ host?: string; entries: (body: string, host: string) => ListingEntry[] | null } | { kind: "reader"; /** The reader lists the market itself (several reads); null when it cannot. */ entries: (fetcher: HtmlFetcher, now: number) => Promise<ListingEntry[] | null> };
   /** Path of a community page in the builder's San Antonio market. */
   communityPath: RegExp;
   /** Reads the community's record from its page when the site has no schema.org record (default: communityRecordFromHtml). */
@@ -176,8 +177,7 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "DRB Homes", host: DRB_HOST,
     index: { kind: "listing", url: drbListingUrl(), accept: "application/json", host: DRB_API_HOST, entries: (body, host) => drbListingEntries(body, host) },
     communityPath: /^\/drbhomes\/find-your-home\/communities\/texas\/san-antonio\/[a-z0-9-]+(?:\/(?:overview|home-plans|quick-move-in-homes))?\/?$/i,
-    // The page carries no record (it is an app shell); a listing entry without an address is skipped by the pin rule.
-    record: () => null,
+    // The page is an app shell with no record: a listing row is kept on its pin even without a street (no page is read).
   },
   {
     // Starlight: the market page links every community; each page's business record gives the sales address, phone and pin.
@@ -191,7 +191,12 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "Legend Homes", host: LEGEND_HOST,
     index: { kind: "listing", url: legendListingUrl(), accept: "application/json", host: LEGEND_API_HOST, entries: (body, host) => legendListingEntries(body, host) },
     communityPath: /^\/communities\/san-antonio\/[a-z0-9-]+\/[a-z0-9-]+\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
-    record: () => null,
+  },
+  {
+    // Drees: the reader lists the San Antonio market itself (areas, then the market's community list) with every record; parents only where a community has sub-neighborhoods.
+    builder: "Drees Custom Homes", host: DREES_HOST,
+    index: { kind: "reader", entries: (fetcher, now) => dreesDiscoveryEntries(fetcher, now) },
+    communityPath: /^\/new-homes-san-antonio\/[a-z0-9-]+\/[a-z0-9-]+(?:\/[a-z0-9-]+)?\/?$/i,
   },
   { builder: "Century Communities", host: CENTURY_HOST, index: { kind: "sitemap", url: `https://${CENTURY_HOST}/sitemap.xml` }, communityPath: /^\/find-your-new-home\/texas\/san-antonio-metro\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({
@@ -329,6 +334,7 @@ export type BuilderDiscovery = {
 /** One builder's San Antonio area communities, read from its own site, one page at a time. */
 /** The builder's community pages from its index (with the record when the index carries it); null when the index cannot be read whole. */
 async function indexedEntries(reader: DiscoveryReader, fetcher: HtmlFetcher): Promise<ListingEntry[] | null> {
+  if (reader.index.kind === "reader") return reader.index.entries(fetcher, Date.now());
   if (reader.index.kind === "sitemap") {
     const urls = await officialSitemapUrls(reader.index.url, reader.host, fetcher);
     return urls ? urls.map((url) => ({ url, record: null })) : null;

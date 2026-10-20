@@ -185,6 +185,11 @@ describe("David Weekley reader: a community", () => {
     const closing = { ...ratePromotion, Description: "Up to 3% toward closing costs on select quick move-in homes.", IsSiteWide: false, ShowOnCommunityIds: ["communities/22915"] };
     const mixed = vi.fn(async (input: string) => input === weekleyPromotionsUrl() ? new Response(JSON.stringify([closing, ratePromotion]), { status: 200, headers: { "content-type": "application/json" } }) : fetcher(input));
     expect((await loadOfficialDeals(config, { fetcher: mixed, now: () => NOW })).private.incentive?.text).toBe("4.99% (5.42% APR) 30-year fixed FHA rate with 3.5% down on select homes.");
+    // The bare words "interest rate" or "buydown" without a figure do not name a rate either.
+    resetWeekleyCaches();
+    const words = { ...ratePromotion, Description: "$10,000 in flex cash on select homes. Ask about our interest rate buydown options!", IsSiteWide: false, ShowOnCommunityIds: ["communities/22915"] };
+    const wordy = vi.fn(async (input: string) => input === weekleyPromotionsUrl() ? new Response(JSON.stringify([words, ratePromotion]), { status: 200, headers: { "content-type": "application/json" } }) : fetcher(input));
+    expect((await loadOfficialDeals(config, { fetcher: wordy, now: () => NOW })).private.incentive?.text).toBe("4.99% (5.42% APR) 30-year fixed FHA rate with 3.5% down on select homes.");
   });
 
   it("holds the run when the page is not a community page, when the home array is gone, when the availability wording is unknown, when the site is not Weekley's, or when it cannot be read; a missing promotion list holds the offer only", async () => {

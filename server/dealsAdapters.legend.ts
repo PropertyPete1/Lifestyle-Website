@@ -51,9 +51,10 @@ export function legendPageUrlFor(row: Json): string | null {
   return `https://${LEGEND_HOST}/communities/${LEGEND_DIVISION}/${legendSlug(region)}/${legendSlug(county)}/${legendSlug(city)}/${legendSlug(name)}`;
 }
 
+// The site host is read lazily: this module and dealsAdapters.ts import each other, and the registry loads first in production.
 export const LEGEND_BRAND: NdgBrand = {
   builder: "Legend Homes",
-  host: LEGEND_HOST,
+  get host() { return LEGEND_HOST; },
   apiHost: LEGEND_API_HOST,
   assetHost: LEGEND_ASSET_HOST,
   listingUrl: () => ndgApiUrl(LEGEND_BRAND, `public-epcon/community/for-legend?limit=1000&division=${LEGEND_DIVISION}&barebones=false`),

@@ -12,7 +12,9 @@ import { jsonLdRecords } from "./dealsAdapters.homefiniti";
  * the plan link in `.qmi-table__cell--plan`, "3 Beds | 2 Baths<br>1,402 sq.
  * ft." in `.qmi-table__cell--details`, and "Ready Now" or "Available
  * November 2026" in `.qmi-table__cell--date`), under a heading "N Available
- * Homes In This Neighborhood". The homes have no pages of their own. Plans
+ * Homes In This Neighborhood". The homes have no pages of their own, so each
+ * is keyed as `/<community>/available-homes/<street slug>` (a path, since
+ * the source key drops fragments and queries). Plans
  * are `.plan-card`s (`.plan-card__heading a`, `.specs__item--beds/baths/
  * stories/garage/area`, photos on `awh.widen.net`) with no price (the site
  * sells by monthly payment). The community's record is a schema.org
@@ -168,8 +170,8 @@ export function parseStarlightCommunity(html: string, pageUrl: string, now: Date
       const sqft = /([\d,]{3,6})\s*sq\.?\s*ft/i.exec(details);
       const status = starlightStatus(classText(cells, html, "qmi-table__cell--date"), now);
       homes.push({
-        // The homes have no pages: each is a fragment of the community page keyed by its street, so a row's key does not shift when another row goes.
-        sourceUrl: readable ? `${community.origin}${community.pathname.replace(/\/+$/, "")}#home-${street.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}` : `${community.origin}${community.pathname.replace(/\/+$/, "")}/unreadable-${homes.length}`,
+        // The homes have no pages: each is keyed by a path under the community page named by its street (a fragment or query would be dropped by the source key), so a row's key does not shift when another row goes.
+        sourceUrl: readable ? `${community.origin}${community.pathname.replace(/\/+$/, "")}/available-homes/${street.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}` : `${community.origin}${community.pathname.replace(/\/+$/, "")}/unreadable-${homes.length}`,
         privateName: street,
         privateAddress: street ? `${street}, ${cityLine}` : null,
         privatePlanName: planName,
@@ -212,9 +214,9 @@ export function parseStarlightCommunity(html: string, pageUrl: string, now: Date
   }
   const text = htmlToText(html);
   const count = /(\d{1,3})\s+Available\s+Homes?\s+In\s+This\s+Neighborhood/i.exec(text);
-  // The financing terms paragraph states the offer in full; a page without it has no offer.
-  const terms = /\*?\s*Terms\s+are\s+based\s+upon\s+a\s+loan[^]*?(?=\s+(?:\*\*|©|©)|$)/i.exec(text)?.[0] ?? null;
-  const offer = terms ? cleanOfferText(terms.slice(0, 4_000)) : null;
+  // The financing terms paragraph states the offer in full: the one element whose own text opens with it (never the page text after it); a page without it has no offer.
+  const termsElement = all.filter((item) => /^(?:p|div|li|span)$/.test(item.tag)).map((item) => ({ item, text: elementText(item, html) })).filter(({ text: own }) => /^\*?\s*Terms\s+are\s+based\s+upon\s+a\s+loan/i.test(own)).sort((a, b) => a.text.length - b.text.length)[0] ?? null;
+  const offer = termsElement ? cleanOfferText(termsElement.text.slice(0, 4_000)) : null;
   return { record, foreignPage, foreignPlan, statedHomeCount: count ? Number(count[1]) : null, hasTable: Boolean(table), homes, plans, offer: offer && /\d+(?:\.\d+)?\s*%/.test(offer) ? offer : null };
 }
 

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StarlightAdapter, parseStarlightCommunity, starlightListingEntries, starlightRecord, starlightStatus } from "./dealsAdapters.starlight";
 import { DEAL_ADAPTERS, loadOfficialDeals, type CommunitySourceConfig } from "./dealsAdapters";
+import { normalizedDealSourceKey } from "../shared/deals";
 
 /**
  * Synthetic Starlight pages in the shape the live site served in October
@@ -56,8 +57,9 @@ describe("Starlight reader: page data", () => {
       ["1408 Fixture Street, Seguin, TX 78155", "Prism", "Quick Move-In (January 2027)", false, "January 2027", 310_990, 4, 3, 1_912],
       ["144 Fixture Loop, Seguin, TX 78155", "Magellan", "Quick Move-In", false, null, 315_990, 4, 3, 2_268],
     ]);
-    // The homes have no pages of their own: each is a fragment of the community page.
-    expect(parsed.homes.map((home) => home.sourceUrl)).toEqual([`${COMMUNITY}#home-1412-fixture-street`, `${COMMUNITY}#home-140-fixture-loop`, `${COMMUNITY}#home-1408-fixture-street`, `${COMMUNITY}#home-144-fixture-loop`]);
+    // The homes have no pages of their own: each is keyed by a path under the community page named by its street (a fragment would be dropped by the source key).
+    expect(parsed.homes.map((home) => home.sourceUrl)).toEqual([`${COMMUNITY}/available-homes/1412-fixture-street`, `${COMMUNITY}/available-homes/140-fixture-loop`, `${COMMUNITY}/available-homes/1408-fixture-street`, `${COMMUNITY}/available-homes/144-fixture-loop`]);
+    expect(new Set(parsed.homes.map((home) => normalizedDealSourceKey(home.sourceUrl))).size).toBe(4);
     expect(parsed.plans.map((entry) => [entry.sourceUrl, entry.privatePlanName, entry.price, entry.bedrooms, entry.bathrooms, entry.squareFeet, entry.garage, entry.gallery!.map((image) => image.sourceUrl)])).toEqual([
       [`${COMMUNITY}/falcon`, "Falcon", null, 3, 2, 1_212, 2, ["https://awh.widen.net/content/abcFalcon/webp/SL_Falcon_Elev_K.jpg", "https://awh.widen.net/content/defFalcon/webp/SL_Falcon_Kitchen.jpeg"]],
       [`${COMMUNITY}/sterling`, "Sterling", null, 3, 2, 1_212, 2, ["https://awh.widen.net/content/abcSterling/webp/SL_Sterling_Elev_K.jpg", "https://awh.widen.net/content/defSterling/webp/SL_Sterling_Kitchen.jpeg"]],
@@ -66,6 +68,10 @@ describe("Starlight reader: page data", () => {
     expect(parsed.offer).not.toMatch(/NMLS|1529234|830-555|www\./);
     expect(parsed.offer).toMatch(/expires on October 31, 2026/);
     expect(parseStarlightCommunity(communityPage({ terms: null }), COMMUNITY, NOW)!.offer).toBeNull();
+    // The offer is the terms paragraph's own text, never the footer after it, whatever follows.
+    const bare = communityPage().replace("<p>**Monthly payment shown is an estimate.</p><p>&copy; 2026 Starlight Homes, LLC.</p>", "<p>&copy; 2026 Starlight Homes, LLC. Privacy Policy Terms of Use 1234 Fixture Parkway Suite 500 Atlanta GA 30339</p>");
+    expect(bare).not.toBe(communityPage());
+    expect(parseStarlightCommunity(bare, COMMUNITY, NOW)!.offer).not.toMatch(/Privacy|Atlanta|2026 Starlight/);
     // Status wording: ready now, a future month, a past month (no date), unknown or none (no status), sold.
     expect(starlightStatus("Ready Now", NOW)).toEqual({ status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null });
     expect(starlightStatus("Available December 2026", NOW)).toEqual({ status: "Quick Move-In (December 2026)", readyNow: false, moveInDate: "December 2026" });
@@ -74,7 +80,7 @@ describe("Starlight reader: page data", () => {
     for (const word of ["Coming Soon", "Available Soon", "Available 2027", "", null]) expect(starlightStatus(word, NOW).status).toBeNull();
     // A row without a readable street or with unknown wording has no status.
     const odd = parseStarlightCommunity(communityPage({ rows: [row("$1", "", "Prism", "3 Beds", "Ready Now"), row("$2", "9 Fixture Way", "Prism", "3 Beds", "Reserved")] }), COMMUNITY, NOW)!;
-    expect(odd.homes.map((home) => [home.sourceUrl.replace(COMMUNITY, ""), home.status])).toEqual([["/unreadable-0", null], ["#home-9-fixture-way", null]]);
+    expect(odd.homes.map((home) => [home.sourceUrl.replace(COMMUNITY, ""), home.status])).toEqual([["/unreadable-0", null], ["/available-homes/9-fixture-way", null]]);
     // Another community's page under this URL, a plan under another community's path.
     expect(parseStarlightCommunity(communityPage({ url: `${HOST}/san-antonio/other-trails` }), COMMUNITY, NOW)!.foreignPage).toBe(true);
     expect(parseStarlightCommunity(communityPage({ plans: [plan("Zinnia", "/san-antonio/other-trails/zinnia")] }), COMMUNITY, NOW)).toMatchObject({ foreignPlan: true, plans: [] });

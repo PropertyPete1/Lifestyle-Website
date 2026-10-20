@@ -267,7 +267,8 @@ export function parseScottFelderCommunity(html: string, pageUrl: string, now: Da
     const sourceUrl = readable ? homeUrlFor(member, street) : `${community.origin}${community.pathname.replace(/\/+$/, "")}/unreadable-${homes.length}`;
     if (readable) homeUrls.add(sourceUrl);
     // The site marks a model only in its label ("Model Home Available"); a model is not for sale (the sync leaves a "Model" home out).
-    const model = /\bmodel\s+home\b/i.test(str(home.special_feature_headline) ?? "");
+    const label = str(home.special_feature_headline) ?? "";
+    const model = /\bmodel\s+home\b/i.test(label) && !/\b(?:former|for\s+sale|now\s+selling|now\s+available)\b/i.test(label);
     homes.push({
       sourceUrl,
       privateName: street,

@@ -394,7 +394,7 @@ async function promotions(fetcher: HtmlFetcher, now: number, snapshot: PrivateDe
   const today = new Date(now).toISOString().slice(0, 10);
   const current = list.filter((promotion) => (promotion.siteWide || (communityId !== null && promotion.communityIds.includes(communityId))) && (!promotion.end || promotion.end.slice(0, 10) >= today) && (!promotion.start || promotion.start.slice(0, 10) <= today));
   // One promotion only: joining two would publish one's deadline or down payment as a term of the other's rate.
-  const namesRate = (promotion: WeekleyPromotion) => parsePromotionalRate(promotion.text).rateKind !== "none";
+  const namesRate = (promotion: WeekleyPromotion) => parsePromotionalRate(promotion.text).promotionalRatePercent !== null;
   const chosen = current.find((promotion) => !promotion.siteWide && namesRate(promotion)) ?? current.find(namesRate) ?? current.find((promotion) => !promotion.siteWide) ?? current[0];
   return { text: chosen?.text ?? null };
 }

@@ -283,8 +283,11 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   YYYY>"), under "N Available Homes In This Neighborhood" (the count is
   checked against the rows; rows without the count, or a count without the
   table, hold). The homes have no pages; each is filed as a fragment of the
-  community page keyed by its street (`#home-<street slug>`), so a row's key
-  does not shift when another row goes. No photos per home.
+  community page keyed by its street (`/<community>/available-homes/<street
+  slug>` — a path, since the source key drops fragments and query strings),
+  so a row's key does not shift when another row goes. The offer is the one
+  element whose own text opens with "Terms are based upon a loan", never the
+  page text after it. No photos per home.
 - Plans: `.plan-card` with heading link, specs, `awh.widen.net` photos; no
   price (the site sells by monthly payment: "Own your new home from
   $1,427/month*", which is not read).
@@ -332,6 +335,49 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   names no rate, so it is held for a look. Image-only popups say nothing.
 - Scrub: Legend Homes, Legend Home, Camillo Companies (parent), Camillo.
 
+## Drees Custom Homes reader (added 2026-10-20)
+
+- Site: `www.dreeshomes.com`. Community pages are an app shell naming the
+  page in an inline script (`var contentId = 309651; var isNeighborhoodPage
+  = true;`; a parent community such as Haby Hill says `isCommunityPage=true`
+  and `url="/new-homes-san-antonio/san-antonio/comm-haby-hills/"`). The
+  content comes from the site's own JSON API with POST search queries, which
+  the reader sends as the page does — the only POST in the readers
+  (`postJsonDocument`: official host only, no credentials, no redirect, a
+  body of `{ contentId, pageSize, pageNumber }`, never a form):
+  `GET /api/en/dreeshomes/areas` (San Antonio `pageId` 310095),
+  `POST …/community` (the market's 10 neighborhoods: name, `url`, model
+  `address`, city, ZIP, `modelPhone`, pin, `priceLow`, `qmiCount`,
+  `planCount`, `isCommunity`), `POST …/qmi` (homes: `address`, `url`,
+  `planName`, `moveInDate` "Jan 23, 2027", `discountedPrice` = price,
+  `actualPrice` = the price before a cut or 0, specs, `isModelHome`,
+  `isBoylHome`, `mlsNumber`; `filteredRecords`; the market's `promos`),
+  `POST …/plan` (plans with `priceLow`, `suppressPrice`, `isPlanAvailable`).
+  A GET to the search paths answers 405.
+- Homes: the cards say "Move-in date: Jan 23, 2027" only (49 homes in the
+  market in October 2026, dates from Oct 14, 2026 to Apr 2027); a date that
+  has passed is an undated quick move-in, never "ready now"; a model is a
+  Model (left out); a build-on-your-lot listing is skipped. The home page is
+  the row's `url` under the community's path (a parent's under its
+  sub-neighborhoods'). No per-home photos (a separate image endpoint; not
+  read).
+- Corroboration: `filteredRecords` against the rows and the market row's
+  `qmiCount` against the homes read; the market row's `url` must be the
+  page's (`invalid_inventory_response` otherwise); a row without the model
+  address holds. The market list (areas + community query) is read once an
+  hour.
+- Offers: `promos` on every query ("Save Your Way Up To $50,000!*" with the
+  description "… this promotion ends November 22, 2026!"); one promo is the
+  offer, a rate-naming one first.
+- Discovery: the reader lists the market itself (`DiscoveryReader.index.kind
+  "reader"`); a parent community stands for its sub-neighborhoods and takes
+  the first one's model address (the parent row names none), as with Ashton
+  Woods. The research list carries sub-neighborhood URLs (Esperanza 70s,
+  Ladera 50s): where a parent is also onboarded the same homes would move
+  between the two — keep one of each pair.
+- Scrub: Drees Custom Homes, Drees Homes, The Drees Company, Drees; lender
+  First Equity Mortgage.
+
 ## Meritage Homes: deferred
 
 - `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.
@@ -346,4 +392,8 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - KB Home: the page's home links are counted under the community's own path only and the smaller "Move-in Ready (N)" count on the page is the community's; a page that shows only the market-wide count (no community count) would hold every run.
 - Ashton Woods, LGI Homes: zero cards or an empty plan list is read as the page says (nothing for sale); neither page carries a count to check it against. Find one on the live page if a sweep to sold is ever seen.
 - LGI Homes cards on the landing page say "0 homes" because LGI sells plans only and the card counts quick move-in homes.
+- Scott Felder: every San Antonio community row's `area` must slug to the URL's sub-market ("Schertz/Cibolo" → `schertzcibolo`); a blank or differently worded `area` holds every run.
+- DRB / Legend: if the API's `moveInNowHomesCount` counts hidden (`displayInventory: false`) rows the community holds `incomplete_inventory` every run; a home row with `status` other than "active" and `salesStatus` "available" would publish (row-level `status` is not read); `availabilityDate` is compared in UTC (a one-day skew around midnight is possible for the ready-now label).
+- Starlight: the footer's "**Monthly payment" note and `&copy;` line follow the terms paragraph; the reader now reads the paragraph's own element, so neither matters. A sold-out community's count wording ("0 Available Homes" with no table) is a live check.
+- KB Home: a community heading "Move-in Ready (0)" beside the market's count corroborates an empty list; "(0)" beside a list with homes says nothing.
 - Century: if the live page renders the card list twice (mobile and desktop) or shows sold or model cards with `.street-number-text`, the card count exceeds the records and every run holds. The sitemap is one 2 MB urlset (8,205 URLs, no index) today.

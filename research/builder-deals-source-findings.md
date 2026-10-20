@@ -111,6 +111,18 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - **Incentives:** a monthly-payment disclaimer template (KBHS Home Loans, NMLS id) and site-wide banners; no community offer terms on the page. Not read.
 - **Scrub:** KB Home, KB Homes, KB; lender KBHS Home Loans, KBHS.
 
+## Toll Brothers reader (added 2026-10-20)
+
+- **Community source:** `https://www.tollbrothers.com/luxury-homes-for-sale/Texas/<slug>[/<Collection>]` (the metro search page `/luxury-homes/San-Antonio-TX` lists 13 entries; master communities such as Regency at Esperanza and Mayfair nest their collections, each a community page of its own).
+- **Site shape:** Next.js (pages router). `__NEXT_DATA__.props.pageProps.pageData.communityComponent` carries the community: `homes.models[]` (plans: `name`, `pricedFrom` number, `minBed`, `minBath`, `minHalfBath`, `minSqft`, `minGarage`, `url`, `headShot.media.url`, `elevations[]`), each with `qmis[]` (homes: `street`, `pricedFrom`, `moveInDate` "2026-11-30", `isComingSoon`, `lotNumber`, `url` ".../Quick-Move-In/<id>", `communityId`, `modelName`, photos), `qmiSitePlanLots` (the site plan's count of homes for sale, matched the qmis count on every page seen), `salesOffice` (street, city, zip, phone, lat, lon, sales people — not read), `schoolInfo.schoolDistrict`, `amenities.amenityGroups[].amenities[]`, and `events[]`. Status comes from `moveInDate`: on or before today is ready, later names its month, `isComingSoon` is "Coming Soon" (not published), no date is no status (held). Fewer homes than the site plan counts holds the run. Photos sit on `cdn.tollbrothers.com`; drawings (`floorplans`, `siteplans`, `.svg`, logos) are skipped.
+- **Incentives:** `events[]` carry the national sales event ("Up to $45,000 to Use Your Way on Build to Order Homes", deposit window in the disclaimer) and a rate banner (`bannerEventNational`: "5.49% (6.27% APR) FHA 30-Year Fixed", paragraphs with the down payment and closing deadline, a disclaimer with the lender's NMLS id). The reader takes the event naming a rate (else the first), strips links, phone numbers and NMLS ids, and hands the text to the promotional-rate parser; on the fixture wording the contract window ("on or after 10/8/26") is not a deadline the parser reads, so the offer waits for an admin look.
+- **Listing (discovery):** `searchResults.perfect[]` on the metro page: `CommunitySearchItem` with `streetAddress`, `city`, `zipCode`, `phone`, `lat`, `lon`, `pMin`, `url`; `MasterCommunitySearchItem` with `communities[]` of the same shape. Entries without coordinates are skipped.
+- **Scrub:** Toll Brothers, Toll Brothers Inc; lender Toll Brothers Mortgage Company, Toll Brothers Mortgage, TBI Mortgage ("Toll" alone is an ordinary word and is not an alias).
+
+## Meritage Homes: deferred
+
+- `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.
+
 ## Live checks before launch (fail-safe holds the fixtures cannot settle)
 
 - D.R. Horton: a community with zero quick move-in homes may omit the `#relatedmovein` block; the reader then holds `expected_community_container_not_found` and its plans never publish. Check one such community live; if the block is omitted, relax the hold to "block absent, `#floorplans` present with counts, LocalBusiness record present and no `available-home-card` anywhere" (still holds when the cards are merely renamed).

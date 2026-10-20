@@ -8,12 +8,13 @@ import { DavidsonAdapter } from "./dealsAdapters.davidson";
 import { HighlandAdapter } from "./dealsAdapters.highland";
 import { CenturyAdapter } from "./dealsAdapters.century";
 import { KbHomeAdapter } from "./dealsAdapters.kbhome";
+import { TollBrothersAdapter } from "./dealsAdapters.toll";
 
 /**
  * Official, read-only builders supported by this module.  These display names
  * deliberately exist only in the private/internal half of an adapter result.
  */
-export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Manual";
+export type BuilderId = "Chesmar" | "M/I Homes" | "Perry Homes" | "D.R. Horton" | "Pulte" | "Centex" | "Del Webb" | "First America Homes" | "Coventry Homes" | "Davidson Homes" | "Highland Homes" | "Century Communities" | "KB Home" | "Toll Brothers" | "Manual";
 
 export interface CommunitySourceConfig {
   /** Selects an adapter from DEAL_ADAPTERS. */
@@ -231,8 +232,9 @@ export const DAVIDSON_HOST = "www.davidsonhomes.com";
 export const HIGHLAND_HOST = "www.highlandhomes.com";
 export const CENTURY_HOST = "www.centurycommunities.com";
 export const KBHOME_HOST = "www.kbhome.com";
+export const TOLL_HOST = "www.tollbrothers.com";
 /** The exact official hosts each adapter accepts; apex or other subdomains hold every run. */
-export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST };
+export const OFFICIAL_BUILDER_HOSTS: Readonly<Record<Exclude<BuilderId, "Manual">, string>> = { Chesmar: CHESMAR_HOST, "M/I Homes": MI_HOST, "Perry Homes": PERRY_HOST, "D.R. Horton": DRHORTON_HOST, ...PULTEGROUP_HOSTS, ...HOMEFINITI_HOSTS, "Davidson Homes": DAVIDSON_HOST, "Highland Homes": HIGHLAND_HOST, "Century Communities": CENTURY_HOST, "KB Home": KBHOME_HOST, "Toll Brothers": TOLL_HOST };
 /** True when a reader exists for this builder's official site (new builders get one at a time). */
 export function hasBuilderReader(builder: string): builder is Exclude<BuilderId, "Manual"> {
   return Object.prototype.hasOwnProperty.call(OFFICIAL_BUILDER_HOSTS, builder);
@@ -1119,6 +1121,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "Perry Homes") { config.builder.push("Perry Homes", "Perry"); config.lender.push("Parkstone Mortgage", "Parkstone", "Crestmark Mortgage", "Crestmark"); }
   if (builder === "Century Communities") { config.builder.push("Century Communities", "Century Complete", "Century"); config.lender.push("Inspire Home Loans", "Inspire"); }
   if (builder === "KB Home") { config.builder.push("KB Home", "KB Homes", "KB"); config.lender.push("KBHS Home Loans", "KBHS"); }
+  if (builder === "Toll Brothers") { config.builder.push("Toll Brothers", "Toll Brothers Inc"); config.lender.push("Toll Brothers Mortgage Company", "Toll Brothers Mortgage", "TBI Mortgage"); }
   if (builder === "Highland Homes") { config.builder.push("Highland Homes", "Highland"); config.lender.push("Highland HomeLoans", "Highland Home Loans"); }
   if (builder === "Davidson Homes") { config.builder.push("Davidson Homes", "Davidson"); config.lender.push("NorthStar Mortgage Advisors", "NorthStar Mortgage", "NorthStar"); }
   if (builder === "First America Homes") { config.builder.push("First America Homes", "First America"); }
@@ -1761,6 +1764,7 @@ let davidsonAdapter: DealAdapter | null = null;
 let highlandAdapter: DealAdapter | null = null;
 let centuryAdapter: DealAdapter | null = null;
 let kbHomeAdapter: DealAdapter | null = null;
+let tollAdapter: DealAdapter | null = null;
 export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   Chesmar: new ChesmarAdapter(),
   "M/I Homes": new MiHomesAdapter(),
@@ -1776,6 +1780,7 @@ export const DEAL_ADAPTERS: Readonly<Record<BuilderId, DealAdapter>> = {
   get "Highland Homes"() { return (highlandAdapter ??= new HighlandAdapter()); },
   get "Century Communities"() { return (centuryAdapter ??= new CenturyAdapter()); },
   get "KB Home"() { return (kbHomeAdapter ??= new KbHomeAdapter()); },
+  get "Toll Brothers"() { return (tollAdapter ??= new TollBrothersAdapter()); },
   Manual: new ManualAdapter(),
 };
 

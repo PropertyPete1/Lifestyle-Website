@@ -50,6 +50,7 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "media.hhomesltd.com",
   "www.centurycommunities.com",
   "www.kbhome.com",
+  "cdn.tollbrothers.com",
 ]);
 const ACCEPTED_IMAGE_FORMATS = new Set(["jpeg", "png", "webp", "avif", "gif", "heif"]);
 

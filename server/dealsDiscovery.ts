@@ -7,12 +7,13 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { CENTURY_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { CENTURY_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
 import { highlandRecord } from "./dealsAdapters.highland";
 import { kbRecord } from "./dealsAdapters.kbhome";
+import { tollListingEntries, tollListingUrl } from "./dealsAdapters.toll";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
 
 /**
@@ -120,6 +121,12 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "KB Home", host: KBHOME_HOST, index: { kind: "sitemap", url: `https://${KBHOME_HOST}/sitemap.xml` },
     communityPath: /^\/new-homes-san-antonio\/[a-z0-9-]+\/?$/i,
     record: (html) => kbRecord(html),
+  },
+  {
+    // Toll Brothers: the metro search page's Next.js data lists every community with its address and coordinates (collections of a master community included), so no page is read.
+    builder: "Toll Brothers", host: TOLL_HOST,
+    index: { kind: "listing", url: tollListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => tollListingEntries(body, host) },
+    communityPath: /^\/luxury-homes-for-sale\/Texas\/[A-Za-z0-9%'.-]+(?:\/[A-Za-z0-9%'.-]+)?\/?$/,
   },
   { builder: "Century Communities", host: CENTURY_HOST, index: { kind: "sitemap", url: `https://${CENTURY_HOST}/sitemap.xml` }, communityPath: /^\/find-your-new-home\/texas\/san-antonio-metro\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({

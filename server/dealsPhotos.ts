@@ -63,6 +63,8 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "yourviewhome.com",
   // Texas Homes serves its photos from its Drupal files (…/sites/default/files/…); the path is checked below.
   "www.texas-homes.com",
+  // Hakes Brothers serves its photos from its media library (…/storage/app/medialibrary/…); the path is checked below.
+  "www.hakesbrothers.com",
   // LGI Homes serves its photos from Sitecore's edge CDN (…/lgihomesinc…/…); the path is checked below.
   "edge.sitecorecloud.io",
 ]);
@@ -292,6 +294,7 @@ export function safeDealImageUrl(raw: string): URL {
   if (url.hostname.toLowerCase() === "s3.amazonaws.com" && !/^\/buildercloud\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "yourviewhome.com" && !/^\/wp-content\/uploads\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "www.texas-homes.com" && !/^\/sites\/default\/files\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
+  if (url.hostname.toLowerCase() === "www.hakesbrothers.com" && !/^\/storage\/app\/medialibrary\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   return url;
 }
 

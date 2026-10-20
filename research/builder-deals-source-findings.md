@@ -490,6 +490,45 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
   community paths.
 - Scrub: Texas Homes; lender CMG Mortgage, CMG Home Loans, CMG.
 
+## Hakes Brothers reader (added 2026-10-20)
+
+- Site: `www.hakesbrothers.com` (October CMS "rADMIN", server-rendered,
+  Alpine for the calculator only). The community page
+  `/san-antonio/<slug>` carries a schema.org `HomeAndConstructionBusiness`
+  record ("Hakes Brothers at The Woodlands": sales address, phone, pin,
+  own `url`), one `SingleFamilyResidence` record per home for sale (`url`,
+  street address, pin, `floorSize`, bedrooms, full/partial bathrooms,
+  photo) and the "Find Your New Home Design" tabs (`#home-tabs`):
+  `#home-designs` with one `article.card` per plan (`.plan-card__title a`
+  → `/san-antonio/<slug>/home-design/<plan>-at-<slug>`, "Pricing starting
+  at $259,490", Square Feet / Bedrooms / Bathrooms / Garage cells with
+  "2.5 - 3" and "4+" values, slick-slider elevation photos under
+  `/storage/app/medialibrary/…/conversions/*-large.jpg`) and, only when
+  homes are for sale, `#quick-move-in-homes` with one
+  `article.card[data-spec][data-move-in-date][data-price][data-sqft]` per
+  home (`.card-title` "Move-In Ready" or "Dec 2026", the street linking to
+  `/san-antonio/<slug>/home/<street slug>`, `del.card__original-price`
+  and the price, the same cells, "Homesite Number: 4", an "Est. Monthly
+  Payment" button). 14 homes across 11 communities on 2026-10-20 (Hickory
+  Ridge had no quick move-in tab at all). The reader takes the cards for
+  statuses and prices and requires the residence records to name the same
+  set of home pages (`incomplete_inventory` otherwise; a tab with no cards,
+  or a record with no tab, is a changed page). The hero cells give the
+  status ("Now Selling", "Final Opportunities"), the school district and
+  the county; the district is read from its own cell (the generic text
+  rule would glue "Now Selling" to it).
+- Statuses: "Move-In Ready" is ready; "Dec 2026" names a month (a passed
+  one undated); without a label the card's `data-move-in-date` decides
+  (passed → ready); other wording holds.
+- Offers: none on the site in October 2026 (the mortgage calculator's
+  "10% down payment … 6.5% interest rate" wording is not an offer and is
+  never read).
+- Discovery: `/san-antonio` links every community (`/san-antonio/<slug>`,
+  11 on 2026-10-20 including La Cima in San Marcos — inside the 45-mile
+  rule, so it is onboarded — and the coming-soon Highland Gardens, Mesa Vista and Park Place);
+  each page is read for its business record.
+- Scrub: Hakes Brothers, Hakes Bros, Hakes (no affiliated lender named).
+
 ## Meritage Homes: deferred
 
 - `meritagehomes.com` is a Sitecore/Next.js site whose community pages ("Community Multi-Series Landing Page") render homes and plans in the browser from Sitecore Discover (`discover.sitecorecloud.io`), a search service called with the site's own client key. The page's `__NEXT_DATA__` holds navigation, dictionary strings and promotions only. Using the site's frontend key is not done (same rule as CastleRock). Parked.
@@ -513,4 +552,5 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - KB Home: a community heading "Move-in Ready (0)" beside the market's count corroborates an empty list; "(0)" beside a list with homes says nothing.
 - View Homes: if the roster's `homes[]` ever omits a home the page shows (or shows one the page hides) every run holds `incomplete_inventory`; a badge wording other than "Ready Now!" / "Est. Completion- <Month>" (e.g. a sold label) holds through the sync's status rule. The promo banner changes per campaign: a page without `.promo-overview` holds the offer only (`expected_incentive_container_not_found`).
 - Texas Homes: the menu count is read as a lower bound only; a community page without the "Quick Move-In Homes in <name>" link while the menu counts homes for it holds every run (the closeouts Bent Tree and Vistas of Sonoma have no menu row; `/bent-tree` answered 403 on 2026-10-20 — a bot block would hold `community_fetch_failed`). Whether a coming-soon or sold-out page keeps the `.sales-address-link` block is unknown (without it or the pin the page holds).
+- Hakes Brothers: a coming-soon page's shape is unknown (Highland Gardens, Mesa Vista, Park Place): without the business record's street, or without `#home-tabs`, the page holds `expected_community_container_not_found` until it opens; if the residence records ever list a home the cards hide (or the reverse), the community holds `incomplete_inventory` every run.
 - Century: if the live page renders the card list twice (mobile and desktop) or shows sold or model cards with `.street-number-text`, the card count exceeds the records and every run holds. The sitemap is one 2 MB urlset (8,205 URLs, no index) today.

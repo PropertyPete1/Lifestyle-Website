@@ -18,6 +18,7 @@ import { parsePromotionalRate, publicTextResidue } from "./dealsAdapters";
 import { refreshOfficialDeals, revalidateDealIncentives } from "./dealsSync";
 import { acceptIncentiveHold, dismissIncentiveHold, listCommunityDiagnostics, saveIncentiveForCommunity } from "./dealsSyncAdmin";
 import { gatedDealsCatalog, publicDealsCatalog } from "./dealsService";
+import { AUTO_ACCEPTED_NO_DEADLINE, heldIncentivePublicEntry, heldIncentiveShowsLine } from "../shared/dealsHeldIncentive";
 
 const COMMUNITY_URL = "https://www.mihomes.com/new-homes/texas/greater-san-antonio/southeast-san-antonio/fixture-gardens";
 const home = (slug: string) => `${COMMUNITY_URL}/fixture-a-plan/${slug}`;
@@ -731,6 +732,128 @@ describe("incentive state machine: random sequences with offerRead", () => {
     console.log("STATS", JSON.stringify(stats));
     console.log("LEGACY", JSON.stringify(legacyLog));
     expect(stats["not read"]).toBeGreaterThan(300);
+    expect(violations.slice(0, 5)).toEqual([]);
+  }, 300_000);
+
+  it("300 random sequences of 14 steps with two deadline-only texts (one undated, one with a date the parser cannot read) beside the five above: a deadline-only text is published by itself exactly when nothing forbids it, the mark never sits on a held, manual or admin-accepted row, the sync never adopts a marked row as an admin's Accept, a held text shows only the neutral line, and the r22 invariants still hold", async () => {
+    const NO_DATE = "Up to $10,000 toward closing costs paid by the builder on select quick move-in homes.";
+    const UNREAD_DATE = "Up to $10,000 toward closing costs on homes that close by December 15.";
+    const WALK_TEXTS = [...TEXTS, NO_DATE, UNREAD_DATE];
+    const identity = new Map<string, string>();
+    for (const text of WALK_TEXTS) {
+      db = new FakeDealsDb(); mocks.getDb.mockResolvedValue(db);
+      const id = seedCommunity();
+      await run(text, 0, id);
+      identity.set(text, incentiveRows()[0]!.normalizedText);
+    }
+    const violations: string[] = [];
+    const stats: Record<string, number> = {};
+    const bump = (key: string) => { stats[key] = (stats[key] ?? 0) + 1; };
+    const snapshotRows = () => JSON.stringify(incentiveRows().map(({ updatedAt: _u, ...row }) => row));
+    for (let sequence = 0; sequence < 300; sequence++) {
+      db = new FakeDealsDb(); mocks.getDb.mockResolvedValue(db); mocks.sendBuilderDealsEmail.mockClear();
+      const random = prng(sequence + 101);
+      const communityId = seedCommunity();
+      const lead = seedLead();
+      const log: string[] = [];
+      let hours = 0;
+      const accepted = new Set<string>();
+      for (let step = 0; step < 14; step++) {
+        const pick = Math.floor(random() * 16);
+        const check = (label: string, ok: boolean) => { if (!ok) violations.push(`seq ${sequence} after [${log.join(" → ")}]: ${label}`); };
+        if (pick <= 6) {
+          const text = WALK_TEXTS[pick]!;
+          log.push(`read ${pick}`); bump("read");
+          const manualLive = live().some((row) => row.manual);
+          const want = identity.get(text)!;
+          // A text that would take off a live record with an admin's date waits for the admin (new or returning), and a held
+          // text that replaced one keeps waiting while that admin's date still runs; otherwise nothing is carried.
+          const readAt = at(hours);
+          const adminDated = (row: Row) => Boolean((row.contractBy && (row.contractByManual || row.manual)) || (row.closeBy && (row.closeByManual || row.manual)));
+          const datedByAdmin = live().some((row) => row.normalizedText !== want && adminDated(row));
+          const ownBefore = incentiveRows().find((row) => row.normalizedText === want && !row.manual);
+          const adminDateRuns = incentiveRows().some((row) => row.normalizedText !== want && !row.held && adminDated(row) && row.holdReason !== "dismissed" && row.holdReason !== "expired" && Boolean(row.expiresAt && row.expiresAt > readAt));
+          const waitsForAdmin = datedByAdmin || (Boolean(ownBefore?.held && /replaces_manual_date/.test(ownBefore.holdReason ?? "")) && adminDateRuns);
+          await run(text, hours++, communityId);
+          check("live non-manual row for another text", live().every((row) => row.manual || row.normalizedText === want));
+          check("held row for another text", heldRows().every((row) => row.normalizedText === want));
+          const own = incentiveRows().find((row) => row.normalizedText === want && !row.manual)!;
+          const settledOff = own.holdReason === "expired" || own.holdReason === "dismissed";
+          if (text === NO_DATE) {
+            bump("deadline-only read");
+            if (manualLive) check("published by itself beside a live manual override", !own.active && own.holdReason !== AUTO_ACCEPTED_NO_DEADLINE);
+            else if (!settledOff && !own.acceptedAt && waitsForAdmin) { bump("held for an admin's date"); check("a text that would drop an admin's date was not held", own.held && JSON.parse(own.holdReason ?? "[]").includes("replaces_manual_date")); }
+            else if (!settledOff && !own.acceptedAt) { bump("auto-published"); check("deadline-only text not published by itself", own.active && !own.held && own.holdReason === AUTO_ACCEPTED_NO_DEADLINE); }
+          }
+          if (text === UNREAD_DATE) {
+            check("a text with an unreadable date was published by itself", !(own.active && own.holdReason === AUTO_ACCEPTED_NO_DEADLINE));
+            if (!settledOff && !own.acceptedAt && !manualLive) check("a text with an unreadable date is not held", own.held);
+          }
+          if (TEXTS.includes(text)) check("an ordinary text carries the mark", own.holdReason !== AUTO_ACCEPTED_NO_DEADLINE);
+          // What a buyer sees: the live offer, else the neutral line for a held text, never a figure of the held text.
+          const shown = ((await gatedDealsCatalog(lead)) as Gated)[0]!.incentive as (Gated[number]["incentive"] & { pending?: boolean }) | null;
+          const now = new Date();
+          const liveRow = live().find((row) => row.expiresAt ? row.expiresAt > now : row.confirmedAt.getTime() > now.getTime() - 14 * 86_400_000);
+          if (liveRow) check("a live offer is hidden behind the neutral line", Boolean(shown) && !shown!.pending);
+          else if (heldRows().some((row) => heldIncentiveShowsLine(row, now, 14))) {
+            bump("neutral line shown");
+            check("a held text shows more than the neutral line", JSON.stringify(shown) === JSON.stringify(heldIncentivePublicEntry()));
+          }
+          if (shown?.pending) check("the neutral line carries a figure", !/[\d%$]/.test(JSON.stringify(shown)));
+        } else if (pick === 7) {
+          log.push("empty read"); bump("empty read");
+          await run({ text: null, offerRead: true }, hours++, communityId);
+          check("live non-manual row after an empty read", live().every((row) => row.manual));
+          check("held row after an empty read", heldRows().length === 0);
+        } else if (pick === 8) {
+          log.push("not read"); bump("not read");
+          const before = snapshotRows();
+          const mails = holdEmails().length;
+          await run({ text: null, offerRead: false }, hours++, communityId);
+          check("a not-read run changed an incentive row", snapshotRows() === before);
+          check("a not-read run sent a hold e-mail", holdEmails().length === mails);
+        } else if (pick === 9) {
+          log.push("fetch failure"); bump("fetch failure");
+          const before = snapshotRows();
+          await run({ text: null, holds: ["incentive_fetch_failed"] }, hours++, communityId);
+          check("a fetch failure changed an incentive row", snapshotRows() === before);
+        } else if (pick === 10 && heldRows().length) {
+          const row = heldRows()[0]!;
+          log.push("accept"); bump("accept");
+          await acceptIncentiveHold({ id: row.id, publicText: row.publicText.includes("(210)") ? CLEAN_EDIT : undefined, closeBy: "2026-12-15", apr: row.apr ?? "6.62%", headlineRate: row.headlineRate ?? "4.99%", loanType: row.loanType ?? "FHA", downPayment: row.downPayment ?? "3.5% down payment", repaymentTerms: row.repaymentTerms ?? "30-year fixed" }).catch((error: Error) => { log.push(`(accept refused: ${error.message.slice(0, 40)})`); });
+          const after = incentiveRows().find((candidate) => candidate.id === row.id)!;
+          if (after.acceptedAt) { accepted.add(after.normalizedText); check("an admin Accept left the mark", after.holdReason !== AUTO_ACCEPTED_NO_DEADLINE); }
+        } else if (pick === 11 && heldRows().length) {
+          log.push("dismiss"); bump("dismiss");
+          await dismissIncentiveHold(heldRows()[0]!.id);
+        } else if (pick === 12 && live().length && !live()[0]!.manual) {
+          const row = live()[0]!;
+          log.push("save"); bump("save");
+          await saveIncentiveForCommunity({ id: row.id, communityId, publicText: row.publicText, manual: false, contractBy: "2026-12-31", headlineRate: row.headlineRate ?? "4.99%", apr: row.apr ?? "6.62%", loanType: row.loanType ?? "FHA", downPayment: row.downPayment ?? "3.5% down payment", repaymentTerms: row.repaymentTerms ?? "30-year fixed" }).then(() => accepted.add(row.normalizedText)).catch((error: Error) => { log.push(`(save refused: ${error.message.slice(0, 40)})`); });
+        } else if (pick === 13) {
+          log.push("lapse job"); bump("lapse job");
+          await revalidateDealIncentives(new Date(Date.now() + 15 * 86_400_000));
+          check("a marked row outlived the lapse rule", live().every((row) => row.holdReason !== AUTO_ACCEPTED_NO_DEADLINE));
+        } else if (pick === 14 && !live().some((row) => row.manual) && random() < 0.3) {
+          log.push("manual override"); bump("manual override");
+          await saveIncentiveForCommunity({ communityId, publicText: MANUAL, manual: true });
+        } else if (pick === 15 && live().length && !live()[0]!.manual && live()[0]!.acceptedAt && !live()[0]!.contractByManual && !live()[0]!.closeByManual) {
+          log.push("legacy reset"); bump("legacy reset");
+          (live()[0] as { acceptedAt: Date | null }).acceptedAt = null;
+        }
+        for (const row of incentiveRows()) {
+          if (row.holdReason === AUTO_ACCEPTED_NO_DEADLINE) check("the mark on a held, manual or accepted row", !row.held && !row.manual && !row.acceptedAt);
+          // Only an admin's Accept or save (or the adoption of one, which needs an earlier Accept of that text) sets accepted_at.
+          if (row.acceptedAt && !row.manual) check("accepted_at set on a text no admin accepted", accepted.has(row.normalizedText));
+        }
+        if (heldRows().length > 1) violations.push(`seq ${sequence} after [${log.join(" → ")}]: ${heldRows().length} held rows`);
+        if (incentiveRows().filter((row) => row.active).length > 1) violations.push(`seq ${sequence} after [${log.join(" → ")}]: two live rows`);
+      }
+    }
+    console.log("STATS (auto-accept walk)", JSON.stringify(stats));
+    expect(stats["auto-published"]).toBeGreaterThan(50);
+    expect(stats["held for an admin's date"]).toBeGreaterThan(5);
+    expect(stats["neutral line shown"]).toBeGreaterThan(100);
     expect(violations.slice(0, 5)).toEqual([]);
   }, 300_000);
 });

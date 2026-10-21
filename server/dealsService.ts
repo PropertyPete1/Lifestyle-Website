@@ -39,7 +39,9 @@ import { sendBuilderDealsEmail } from "./dealsEmail";
 import { effectiveScrubConfig } from "./dealsScrub";
 import { loanTypeLabel, priceBandFloor, priceBandLabel } from "../shared/dealsFeatured";
 import { incentiveTeaser } from "../shared/dealsTeaser";
+import { heldIncentivePublicEntry, heldIncentiveShowsLine } from "../shared/dealsHeldIncentive";
 import { checkTwilioVerify } from "./dealsVerification";
+import { mentionsRate, mentionsTriggeringTerm } from "./dealsAdapters";
 
 export type DealSettings = {
   allowCanada: boolean;
@@ -527,6 +529,20 @@ async function liveIncentivesByCommunity(db: NonNullable<Awaited<ReturnType<type
   return byCommunity;
 }
 
+/**
+ * Communities whose current offer is held for a publication rule (shared/dealsHeldIncentive): the buyer pages show
+ * the neutral "Builder incentive available" line for them, never anything from the held text. Only consulted for a
+ * community with no live incentive.
+ */
+async function heldLineCommunities(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, communityIds: number[], now: Date, lapseDays: number): Promise<Set<number>> {
+  const shown = new Set<number>();
+  if (!communityIds.length) return shown;
+  const rows = await db.select({ communityId: dealIncentives.communityId, held: dealIncentives.held, holdReason: dealIncentives.holdReason, expiresAt: dealIncentives.expiresAt, confirmedAt: dealIncentives.confirmedAt })
+    .from(dealIncentives).where(and(inArray(dealIncentives.communityId, communityIds), eq(dealIncentives.held, true)));
+  for (const row of rows) if (heldIncentiveShowsLine(row, now, lapseDays)) shown.add(row.communityId);
+  return shown;
+}
+
 /** Rows grouped by a numeric key, keeping their order. */
 function groupBy<T>(rows: readonly T[], key: (row: T) => number): Map<number, T[]> {
   const grouped = new Map<number, T[]>();
@@ -601,14 +617,15 @@ export async function publicDealsCatalog(src?: string | null) {
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
   const { areaMapRadius, communityAreaMap } = await import("./dealsMap");
   const publicRadius = areaMapRadius(settings, "public");
-  const result = [] as Array<{ label: string; area: string; fromPrice: number | null; fromPriceLabel: string | null; reelUrl: string | null; homesAvailable: number; incentive: ReturnType<typeof publicIncentive> | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean }>;
+  const result = [] as Array<{ label: string; area: string; fromPrice: number | null; fromPriceLabel: string | null; reelUrl: string | null; homesAvailable: number; incentive: (ReturnType<typeof publicIncentive> & { pending?: true }) | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean }>;
   if (!communities.length) return result;
   const reelCode = src?.trim().toLowerCase() || null;
   // Two reads for the whole page, however many communities there are.
   const ids = communities.map((community) => community.id);
-  const [availableNow, incentives] = await Promise.all([
+  const [availableNow, incentives, heldLine] = await Promise.all([
     db.select({ communityId: dealHomes.communityId }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"), eq(dealHomes.kind, "quick_move_in"))),
     liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
+    heldLineCommunities(db, ids, now, settings.incentiveLapseDays),
   ]);
   const availableCount = new Map<number, number>();
   for (const home of availableNow) availableCount.set(home.communityId, (availableCount.get(home.communityId) ?? 0) + 1);
@@ -624,7 +641,9 @@ export async function publicDealsCatalog(src?: string | null) {
       reelUrl: community.reelUrl,
       homesAvailable: availableCount.get(community.id) ?? 0,
       // The landing card shows the teaser and figures; the full wording and the deadlines wait for sign-up.
-      incentive: incentive ? (({ text: _text, contractBy: _contractBy, closeBy: _closeBy, ...teaser }) => ({ ...teaser, text: teaser.teaser, contractBy: null, closeBy: null }))(publicIncentive(incentive, (value) => scrubPrivateNames(value, communityScrubConfig(community)))) : null,
+      // A held offer shows the neutral line only, never a figure or name from its text.
+      // A rate never shows without its APR (rateDisclosedIncentive).
+      incentive: incentive ? (() => { const shown = rateDisclosedIncentive(incentive); return shown ? (({ text: _text, contractBy: _contractBy, closeBy: _closeBy, ...teaser }) => ({ ...teaser, text: teaser.teaser, contractBy: null, closeBy: null }))(publicIncentive(shown, (value) => scrubPrivateNames(value, communityScrubConfig(community)))) : null; })() : heldLine.has(community.id) ? heldIncentivePublicEntry() : null,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       // A wide circle around the ZIP code centroid: "this side of town", never the community.
       areaMap: communityAreaMap(community, { variant: "public", radiusMiles: publicRadius }),
@@ -633,6 +652,20 @@ export async function publicDealsCatalog(src?: string | null) {
     result.push(entry);
   }
   return result;
+}
+
+/**
+ * Reg Z on every buyer surface (1026.24(c), (d)): a rate, and any triggering term (a payment amount, a down payment, a
+ * number of payments or a repayment period), is printed only beside its APR. A live record with no stored APR shows
+ * only its sentences that state neither; its rate, follow-on, down payment and repayment-term fields are left out.
+ * Nothing left means no incentive at all. A record with an APR is returned as it is.
+ */
+export function rateDisclosedIncentive<T extends Pick<typeof dealIncentives.$inferSelect, "publicText" | "headlineRate" | "followOnRate" | "followOnPeriod" | "apr" | "downPayment" | "repaymentTerms">>(row: T): T | null {
+  if (normalizeRateFigure(row.apr)) return row;
+  const discloses = (sentence: string) => mentionsRate(sentence) || mentionsTriggeringTerm(sentence);
+  const kept = row.publicText.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+(?=["“(]?[A-Z0-9$])/).filter((sentence) => sentence.trim() && !discloses(sentence)).join(" ").trim();
+  if (!/[A-Za-z]/.test(kept)) return null;
+  return { ...row, publicText: kept, headlineRate: null, followOnRate: null, followOnPeriod: null, downPayment: null, repaymentTerms: null };
 }
 
 /**
@@ -699,9 +732,10 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
   if (!communities.length) return data;
   // Three reads for the whole list (incentives, homes, photos), however many communities there are.
   const ids = communities.map((community) => community.id);
-  const [incentives, allHomes] = await Promise.all([
+  const [incentives, allHomes, heldLine] = await Promise.all([
     liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
     db.select().from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
+    heldLineCommunities(db, ids, now, settings.incentiveLapseDays),
   ]);
   const homesBy = groupBy(allHomes, (home) => home.communityId);
   const shownHomes = new Map(communities.map((community) => [community.id, selectDealCatalogHomes(homesBy.get(community.id) ?? [])]));
@@ -754,7 +788,8 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
       fromPrice: community.fromPrice,
       reelUrl: community.reelUrl,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
-      incentive: incentive ? publicIncentive(incentive, scrub, full) : null,
+      // A held offer shows the neutral line only (the team reads the held text in Admin).
+      incentive: incentive ? (() => { const shown = rateDisclosedIncentive(incentive); return shown ? publicIncentive(shown, scrub, full) : null; })() : heldLine.has(community.id) ? heldIncentivePublicEntry() : null,
       homes,
       ...(full ? { details: { builderName: community.builder === "Manual" ? null : community.builder, communityName: community.privateName, address: community.privateAddress || null, salesLine: view.builderPages ? community.salesPhone : null, builderPage: view.builderPages && /^https?:\/\//i.test(community.sourceUrl) ? community.sourceUrl : null } } : {}),
     };

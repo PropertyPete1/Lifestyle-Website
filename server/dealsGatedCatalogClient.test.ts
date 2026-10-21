@@ -260,7 +260,8 @@ describe("incentive rates: equal prominence (Reg Z)", () => {
   it("labels a rate with no follow-on period as the rate and still carries the APR", () => {
     expect(incentiveRateLines({ headlineRate: "5.5%", followOnRate: null, followOnPeriod: null, apr: "5.74%" })).toEqual(["Rate: 5.5%", "APR: 5.74%"]);
     expect(incentiveRateLines({ headlineRate: null, followOnRate: null, followOnPeriod: null, apr: "5.74%" })).toEqual(["APR: 5.74%"]);
-    expect(incentiveRateLines({ headlineRate: "4.99%", followOnRate: "6.5%", followOnPeriod: null, apr: null })).toEqual(["Rate: 4.99%", "6.5%"]);
+    // Reg Z: with no APR, no rate is printed at all.
+    expect(incentiveRateLines({ headlineRate: "4.99%", followOnRate: "6.5%", followOnPeriod: null, apr: null })).toEqual([]);
   });
 
   it("hides the rate row for a closing-cost-only promotion instead of showing empty gold cells", () => {

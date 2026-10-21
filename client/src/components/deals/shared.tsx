@@ -94,6 +94,8 @@ export type DealsIncentive = {
   repaymentTerms: string | null;
   contractBy: string | null;
   closeBy: string | null;
+  /** A held offer: the text is the neutral "Builder incentive available" line and every figure is null. */
+  pending?: boolean;
 };
 
 /** Every rate figure, its period and the APR share one size, weight and colour (Reg Z equal prominence). */
@@ -106,6 +108,8 @@ export const RATE_CLASS = "text-lg font-medium text-gold";
  */
 export function incentiveRateLines(incentive: Pick<DealsIncentive, "headlineRate" | "followOnRate" | "followOnPeriod" | "apr">): string[] {
   if (!incentive.headlineRate && !incentive.apr) return [];
+  // Reg Z: a rate is printed only beside its APR (the server leaves such a rate out; this keeps the card safe on its own).
+  if (!incentive.apr) return [];
   const lines: string[] = [];
   if (incentive.headlineRate) lines.push(`${incentive.followOnPeriod ? "First year" : "Rate"}: ${incentive.headlineRate}`);
   if (incentive.followOnRate) lines.push(`${incentive.followOnPeriod ? `${incentive.followOnPeriod}: ` : ""}${incentive.followOnRate}`);
@@ -115,6 +119,8 @@ export function incentiveRateLines(incentive: Pick<DealsIncentive, "headlineRate
 
 export function Incentive({ incentive, compact = false }: { incentive: DealsIncentive | null | undefined; compact?: boolean }) {
   if (!incentive) return null;
+  // A held offer shows its one neutral line: no figures, no financing fine print.
+  if (incentive.pending) return <div data-deals-incentive-pending="true" className="border-l-2 border-gold bg-gold/5 p-4"><p className="text-sm leading-relaxed text-foreground">{incentive.text}</p></div>;
   const deadline = (date: string | null, prefix: string) => date ? `${prefix} ${formatChicagoDate(date)}` : null;
   const rates = incentiveRateLines(incentive);
   return <div className="border-l-2 border-gold bg-gold/5 p-4">

@@ -21,6 +21,19 @@ import { pruneDealPhotoRenders, type DealPhotoRenderPruneResult } from "./dealsP
 import { photoDrainStall, readDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
 import { PRIVACY_RESIDUE_EVENT_KIND, getDealSettings, privacyResidueCommunityId, privacyResidueSinceStart } from "./dealsService";
 import { hasBuilderReader } from "./dealsAdapters";
+import { heldReasonsOf } from "../shared/dealsHeldIncentive";
+
+/**
+ * Whether a held offer puts the neutral line on the buyer pages, as the catalogs decide it: not one held because a manual
+ * override is live (the override shows; the sync records that as differs_from_manual_override on every read), not past
+ * a date it carries, and re-read within the lapse window. A row without those columns (older snapshot) counts.
+ */
+export function heldIncentiveCountsAsShowingLine(row: { holdReason: string | null; confirmedAt?: Date | null; expiresAt?: Date | null }, now: Date, lapseDays: number): boolean {
+  const reasons = heldReasonsOf(row.holdReason);
+  if (!reasons.length || reasons.includes("differs_from_manual_override")) return false;
+  if (row.expiresAt && row.expiresAt <= now) return false;
+  return !row.confirmedAt || row.confirmedAt.getTime() > now.getTime() - lapseDays * 86_400_000;
+}
 import { activeCatalogHold } from "./dealsSync";
 import { fubHeaders } from "./fub";
 
@@ -479,7 +492,8 @@ type OperationalSnapshot = {
   fubFailures: { jobs: number; leads: number; failingOverAnHour: number; state: HealthState };
   emailFailures: { failed: number; state: HealthState };
   jobFailures: { failed: number; jobs: string[]; state: HealthState };
-  holds: { communities: number; incentives: number; items: HoldItem[]; state: HealthState };
+  /** incentivesShowingLine: held offers whose community shows "Builder incentive available" (not those behind a manual override, nor stale ones). */
+  holds: { communities: number; incentives: number; incentivesShowingLine: number; items: HoldItem[]; state: HealthState };
   /** Buyer-facing community entries dropped because a private name survived scrubbing (deal_events rows in the window, plus the in-process counter). */
   privacyResidue: { dropped: number; communityIds: number[]; droppedSinceStart: number; state: HealthState };
 };
@@ -493,7 +507,7 @@ const emptyOperationalSnapshot = (): OperationalSnapshot => ({
   fubFailures: { jobs: 0, leads: 0, failingOverAnHour: 0, state: "unknown" },
   emailFailures: { failed: 0, state: "unknown" },
   jobFailures: { failed: 0, jobs: [], state: "unknown" },
-  holds: { communities: 0, incentives: 0, items: [], state: "unknown" },
+  holds: { communities: 0, incentives: 0, incentivesShowingLine: 0, items: [], state: "unknown" },
   privacyResidue: { dropped: 0, communityIds: [], droppedSinceStart: privacyResidueSinceStart().dropped, state: "unknown" },
 });
 
@@ -546,13 +560,15 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
       db.select({ count: sql<number>`COUNT(*)` }).from(dealFubJobs).where(eq(dealFubJobs.status, "failed")),
       db.select({ count: sql<number>`COUNT(*)` }).from(dealFubJobs).where(and(eq(dealFubJobs.status, "failed"), lt(dealFubJobs.createdAt, fubFailureCutoff))),
       db.select({ count: sql<number>`COUNT(*)` }).from(dealLeads).where(eq(dealLeads.fubStatus, "failed")),
-      db.select({ id: dealIncentives.id, communityId: dealIncentives.communityId, holdReason: dealIncentives.holdReason, createdAt: dealIncentives.createdAt }).from(dealIncentives).where(eq(dealIncentives.held, true)),
+      db.select({ id: dealIncentives.id, communityId: dealIncentives.communityId, holdReason: dealIncentives.holdReason, createdAt: dealIncentives.createdAt, confirmedAt: dealIncentives.confirmedAt, expiresAt: dealIncentives.expiresAt }).from(dealIncentives).where(eq(dealIncentives.held, true)),
       db.select({ count: sql<number>`COUNT(*)` }).from(dealEmailLogs).where(and(eq(dealEmailLogs.deliveryStatus, "failed"), gte(dealEmailLogs.createdAt, emailFailureCutoff))),
       db.select({ jobName: dealJobRuns.jobName }).from(dealJobRuns).where(and(eq(dealJobRuns.status, "failed"), gte(dealJobRuns.startedAt, jobFailureCutoff))),
       db.select({ detail: dealEvents.detail }).from(dealEvents).where(and(eq(dealEvents.kind, PRIVACY_RESIDUE_EVENT_KIND), gte(dealEvents.createdAt, jobFailureCutoff))),
     ]);
     // The stale limit follows Admin's "Check each builder page every (days)" plus a day of slack.
-    const refreshDays = await getDealSettings().then((settings) => settings.catalogRefreshDays).catch(() => 1);
+    const dealSettings = await getDealSettings().catch(() => null);
+    const refreshDays = dealSettings?.catalogRefreshDays ?? 1;
+    const lapseDays = dealSettings?.incentiveLapseDays ?? 14;
     const cadenceDays = Number.isInteger(refreshDays) && refreshDays >= 1 && refreshDays <= 30 ? refreshDays : 1;
     thresholds.communityUpdateHours = Math.max(BUILDER_DEALS_HEALTH_THRESHOLDS.communityUpdateHours, (cadenceDays + 1) * 24);
     const number = (value: unknown) => Number(value ?? 0);
@@ -601,7 +617,7 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
       fubFailures: { jobs: number(failedJobRows[0]?.count), leads: number(failedLeadRows[0]?.count), failingOverAnHour, state: healthState(failingOverAnHour === 0) },
       emailFailures: { failed: failedEmails, state: healthState(failedEmails === 0) },
       jobFailures: { failed: failedRunRows.length, jobs: failedRunNames, state: healthState(failedRunRows.length === 0) },
-      holds: { communities: heldCommunities, incentives: heldIncentives.length, items: holdItems, state: healthState(holdItems.length === 0) },
+      holds: { communities: heldCommunities, incentives: heldIncentives.length, incentivesShowingLine: heldIncentives.filter((row) => heldIncentiveCountsAsShowingLine(row, now, lapseDays)).length, items: holdItems, state: healthState(holdItems.length === 0) },
       privacyResidue: { dropped: residueRows.length, communityIds: residueCommunityIds, droppedSinceStart: privacyResidueSinceStart().dropped, state: healthState(residueRows.length === 0) },
     };
   } catch {
@@ -659,7 +675,10 @@ export async function builderDealsHealthCheck(now = new Date(), options: HealthC
     if (operational.fubFailures.state === "attention") attention.push(`${operational.fubFailures.failingOverAnHour} FUB write${operational.fubFailures.failingOverAnHour === 1 ? " has" : "s have"} been failing for over ${thresholds.fubFailureMinutes} minutes.`);
     if (operational.emailFailures.state === "attention") attention.push(`${operational.emailFailures.failed} alert email${operational.emailFailures.failed === 1 ? "" : "s"} failed to send in the last ${thresholds.emailFailureHours} hours.`);
     if (operational.jobFailures.state === "attention") attention.push(`${operational.jobFailures.failed} scheduled job run${operational.jobFailures.failed === 1 ? "" : "s"} failed in the last ${thresholds.jobFailureHours} hours: ${operational.jobFailures.jobs.join(", ")}.`);
-    if (operational.holds.incentives > 0) attention.push(`${operational.holds.incentives} incentive hold${operational.holds.incentives === 1 ? "" : "s"} await Accept or Dismiss.`);
+    if (operational.holds.incentives > 0) {
+      const { incentives, incentivesShowingLine: showing } = operational.holds;
+      attention.push(`${incentives} incentive hold${incentives === 1 ? "" : "s"}${showing ? `: ${showing} show${showing === 1 ? "s" : ""} "Builder incentive available" until reviewed` : ""}${incentives - showing ? `${showing ? "," : ":"} ${incentives - showing} behind a manual override or no longer re-read` : ""} (Accept is optional).`);
+    }
     if (operational.privacyResidue.state === "attention") attention.push(`${operational.privacyResidue.dropped} buyer-facing community entr${operational.privacyResidue.dropped === 1 ? "y was" : "ies were"} dropped for private residue in the last ${thresholds.jobFailureHours} hours (community id${operational.privacyResidue.communityIds.length === 1 ? "" : "s"} ${operational.privacyResidue.communityIds.join(", ") || "unknown"}). Review the names to hide and excluded terms in Admin, Builder Deals, Communities.`);
   }
   return {

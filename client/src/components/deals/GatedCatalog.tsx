@@ -191,7 +191,7 @@ function CommunitySection({ community, homes, open, onToggle, autoLoadReel, team
   const prices = homes.map((home) => home.price).filter((price): price is number => typeof price === "number" && price > 0);
   const from = prices.length ? Math.min(...prices) : community.fromPrice ?? null;
   const ready = homes.filter((home) => home.kind === "quick_move_in").length;
-  const summary = [from ? `From ${money.format(from)}` : null, ready ? `${ready} quick move-in` : `${homes.length} home${homes.length === 1 ? "" : "s"}`, community.incentive?.headlineRate ? `${community.incentive.headlineRate} builder rate` : null].filter(Boolean).join(" · ");
+  const summary = [from ? `From ${money.format(from)}` : null, ready ? `${ready} quick move-in` : `${homes.length} home${homes.length === 1 ? "" : "s"}`, community.incentive?.headlineRate ? "Builder rate offer" : null].filter(Boolean).join(" · ");
   return <section className="border-t border-border pt-8" data-deals-community={open ? "open" : "closed"}>
     {onToggle
       ? <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={id} className="flex w-full min-w-0 items-start justify-between gap-4 text-left">

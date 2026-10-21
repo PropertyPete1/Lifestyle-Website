@@ -141,6 +141,8 @@ export type FeaturedRate = {
   loanType: string | null;
   /** True when this is the builder's offer; false for the market rate. */
   builderOffer: boolean;
+  /** The offer's APR, printed beside its rate (Reg Z); null when the stored offer has none. Absent on the market rate. */
+  aprPercent?: number | null;
 };
 
 export type FeaturedCandidate = {
@@ -159,7 +161,7 @@ export type FeaturedCandidate = {
   beds?: string | number | null;
   sqft?: number | null;
   /** The builder's offer for this community, if it has a usable rate. */
-  offer: { ratePercent: number | null; firstYearRatePercent: number | null; loanType: string | null; downPercent: number | null } | null;
+  offer: { ratePercent: number | null; firstYearRatePercent: number | null; loanType: string | null; downPercent: number | null; aprPercent?: number | null } | null;
   /** Largest lot this home or its community mentions, in acres. */
   acres: number | null;
   /** Builders kept out of Best Deals (Lennar by default). */
@@ -202,7 +204,7 @@ function priced(candidate: FeaturedCandidate, settings: FeaturedSettings): Featu
   if (!candidate.price || candidate.price <= 0) return null;
   const offerRate = candidate.offer?.ratePercent ?? null;
   const rate: FeaturedRate = offerRate !== null
-    ? { ratePercent: offerRate, firstYearRatePercent: candidate.offer?.firstYearRatePercent ?? null, loanType: candidate.offer?.loanType ?? null, builderOffer: true }
+    ? { ratePercent: offerRate, firstYearRatePercent: candidate.offer?.firstYearRatePercent ?? null, loanType: candidate.offer?.loanType ?? null, builderOffer: true, ...(candidate.offer?.aprPercent !== undefined ? { aprPercent: candidate.offer.aprPercent } : {}) }
     : { ratePercent: settings.marketRatePercent, firstYearRatePercent: null, loanType: null, builderOffer: false };
   const downPercent = (offerRate !== null ? candidate.offer?.downPercent : null) ?? settings.defaultDownPercent;
   return {

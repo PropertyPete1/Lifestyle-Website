@@ -1,5 +1,5 @@
 import { and, eq, or } from "drizzle-orm";
-import { dealDoNotAutoImport, dealFubRecords, dealKnownAgents, dealLeads, dealTeamAllowlist } from "../drizzle/schema";
+import { dealDoNotAutoImport, dealFubRecords, dealJobRuns, dealKnownAgents, dealLeads, dealTeamAllowlist } from "../drizzle/schema";
 import { normalizeUsPhone } from "../shared/deals";
 import { getDb } from "./db";
 import { isBuilderDealsSystemNote } from "./dealsFub";
@@ -24,9 +24,55 @@ const PEOPLE_FIELDS = "id,name,firstName,lastName,phones,emails,tags,source";
 /** Every tag starting with this word marks a recruit, in addition to the exact admin list. */
 const RECRUIT_TAG_PREFIX = "recruit";
 
+/**
+ * The nightly mirror runs inside one cron request: it stops starting FUB reads after this long, so the request always
+ * answers and records a result (a request the host cuts off leaves its run "running" with no reason at all).
+ */
+export const KNOWN_AGENT_SYNC_BUDGET_MS = 4 * 60_000;
+/** Time kept for the database writes after the last notes read. */
+const WRITE_RESERVE_MS = 20_000;
+/** A 429 is retried this many times, waiting what FUB's Retry-After says (capped), while the budget allows. */
+const MAX_RATE_LIMIT_RETRIES = 4;
+const MAX_RETRY_WAIT_MS = 30_000;
+const DEFAULT_RETRY_WAIT_MS = 10_000;
+/** A gateway error, timeout or dropped connection is retried twice, with a short pause. */
+const MAX_TRANSIENT_RETRIES = 2;
+const TRANSIENT_WAIT_MS = 2_000;
+/** Where the notes pass resumes when one night's budget did not reach every recruit. */
+const NOTES_CURSOR_JOB = "builder-deals-known-agent-cursor";
+const NOTES_CURSOR_DAY = "cursor";
+
 type FubRecord = Record<string, unknown>;
-type FubFailureReason = "fub_not_configured" | "fub_unavailable" | "fub_invalid_response";
-type FubFetchResult = { ok: true; body: FubRecord } | { ok: false; reason: FubFailureReason };
+type FubFailureReason = "fub_not_configured" | "fub_unavailable" | "fub_invalid_response" | "fub_rate_limited" | "fub_timeout" | "fub_auth_failed" | "time_budget_exceeded";
+type FubFetchResult = { ok: true; body: FubRecord } | { ok: false; reason: FubFailureReason; detail: string };
+
+/** Timing for the FUB reads of one sync; tests pass a fake clock and sleep. */
+export type KnownAgentSyncOptions = { clock?: () => number; sleep?: (ms: number) => Promise<void>; budgetMs?: number };
+type FubClient = { deadline: number; clock: () => number; sleep: (ms: number) => Promise<void>; requests: number; rateLimited: number; pausedUntil: Map<string, number> };
+
+function fubClient(options: KnownAgentSyncOptions = {}): FubClient {
+  const clock = options.clock ?? Date.now;
+  return {
+    deadline: clock() + (options.budgetMs ?? KNOWN_AGENT_SYNC_BUDGET_MS),
+    clock,
+    sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+    requests: 0,
+    rateLimited: 0,
+    pausedUntil: new Map(),
+  };
+}
+
+/** Retry-After in seconds or as an HTTP date; null when absent or unreadable. */
+export function retryAfterMs(value: string | null, now = Date.now()): number | null {
+  if (!value) return null;
+  const seconds = Number(value.trim());
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1_000);
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? Math.max(0, at - now) : null;
+}
+
+/** FUB counts requests per context ("notes" has its own small limit); this run paces itself by the same split. */
+const rateContext = (path: string) => (path.startsWith("/notes") ? "notes" : "global");
 
 /** Every automatic-import exclusion is counted per skipped identifier, not per person. */
 export type KnownAgentSkipLists = {
@@ -40,8 +86,11 @@ export type KnownAgentSkipLists = {
   systemNotes: number;
 };
 
+/** How the FUB reads went: requests made, 429s met, and recruits whose notes this run's time budget did not reach (their rows stay as they were). */
+export type KnownAgentsSyncRun = { fubRequests?: number; rateLimited?: number; notesDeferred?: number };
+
 export type KnownAgentsSyncResult =
-  | {
+  | ({
     ok: true;
     peopleFetched: number;
     recruitTagged: number;
@@ -50,8 +99,8 @@ export type KnownAgentsSyncResult =
     noteFetchFailures: number;
     linksKilled: number;
     skippedBy: KnownAgentSkipLists;
-  }
-  | {
+  } & KnownAgentsSyncRun)
+  | ({
     ok: false;
     peopleFetched: number;
     recruitTagged: number;
@@ -61,7 +110,9 @@ export type KnownAgentsSyncResult =
     linksKilled: number;
     skippedBy: KnownAgentSkipLists;
     reason: "database_unavailable" | FubFailureReason;
-  };
+    /** Where and why it stopped (the page, the HTTP status, how far the scan got); never a credential. */
+    detail?: string;
+  } & KnownAgentsSyncRun);
 
 const emptySkipLists = (): KnownAgentSkipLists => ({
   doNotAutoImport: 0,
@@ -206,23 +257,64 @@ export function extractNotePhones(value: unknown): string[] {
   return Array.from(new Set(matches.map((match) => phone(match)).filter((item): item is string => Boolean(item))));
 }
 
-async function getFubJson(path: string): Promise<FubFetchResult> {
+/**
+ * One FUB GET. A 429 waits what Retry-After says (FUB: the request was not processed and must be resent) and is
+ * retried a few times; a gateway error, timeout or dropped connection is retried twice; nothing waits past the run's
+ * budget. When FUB's X-RateLimit-Remaining runs out, the next request of that context waits for its window first,
+ * so the notes pass (10 requests per 10 seconds) is paced instead of answered with 429s.
+ */
+async function getFubJson(path: string, client: FubClient): Promise<FubFetchResult> {
   const apiKey = process.env.FUB_API_KEY?.trim();
-  if (!apiKey) return { ok: false, reason: "fub_not_configured" };
-  try {
-    const response = await fetch(`${FUB_API_URL}${path}`, { headers: fubHeaders(apiKey), signal: AbortSignal.timeout(FUB_TIMEOUT_MS) });
-    if (!response.ok) return { ok: false, reason: "fub_unavailable" };
+  if (!apiKey) return { ok: false, reason: "fub_not_configured", detail: "FUB_API_KEY is not set" };
+  const context = rateContext(path);
+  const label = path.split("?")[0];
+  let rateRetries = 0;
+  let transientRetries = 0;
+  const wait = async (ms: number) => {
+    if (client.clock() + ms >= client.deadline) return false;
+    await client.sleep(ms);
+    return true;
+  };
+  for (;;) {
+    const pause = (client.pausedUntil.get(context) ?? 0) - client.clock();
+    if (pause > 0 && !(await wait(pause))) return { ok: false, reason: "time_budget_exceeded", detail: `${label}: the run's ${Math.round((client.deadline - client.clock()) / 1000)}s left did not cover FUB's rate-limit window` };
+    const remaining = client.deadline - client.clock();
+    if (remaining <= 0) return { ok: false, reason: "time_budget_exceeded", detail: `${label}: the run's time budget was spent` };
+    client.requests += 1;
+    let response: Response;
+    try {
+      response = await fetch(`${FUB_API_URL}${path}`, { headers: fubHeaders(apiKey), signal: AbortSignal.timeout(Math.min(FUB_TIMEOUT_MS, remaining)) });
+    } catch (error) {
+      const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+      if (transientRetries < MAX_TRANSIENT_RETRIES && (await wait(TRANSIENT_WAIT_MS * (transientRetries + 1)))) { transientRetries += 1; continue; }
+      return timedOut
+        ? { ok: false, reason: "fub_timeout", detail: `${label}: no answer within ${Math.round(Math.min(FUB_TIMEOUT_MS, remaining) / 1000)}s (${transientRetries + 1} tries)` }
+        : { ok: false, reason: "fub_unavailable", detail: `${label}: connection failed (${transientRetries + 1} tries)` };
+    }
+    const left = Number(response.headers.get("x-ratelimit-remaining"));
+    const windowSeconds = Number(response.headers.get("x-ratelimit-window"));
+    if (response.headers.has("x-ratelimit-remaining") && Number.isFinite(left) && left <= 1) {
+      client.pausedUntil.set(context, client.clock() + Math.min(MAX_RETRY_WAIT_MS, Number.isFinite(windowSeconds) && windowSeconds > 0 ? windowSeconds * 1_000 : DEFAULT_RETRY_WAIT_MS));
+    }
+    if (response.status === 429) {
+      client.rateLimited += 1;
+      const after = Math.min(MAX_RETRY_WAIT_MS, retryAfterMs(response.headers.get("retry-after"), client.clock()) ?? DEFAULT_RETRY_WAIT_MS);
+      client.pausedUntil.set(context, client.clock() + after);
+      if (rateRetries < MAX_RATE_LIMIT_RETRIES && client.clock() + after < client.deadline) { rateRetries += 1; continue; }
+      return { ok: false, reason: "fub_rate_limited", detail: `${label}: HTTP 429 after ${rateRetries + 1} tries (Retry-After ${response.headers.get("retry-after") ?? "not given"}, context ${response.headers.get("x-ratelimit-context") ?? context})` };
+    }
+    if ([502, 503, 504].includes(response.status) && transientRetries < MAX_TRANSIENT_RETRIES && (await wait(TRANSIENT_WAIT_MS * (transientRetries + 1)))) { transientRetries += 1; continue; }
+    if (response.status === 401 || response.status === 403) return { ok: false, reason: "fub_auth_failed", detail: `${label}: HTTP ${response.status} (check FUB_API_KEY and the X-System registration)` };
+    if (!response.ok) return { ok: false, reason: "fub_unavailable", detail: `${label}: HTTP ${response.status}` };
     const body: unknown = await response.json().catch(() => null);
-    return body && typeof body === "object" && !Array.isArray(body) ? { ok: true, body: body as FubRecord } : { ok: false, reason: "fub_invalid_response" };
-  } catch {
-    return { ok: false, reason: "fub_unavailable" };
+    return body && typeof body === "object" && !Array.isArray(body) ? { ok: true, body: body as FubRecord } : { ok: false, reason: "fub_invalid_response", detail: `${label}: the body was not a JSON object` };
   }
 }
 
-type FubListResult = { ok: true; values: FubRecord[] } | { ok: false; reason: FubFailureReason };
+type FubListResult = { ok: true; values: FubRecord[] } | { ok: false; reason: FubFailureReason; detail: string };
 
-/** Uses FUB's keyset cursor when present, with offset fallback for older responses. */
-async function listAllFub(path: string, collection: string, params: Record<string, string> = {}): Promise<FubListResult> {
+/** Uses FUB's keyset cursor when present, with offset fallback for older responses. A failure names the page and how far the scan got. */
+async function listAllFub(path: string, collection: string, params: Record<string, string>, client: FubClient): Promise<FubListResult> {
   const values: FubRecord[] = [];
   const cursors = new Set<string>();
   let cursor: string | null = null;
@@ -230,28 +322,29 @@ async function listAllFub(path: string, collection: string, params: Record<strin
   for (let page = 0; page < MAX_FUB_PAGES; page += 1) {
     const query = new URLSearchParams({ ...params, limit: String(FUB_PAGE_SIZE) });
     if (cursor) query.set("next", cursor); else query.set("offset", String(offset));
-    const response = await getFubJson(`${path}?${query.toString()}`);
-    if (!response.ok) return response;
+    const response = await getFubJson(`${path}?${query.toString()}`, client);
+    const at = `${path} page ${page + 1} (${values.length.toLocaleString("en-US")} read so far)`;
+    if (!response.ok) return { ...response, detail: `${at}: ${response.detail}` };
     const raw = response.body[collection];
-    if (!Array.isArray(raw)) return { ok: false, reason: "fub_invalid_response" };
+    if (!Array.isArray(raw)) return { ok: false, reason: "fub_invalid_response", detail: `${at}: no "${collection}" list` };
     const batch = raw.filter((value): value is FubRecord => Boolean(value) && typeof value === "object" && !Array.isArray(value));
-    if (batch.length !== raw.length) return { ok: false, reason: "fub_invalid_response" };
+    if (batch.length !== raw.length) return { ok: false, reason: "fub_invalid_response", detail: `${at}: a non-object entry` };
     values.push(...batch);
     const metadata = response.body._metadata && typeof response.body._metadata === "object" ? response.body._metadata as FubRecord : {};
     const next = nonEmpty(metadata.next, 2_000);
     if (next) {
-      if (cursors.has(next)) return { ok: false, reason: "fub_invalid_response" };
+      if (cursors.has(next)) return { ok: false, reason: "fub_invalid_response", detail: `${at}: the next cursor repeated` };
       cursors.add(next);
       cursor = next;
       continue;
     }
     const total = Number(metadata.total);
-    if (Number.isFinite(total) && total >= 0 && values.length < total && batch.length === 0) return { ok: false, reason: "fub_invalid_response" };
+    if (Number.isFinite(total) && total >= 0 && values.length < total && batch.length === 0) return { ok: false, reason: "fub_invalid_response", detail: `${at}: an empty page before the reported total ${total}` };
     if (batch.length < FUB_PAGE_SIZE || (Number.isFinite(total) && values.length >= total)) return { ok: true, values };
     cursor = null;
     offset += batch.length;
   }
-  return { ok: false, reason: "fub_invalid_response" };
+  return { ok: false, reason: "fub_invalid_response", detail: `${path}: more than ${MAX_FUB_PAGES} pages` };
 }
 
 /**
@@ -259,12 +352,12 @@ async function listAllFub(path: string, collection: string, params: Record<strin
  * moved out of the phone field). Notes this system wrote are skipped by their
  * recorded id and, as a second guard, by their system marker.
  */
-async function fullNotePhones(person: FubRecord, systemNoteIds: Set<string>): Promise<{ phones: string[]; fetchFailed: boolean; systemNotesSkipped: number }> {
+async function fullNotePhones(person: FubRecord, systemNoteIds: Set<string>, client: FubClient): Promise<{ phones: string[]; fetchFailed: boolean; failure?: FubFailureReason; systemNotesSkipped: number }> {
   const embedded = noteText(person).flatMap(extractNotePhones);
   const personId = fubId(person.id);
   if (!personId) return { phones: Array.from(new Set(embedded)), fetchFailed: false, systemNotesSkipped: 0 };
-  const notes = await listAllFub("/notes", "notes", { personId });
-  if (!notes.ok) return { phones: Array.from(new Set(embedded)), fetchFailed: true, systemNotesSkipped: 0 };
+  const notes = await listAllFub("/notes", "notes", { personId }, client);
+  if (!notes.ok) return { phones: Array.from(new Set(embedded)), fetchFailed: true, failure: notes.reason, systemNotesSkipped: 0 };
   let systemNotesSkipped = 0;
   const found = notes.values.flatMap((note) => {
     const noteId = fubId(note.id);
@@ -327,14 +420,47 @@ async function deactivateStaleFubRecruits(
   return stale.filter((row) => row.active).length;
 }
 
+/** Recruits in FUB id order, starting after the id where the last pass stopped (then wrapping around). */
+function notesOrder(people: readonly FubRecord[], cursor: string | null): FubRecord[] {
+  const key = (person: FubRecord) => fubId(person.id) ?? "";
+  const byId = (a: string, b: string) => (/^\d+$/.test(a) && /^\d+$/.test(b) ? Number(a) - Number(b) : a.localeCompare(b));
+  const sorted = [...people].sort((a, b) => byId(key(a), key(b)));
+  if (!cursor) return sorted;
+  const start = sorted.findIndex((person) => byId(key(person), cursor) > 0);
+  return start <= 0 ? sorted : [...sorted.slice(start), ...sorted.slice(0, start)];
+}
+
+type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+
+async function readNotesCursor(db: Db): Promise<{ value: string | null; exists: boolean }> {
+  try {
+    const row = (await db.select({ detail: dealJobRuns.detail }).from(dealJobRuns).where(and(eq(dealJobRuns.jobName, NOTES_CURSOR_JOB), eq(dealJobRuns.chicagoDay, NOTES_CURSOR_DAY))).limit(1))[0];
+    return { value: row?.detail?.trim() || null, exists: Boolean(row) };
+  } catch {
+    return { value: null, exists: false };
+  }
+}
+
+/** Saves (or clears) the resume point; a failed write only means the next pass starts from the beginning. */
+async function writeNotesCursor(db: Db, value: string | null, exists: boolean) {
+  try {
+    const values = { status: "ok" as const, detail: value, startedAt: new Date(), completedAt: new Date() };
+    if (exists) await db.update(dealJobRuns).set(values).where(and(eq(dealJobRuns.jobName, NOTES_CURSOR_JOB), eq(dealJobRuns.chicagoDay, NOTES_CURSOR_DAY)));
+    else await db.insert(dealJobRuns).values({ jobName: NOTES_CURSOR_JOB, chicagoDay: NOTES_CURSOR_DAY, ...values });
+  } catch (error) {
+    console.warn("[deals known agents] could not save the notes cursor", error instanceof Error ? error.message : error);
+  }
+}
+
 /**
  * Performs the sole FUB known-agent mirror. It reads every page of people and
  * users once, evaluates the saved tag/source settings (plus the Recruit prefix)
  * locally, and only then writes. Every skip list is applied per identifier: a
  * spouse's number swept from a note is skipped, the recruit's own number is not.
  */
-export async function syncKnownAgentsFromFub(): Promise<KnownAgentsSyncResult> {
+export async function syncKnownAgentsFromFub(options: KnownAgentSyncOptions = {}): Promise<KnownAgentsSyncResult> {
   const skippedBy = emptySkipLists();
+  const client = fubClient(options);
   const db = await getDb();
   if (!db) {
     return { ok: false, peopleFetched: 0, recruitTagged: 0, upserted: 0, skipped: 0, noteFetchFailures: 0, linksKilled: 0, skippedBy, reason: "database_unavailable" };
@@ -358,8 +484,8 @@ export async function syncKnownAgentsFromFub(): Promise<KnownAgentsSyncResult> {
   // One full people scan: FUB's tags filter is exact, so "any tag starting with
   // Recruit" and the non-recruit ownership check both need every person locally.
   const [peopleResult, usersResult] = await Promise.all([
-    listAllFub("/people", "people", { fields: PEOPLE_FIELDS }),
-    listAllFub("/users", "users"),
+    listAllFub("/people", "people", { fields: PEOPLE_FIELDS }, client),
+    listAllFub("/users", "users", {}, client),
   ]);
   if (!peopleResult.ok || !usersResult.ok) {
     const failure = !peopleResult.ok ? peopleResult : usersResult as Extract<FubListResult, { ok: false }>;
@@ -373,6 +499,9 @@ export async function syncKnownAgentsFromFub(): Promise<KnownAgentsSyncResult> {
       linksKilled: 0,
       skippedBy,
       reason: failure.reason,
+      detail: failure.detail,
+      fubRequests: client.requests,
+      rateLimited: client.rateLimited,
     };
   }
 
@@ -423,13 +552,21 @@ export async function syncKnownAgentsFromFub(): Promise<KnownAgentsSyncResult> {
     let skipped = 0;
     let linksKilled = 0;
     let noteFetchFailures = 0;
+    let notesDeferred = 0;
+    let lastRead: string | null = null;
     const activeIdentityKeys = new Set<string>();
     const retainPersonIds = new Set<string>();
-    for (const person of selected) {
+    // FUB allows about one notes request a second, so a large recruit list may not fit one night's budget. The pass
+    // resumes where the last one stopped; a recruit it does not reach keeps its rows exactly as a notes failure does.
+    const cursor = await readNotesCursor(db);
+    for (const person of notesOrder(selected, cursor.value)) {
       const id = fubId(person.id);
       if (!id) { skipped += 1; continue; }
-      const noteResult = await fullNotePhones(person, systemNoteIds);
+      if (client.clock() >= client.deadline - WRITE_RESERVE_MS) { notesDeferred += 1; retainPersonIds.add(id); continue; }
+      const noteResult = await fullNotePhones(person, systemNoteIds, client);
       skippedBy.systemNotes += noteResult.systemNotesSkipped;
+      if (noteResult.fetchFailed && noteResult.failure === "time_budget_exceeded") { notesDeferred += 1; retainPersonIds.add(id); continue; }
+      lastRead = id;
       if (noteResult.fetchFailed) {
         // Notes are part of the privacy exclusion check. If they cannot be
         // read, importing would be less safe than waiting for the next pass,
@@ -463,6 +600,7 @@ export async function syncKnownAgentsFromFub(): Promise<KnownAgentsSyncResult> {
       }
     }
     const deactivated = await deactivateStaleFubRecruits(db, activeIdentityKeys, retainPersonIds);
+    if (notesDeferred || cursor.value) await writeNotesCursor(db, notesDeferred ? lastRead ?? cursor.value : null, cursor.exists);
     return {
       ok: true,
       peopleFetched: peopleResult.values.length,
@@ -472,8 +610,13 @@ export async function syncKnownAgentsFromFub(): Promise<KnownAgentsSyncResult> {
       noteFetchFailures,
       linksKilled,
       skippedBy,
+      fubRequests: client.requests,
+      rateLimited: client.rateLimited,
+      notesDeferred,
     };
-  } catch {
+  } catch (error) {
+    // The error text can carry SQL values (phone numbers), so it goes to the server log only.
+    console.error("[deals known agents] database step failed", error instanceof Error ? error.message.slice(0, 300) : error);
     return {
       ok: false,
       peopleFetched: peopleResult.values.length,
@@ -484,6 +627,9 @@ export async function syncKnownAgentsFromFub(): Promise<KnownAgentsSyncResult> {
       linksKilled: 0,
       skippedBy,
       reason: "database_unavailable",
+      detail: "a database read or write failed after the FUB scan; nothing past that point was changed",
+      fubRequests: client.requests,
+      rateLimited: client.rateLimited,
     };
   }
 }

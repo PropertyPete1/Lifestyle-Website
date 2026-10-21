@@ -9,7 +9,7 @@ import { dealFubRecords, dealAccessTokens, dealAlerts, dealBlocklist, dealClient
 import { sendTwilioVerify } from "./dealsVerification";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 import { OFFICIAL_BUILDER_HOSTS, officialHostFor } from "./dealsAdapters";
-import { type DealsAdminError, acceptIncentiveHold, dismissCatalogHold, dismissIncentiveHold, listCommunityDiagnostics, refreshCommunityGeography, refreshCommunityInBackground, saveIncentiveForCommunity, storedScrubListForCommunity, testCommunitySource } from "./dealsSyncAdmin";
+import { type DealsAdminError, acceptIncentiveHold, dismissCatalogHold, dismissIncentiveHold, listCommunityDiagnostics, refreshCommunityGeography, queueCommunityRefresh, saveIncentiveForCommunity, storedScrubListForCommunity, testCommunitySource } from "./dealsSyncAdmin";
 import { type PhotoAdminError, getBuilderPhotoSettingsForAdmin, getDealPhotoPreview, listBuilderPhotoSamples, reprocessBuilderPhotos, saveBuilderPhotoSettings, uploadManualHomePhoto } from "./dealsPhotosAdmin";
 import { parseStoredScrubList } from "./dealsScrub";
 import {
@@ -747,8 +747,10 @@ export const dealsRouter = router({
     health: adminProcedure.query(async () => (await import("./dealsMaintenance")).builderDealsHealthCheck(new Date(), { prune: false })),
     mondayReport: adminProcedure.query(async () => (await import("./dealsMaintenance")).builderDealsMondayReport()),
     addTrecFakeRow: adminProcedure.input(z.object({ fullName: z.string().trim().min(3).max(190), confirm: z.literal(true) })).mutation(async ({ input }) => (await import("./dealsTrec")).addTrecFakeRow(input.fullName)),
-    /** "Refresh now": one background adapter run for this community, recorded in deal_job_runs; refused while a run is in flight. */
-    refreshCommunity: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => adminCall(() => refreshCommunityInBackground(input.id))),
+    /** Read-only: the last 3 days of scheduled job, digest and Refresh now records (newest first, details cut to 2,000 characters), to diagnose a failed job live. */
+    jobRuns: adminProcedure.query(async () => (await import("./dealsJobRuns")).recentDealJobRuns()),
+    /** "Refresh now": queues this community for the next catalog batch (read first, within ~10 minutes in catalog hours), recorded in deal_job_runs; refused while one is queued or being read. */
+    refreshCommunity: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => adminCall(() => queueCommunityRefresh(input.id))),
     /** Load the research list (research/sa-communities.csv): every area community, hidden until its builder has a reader. */
     importResearchCommunities: adminProcedure.mutation(async () => {
       const { importResearchCommunities } = await import("./dealsResearchImport");

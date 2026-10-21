@@ -109,8 +109,8 @@ describe("official refresh: homes", () => {
     expect(byUrl()).toMatchObject({ [home("8301-a")]: "available", [home("8305-b")]: "sold", [plan("fixture-a")]: "sold", [home("hidden")]: "hidden", [home("manual")]: "available" });
     expect(db.rows(dealHomes).some((row) => row.sourceUrl === home("9010-model"))).toBe(false);
     const summary = emails().filter((email) => email.category === "deals_sync_summary").at(-1);
-    expect(summary?.content).toContain("sold: 8305-b");
-    expect(summary?.content).toContain("sold: fixture-a-plan");
+    // One line per community: "2 sold: <names>".
+    expect(summary?.content).toMatch(/Fixture Gardens \(M\/I Homes\): 2 sold: (8305-b, fixture-a-plan|fixture-a-plan, 8305-b)/);
 
     mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }, { sourceUrl: home("8305-b") }, { sourceUrl: home("8309-c"), status: "Sold" }] }));
     await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 6 * DAY) });
@@ -511,7 +511,8 @@ describe("official refresh: incentive lifecycle", () => {
     expect(emails()).toEqual([]);
     expect(db.rows(dealSyncDigestEntries)).toHaveLength(1);
     expect(await sendSyncDigestIfReady(new Date("2026-10-19T00:10:00Z"), true)).toBe("sent");
-    expect(emails().map((email) => email.subject)).toEqual(["Builder Deals update: 4 changes"]);
+    // Each retired offer is one change (its quoted text is the second line of the same update).
+    expect(emails().map((email) => email.subject)).toEqual(["Builder Deals evening follow-up: 2 changes"]);
     expect(emails()[0].content).toContain("came off the page: reached its close-by date (2026-10-18)");
     expect(emails()[0].content).toContain("came off the page: no dates and not re-confirmed for 14 days");
     expect(emails()[0].recipients).toEqual(["peter@lifestyledesignrealty.com"]);
@@ -579,7 +580,7 @@ describe("scheduling", () => {
     expect(new Set([...first.results, ...second.results].map((result) => result.communityId))).toEqual(new Set(ids));
     // Both batches' changes arrive in one summary email.
     expect(emails().map((email) => email.category)).toEqual(["deals_sync_summary"]);
-    for (const name of ["Fixture Gardens", "B", "C"]) expect(emails()[0].content).toContain(`${name} (M/I Homes)\n  added:`);
+    for (const name of ["Fixture Gardens", "B", "C"]) expect(emails()[0].content).toContain(`- ${name} (M/I Homes): 1 new:`);
   });
 
   it("checks different builders side by side but one builder's communities one at a time", async () => {

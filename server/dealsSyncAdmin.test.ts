@@ -18,7 +18,7 @@ vi.mock("./dealsMap", () => ({ refreshCommunityGeography: (...args: unknown[]) =
 vi.mock("./dealsPhotos", () => ({ processDealPhoto: (...args: unknown[]) => mocks.processDealPhoto(...args), processPendingDealPhotos: (...args: unknown[]) => mocks.processPendingDealPhotos(...args) }));
 vi.mock("./dealsAdapters", async (importOriginal) => ({ ...(await importOriginal<typeof import("./dealsAdapters")>()), loadOfficialDeals: (...args: unknown[]) => mocks.loadOfficialDeals(...args) }));
 
-import { CATALOG_HOLD_REASON_HELP, DealsAdminError, acceptIncentiveHold, describeCatalogHold, dismissIncentiveHold, heldIncentiveMissingFields, listCommunityDiagnostics, refreshCommunityInBackground, saveIncentiveForCommunity, storedScrubListForCommunity, testCommunitySource } from "./dealsSyncAdmin";
+import { CATALOG_HOLD_REASON_HELP, DealsAdminError, acceptIncentiveHold, describeCatalogHold, dismissIncentiveHold, heldIncentiveMissingFields, listCommunityDiagnostics, queueCommunityRefresh, saveIncentiveForCommunity, storedScrubListForCommunity, testCommunitySource } from "./dealsSyncAdmin";
 import { chicagoEndOfDay } from "./dealsService";
 
 const COMMUNITY_URL = "https://www.mihomes.com/new-homes/texas/greater-san-antonio/southeast-san-antonio/fixture-gardens";
@@ -55,27 +55,69 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("refreshCommunityInBackground", () => {
-  it("records a job run, runs the single-community refresh after returning, and refuses a concurrent second run", async () => {
-    const first = await refreshCommunityInBackground(communityId);
-    expect(first).toEqual({ queued: true, jobName: `deals-refresh-community-${communityId}` });
-    expect(db.rows(dealJobRuns)[0]).toMatchObject({ jobName: `deals-refresh-community-${communityId}`, status: "running" });
-    expect(mocks.loadOfficialDeals).not.toHaveBeenCalled();
-    expect(await refreshCommunityInBackground(communityId)).toMatchObject({ queued: false, reason: "already_running" });
+describe("queueCommunityRefresh (Refresh now)", () => {
+  // 11:00 AM Chicago: inside catalog hours.
+  const NOON = new Date("2026-10-21T16:00:00Z");
+
+  it("only queues: nothing runs in the background, a second click is answered from the queue, and the next catalog batch reads it first", async () => {
+    // Pulled today, so the schedule alone would not read it again.
+    db.rows(dealCommunities)[0].lastSuccessfulSyncAt = new Date("2026-10-21T10:00:00Z");
+    db.rows(dealCommunities)[0].lastAttemptAt = new Date("2026-10-21T15:50:00Z");
+    const first = await queueCommunityRefresh(communityId, NOON);
+    expect(first).toMatchObject({ queued: true, jobName: `deals-refresh-community-${communityId}`, message: expect.stringMatching(/^Queued — updates within ~10 minutes/) });
+    expect(db.rows(dealJobRuns)).toHaveLength(1);
+    expect(db.rows(dealJobRuns)[0]).toMatchObject({ jobName: `deals-refresh-community-${communityId}`, status: "running", detail: "queued" });
     await flush();
+    expect(mocks.loadOfficialDeals).not.toHaveBeenCalled();
+    expect(await queueCommunityRefresh(communityId, NOON)).toMatchObject({ queued: true, reason: "already_queued" });
+    expect(db.rows(dealJobRuns)).toHaveLength(1);
+
+    const { refreshDueCommunitiesBatch } = await import("./dealsSync");
+    const batch = await refreshDueCommunitiesBatch({ clock: () => NOON.getTime() + 5 * 60_000 });
+    expect(batch.results.map((result) => [result.communityId, result.ok])).toEqual([[communityId, true]]);
     expect(mocks.loadOfficialDeals).toHaveBeenCalledTimes(1);
-    expect(db.rows(dealJobRuns)[0]).toMatchObject({ status: "ok" });
+    expect(db.rows(dealJobRuns).find((row) => row.jobName === `deals-refresh-community-${communityId}`)).toMatchObject({ status: "ok", detail: "refreshed", completedAt: expect.any(Date) });
     expect(db.rows(dealHomes)).toHaveLength(1);
-    expect(db.rows(dealCommunities)[0].lastSuccessfulSyncAt).toBeInstanceOf(Date);
-    // Finished today: the same day may be refreshed again.
-    expect(await refreshCommunityInBackground(communityId)).toMatchObject({ queued: true });
+    // Finished: the same day may be queued again; a later batch with no request does not read it again.
+    expect(await queueCommunityRefresh(communityId, new Date(NOON.getTime() + 10 * 60_000))).toMatchObject({ queued: true });
+    expect(db.rows(dealJobRuns).filter((row) => row.jobName.startsWith("deals-refresh-community-"))).toHaveLength(1);
+  });
+
+  it("refuses while the batch is reading it, says when checks resume outside catalog hours, and records a held read as a read (ok, held: reason), not a failed job", async () => {
+    // 11 PM Chicago: the batch is idle until 4 AM.
+    expect((await queueCommunityRefresh(communityId, new Date("2026-10-22T04:00:00Z"))).message).toMatch(/builder checks resume at 4 AM Central/);
+    db.rows(dealJobRuns)[0]!.detail = "started";
+    db.rows(dealJobRuns)[0]!.startedAt = new Date();
+    expect(await queueCommunityRefresh(communityId)).toMatchObject({ queued: false, reason: "already_running" });
+    db.rows(dealJobRuns)[0]!.detail = "queued";
+    mocks.loadOfficialDeals.mockResolvedValue({ ...okSnapshot(), ok: false, catalogOk: false, holdReasons: ["source_access_refused"] });
+    const { refreshDueCommunitiesBatch } = await import("./dealsSync");
+    await refreshDueCommunitiesBatch({ clock: () => Date.parse("2026-10-22T11:00:00Z") });
+    expect(db.rows(dealJobRuns).find((row) => row.jobName.startsWith("deals-refresh-community-"))).toMatchObject({ status: "ok", detail: "held: source_access_refused" });
+  });
+
+  it("closes a request that started and never reported back as interrupted, and skips one whose community was paused meanwhile", async () => {
+    const at = Date.parse("2026-10-21T16:00:00Z");
+    const pausedId = db.seed(dealCommunities, { ...db.rows(dealCommunities)[0], id: undefined, privateName: "Paused Place", sourceUrl: `${COMMUNITY_URL}-paused`, reelCode: "paused1", paused: true });
+    const stuck = db.seed(dealJobRuns, { jobName: `deals-refresh-community-${communityId}`, chicagoDay: "2026-10-20", status: "running", detail: "started", startedAt: new Date(at - 3 * 3_600_000) });
+    const legacy = db.seed(dealJobRuns, { jobName: "deals-refresh-community-30001", chicagoDay: "2026-10-20", status: "running", detail: null, startedAt: new Date(at - 26 * 3_600_000) });
+    const pausedRequest = db.seed(dealJobRuns, { jobName: `deals-refresh-community-${pausedId}`, chicagoDay: "2026-10-21", status: "running", detail: "queued", startedAt: new Date(at - 60_000) });
+    const { refreshDueCommunitiesBatch } = await import("./dealsSync");
+    await refreshDueCommunitiesBatch({ clock: () => at });
+    const row = (id: number) => db.rows(dealJobRuns).find((value) => value.id === id)!;
+    expect(row(stuck)).toMatchObject({ status: "failed", detail: expect.stringMatching(/^interrupted:/) });
+    // An interrupted run keeps its start time, so it leaves the 24-hour failure count when its day does.
+    expect(row(legacy)).toMatchObject({ status: "failed", startedAt: new Date(at - 26 * 3_600_000) });
+    expect(row(pausedRequest)).toMatchObject({ status: "skipped", detail: expect.stringMatching(/^not refreshed:/) });
+    // After the stuck run is closed, Refresh now can queue the community again.
+    expect(await queueCommunityRefresh(communityId, new Date(at + 60_000))).toMatchObject({ queued: true });
   });
 
   it("refuses manual-mode and Manual-builder communities", async () => {
     const manualId = db.seed(dealCommunities, { builder: "Manual", privateName: "Hand Fixture", sourceUrl: "https://example.test/", privateAddress: "", publicLabel: "Label", areaLabel: "Area", reelCode: "mn1", scrubList: "[]", manualMode: true });
-    await expect(refreshCommunityInBackground(manualId)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    await expect(queueCommunityRefresh(manualId)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
     db.rows(dealCommunities)[0].manualMode = true;
-    await expect(refreshCommunityInBackground(communityId)).rejects.toBeInstanceOf(DealsAdminError);
+    await expect(queueCommunityRefresh(communityId)).rejects.toBeInstanceOf(DealsAdminError);
     expect(db.rows(dealJobRuns)).toHaveLength(0);
   });
 });

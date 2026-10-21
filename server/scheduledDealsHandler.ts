@@ -14,9 +14,8 @@ import { chicagoClock, chicagoDay } from "./dealsService";
 export function isDueAtChicago(now: { hour: number; minute: number; weekday: string }, hour: number, minute: number, weekday?: string) {
   return now.hour === hour && now.minute >= minute && (!weekday || now.weekday === weekday);
 }
-/** Builder checks run from 4 AM (fresh each morning) until 10 PM Central. */
-export const CATALOG_FIRST_HOUR = 4;
-export const CATALOG_LAST_HOUR = 22;
+import { CATALOG_FIRST_HOUR, CATALOG_LAST_HOUR } from "./dealsSchedule";
+export { CATALOG_FIRST_HOUR, CATALOG_LAST_HOUR };
 function dueAt(hour: number, minute: number, weekday?: string) { return isDueAtChicago(chicagoClock(), hour, minute, weekday); }
 function isSuccessfulResult(result: unknown) {
   if (Array.isArray(result)) return result.some((item) => item && typeof item === "object" && (item as { ok?: unknown }).ok === true);
@@ -35,7 +34,37 @@ async function once(jobName: string, work: () => Promise<unknown>) {
     try { await db.insert(dealJobRuns).values({ jobName, chicagoDay: day, status: "running" }); }
     catch { return { skipped: "already_running" }; }
   }
-  try { const result = await work(); if (!isSuccessfulResult(result)) throw new Error("scheduled operation reported no successful community"); await db.update(dealJobRuns).set({ status: "ok", detail: JSON.stringify(result).slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running"))); return result; } catch (error) { await db.update(dealJobRuns).set({ status: "failed", detail: error instanceof Error ? error.message : "failed", completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running"))); throw error; }
+  let detail: string | null = null;
+  try {
+    const result = await work();
+    if (!isSuccessfulResult(result)) {
+      // The job's own reason (and its result, which carries counts and reason codes, never a credential) is what
+      // deals.admin.jobRuns shows, so a failure can be diagnosed without server logs.
+      const reason = jobFailureReason(result);
+      detail = `${reason}\n${JSON.stringify(result).slice(0, 8_000)}`;
+      throw new Error(reason);
+    }
+    await db.update(dealJobRuns).set({ status: "ok", detail: JSON.stringify(result).slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running")));
+    return result;
+  } catch (error) {
+    await db.update(dealJobRuns).set({ status: "failed", detail: (detail ?? (error instanceof Error ? `threw: ${error.message}` : "failed")).slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running")));
+    throw error;
+  }
+}
+
+/** One line naming why a job reported failure: its own reason code and detail, an email error, or the per-community reasons. */
+export function jobFailureReason(result: unknown): string {
+  if (Array.isArray(result)) {
+    const reasons = Array.from(new Set(result.map((item) => item && typeof item === "object" ? ((item as { reason?: unknown; skipped?: unknown }).reason ?? (item as { skipped?: unknown }).skipped) : null).filter((value): value is string => typeof value === "string")));
+    return `no successful community (${result.length} tried${reasons.length ? `: ${reasons.join(", ").slice(0, 300)}` : ""})`;
+  }
+  if (result && typeof result === "object") {
+    const record = result as Record<string, unknown>;
+    const text = (value: unknown) => typeof value === "string" && value.trim() ? value.trim().slice(0, 500) : null;
+    const parts = [text(record.reason), text(record.detail), text(record.emailError) && `email: ${text(record.emailError)}`, text(record.error)].filter((value): value is string => Boolean(value));
+    if (parts.length) return `reported ok:false: ${Array.from(new Set(parts)).join("; ")}`;
+  }
+  return "reported ok:false without a reason";
 }
 const whenDue = (due: boolean, job: string, work: () => Promise<unknown>) => due ? once(job, work) : Promise.resolve({ skipped: "not_due_chicago" });
 

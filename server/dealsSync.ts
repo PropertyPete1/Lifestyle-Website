@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, lt, ne, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, like, lt, ne, or } from "drizzle-orm";
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealJobRuns, dealPhotos, dealSyncDigestEntries } from "../drizzle/schema";
 import { getDb } from "./db";
 import { chicagoClock, chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
@@ -9,6 +9,7 @@ import { applyScrubExclusions, parseStoredScrubList, serializeStoredScrubList } 
 import { AUTO_ACCEPTED_NO_DEADLINE, HELD_INCENTIVE_PUBLIC_LINE, autoAcceptedStatus, deadlineOnlyHold, isAutoAcceptedIncentive, unreadDateIn } from "../shared/dealsHeldIncentive";
 import { processPendingDealPhotos } from "./dealsPhotos";
 import { sendBuilderDealsEmail } from "./dealsEmail";
+import { composeBuilderDealsDigest, deliveredEntryIds, type DigestEmail, type DigestStats } from "./dealsDigest";
 import { refreshCommunityGeography } from "./dealsMap";
 import { suppliedDealsSnapshot } from "./dealsAdapters.supplied";
 import { suppliedSourceFor } from "./dealsSuppliedStore";
@@ -747,62 +748,33 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
   return { ...base, ok: true };
 }
 
-function money(value: number) {
-  return `$${value.toLocaleString("en-US")}`;
-}
-
-type RunEmail = { category: string; subject: string; content: string };
-
-function summaryBody(summaries: readonly CommunityChangeSummary[]): string {
-  const lines = summaries.flatMap((summary) => [
-    `${summary.privateName} (${summary.builder})`,
-    ...summary.added.map((name) => `  added: ${name}`),
-    ...summary.sold.map((name) => `  sold: ${name}`),
-    ...summary.reappeared.map((name) => `  back on the market: ${name}`),
-    ...summary.priceChanges.map((change) => `  price ${change.to < change.from ? "drop" : "change"}: ${change.name} ${money(change.from)} to ${money(change.to)}`),
-    ...summary.incentive.map((line) => `  incentive: ${line}`),
-    "",
-  ]);
-  return ["Official builder refresh summary.", "", ...lines, "Review in Admin, Builder Deals: /admin/deals"].join("\n");
-}
-
-function holdBody(holds: readonly HoldNotice[]): string {
-  const lines = holds.flatMap((hold) => [`${hold.privateName} (${hold.builder}), ${hold.kind} hold: ${hold.reason}`, ...(hold.detail ? [`  ${hold.detail}`] : []), ""]);
-  return ["A builder page could not be published. The last good data stays live.", "", ...lines, `Catalog holds offer Dismiss hold or Switch to Manual. A held incentive needs nothing from you: buyers see "${HELD_INCENTIVE_PUBLIC_LINE}" for that community until it is reviewed (or the manual override, where one is live), and Accept this update (optional) publishes the full offer. Offers held only for a deadline the text does not date are published by themselves. Admin, Builder Deals: /admin/deals`].join("\n");
-}
-
-/** One change-summary email and one hold email per run; a failure never fails the sync, and is reported as false. */
+/**
+ * One run's emails (a single refresh, not the scheduled digest): the same compact format as the digest, split into
+ * numbered parts when it is long. A failure never fails the sync, and is reported as false.
+ */
 async function sendRunEmails(summaries: readonly CommunityChangeSummary[], holds: readonly HoldNotice[]): Promise<boolean> {
-  const messages = composeRunEmails(summaries, holds);
+  const messages = composeBuilderDealsDigest([{ summaries, holds }], { label: "update" });
   if (!messages.length) return true;
-  let recipients: string[] = [];
-  try { recipients = (await getDealSettings()).syncEmailRecipients; } catch { recipients = []; }
+  const recipients = await syncEmailRecipients();
   let allSent = true;
-  for (const message of messages) {
-    const result = await sendBuilderDealsEmail({ ...message, recipients }).catch((error) => { console.error("[deals-sync] email failed", error instanceof Error ? error.message : error); return null; });
-    if (!result || (typeof result === "object" && "ok" in result && (result as { ok?: boolean }).ok === false)) allSent = false;
-  }
+  for (const message of messages) if (!(await sendDigestPart(message, recipients)).ok) allSent = false;
   return allSent;
 }
 
-function composeRunEmails(summaries: readonly CommunityChangeSummary[], holds: readonly HoldNotice[]): RunEmail[] {
-  const messages: RunEmail[] = [];
-  const send = (category: string, subject: string, content: string) => { messages.push({ category, subject, content }); };
-  // Changes and holds from one run travel in one email, so a send either happened or did not.
-  if (summaries.length && holds.length) {
-    const changes = summaries.reduce((count, summary) => count + summary.added.length + summary.sold.length + summary.reappeared.length + summary.priceChanges.length + summary.incentive.length, 0);
-    // Filed under the hold category: a hold needs an admin's hand, a change only needs reading.
-    send("deals_sync_hold", `Builder Deals update: ${changes} change${changes === 1 ? "" : "s"}, ${holds.length} hold${holds.length === 1 ? "" : "s"}`, [holdBody(holds), "", "CHANGES", "", summaryBody(summaries)].join("\n"));
-    return messages;
+async function syncEmailRecipients(): Promise<string[]> {
+  try { return (await getDealSettings()).syncEmailRecipients; } catch { return []; }
+}
+
+/** Sends one composed part; a thrown transport error is a failed part, never a failed sync. */
+async function sendDigestPart(message: DigestEmail, recipients: string[]): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const result = await sendBuilderDealsEmail({ category: message.category, subject: message.subject, content: message.content, recipients });
+    const ok = !(result && typeof result === "object" && "ok" in result && (result as { ok?: boolean }).ok === false);
+    return ok ? { ok } : { ok, error: (result as { error?: string }).error ?? "not delivered" };
+  } catch (error) {
+    console.error("[deals-sync] email failed", error instanceof Error ? error.message : error);
+    return { ok: false, error: error instanceof Error ? error.message.slice(0, 200) : "email failed" };
   }
-  if (summaries.length) {
-    const total = summaries.reduce((count, summary) => count + summary.added.length + summary.sold.length + summary.reappeared.length + summary.priceChanges.length + summary.incentive.length, 0);
-    send("deals_sync_summary", `Builder Deals update: ${total} change${total === 1 ? "" : "s"}`, summaryBody(summaries));
-  }
-  if (holds.length) {
-    send("deals_sync_hold", `Builder Deals hold: ${holds.map((hold) => hold.privateName).join(", ")}`, holdBody(holds));
-  }
-  return messages;
 }
 
 /**
@@ -875,7 +847,7 @@ export const CATALOG_RETRY_GAP_MS = 90 * 60_000;
 const DIGEST_MORNING_DEADLINE_HOUR = 10;
 /** Anything found after the morning summary (including what the 6:15 PM incentive job retires) goes out in one 7 PM follow-up. */
 const DIGEST_EVENING_HOUR = 19;
-const DIGEST_KEEP_DAYS = 30;
+export const DIGEST_KEEP_DAYS = 30;
 
 export type CatalogBatchResult = {
   checked: number;
@@ -903,13 +875,14 @@ function dueCandidates(rows: readonly CommunityRow[], now: Date, everyDays: numb
  * archived or switched it to manual since the batch listed it). Returns the row
  * as it is now.
  */
-async function claimCommunity(communityId: number, at: Date): Promise<CommunityRow | null> {
+async function claimCommunity(communityId: number, at: Date, options: { requested?: boolean } = {}): Promise<CommunityRow | null> {
   const db = await getDb();
   if (!db) return null;
   const claimed = await db.update(dealCommunities).set({ lastAttemptAt: at })
     .where(and(
       eq(dealCommunities.id, communityId),
-      or(isNull(dealCommunities.lastAttemptAt), lt(dealCommunities.lastAttemptAt, new Date(at.getTime() - CATALOG_RETRY_GAP_MS))),
+      // An admin's "Refresh now" is read whatever the retry gap; its request row (taken first) keeps it to one batch.
+      options.requested ? undefined : or(isNull(dealCommunities.lastAttemptAt), lt(dealCommunities.lastAttemptAt, new Date(at.getTime() - CATALOG_RETRY_GAP_MS))),
       or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)),
       eq(dealCommunities.paused, false),
       eq(dealCommunities.manualMode, false),
@@ -977,6 +950,67 @@ export async function buildersInFlight(now = new Date()): Promise<string[]> {
   return rows.flatMap((row) => row.jobName.startsWith(BUILDER_LEASE_PREFIX) ? [row.jobName.slice(BUILDER_LEASE_PREFIX.length)] : []);
 }
 
+/**
+ * "Refresh now" requests. The admin's click only records a request: a deal_job_runs row
+ * ("deals-refresh-community-<id>", Chicago day) with status "running" and detail "queued". The next
+ * catalog batch (every 10 minutes in catalog hours) reads queued communities first, whatever their
+ * schedule, inside its own request: work left running after an HTTP response is unreliable on the
+ * production host, so nothing runs in the background. The batch takes the request (detail
+ * "started") before reading the community, so two overlapping batches never both read it, and
+ * records the outcome on the same row.
+ */
+export const REFRESH_JOB_PREFIX = "deals-refresh-community-";
+export const REFRESH_QUEUED = "queued";
+const REFRESH_STARTED = "started";
+/** A request taken this long ago with no outcome was interrupted (the host recycled the batch); it may be clicked again. */
+export const REFRESH_STALE_MS = 60 * 60_000;
+
+type RefreshRequest = { rowId: number; communityId: number };
+
+/** Queued requests, oldest first. A request taken long ago and never finished is closed as interrupted (one failed run, not a forever-running one). */
+async function queuedRefreshRequests(now: Date): Promise<RefreshRequest[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({ id: dealJobRuns.id, jobName: dealJobRuns.jobName, detail: dealJobRuns.detail, startedAt: dealJobRuns.startedAt }).from(dealJobRuns)
+    .where(and(like(dealJobRuns.jobName, `${REFRESH_JOB_PREFIX}%`), eq(dealJobRuns.status, "running"))).orderBy(dealJobRuns.startedAt);
+  const staleBefore = new Date(now.getTime() - REFRESH_STALE_MS);
+  for (const row of rows) {
+    if (row.detail === REFRESH_QUEUED || row.startedAt >= staleBefore) continue;
+    await db.update(dealJobRuns).set({ status: "failed", detail: "interrupted: the refresh started but never reported back (the server was restarted mid-run). The community is read again on its normal schedule; click Refresh now to queue it again.", completedAt: now })
+      .where(and(eq(dealJobRuns.id, row.id), eq(dealJobRuns.status, "running"), lt(dealJobRuns.startedAt, staleBefore))).catch(() => undefined);
+  }
+  return rows.filter((row) => row.detail === REFRESH_QUEUED).flatMap((row) => {
+    const communityId = Number(row.jobName.slice(REFRESH_JOB_PREFIX.length));
+    return Number.isSafeInteger(communityId) && communityId > 0 ? [{ rowId: row.id, communityId }] : [];
+  });
+}
+
+/** Takes a queued request for this batch; false when another batch already took it. */
+async function takeRefreshRequest(rowId: number, at: Date): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const taken = await db.update(dealJobRuns).set({ detail: REFRESH_STARTED, startedAt: at })
+    .where(and(eq(dealJobRuns.id, rowId), eq(dealJobRuns.status, "running"), eq(dealJobRuns.detail, REFRESH_QUEUED)));
+  return Number((taken as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) === 1;
+}
+
+async function finishRefreshRequest(rowId: number, status: "ok" | "failed" | "skipped", detail: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(dealJobRuns).set({ status, detail: detail.slice(0, 2_000), completedAt: new Date() }).where(eq(dealJobRuns.id, rowId)).catch(() => undefined);
+}
+
+/**
+ * The request row's outcome: a read that ran is "ok" even when the page was held (the hold is the community's state,
+ * reported with the holds), "failed" only when the reader itself broke, "skipped" when it could not be read at all.
+ */
+function refreshRequestOutcome(result: RefreshResult): { status: "ok" | "failed" | "skipped"; detail: string } {
+  if (result.skipped) return { status: "skipped", detail: `not refreshed: ${result.skipped.replace(/_/g, " ")}` };
+  if (result.ok) return { status: "ok", detail: "refreshed" };
+  if (result.reason === REFRESH_FAILED) return { status: "failed", detail: "failed: the reader hit an unexpected error on this community's pages; nothing was published or marked sold" };
+  return { status: "ok", detail: `held: ${result.reason ?? "unknown"}` };
+}
+
 /** What one community's check found, written as its own digest entry the moment it finishes, so a restart loses nothing. */
 async function recordDigestEntry(summaries: readonly CommunityChangeSummary[], holds: readonly HoldNotice[]) {
   if (!summaries.length && !holds.length) return;
@@ -1002,11 +1036,22 @@ export async function refreshDueCommunitiesBatch(options: { clock?: () => number
   const now = new Date(startedAt);
   const { catalogRefreshDays } = await getDealSettings();
   const rows = await db.select().from(dealCommunities).where(and(or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
-  // Live communities first (oldest data first), then ones waiting for their first pull.
-  const due = dueCandidates(rows, now, catalogRefreshDays).sort((a, b) =>
+  // An admin's "Refresh now" goes first, whatever the schedule; one that can no longer be read is closed as skipped.
+  const requests = await queuedRefreshRequests(now).catch((error) => { console.warn("[deals-sync] refresh requests unreadable", error instanceof Error ? error.message : error); return [] as RefreshRequest[]; });
+  const requestFor = new Map<number, number>();
+  const requested: DueCandidate[] = [];
+  for (const request of requests) {
+    const row = rows.find((community) => community.id === request.communityId);
+    if (requestFor.has(request.communityId)) { await finishRefreshRequest(request.rowId, "skipped", "not refreshed: another request for this community was queued"); continue; }
+    if (!row || row.builder === "Manual" || !hasBuilderReader(row.builder)) { await finishRefreshRequest(request.rowId, "skipped", "not refreshed: the community is paused, archived, in manual mode or its builder has no reader"); continue; }
+    requestFor.set(request.communityId, request.rowId);
+    requested.push(row);
+  }
+  // Then live communities (oldest data first), then ones waiting for their first pull.
+  const due = [...requested, ...dueCandidates(rows, now, catalogRefreshDays).filter((community) => !requestFor.has(community.id)).sort((a, b) =>
     Number(a.awaitingFirstSync) - Number(b.awaitingFirstSync)
     || (a.lastSuccessfulSyncAt?.getTime() ?? 0) - (b.lastSuccessfulSyncAt?.getTime() ?? 0)
-    || a.id - b.id);
+    || a.id - b.id)];
   const byBuilder = new Map<string, DueCandidate[]>();
   for (const community of due) byBuilder.set(community.builder, [...(byBuilder.get(community.builder) ?? []), community]);
   const lanesOfWork = Array.from(byBuilder.entries());
@@ -1024,16 +1069,24 @@ export async function refreshDueCommunitiesBatch(options: { clock?: () => number
         for (const community of communities) {
           if (clock() >= deadline) { stoppedForTime = true; return; }
           const at = new Date(clock());
-          const fresh = await claimCommunity(community.id, at);
-          if (!fresh) continue;
+          const requestRow = requestFor.get(community.id);
+          if (requestRow !== undefined && !(await takeRefreshRequest(requestRow, at))) continue;
+          const fresh = await claimCommunity(community.id, at, { requested: requestRow !== undefined });
+          if (!fresh) {
+            if (requestRow !== undefined) await finishRefreshRequest(requestRow, "skipped", "not refreshed: the community was paused, archived or switched to manual before it was read");
+            continue;
+          }
           const summaries: CommunityChangeSummary[] = [];
           const holds: HoldNotice[] = [];
+          let result: RefreshResult;
           try {
-            results.push(await refreshCommunity(fresh, at, summaries, holds, heartbeat));
+            result = await refreshCommunity(fresh, at, summaries, holds, heartbeat);
           } catch (error) {
-            results.push(await refreshFailed(fresh, at, holds, error));
+            result = await refreshFailed(fresh, at, holds, error);
           }
+          results.push(result);
           await recordDigestEntry(summaries, holds);
+          if (requestRow !== undefined) { const outcome = refreshRequestOutcome(result); await finishRefreshRequest(requestRow, outcome.status, outcome.detail); }
           await heartbeat();
         }
       } finally {
@@ -1110,7 +1163,7 @@ export async function refreshSuppliedCommunities(builder: string, communityIds: 
  * spent it. A slot whose send failed (status "failed") may be taken again, so
  * a bad email minute never loses a day's changes.
  */
-async function claimDigestSlot(slot: "morning" | "evening", now: Date): Promise<{ done: (ok: boolean) => Promise<void> } | null> {
+async function claimDigestSlot(slot: "morning" | "evening", now: Date): Promise<{ done: (ok: boolean, detail?: string) => Promise<void> } | null> {
   const db = await getDb();
   if (!db) return null;
   const jobName = `builder-deals-sync-digest-${slot}`;
@@ -1129,19 +1182,44 @@ async function claimDigestSlot(slot: "morning" | "evening", now: Date): Promise<
     }
   }
   return {
-    done: async (ok) => {
+    done: async (ok, detail) => {
       const connection = await getDb();
       if (!connection) return;
-      await connection.update(dealJobRuns).set({ status: ok ? "ok" : "failed", completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).catch(() => undefined);
+      await connection.update(dealJobRuns).set({ status: ok ? "ok" : "failed", completedAt: new Date(), ...(detail ? { detail: detail.slice(0, 2_000) } : {}) }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).catch(() => undefined);
     },
   };
 }
 
+/** Today's check counts for the summary's first line: communities tried today, and those read cleanly today. */
+async function digestStats(now: Date): Promise<DigestStats | null> {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    const today = chicagoDay(now);
+    const rows = await db.select({ lastAttemptAt: dealCommunities.lastAttemptAt, lastSuccessfulSyncAt: dealCommunities.lastSuccessfulSyncAt }).from(dealCommunities)
+      .where(and(or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
+    const on = (value: Date | null) => Boolean(value && chicagoDay(value) === today);
+    return { checkedToday: rows.filter((row) => on(row.lastAttemptAt)).length, cleanToday: rows.filter((row) => on(row.lastSuccessfulSyncAt)).length };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The morning summary goes out once every due community has been tried today
- * (or at 10 AM Central at the latest); the evening follow-up at 6 PM carries
+ * (or at 10 AM Central at the latest); the evening follow-up at 7 PM carries
  * anything found after it. Each entry is claimed before sending, so it goes
  * out once even when batches overlap.
+ *
+ * Every Builder Deals email can travel through the owner notification, which
+ * refuses content over 20,000 characters: a summary of 300+ communities is
+ * several times that, so it is composed compactly (dealsDigest) and sent as
+ * numbered parts. An entry is marked sent once every part naming it went out;
+ * when a part fails the slot is "failed" and the next batch sends only what is
+ * still unsent (a community split across a sent and a failed part may be
+ * repeated then; nothing is lost). Unsent entries older than DIGEST_KEEP_DAYS
+ * are counted in one line, not listed, so a long outage cannot grow the email
+ * without bound.
  */
 export async function sendSyncDigestIfReady(now: Date, allTriedToday: boolean): Promise<CatalogBatchResult["digest"]> {
   const db = await getDb();
@@ -1160,10 +1238,27 @@ export async function sendSyncDigestIfReady(now: Date, allTriedToday: boolean): 
   const unsent = await db.select().from(dealSyncDigestEntries).where(isNull(dealSyncDigestEntries.sentAt)).orderBy(dealSyncDigestEntries.id);
   if (!unsent.length) { await claim.done(true); return "nothing_new"; }
   const parse = <T,>(text: string): T[] => { try { const value: unknown = JSON.parse(text); return Array.isArray(value) ? value as T[] : []; } catch { return []; } };
-  const sent = await sendRunEmails(unsent.flatMap((entry) => parse<CommunityChangeSummary>(entry.summaries)), unsent.flatMap((entry) => parse<HoldNotice>(entry.holds)));
-  if (!sent) { await claim.done(false); return "waiting"; }
-  await db.update(dealSyncDigestEntries).set({ sentAt: now }).where(inArray(dealSyncDigestEntries.id, unsent.map((entry) => entry.id)));
-  await claim.done(true);
+  const messages = composeBuilderDealsDigest(unsent.map((entry) => ({ id: entry.id, createdAt: entry.createdAt, summaries: parse<CommunityChangeSummary>(entry.summaries), holds: parse<HoldNotice>(entry.holds) })), {
+    label: slot === "morning" ? "morning summary" : "evening follow-up",
+    now,
+    stats: await digestStats(now),
+    staleBefore: new Date(now.getTime() - DIGEST_KEEP_DAYS * 86_400_000),
+  });
+  // Entries that report nothing (unreadable rows) are spent with the slot.
+  if (!messages.length) {
+    await db.update(dealSyncDigestEntries).set({ sentAt: now }).where(inArray(dealSyncDigestEntries.id, unsent.map((entry) => entry.id)));
+    await claim.done(true, "nothing to report");
+    return "nothing_new";
+  }
+  const recipients = await syncEmailRecipients();
+  const outcomes: Array<{ ok: boolean; error?: string }> = [];
+  for (const message of messages) outcomes.push(await sendDigestPart(message, recipients));
+  const delivered = deliveredEntryIds(messages, outcomes.map((outcome) => outcome.ok));
+  if (delivered.length) await db.update(dealSyncDigestEntries).set({ sentAt: now }).where(inArray(dealSyncDigestEntries.id, delivered));
+  const failed = outcomes.flatMap((outcome, index) => outcome.ok ? [] : [`part ${index + 1}: ${outcome.error ?? "not delivered"}`]);
+  const detail = `${messages.length} part${messages.length === 1 ? "" : "s"} (${messages.map((message) => message.content.length).join(", ")} characters), ${unsent.length} entr${unsent.length === 1 ? "y" : "ies"}, ${delivered.length} marked sent${failed.length ? `; failed ${failed.join("; ")}` : ""}`;
+  if (failed.length) { await claim.done(false, detail); return "waiting"; }
+  await claim.done(true, detail);
   return "sent";
 }
 

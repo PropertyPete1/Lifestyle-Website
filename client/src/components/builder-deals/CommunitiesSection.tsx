@@ -286,7 +286,8 @@ function CommunityCard({ community, diagnostics, activeIncentive, builders }: { 
   const remove = trpc.deals.admin.removeCommunity.useMutation({ onSuccess: () => { refresh(); setConfirmRemove(false); toast.success("Community removed from the catalog (archived)"); }, onError });
   const refreshNow = trpc.deals.admin.refreshCommunity.useMutation({
     onSuccess: (result) => {
-      toast[result.queued ? "success" : "message"](result.queued ? `Refresh queued (${result.jobName}). Photos are served once processed.` : "A refresh is already running for this community.");
+      // Queued for the next builder check (every 10 minutes in catalog hours), which reads it first.
+      toast[result.queued ? "success" : "message"](result.message);
       window.setTimeout(refresh, 4000);
     },
     onError,
@@ -311,7 +312,7 @@ function CommunityCard({ community, diagnostics, activeIncentive, builders }: { 
           <p className="break-words text-xs text-muted-foreground">Private mapping: {community.builder} / {community.privateName} / {community.privateAddress || "no address"} / {community.salesPhone || "no sales phone"} / {sourceHost(community.sourceUrl)}</p>
           <p className="text-xs text-muted-foreground">Reel code {community.reelCode}. Last successful update {displayDate(community.lastSuccessfulSyncAt)}. Last attempt {displayDate(community.lastAttemptAt)}. Catalog updated {displayDate(community.catalogUpdatedAt)}.</p>
           {diagnostics && <p className="text-xs text-muted-foreground">{diagnostics.homes.quickMoveIn} available now, {diagnostics.homes.toBeBuilt} to be built, {diagnostics.homes.sold} sold, {diagnostics.homes.hidden} hidden, {diagnostics.homes.manual} manual. Area map {diagnostics.areaMap ? "ready" : "unavailable (no ZIP centroid yet)"}{diagnostics.driveTimeChips.length ? `, ${diagnostics.driveTimeChips.join(", ")}` : ""}.</p>}
-          {lastRun && <p className="flex items-center gap-1 text-xs text-muted-foreground">{lastRun.status === "ok" ? <CheckCircle2 className="h-3.5 w-3.5 text-gold" /> : lastRun.status === "running" ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5 text-destructive" />} Refresh now: {lastRun.status} at {displayDate(lastRun.startedAt)}{lastRun.completedAt ? `, finished ${displayDate(lastRun.completedAt)}` : ""}</p>}
+          {lastRun && <p className="flex items-center gap-1 text-xs text-muted-foreground">{lastRun.status === "ok" ? <CheckCircle2 className="h-3.5 w-3.5 text-gold" /> : lastRun.status === "running" ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5 text-destructive" />} Refresh now: {lastRun.status === "running" && lastRun.detail === "queued" ? "queued (read within ~10 minutes in catalog hours)" : lastRun.status === "running" ? "reading now" : lastRun.status} at {displayDate(lastRun.startedAt)}{lastRun.completedAt ? `, finished ${displayDate(lastRun.completedAt)}` : ""}{lastRun.status !== "running" && lastRun.detail && /^(held|not refreshed|failed|interrupted):/.test(lastRun.detail) ? ` (${lastRun.detail.slice(0, 160)})` : ""}</p>}
           {diagnostics?.dismissedCatalogHold && !diagnostics.catalogHold && <p className="text-xs text-muted-foreground">Dismissed hold: {diagnostics.dismissedCatalogHold.replaceAll("_", " ")} (no repeat email until the parse result changes).</p>}
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">

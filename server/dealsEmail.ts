@@ -1,6 +1,7 @@
 import { dealEmailLogs } from "../drizzle/schema";
 import { notifyOwner } from "./_core/notification";
 import { getDb } from "./db";
+import { OWNER_NOTIFICATION_CONTENT_MAX, capSubject, partSubject, splitEmailContent } from "./dealsEmailLimits";
 
 export type BuilderDealsEmailInput = {
   alertId?: number | null;
@@ -20,6 +21,8 @@ export type BuilderDealsEmailResult = {
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 /** The exact audit phrase for a delivery that reached only the project owner notification, not the recipients. */
 export const OWNER_ONLY_DELIVERY_LOG = "owner only: project-owner notification, recipients not emailed";
+/** The audit phrase for an owner notification the service did not accept: nothing was delivered, so it is logged as failed. */
+export const OWNER_ONLY_REJECTED_LOG = "owner only: project-owner notification NOT accepted, nothing delivered";
 export const RESEND_FROM_MISSING_ERROR = "RESEND_FROM_EMAIL is not set. Resend needs a verified sender on the lifestyledesignrealty.com domain (for example deals@lifestyledesignrealty.com) before any Builder Deals email can reach peter@ and steven@; the onboarding@resend.dev sender only delivers to the Resend account owner.";
 
 function normalizedRecipients(recipients: readonly string[]) {
@@ -59,25 +62,41 @@ async function persistEmailLog(input: BuilderDealsEmailInput, result: BuilderDea
   }
 }
 
+/**
+ * The owner notification rejects content over 20,000 characters (and a title over 1,200), so a longer message is sent
+ * as numbered parts ("Subject (2/3)"), every part logged on its own row. A part the service did not accept is logged as
+ * "failed" (the health check's email-failure count reads that status), and the message is ok only when every part went.
+ */
 async function ownerOnlyFallback(normalized: BuilderDealsEmailInput, recipients: string[], configurationError?: string): Promise<BuilderDealsEmailResult> {
-  let accepted = false;
-  try {
-    accepted = await notifyOwner({
-      title: normalized.subject,
-      content: `To: ${recipients.join(", ")} (owner-only fallback: these recipients were NOT emailed)\n\n${normalized.content}`,
-    });
-  } catch {
-    accepted = false;
+  const prefix = `To: ${recipients.join(", ")} (owner-only fallback: these recipients were NOT emailed)\n\n`;
+  const room = Math.max(2_000, OWNER_NOTIFICATION_CONTENT_MAX - prefix.length - 500);
+  const parts = normalized.content.length <= room ? [normalized.content] : splitEmailContent(normalized.content, room);
+  const rejected: number[] = [];
+  for (let index = 0; index < parts.length; index++) {
+    const title = parts.length > 1 ? partSubject(normalized.subject, index + 1, parts.length) : normalized.subject;
+    let accepted = false;
+    try {
+      accepted = await notifyOwner({ title, content: `${prefix}${parts[index]}` });
+    } catch {
+      accepted = false;
+    }
+    if (!accepted) rejected.push(index + 1);
+    const error = [configurationError, accepted ? null : "Owner notification was not accepted"].filter(Boolean).join(" ");
+    await persistEmailLog({ ...normalized, subject: title }, {
+      ok: accepted,
+      status: accepted ? "owner_only_fallback" : "failed",
+      deliveryLog: accepted ? OWNER_ONLY_DELIVERY_LOG : OWNER_ONLY_REJECTED_LOG,
+      ...(error ? { error } : {}),
+    }, "owner_notification");
   }
-  const error = [configurationError, accepted ? null : "Owner notification was not accepted"].filter(Boolean).join(" ");
-  const result: BuilderDealsEmailResult = {
-    ok: accepted,
+  const notAccepted = rejected.length ? (parts.length > 1 ? `Owner notification was not accepted for part${rejected.length === 1 ? "" : "s"} ${rejected.join(", ")} of ${parts.length}` : "Owner notification was not accepted") : null;
+  const error = [configurationError, notAccepted].filter(Boolean).join(" ");
+  return {
+    ok: rejected.length === 0,
     status: "owner_only_fallback",
     deliveryLog: OWNER_ONLY_DELIVERY_LOG,
     ...(error ? { error } : {}),
   };
-  await persistEmailLog(normalized, result, "owner_notification");
-  return result;
 }
 
 /**
@@ -90,7 +109,9 @@ async function ownerOnlyFallback(normalized: BuilderDealsEmailInput, recipients:
  */
 export async function sendBuilderDealsEmail(input: BuilderDealsEmailInput): Promise<BuilderDealsEmailResult> {
   const recipients = normalizedRecipients(input.recipients);
-  const normalized = { ...input, recipients };
+  // Every path (digest, holds, health, Monday report, alerts) gets the same subject cap; a body too big for the owner
+  // notification is split by the fallback below.
+  const normalized = { ...input, recipients, subject: capSubject(input.subject) };
   const resend = resendConfiguration();
 
   if (!resend.apiKey) return ownerOnlyFallback(normalized, recipients);

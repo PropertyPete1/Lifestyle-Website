@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dealAccessTokens, dealBlocklist, dealClientLinks, dealCommunities, dealDoNotAutoImport, dealEvents, dealHomes, dealKnownAgents, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
+import { dealAccessTokens, dealBlocklist, dealClientLinks, dealCommunities, dealDoNotAutoImport, dealEvents, dealHomes, dealJobRuns, dealKnownAgents, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 import type { TrpcContext } from "./_core/context";
 
@@ -29,7 +29,7 @@ const mocks = vi.hoisted(() => ({
   findBuilderDealsFubPersonId: vi.fn(),
   requeueDealPhoto: vi.fn(),
   processPendingDealPhotos: vi.fn(),
-  refreshCommunityInBackground: vi.fn(),
+  queueCommunityRefresh: vi.fn(),
   testCommunitySource: vi.fn(),
   saveIncentiveForCommunity: vi.fn(),
   acceptIncentiveHold: vi.fn(),
@@ -80,7 +80,7 @@ vi.mock("./dealsPhotos", () => ({ requeueDealPhoto: (...args: unknown[]) => mock
 vi.mock("./dealsSyncAdmin", async (importOriginal) => ({
   // storedScrubListForCommunity stays real: the categorised storage is the behaviour under test.
   ...(await importOriginal<typeof import("./dealsSyncAdmin")>()),
-  refreshCommunityInBackground: (...args: unknown[]) => mocks.refreshCommunityInBackground(...args),
+  queueCommunityRefresh: (...args: unknown[]) => mocks.queueCommunityRefresh(...args),
   testCommunitySource: (...args: unknown[]) => mocks.testCommunitySource(...args),
   saveIncentiveForCommunity: (...args: unknown[]) => mocks.saveIncentiveForCommunity(...args),
   acceptIncentiveHold: (...args: unknown[]) => mocks.acceptIncentiveHold(...args),
@@ -556,11 +556,33 @@ describe("admin: read-only health procedures", () => {
   });
 });
 
+describe("admin: job runs (read-only diagnosis)", () => {
+  it("lists the last 3 days of job runs newest first, with details cut to 2,000 characters and lease tokens hidden, to admins only", async () => {
+    const now = Date.now();
+    const at = (hoursAgo: number) => new Date(now - hoursAgo * 3_600_000);
+    db.seed(dealJobRuns, { jobName: "builder-deals-known-agent-sync", chicagoDay: "2026-10-21", status: "failed", detail: `reported ok:false: fub_rate_limited; /people page 33\n${"x".repeat(5_000)}`, startedAt: at(2), completedAt: at(2) });
+    db.seed(dealJobRuns, { jobName: "builder-deals-sync-digest-morning", chicagoDay: "2026-10-21", status: "ok", detail: "3 parts", startedAt: at(1), completedAt: at(1) });
+    db.seed(dealJobRuns, { jobName: "builder-deals-lane-Lennar", chicagoDay: "lease", status: "running", detail: "a1b2c3d4e5f6a1b2c3d4e5f6", startedAt: at(0.1) });
+    db.seed(dealJobRuns, { jobName: "builder-deals-health", chicagoDay: "2026-10-15", status: "failed", detail: "old", startedAt: at(24 * 6) });
+    const result = await admin().jobRuns();
+    expect(result.available).toBe(true);
+    expect(result.runs.map((run) => run.jobName)).toEqual(["builder-deals-lane-Lennar", "builder-deals-sync-digest-morning", "builder-deals-known-agent-sync"]);
+    expect(result.runs[0]!.detail).toBe("builder lease held");
+    expect(result.runs[2]!.detail!.length).toBe(2_000);
+    expect(result.runs[2]!.detail!.startsWith("reported ok:false: fub_rate_limited")).toBe(true);
+    expect(Object.keys(result.runs[1]!).sort()).toEqual(["chicagoDay", "completedAt", "detail", "jobName", "startedAt", "status"]);
+    await expect(dealsRouter.createCaller(makeCtx("user")).admin.jobRuns()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(visitor().admin.jobRuns()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+});
+
 describe("admin: sync-admin wiring and error mapping", () => {
-  it("runs Refresh now in the background and maps a DealsAdminError onto the same tRPC code", async () => {
-    mocks.refreshCommunityInBackground.mockResolvedValue({ queued: true, jobName: "deals-refresh-community-3" });
-    expect(await admin().refreshCommunity({ id: 3 })).toEqual({ queued: true, jobName: "deals-refresh-community-3" });
-    mocks.refreshCommunityInBackground.mockRejectedValue(new DealsAdminError("PRECONDITION_FAILED", "This community is in manual mode, no auto-update."));
+  it("queues Refresh now for the next catalog batch and maps a DealsAdminError onto the same tRPC code", async () => {
+    const queued = { queued: true, jobName: "deals-refresh-community-3", message: "Queued — updates within ~10 minutes (the next builder check reads it first). Photos are served once processed." };
+    mocks.queueCommunityRefresh.mockResolvedValue(queued);
+    expect(await admin().refreshCommunity({ id: 3 })).toEqual(queued);
+    expect(mocks.queueCommunityRefresh).toHaveBeenCalledWith(3);
+    mocks.queueCommunityRefresh.mockRejectedValue(new DealsAdminError("PRECONDITION_FAILED", "This community is in manual mode, no auto-update."));
     await expect(admin().refreshCommunity({ id: 3 })).rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: "This community is in manual mode, no auto-update." });
   });
 

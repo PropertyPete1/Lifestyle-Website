@@ -2,9 +2,10 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealIncentives, dealJobRuns } from "../drizzle/schema";
 import { getDb } from "./db";
 import { hasBuilderReader, mentionsRate, officialHostFor, publicTextResidue, type DealHoldReason } from "./dealsAdapters";
-import { chicagoDay, chicagoEndOfDay, getDealSettings } from "./dealsService";
+import { chicagoClock, chicagoDay, chicagoEndOfDay, getDealSettings } from "./dealsService";
+import { CATALOG_FIRST_HOUR, CATALOG_LAST_HOUR } from "./dealsSchedule";
 import { normalizeExcludedTerms, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
-import { activeCatalogHold, builderScrubConfig, communityRefreshDue, leaseBuilder, refreshOfficialDeals, storedExcludedScrubTerms, storedScrubConfig, summarizeHolds } from "./dealsSync";
+import { REFRESH_JOB_PREFIX, REFRESH_QUEUED, REFRESH_STALE_MS, activeCatalogHold, builderScrubConfig, communityRefreshDue, storedExcludedScrubTerms, storedScrubConfig, summarizeHolds } from "./dealsSync";
 import { communityAreaMap, refreshCommunityGeography } from "./dealsMap";
 import { HELD_INCENTIVE_ADMIN_STATUS, autoAcceptedStatus, heldIncentiveShowsLine, isAutoAcceptedIncentive } from "../shared/dealsHeldIncentive";
 import { DEAL_SCRUB_CATEGORIES, hasPrivateTerm, mergeDealScrubConfig, normalizeRateFigure, normalizedText, scrubPrivateNames, type DealScrubConfig, type DealScrubConfigInput } from "../shared/deals";
@@ -101,13 +102,23 @@ export function describeCatalogHold(reason: string): string[] {
   return reason.split(",").map((part) => part.trim()).filter(Boolean).map((part) => CATALOG_HOLD_REASON_HELP[part as DealHoldReason] ?? part.replace(/_/g, " "));
 }
 
-const REFRESH_JOB_PREFIX = "deals-refresh-community-";
+export type CommunityRefreshQueued = { queued: boolean; jobName: string; reason?: "already_queued" | "already_running"; message: string };
+
+/** What the admin is told after "Refresh now": the catalog cron runs every 10 minutes in catalog hours only. */
+function queuedMessage(now: Date): string {
+  const { hour } = chicagoClock(now);
+  if (hour >= CATALOG_FIRST_HOUR && hour < CATALOG_LAST_HOUR) return "Queued — updates within ~10 minutes (the next builder check reads it first). Photos are served once processed.";
+  return `Queued — builder checks resume at ${CATALOG_FIRST_HOUR} AM Central, and it is read first then. Photos are served once processed.`;
+}
 
 /**
- * "Refresh now": records a deal_job_runs row for today and runs the single
- * community refresh in the background. A second click while it runs is refused.
+ * "Refresh now": queues the community for the next catalog batch, which reads queued communities first and records
+ * the outcome on this deal_job_runs row (see REFRESH_JOB_PREFIX in dealsSync). Nothing runs in the background: work
+ * left running after the response is unreliable on the production host, and such runs stalled or failed. A second
+ * click while queued or being read is refused; a read that never reported back is closed after an hour and may be
+ * queued again.
  */
-export async function refreshCommunityInBackground(communityId: number): Promise<{ queued: boolean; jobName: string; reason?: string }> {
+export async function queueCommunityRefresh(communityId: number, now = new Date()): Promise<CommunityRefreshQueued> {
   const db = await requireDb();
   const community = await requireCommunity(communityId);
   if (community.builder === "Manual" || community.manualMode) throw new DealsAdminError("PRECONDITION_FAILED", "This community is in manual mode, no auto-update.");
@@ -115,37 +126,21 @@ export async function refreshCommunityInBackground(communityId: number): Promise
   if (community.paused) throw new DealsAdminError("PRECONDITION_FAILED", "This community is paused. Resume it first.");
   if (!hasBuilderReader(community.builder)) throw new DealsAdminError("PRECONDITION_FAILED", `There is no reader for ${community.builder} pages yet, so this community cannot be refreshed automatically.`);
   const jobName = `${REFRESH_JOB_PREFIX}${communityId}`;
-  const day = chicagoDay();
+  // Any open request for this community (queued on an earlier day, or being read now) answers the click.
+  const open = await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.status, "running")));
+  if (open.some((row) => row.detail === REFRESH_QUEUED)) return { queued: true, jobName, reason: "already_queued", message: `Already queued. ${queuedMessage(now)}` };
+  if (open.some((row) => row.startedAt.getTime() > now.getTime() - REFRESH_STALE_MS)) return { queued: false, jobName, reason: "already_running", message: "This community is being read right now; the result shows here when it finishes." };
+  const day = chicagoDay(now);
   const existing = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).limit(1))[0];
+  const queued = { status: "running" as const, detail: REFRESH_QUEUED, startedAt: now, completedAt: null };
   if (existing) {
-    if (existing.status === "running" && existing.startedAt.getTime() > Date.now() - 30 * 60_000) return { queued: false, jobName, reason: "already_running" };
-    const claimed = await db.update(dealJobRuns).set({ status: "running", startedAt: new Date(), completedAt: null, detail: null }).where(and(eq(dealJobRuns.id, existing.id), sql`(${dealJobRuns.status} <> 'running' OR ${dealJobRuns.startedAt} <= ${new Date(Date.now() - 30 * 60_000)})`));
-    if (!Number((claimed as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0)) return { queued: false, jobName, reason: "already_running" };
+    // A finished run today (or one that never reported back) is replaced by the new request.
+    const claimed = await db.update(dealJobRuns).set(queued).where(and(eq(dealJobRuns.id, existing.id), sql`(${dealJobRuns.status} <> 'running' OR ${dealJobRuns.startedAt} <= ${new Date(now.getTime() - REFRESH_STALE_MS)})`));
+    if (!Number((claimed as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0)) return { queued: false, jobName, reason: "already_running", message: "This community is being read right now; the result shows here when it finishes." };
   } else {
-    try { await db.insert(dealJobRuns).values({ jobName, chicagoDay: day, status: "running" }); } catch { return { queued: false, jobName, reason: "already_running" }; }
+    try { await db.insert(dealJobRuns).values({ jobName, chicagoDay: day, ...queued }); } catch { return { queued: true, jobName, reason: "already_queued", message: `Already queued. ${queuedMessage(now)}` }; }
   }
-  const finish = async (status: "ok" | "failed", detail: string) => {
-    const connection = await getDb();
-    if (!connection) return;
-    await connection.update(dealJobRuns).set({ status, detail: detail.slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).catch(() => undefined);
-  };
-  setImmediate(() => {
-    // One request stream per builder: wait for the builder's lease (a running batch lane) before reading its pages.
-    const run = async () => {
-      for (let attempt = 0; ; attempt++) {
-        const lease = await leaseBuilder(community.builder);
-        if (lease) {
-          try { return await refreshOfficialDeals({ communityId, heartbeat: lease.heartbeat }); } finally { await lease.release(); }
-        }
-        if (attempt >= 20) throw new Error("builder busy: another check of this builder's pages is still running");
-        await new Promise((resolve) => setTimeout(resolve, 15_000));
-      }
-    };
-    run()
-      .then((results) => finish(results.some((result) => result.ok) ? "ok" : "failed", JSON.stringify(results)))
-      .catch((error) => finish("failed", error instanceof Error ? error.message : "refresh failed"));
-  });
-  return { queued: true, jobName };
+  return { queued: true, jobName, message: queuedMessage(now) };
 }
 
 export type AdminIncentiveInput = {

@@ -799,7 +799,7 @@ export function communityRefreshDue(lastSuccessfulSyncAt: Date | null, now = new
 /** Each scheduled batch stops starting new communities after this long, so one cron call stays short. */
 export const CATALOG_BATCH_BUDGET_MS = 4 * 60_000;
 /** Builders checked side by side; one builder's communities are always checked one at a time. */
-export const CATALOG_BATCH_LANES = 4;
+export const CATALOG_BATCH_LANES = 2;
 /** A failed (or still running) community is not tried again sooner than this. */
 export const CATALOG_RETRY_GAP_MS = 90 * 60_000;
 /** The morning summary goes out once nothing is left to check, or at this Chicago hour at the latest. */
@@ -852,8 +852,13 @@ async function claimCommunity(communityId: number, at: Date): Promise<CommunityR
 const BUILDER_LEASE_PREFIX = "builder-deals-lane-";
 /** One lease row per builder, whatever the day (a lane may cross midnight). */
 const BUILDER_LEASE_DAY = "lease";
-/** A lease not heartbeaten for this long belongs to a run that died; the next batch may take it. */
-export const BUILDER_LEASE_STALE_MS = 2 * 60 * 60_000;
+/**
+ * A lease not heartbeaten for this long belongs to a run that died; the next batch may take it. The holder
+ * heartbeats between communities and at least once a minute while it fetches, so ten minutes of silence means
+ * the process is gone (on the production host an instance that crashes or is recycled mid-batch never
+ * releases its leases, and a two-hour window left those builders unread for two hours).
+ */
+export const BUILDER_LEASE_STALE_MS = 10 * 60_000;
 
 export type BuilderLease = { release: () => Promise<void>; heartbeat: () => Promise<void> };
 
@@ -863,7 +868,7 @@ export type BuilderLease = { release: () => Promise<void>; heartbeat: () => Prom
  * carries its holder's token, so only the holder can release or extend it, and
  * the (job, day) unique key on deal_job_runs settles two takers racing for it.
  * The holder heartbeats between communities; a lease without a heartbeat for
- * two hours is treated as dead.
+ * ten minutes is treated as dead.
  */
 export async function leaseBuilder(builder: string, now = new Date()): Promise<BuilderLease | null> {
   const db = await getDb();
@@ -967,11 +972,9 @@ export async function refreshDueCommunitiesBatch(options: { clock?: () => number
       }
     }
   };
-  if (lanesOfWork.length) {
-    void processPendingDealPhotos(5).catch((error) => console.warn("[deals-photo] retry queue drain failed", error));
-    await Promise.all(Array.from({ length: Math.min(Math.max(1, options.lanes ?? CATALOG_BATCH_LANES), lanesOfWork.length) }, lane));
-    void processPendingDealPhotos(10).catch((error) => console.warn("[deals-photo] retry queue drain failed", error));
-  }
+  // Photos are left to their own cron job: processing them here ran image work alongside the page reads in
+  // the same request, and the host answered later calls with 503 after such batches.
+  if (lanesOfWork.length) await Promise.all(Array.from({ length: Math.min(Math.max(1, options.lanes ?? CATALOG_BATCH_LANES), lanesOfWork.length) }, lane));
   const checkedIds = new Set(results.map((result) => result.communityId));
   const remaining = due.filter((community) => !checkedIds.has(community.id)).length;
   // Still to do today: due and not tried yet today (a failed one being retried later does not hold

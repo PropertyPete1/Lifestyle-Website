@@ -685,18 +685,18 @@ describe("scheduling", () => {
     await lease!.release();
     expect(await buildersInFlight(new Date(at))).toEqual([]);
     expect(await refreshDueCommunitiesBatch({ clock: () => at + 120_000 })).toMatchObject({ checked: 0, digest: "sent" });
-    // A lease with no heartbeat for two hours belongs to a dead run and can be taken; a heartbeat keeps it alive.
+    // A lease with no heartbeat for ten minutes belongs to a dead run and can be taken; a heartbeat keeps it alive.
     const first = await leaseBuilder("Chesmar", new Date(at));
     expect(first).not.toBeNull();
-    expect(await leaseBuilder("Chesmar", new Date(at + 90 * 60_000))).toBeNull();
+    expect(await leaseBuilder("Chesmar", new Date(at + 9 * 60_000))).toBeNull();
     await first!.heartbeat();
-    expect(await buildersInFlight(new Date(Date.now() + 100 * 60_000))).toEqual(["Chesmar"]);
-    const taker = await leaseBuilder("Chesmar", new Date(Date.now() + 121 * 60_000));
+    expect(await buildersInFlight(new Date(Date.now() + 8 * 60_000))).toEqual(["Chesmar"]);
+    const taker = await leaseBuilder("Chesmar", new Date(Date.now() + 11 * 60_000));
     expect(taker).not.toBeNull();
     // Only the holder can release or extend its lease: the dead run's late release leaves the new holder's lease standing.
     await first!.release();
     await first!.heartbeat();
-    expect(await buildersInFlight(new Date(Date.now() + 121 * 60_000))).toEqual(["Chesmar"]);
+    expect(await buildersInFlight(new Date(Date.now() + 11 * 60_000))).toEqual(["Chesmar"]);
     await taker!.release();
     expect(await buildersInFlight(new Date(Date.now() + 121 * 60_000))).toEqual([]);
     // One lease row per builder, whatever the day: a run across midnight is still one stream.

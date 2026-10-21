@@ -98,9 +98,11 @@ export async function latestSuppliedImport(communityId: number): Promise<StoredS
 }
 
 /** For the sync: null when the builder does not take imports; otherwise the community's latest import (or null inside). */
-export async function suppliedSourceFor(builder: string, communityId: number): Promise<{ latest: StoredSuppliedImport | null } | null> {
+export async function suppliedSourceFor(builder: string, communityId: number): Promise<{ latest: StoredSuppliedImport | null; previous: StoredSuppliedImport | null } | null> {
   if (!(await isSuppliedBuilder(builder))) return null;
-  return { latest: await latestSuppliedImport(communityId) };
+  const db = await requireDb();
+  const rows = await db.select().from(dealSuppliedImports).where(eq(dealSuppliedImports.communityId, communityId)).orderBy(desc(dealSuppliedImports.capturedAt), desc(dealSuppliedImports.id)).limit(2);
+  return { latest: rows[0] ? parseStored(rows[0]) : null, previous: rows[1] ? parseStored(rows[1]) : null };
 }
 
 /** Stores one community's import and keeps only the newest two for that community. */

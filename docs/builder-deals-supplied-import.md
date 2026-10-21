@@ -119,7 +119,8 @@ listing the page no longer shows.
 | `pageComplete` false, or homes for sale sent differ from `homesShownCount` | hold `supplied_import_incomplete` |
 | `capturedAt` more than 36 hours before the refresh | hold `supplied_import_stale` |
 | Price outside 50,000 to 5,000,000 (or not whole dollars), beds outside 1 to 10 (or not whole), baths outside 1 to 10 or not in steps of 0.5, sqft outside 400 to 15,000 | hold `supplied_import_out_of_bounds` |
-| Home link off the builder's site (or the community page itself), address without a house number and street, unreadable `moveIn`, an under-construction home "ready now", a photo off the builder's hosts | hold `supplied_import_invalid_home` |
+| Home link off the builder's site, the community page itself, or a link not under this community's page (a "nearby homes" card from another community), address without a house number and street, unreadable `moveIn`, an under-construction home "ready now", a photo off the builder's hosts | hold `supplied_import_invalid_home` |
+| No homes for sale, unless the previous import (captured earlier) also had none: a list that failed to load must not sweep every home to sold | hold `supplied_import_incomplete` (a sold-out community publishes on its second empty import) |
 | Two homes with the same link or the same street address | hold `supplied_import_duplicate_home` |
 | Community not in the payload | untouched (no sold marking) |
 | Offer that cannot be published (no APR, private text left, ...) | homes publish; the offer is held for "Accept this update", exactly as for a read |
@@ -205,7 +206,8 @@ hold after this import, if any (it needs an admin's review, not a new import).
 > Once a day, open each Legend Homes community page from this list (exact links)
 > in the browser: [paste the links from Admin, Supplied imports]. On each page,
 > open the quick move-in / available homes list and load every home (every page,
-> every "load more"). For each home card record: the home's page link, the full
+> every "load more"). Record only this community's own homes: skip model homes
+> and any "nearby" or "similar homes" cards from other communities. For each home card record: the home's page link, the full
 > address as shown, the plan name, the price in whole dollars (null if none is
 > shown), beds, baths (2.5 for two full and one half), square feet, the status
 > (`available`, `under_construction` or `sold`) and the move-in wording as

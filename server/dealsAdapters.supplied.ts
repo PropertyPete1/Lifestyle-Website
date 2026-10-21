@@ -120,6 +120,8 @@ function statusOf(home: SuppliedHome, moveIn: MoveIn, now: Date): { status: stri
   // An available home whose month has passed is ready now, as a reader treats a past availability date.
   const current = now.getUTCFullYear() * 12 + now.getUTCMonth();
   if (home.status === "available" && moveIn.year * 12 + moveIn.month - 1 < current) return { status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null };
+  // An under-construction home whose month has passed carries a stale estimate: no date, as a reader treats one.
+  if (moveIn.year * 12 + moveIn.month - 1 < current) return { status: "Quick Move-In", readyNow: false, moveInDate: null };
   return { status: `Quick Move-In (${moveIn.label})`, readyNow: false, moveInDate: moveIn.label };
 }
 
@@ -159,6 +161,9 @@ export function checkSuppliedCommunity(builder: string, stored: Pick<StoredSuppl
     const url = officialSuppliedUrl(builder, home.url);
     if (!url) bad("supplied_import_invalid_home", "url is not an https link on the builder's site");
     else if (suppliedUrlKey(url.toString()) === suppliedUrlKey(community.communityUrl)) bad("supplied_import_invalid_home", "url is the community page, not the home's page");
+    // A home's page sits under its community's page (Legend: <community>/quick-move-in-homes/<home>); a card linking under
+    // another community (a "nearby homes" strip) is never this community's home, as a reader holds such a home.
+    else if (!suppliedUrlKey(url.toString()).startsWith(`${suppliedUrlKey(community.communityUrl)}/`)) bad("supplied_import_invalid_home", "url is not under this community's page");
     if (!looksLikeStreetAddress(home.address.split(",")[0])) bad("supplied_import_invalid_home", "address does not start with a house number and street");
     if (home.price !== null && !(Number.isInteger(home.price) && inRange(home.price, SUPPLIED_PRICE_MIN, SUPPLIED_PRICE_MAX))) bad("supplied_import_out_of_bounds", `price ${home.price} is outside ${SUPPLIED_PRICE_MIN.toLocaleString("en-US")}-${SUPPLIED_PRICE_MAX.toLocaleString("en-US")}`);
     if (home.beds != null && !(Number.isInteger(home.beds) && inRange(home.beds, SUPPLIED_ROOMS_MIN, SUPPLIED_ROOMS_MAX))) bad("supplied_import_out_of_bounds", `beds ${home.beds} is outside 1-10`);
@@ -185,6 +190,8 @@ export function checkSuppliedCommunity(builder: string, stored: Pick<StoredSuppl
     if (addresses.has(addressKey)) bad("supplied_import_duplicate_home", `same address as homes[${addresses.get(addressKey)}]`);
     else addresses.set(addressKey, index);
     if (!url || !status) return;
+    // The builder's slugs are lower case: one home is one link whatever case the agent copied it in.
+    url.pathname = url.pathname.toLowerCase();
     const street = home.address.split(",")[0]!.trim();
     homes.push({
       sourceUrl: url.toString(),
@@ -210,12 +217,16 @@ export function checkSuppliedCommunity(builder: string, stored: Pick<StoredSuppl
  * data stays live and nothing is swept to sold. The offer text is cleaned as the
  * builder's reader cleans it and parsed by parsePromotionalRate, unchanged.
  */
-export function suppliedDealsSnapshot(config: CommunitySourceConfig, stored: StoredSuppliedImport | null, now: Date): DealAdapterResult {
+export function suppliedDealsSnapshot(config: CommunitySourceConfig, stored: StoredSuppliedImport | null, now: Date, previous: StoredSuppliedImport | null = null): DealAdapterResult {
   const privateSnapshot = emptyPrivate(config);
   const fetchedAt = (stored?.capturedAt ?? now).toISOString();
   if (!stored || suppliedUrlKey(stored.community.communityUrl) !== suppliedUrlKey(config.sourceUrl)) return failedResult(config, fetchedAt, privateSnapshot, ["supplied_import_missing"]);
   const check = checkSuppliedCommunity(config.builder, stored, now);
   if (check.reasons.length) return failedResult(config, fetchedAt, privateSnapshot, check.reasons);
+  // "No homes for sale" would sweep every home of the community to sold on the agent's word alone: it is taken only when
+  // the import before it, captured earlier, said the same (two separate visits agree); otherwise the community holds.
+  const forSale = (item: StoredSuppliedImport) => item.community.homes.filter((home) => home.status !== "sold").length;
+  if (forSale(stored) === 0 && !(previous && previous.capturedAt.getTime() < stored.capturedAt.getTime() && forSale(previous) === 0)) return failedResult(config, fetchedAt, privateSnapshot, ["supplied_import_incomplete"]);
   privateSnapshot.pages.push(sourcePage("community", config.sourceUrl, config.privateCommunityName));
   for (const home of check.homes) {
     privateSnapshot.homes.push(home);

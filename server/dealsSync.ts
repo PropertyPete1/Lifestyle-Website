@@ -624,7 +624,7 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     console.warn(`[deals-sync] community ${community.id} supplied-import lookup failed`, error instanceof Error ? error.message : error);
     return null;
   });
-  const snapshot = supplied ? suppliedDealsSnapshot(sourceConfig, supplied.latest, now) : await loadOfficialDeals(sourceConfig, heartbeat ? { fetcher: leaseRenewingFetcher(heartbeat) } : {});
+  const snapshot = supplied ? suppliedDealsSnapshot(sourceConfig, supplied.latest, now, supplied.previous) : await loadOfficialDeals(sourceConfig, heartbeat ? { fetcher: leaseRenewingFetcher(heartbeat) } : {});
   if (!snapshot.catalogOk) {
     const reason = snapshot.holdReasons.join(", ");
     await recordCatalogHold(community, reason, now, holds);

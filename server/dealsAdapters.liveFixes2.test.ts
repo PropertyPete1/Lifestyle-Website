@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadOfficialDeals, type CommunitySourceConfig, type HtmlFetcher } from "./dealsAdapters";
-import { homefinitiStatus, parseHomefinitiRecords } from "./dealsAdapters.homefiniti";
+import { chesmarDetailFacts, loadOfficialDeals, type CommunitySourceConfig, type HtmlFetcher } from "./dealsAdapters";
+import { homefinitiCollections, homefinitiStatus, parseHomefinitiRecords } from "./dealsAdapters.homefiniti";
 import { kbStatus } from "./dealsAdapters.kbhome";
 import { parseTexasHomesCommunity, resetTexasHomesCaches, texasHomesHomesUrl } from "./dealsAdapters.texashomes";
 import { parseTollCommunity } from "./dealsAdapters.toll";
-import { parseViewHomesCommunity, resetViewHomesCaches, viewHomesListingUrl } from "./dealsAdapters.viewhomes";
+import { parseViewHomesCommunity, parseViewHomesRoster, resetViewHomesCaches, viewHomesListingUrl } from "./dealsAdapters.viewhomes";
 
 /**
  * Regression tests on the pages the official sites served late on October 20,
@@ -16,11 +16,20 @@ import { parseViewHomesCommunity, resetViewHomesCaches, viewHomesListingUrl } fr
  * the data the readers use (JSON-LD, `__NEXT_DATA__`, KB's inline arrays),
  * styles, inline SVG, comments, non-canonical links and image source sets
  * removed, then gzipped; the markup and data the readers parse are as served.
- * Pages the captures do not include (the View Homes roster) are synthetic and
- * say so where they are built.
+ * The follow-up captures (the View Homes roster and promotion, the Texas Homes
+ * quick move-in list, Coventry's collection pages, every Toll Brothers
+ * community, Chesmar's sitemaps and home pages) were taken the same night;
+ * Chesmar's sitemaps are cut to their first entry and Alsatian Oaks' entries.
+ * Pages still not captured (Chesmar's plan pages) and the variants the hold
+ * tests build are synthetic and say so where they are built.
  */
 const NOW = new Date("2026-10-21T04:00:00Z");
-const live = (name: string) => gunzipSync(readFileSync(new URL(`./fixtures/deals/live-2026-10-20b/${name}.html.gz`, import.meta.url))).toString("utf8");
+const fixture = (file: string) => gunzipSync(readFileSync(new URL(`./fixtures/deals/live-2026-10-20b/${file}.gz`, import.meta.url))).toString("utf8");
+const live = (name: string) => fixture(`${name}.html`);
+/** The page with its `__NEXT_DATA__` object changed (for the hold tests). */
+function withNextData(page: string, change: (data: any) => void): string {
+  return page.replace(/(<script\b[^>]*\bid="__NEXT_DATA__"[^>]*>)([\s\S]*?)(<\/script>)/, (_all, open: string, json: string, close: string) => { const data = JSON.parse(json); change(data); return `${open}${JSON.stringify(data)}${close}`; });
+}
 type Site = Record<string, string | { status: number; body?: string; type?: string }>;
 function siteFetcher(site: Site) {
   const requested: string[] = [];
@@ -83,13 +92,93 @@ describe("Toll Brothers: a model with no homes now leaves its qmis list out (Oct
     const uncounted = siteFetcher({ [BRIGGS]: live("toll-briggs-ranch").replace('"qmiCount":0', '"qmiTotal":0') });
     expect((await loadOfficialDeals(config, { fetcher: uncounted.fetcher, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
     // Shavano Highlands: six models, none with homes (qmiCount 0 each), while the site plan counts one quick move-in lot. That
-    // disagreement is held (the site plan's lot data was not captured), never read as "nothing for sale".
+    // disagreement is held, never read as "nothing for sale" (the community API says the same and lists no lots; see below).
     const shavanoPage = live("toll-shavano-highlands");
     const shavano = parseTollCommunity(shavanoPage, SHAVANO, NOW)!;
     expect([shavano.shapeIntact, shavano.homes.length, shavano.plans.length, shavano.sitePlanHomes]).toEqual([true, 0, 6, 1]);
     const { fetcher } = siteFetcher({ [SHAVANO]: shavanoPage });
     const result = await loadOfficialDeals({ builder: "Toll Brothers", sourceUrl: SHAVANO, privateCommunityName: "Shavano Highlands", scrubList: ["Shavano Highlands"] }, { fetcher, now: () => NOW });
     expect(result.holdReasons).toEqual(["expected_community_container_not_found"]);
+  });
+});
+
+describe("Toll Brothers: every San Antonio community (October 20, 2026 captures)", () => {
+  const T = "https://www.tollbrothers.com/luxury-homes-for-sale/Texas/";
+  type Row = [fixture: string, path: string, holds: string[], homes: number, plans: number];
+  // The catalog outcome per community; an `ambiguous_rate` hold is the offer's alone (the catalog publishes).
+  const ROWS: Row[] = [
+    ["toll-briggs-ranch", "Toll-Brothers-at-Briggs-Ranch", [], 7, 7],
+    ["toll-enchanted-bluff", "Toll-Brothers-at-Enchanted-Bluff", ["ambiguous_rate"], 3, 5],
+    ["toll-flat-creek", "Toll-Brothers-at-Flat-Creek", [], 3, 6],
+    ["toll-georges-ranch", "Toll-Brothers-at-George%27s-Ranch", ["ambiguous_rate"], 2, 6],
+    ["toll-legacy-at-lake-dunlap", "Toll-Brothers-at-Legacy-at-Lake-Dunlap", [], 4, 6],
+    ["toll-mayfair", "Toll-Brothers-at-Mayfair", ["ambiguous_rate"], 3, 0],
+    ["toll-thornebrook", "Toll-Brothers-at-Thornebrook", ["ambiguous_rate"], 2, 6],
+    ["toll-windborne", "Toll-Brothers-at-Windborne", ["ambiguous_rate"], 2, 6],
+    // The site plan counts one quick move-in home more than the data lists (Shavano 1 of 0, Caliza Reserve 3 of 2, Nolte
+    // Farms 3 of 2, Sunset Ridge 13 of 12, Regency at Esperanza's Sardana Collection 5 of 4): held, never a sold home.
+    ["toll-shavano-highlands", "Shavano-Highlands", ["expected_community_container_not_found"], 0, 0],
+    ["toll-caliza-reserve", "Toll-Brothers-at-Caliza-Reserve", ["expected_community_container_not_found"], 0, 0],
+    ["toll-nolte-farms", "Toll-Brothers-at-Nolte-Farms", ["expected_community_container_not_found"], 0, 0],
+    ["toll-sunset-ridge", "Toll-Brothers-at-Sunset-Ridge", ["expected_community_container_not_found"], 0, 0],
+    ["toll-regency-at-esperanza", "Regency-at-Esperanza", ["expected_community_container_not_found"], 0, 0],
+  ];
+  const read = (name: string, url: string, page = live(name)) => loadOfficialDeals({ builder: "Toll Brothers", sourceUrl: url, privateCommunityName: name, scrubList: [] }, { fetcher: siteFetcher({ [url]: page }).fetcher, now: () => NOW });
+
+  it("reads 8 of the 13 and holds the 5 whose site plan counts a home the data does not list", async () => {
+    for (const [name, path, holds, homes, plans] of ROWS) {
+      const result = await read(name, `${T}${path}`);
+      expect([name, result.holdReasons, result.catalogOk, result.private.homes.length, result.private.plans.length]).toEqual([name, holds, holds.every((hold) => hold === "ambiguous_rate"), homes, plans]);
+    }
+  });
+
+  it("Legacy at Lake Dunlap: a home whose plan has no model sits in an unnamed isQMI entry that holds only its list (4 homes, the site plan's 4)", async () => {
+    const result = await read("toll-legacy-at-lake-dunlap", `${T}Toll-Brothers-at-Legacy-at-Lake-Dunlap`);
+    expect(facts(result, "homes")).toEqual([
+      ["221 Grand Legacy", "Maren", "Quick Move-In (Move-In Ready)", 529_000, 3, 3, 2_664, 3, null, true],
+      ["335 Grand Legacy", "Nocona", "Quick Move-In (Move-In Ready)", 569_000, 4, 3.5, 2_936, 3, null, true],
+      ["331 Grand Legacy", "Paisano", "Quick Move-In (December 2026)", 741_000, 4, 4.5, 3_524, 3, "December 2026", false],
+      ["308 Flathead Lake", "Kieran", "Quick Move-In (December 2026)", 654_000, 5, 4, 2_834, 2, "December 2026", false],
+    ]);
+    expect(result.private.plans.map((plan) => plan.privatePlanName)).toEqual(["Quentin", "Liliana", "Maren", "Nocona", "Ophelia", "Paisano"]);
+  });
+
+  it("Mayfair: a master community's page (two collections, homes only, each naming its collection's id) reads its 3 homes", async () => {
+    const result = await read("toll-mayfair", `${T}Toll-Brothers-at-Mayfair`);
+    expect(result.catalogOk).toBe(true);
+    expect(facts(result, "homes")).toEqual([
+      ["338 Cleveland Way", "Aubriella", "Quick Move-In (Move-In Ready)", 744_000, 4, 3.5, 3_116, 2, null, true],
+      ["5755 Tug Pt", "Maren", "Quick Move-In (Move-In Ready)", 589_000, 4, 4, 2_664, 3, null, true],
+      ["318 Cleveland Way", "Ophelia", "Quick Move-In (Move-In Ready)", 959_000, 4, 4.5, 3_877, 3, null, true],
+    ]);
+    expect(result.private.homes.map((home) => home.sourceUrl)).toEqual([`${T}Toll-Brothers-at-Mayfair/Comal-Collection/Quick-Move-In/MLS-612218`, `${T}Toll-Brothers-at-Mayfair/Guadalupe-Collection/Quick-Move-In/274722`, `${T}Toll-Brothers-at-Mayfair/Guadalupe-Collection/Quick-Move-In/287458`]);
+    for (const secret of ["Mayfair", "Cleveland Way", "Tug Pt", "Comal", "Guadalupe", "Toll"]) expect(publicJson(result)).not.toContain(secret);
+  });
+
+  it("still holds an isQMI entry that is a home or names another page, a master's home of no listed collection, and a collection short of its own site plan", async () => {
+    const LEGACY = `${T}Toll-Brothers-at-Legacy-at-Lake-Dunlap`;
+    const legacy = live("toll-legacy-at-lake-dunlap");
+    const holder = (data: any) => data.props.pageProps.pageData.communityComponent.homes.models.find((model: any) => model.isQMI);
+    // The entry has a street of its own: a home listed at the top level, a changed shape.
+    expect((await read("x", LEGACY, withNextData(legacy, (data) => { holder(data).street = "308 Flathead Lake"; }))).holdReasons).toEqual(["expected_community_container_not_found"]);
+    // The entry names another community's page.
+    expect((await read("x", LEGACY, withNextData(legacy, (data) => { holder(data).communityUrl = `${T}Toll-Brothers-at-Flat-Creek`; }))).holdReasons).toEqual(["invalid_inventory_response"]);
+    const MAYFAIR = `${T}Toll-Brothers-at-Mayfair`;
+    const mayfair = live("toll-mayfair");
+    const master = (data: any) => data.props.pageProps.pageData.masterCommunityComponent;
+    // A home naming a collection the master does not list (taken from the collection whose site plan counts none, so every
+    // count is still met): no status (the sync holds), never published as this community's.
+    const stray = await read("x", MAYFAIR, withNextData(mayfair, (data) => { master(data).homes.models[0].qmis[0].communityId = 99999; }));
+    expect(stray.private.homes.map((home) => home.status)).toEqual([null, "Quick Move-In (Move-In Ready)", "Quick Move-In (Move-In Ready)"]);
+    // A collection's site plan counts more homes than the lists give it, though the master's total is met.
+    expect((await read("x", MAYFAIR, withNextData(mayfair, (data) => { master(data).communities[0].qmiSitePlanLots = 2; }))).holdReasons).toEqual(["expected_community_container_not_found"]);
+  });
+
+  it("Shavano Highlands: the community API (/api/v1/community/14460) says the same as the page: one site-plan lot, no model with a home, and no lot list", () => {
+    const api = JSON.parse(fixture("toll-api-community-14460.json"));
+    expect([api.qmiSitePlanLots, api.availableLots, api.reservedLots, api.homes.models.length]).toEqual([1, 2, 2, 6]);
+    expect(api.homes.models.every((model: any) => model.qmiCount === 0 && model.qmis === undefined)).toBe(true);
+    expect(JSON.stringify(api)).not.toMatch(/"(?:lots|lotNumber|qmis)"/);
   });
 });
 
@@ -145,10 +234,14 @@ describe("First America Homes: the 'Ready For You' card label (October 20, 2026)
 });
 
 describe("Coventry Homes: Garden Grove is a parent page over two collections (October 20, 2026)", () => {
-  const COMMUNITY = "https://www.coventryhomes.com/new-homes/tx/san-antonio/garden-grove/";
-  const config: CommunitySourceConfig = { builder: "Coventry Homes", sourceUrl: COMMUNITY, privateCommunityName: "Garden Grove", scrubList: ["Garden Grove"] };
+  const BASE = "https://www.coventryhomes.com/new-homes/tx/san-antonio/";
+  const COMMUNITY = `${BASE}garden-grove/`;
+  const FORTY = `${BASE}garden-grove-40/`;
+  const FIFTY = `${BASE}garden-grove-50/`;
+  const config: CommunitySourceConfig = { builder: "Coventry Homes", sourceUrl: COMMUNITY, privateCommunityName: "Garden Grove", scrubList: ["Garden Grove", "Kestis", "Frostwood", "Hastings", "Hawkwell", "Rocket View", "Spectre Hill"] };
+  const site = (overrides: Site = {}): Site => ({ [COMMUNITY]: live("coventry-garden-grove"), [FORTY]: live("coventry-garden-grove-40"), [FIFTY]: live("coventry-garden-grove-50"), ...overrides });
 
-  it("finds the live hold: every home sits under garden-grove-40/ or garden-grove-50/, each record twice, and one card (4912 Hawkwell Lane) has no record; still held", async () => {
+  it("finds the live hold: every home sits under garden-grove-40/ or garden-grove-50/, each record twice, and one card (4912 Hawkwell Lane) has no record anywhere", () => {
     const page = live("coventry-garden-grove");
     const records = parseHomefinitiRecords(page, "www.coventryhomes.com");
     expect(records.homes).toHaveLength(17);
@@ -157,12 +250,67 @@ describe("Coventry Homes: Garden Grove is a parent page over two collections (Oc
     const cardHomes = new Set(Array.from(page.matchAll(/href="(\/new-homes\/tx\/san-antonio\/garden-grove-[45]0\/[a-z0-9-]+\/[a-z0-9-]+\/)"/g), (match) => match[1]));
     expect(cardHomes.size).toBe(18);
     expect(records.homes.some((home) => home.sourceUrl.includes("4912-hawkwell-lane"))).toBe(false);
-    // The child list counts 10 + 8 homes; the plans (6 + 7) are only on the collection pages, which were not captured.
     expect(page).toMatch(/Garden Grove 40'[\s\S]*?10 Homes[\s\S]*?6 Plans[\s\S]*?Garden Grove 50'[\s\S]*?8 Homes[\s\S]*?7 Plans/);
-    const { fetcher } = siteFetcher({ [COMMUNITY]: page });
+    expect(homefinitiCollections(page, new URL(COMMUNITY), "www.coventryhomes.com")).toEqual([{ url: FORTY, homes: 10 }, { url: FIFTY, homes: 8 }]);
+    // The collection page and the home's own page carry no record for it either (the home page's records are other homes').
+    expect(parseHomefinitiRecords(live("coventry-garden-grove-40"), "www.coventryhomes.com").homes.some((home) => home.sourceUrl.includes("4912-hawkwell-lane"))).toBe(false);
+    expect(parseHomefinitiRecords(live("coventry-4912-hawkwell"), "www.coventryhomes.com").homes.some((home) => home.sourceUrl.includes("4912-hawkwell-lane"))).toBe(false);
+    // An ordinary community page lists no collections.
+    expect(homefinitiCollections(live("coventry-garden-grove-50"), new URL(FIFTY), "www.coventryhomes.com")).toBeNull();
+  });
+
+  it("reads both collections' pages as the community: 10 + 8 homes and 6 + 7 plans, Hawkwell Lane from its card (every other card agrees with its record)", async () => {
+    const { fetcher, requested } = siteFetcher(site());
     const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
-    expect(result.holdReasons).toEqual(["invalid_inventory_response"]);
-    expect(result.public.homes).toEqual([]);
+    expect(result.holdReasons).toEqual([]);
+    expect(requested).toEqual([COMMUNITY, FORTY, FIFTY]);
+    expect(result.private.homes.map((home) => [home.privateName, home.privatePlanName, home.status, home.price, home.previousPrice ?? null, home.bedrooms, home.bathrooms, home.squareFeet])).toEqual([
+      ["4917 Kestis Lane", null, "Quick Move-In (Under Construction)", 259_990, 273_090, 4, 2, 1_557],
+      ["8448 Frostwood Heights", "Gray", "Quick Move-In (Under Construction)", 271_940, null, 3, 2, 1_433],
+      ["4934 Hastings Way", null, "Quick Move-In (Under Construction)", 274_990, 279_340, 3, 2.5, 1_645],
+      ["8437 Frostwood Heights", null, "Quick Move-In (Under Construction)", 279_990, 284_090, 4, 2, 1_570],
+      ["8508 Frostwood Heights", "Gray", "Quick Move-In (Under Construction)", 281_140, null, 3, 2, 1_433],
+      ["8440 Frostwood Heights", "King", "Quick Move-In (Under Construction)", 282_640, null, 3, 2.5, 1_808],
+      ["4953 Kestis Lane", "King", "Quick Move-In (Under Construction)", 296_740, null, 3, 2.5, 1_808],
+      ["8445 Frostwood Heights", "Lynn Ii", "Quick Move-In (Under Construction)", 319_990, 327_790, 5, 3.5, 2_242],
+      ["8441 Frostwood Heights", "Jones", "Quick Move-In (Under Construction)", 334_990, 337_790, 5, 3, 2_414],
+      ["4912 Hawkwell Lane", "La Salle", "Quick Move-In (Under Construction)", 318_490, null, 4, 3, 2_082],
+      ["8403 Rocket View", "Starr", "Quick Move-In (Under Construction)", 324_590, null, 4, 2, 1_669],
+      ["8340 Rocket View", "Young", "Quick Move-In (Move-In Ready)", 339_990, 352_190, 4, 3, 2_019],
+      ["8336 Rocket View", "Llana", "Quick Move-In (Move-In Ready)", 339_990, 351_740, 4, 2.5, 2_073],
+      ["8332 Rocket View", "Young", "Quick Move-In (Move-In Ready)", 344_990, 357_190, 4, 3, 2_006],
+      ["8322 Rocket View", "Martin", "Quick Move-In (Under Construction)", 359_990, 371_340, 4, 2.5, 2_341],
+      ["8328 Rocket View", "Howard", "Quick Move-In (Move-In Ready)", 364_990, 376_890, 5, 2.5, 2_533],
+      ["8368 Rocket View", "Howard", "Quick Move-In (Under Construction)", 394_890, null, 5, 2.5, 2_469],
+      ["8303 Spectre Hill", "Martin", "Quick Move-In (Under Construction)", 398_440, null, 4, 2.5, 2_361],
+    ]);
+    expect(result.private.homes.find((home) => home.privateName === "4912 Hawkwell Lane")).toMatchObject({ privateAddress: "4912 Hawkwell Lane, San Antonio, TX", sourceUrl: `${FORTY}la-salle/4912-hawkwell-lane/` });
+    expect(result.private.plans.map((plan) => [plan.privatePlanName, plan.price])).toEqual([
+      ["Gray", 259_990], ["Hill II", 269_990], ["King", 280_990], ["La Salle", 304_990], ["Lynn II", 314_990], ["Jones", 324_990],
+      ["Starr", 314_990], ["Upton", 334_990], ["Llana", 339_990], ["Young", 339_990], ["Donley", 354_990], ["Martin", 359_990], ["Howard", 364_990],
+    ]);
+    for (const secret of ["Garden Grove", "Kestis", "Frostwood", "Hawkwell", "Rocket View", "Coventry", "La Salle"]) expect(publicJson(result)).not.toContain(secret);
+    // Each collection configured on its own reads the same homes.
+    for (const [url, count] of [[FORTY, 10], [FIFTY, 8]] as const) {
+      const alone = await loadOfficialDeals({ ...config, sourceUrl: url }, { fetcher: siteFetcher(site()).fetcher, now: () => NOW });
+      expect([alone.holdReasons, alone.private.homes.length]).toEqual([[], count]);
+    }
+  });
+
+  it("still holds a card-only home when any card disagrees with its record or with itself, and a parent whose collections are missing, short or not its own", async () => {
+    const forty = live("coventry-garden-grove-40");
+    const run = async (overrides: Site) => (await loadOfficialDeals(config, { fetcher: siteFetcher(site(overrides)).fetcher, now: () => NOW })).holdReasons;
+    // A recorded home's card shows another price: the cards are not to be trusted for Hawkwell Lane.
+    expect(await run({ [FORTY]: forty.replaceAll('data-price="259990"', 'data-price="259000"').replaceAll("$259,990", "$259,000") })).toEqual(["expected_community_container_not_found"]);
+    // Hawkwell Lane's own card disagrees with itself (data attribute against the price shown).
+    expect(await run({ [FORTY]: forty.replaceAll('data-price="318490"', 'data-price="218490"') })).toEqual(["expected_community_container_not_found"]);
+    // A collection page missing, or showing fewer homes than the parent counts for it.
+    expect(await run({ [FIFTY]: { status: 404 } })).toEqual(["community_fetch_failed"]);
+    expect(await run({ [COMMUNITY]: live("coventry-garden-grove").replace("8 Homes", "9 Homes") })).toEqual(["incomplete_inventory"]);
+    // A parent home that no collection page lists (the parent's count lowered to match, so only the missing home tells).
+    expect(await run({ [COMMUNITY]: live("coventry-garden-grove").replace("8 Homes", "7 Homes"), [FIFTY]: live("coventry-garden-grove-50").replace(/<script type='application\/ld\+json'>(?:(?!<\/script>)[\s\S])*?"name": "8303 Spectre Hill"(?:(?!<\/script>)[\s\S])*?<\/script>/g, "").replace(/<article class="card-spec[^"]*"[^>]*>(?:(?!<\/article>)[\s\S])*?8303-spectre-hill(?:(?!<\/article>)[\s\S])*?<\/article>/g, "") })).toEqual(["incomplete_inventory"]);
+    // A child list that links a page not named for the parent is not a list of its collections: the parent's homes are then foreign.
+    expect(await run({ [COMMUNITY]: live("coventry-garden-grove").replaceAll('href="/new-homes/tx/san-antonio/garden-grove-50/"', 'href="/new-homes/tx/san-antonio/orchard-grove/"') })).toEqual(["invalid_inventory_response"]);
   });
 });
 
@@ -199,7 +347,7 @@ describe("View Homes: a coming-soon page has no homes-and-plans module (October 
   const HOST = "https://yourviewhome.com";
   const LADERA = `${HOST}/communities/ladera/`;
   const ENCLAVE = `${HOST}/communities/enclave-35-at-medical-center/`;
-  /** The Texas roster was not captured: synthetic, in the live shape (status.status.{value,label}, address, homes[]). */
+  /** A roster for the hold tests: synthetic, in the live shape (status.status.{value,label}, address, homes[]). */
   const roster = (rows: Array<{ url: string; title: string; status: [string, string]; homes?: unknown[] }>) => {
     const communities = rows.map((row, index) => ({ post_id: 14000 + index, post_title: row.title, permalink: row.url, status: { status: { value: row.status[0], label: row.status[1] } }, address: { street: "", city: "San Antonio", state: "TX", zip: "78245", lat: "29.4", lng: "-98.7" }, price: { value: "", text: "" }, price_range: { PriceLow: 0 }, phone: "(210) 817-5507", homes: row.homes ?? [] }));
     const regions = [{ id: 8, name: "San Antonio", communities, regions: [] }];
@@ -213,18 +361,19 @@ describe("View Homes: a coming-soon page has no homes-and-plans module (October 
     }
   });
 
-  it("reads Ladera and Enclave 35 as coming soon (nothing for sale) when the roster lists them as coming soon with no homes", async () => {
+  it("reads Ladera and Enclave 35 as coming soon (nothing for sale): the live roster lists both as coming soon with no homes", async () => {
+    const PROMO = `${HOST}/promo-autumnatic-san-antonio/`;
+    const rosterPage = live("view-region-texas");
+    expect(parseViewHomesRoster(rosterPage, "yourviewhome.com")!.filter((row) => row.url === LADERA || row.url === ENCLAVE).map((row) => [row.url, row.status.value, row.homes.length])).toEqual([[LADERA, "soon", 0], [ENCLAVE, "soon", 0]]);
     for (const [name, url, community] of [["view-ladera", LADERA, "Ladera"], ["view-enclave-35", ENCLAVE, "Enclave 35 at Medical Center"]] as const) {
       resetViewHomesCaches();
-      const { fetcher, requested } = siteFetcher({ [url]: live(name), [viewHomesListingUrl()]: soonRoster });
+      const { fetcher, requested } = siteFetcher({ [url]: live(name), [viewHomesListingUrl()]: rosterPage, [PROMO]: live("view-promo-autumnatic") });
       const result = await loadOfficialDeals({ builder: "View Homes", sourceUrl: url, privateCommunityName: community, scrubList: [community] }, { fetcher, now: () => NOW });
-      // The catalog reads; the site-wide promo page the hero banner links was not captured, so only the offer is held.
-      expect(result.catalogOk).toBe(true);
-      expect(result.holdReasons).toEqual(["incentive_fetch_failed"]);
-      expect(result.incentiveHoldReasons).toEqual(["incentive_fetch_failed"]);
-      expect(requested.slice(0, 2)).toEqual([url, viewHomesListingUrl()]);
+      expect(result.holdReasons).toEqual([]);
+      expect(requested).toEqual([url, viewHomesListingUrl(), PROMO]);
       expect(result.private.homes).toEqual([]);
       expect(result.private.plans).toEqual([]);
+      // The promotion lists eight participating communities, neither of these.
       expect(result.private.incentive).toBeNull();
     }
   });
@@ -266,12 +415,21 @@ describe("Texas Homes: a renamed community keeps its plans under the old path (O
     ]);
   });
 
-  it("goes on to the community's quick move-in list (not captured: the run holds there until it is)", async () => {
-    const { fetcher, requested } = siteFetcher({ [COMMUNITY]: live("texas-enclave-potranco-oaks") });
+  it("reads the 4 homes of its quick move-in list (the menu's count of 4) and the 8 plans", async () => {
+    const { fetcher, requested } = siteFetcher({ [COMMUNITY]: live("texas-enclave-potranco-oaks"), [texasHomesHomesUrl(424)]: live("texas-mir-424") });
     const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
-    expect(requested).toEqual([COMMUNITY, texasHomesHomesUrl(424)]);
-    expect(result.holdReasons).toEqual(["community_fetch_failed"]);
-    expect(result.public.homes).toEqual([]);
+    // The catalog reads; the home page that carries the site-wide offer was not captured, so only the offer is held.
+    expect(result.catalogOk).toBe(true);
+    expect(result.holdReasons).toEqual(["incentive_fetch_failed"]);
+    expect(requested).toEqual([COMMUNITY, texasHomesHomesUrl(424), "https://www.texas-homes.com/"]);
+    expect(result.private.homes.map((home) => [home.privateName, home.status, home.price, home.previousPrice, home.bedrooms, home.bathrooms, home.squareFeet, home.garage, home.sourceUrl])).toEqual([
+      ["142 Secretariat Ave", "Quick Move-In (Move-In Ready)", 499_999, 554_900, 3, 4, 2_830, 2, "https://www.texas-homes.com/move-in-ready/142-secretariat-ave"],
+      ["137 Gallant Fox", "Quick Move-In (Move-In Ready)", 479_727, 516_215, 4, 3, 2_435, 2, "https://www.texas-homes.com/move-in-ready/137-gallant-fox"],
+      ["130 Gallant Fox", "Quick Move-In (Move-In Ready)", 469_767, 489_767, 4, 3, 2_632, 2, "https://www.texas-homes.com/move-in-ready/130-gallant-fox"],
+      ["110 Thunder Gulch", "Quick Move-In (Move-In Ready)", 599_777, 625_000, 4, 3, 2_305, 2, "https://www.texas-homes.com/move-in-ready/110-thunder-gulch"],
+    ]);
+    expect(result.private.plans).toHaveLength(8);
+    for (const secret of ["Potranco", "Secretariat", "Gallant Fox", "Thunder Gulch", "Texas Homes", "78009"]) expect(publicJson(result)).not.toContain(secret);
   });
 
   it("still holds plans under another path that no plan ties to the page's id, that name another id, that are named for another community, or that sit under two other paths", async () => {
@@ -301,12 +459,48 @@ describe("Texas Homes: a renamed community keeps its plans under the old path (O
   });
 });
 
-describe("Chesmar: the Alsatian Oaks community page (October 20, 2026)", () => {
-  it("passes its container check and goes on to the sitemap; the home pages that carry the status were not captured", async () => {
-    const COMMUNITY = "https://www.chesmar.com/texas/san-antonio-new-homes/castroville/alsatian-oaks/";
-    const { fetcher, requested } = siteFetcher({ [COMMUNITY]: live("chesmar-alsatian-oaks") });
-    const result = await loadOfficialDeals({ builder: "Chesmar", sourceUrl: COMMUNITY, privateCommunityName: "Alsatian Oaks", scrubList: ["Alsatian Oaks"] }, { fetcher, now: () => NOW });
-    expect(requested).toEqual([COMMUNITY, "https://www.chesmar.com/sitemap.xml"]);
-    expect(result.holdReasons).toEqual(["sitemap_fetch_failed"]);
+describe("Chesmar: inventory homes now say 'Home For Sale' in their title (October 20, 2026)", () => {
+  const COMMUNITY = "https://www.chesmar.com/texas/san-antonio-new-homes/castroville/alsatian-oaks/";
+  const HOMES = { "brandy/42210000-0044/": "chesmar-home-brandy-42210000-0044", "lauren/42210000-0039/": "chesmar-home-lauren-42210000-0039", "morgan/42210000-0001/": "chesmar-home-morgan-42210000-0001" } as const;
+  const PLANS = ["acadia", "aspen", "brandy", "brooks", "cayman", "hampton", "lauren", "morgan", "shenandoah", "summerton"];
+  /** The plan pages were not captured: each is the repository's synthetic plan page in the live layout (its figures are not asserted). */
+  const syntheticPlan = readFileSync(new URL("./fixtures/deals/chesmar-plan-page-live.html", import.meta.url), "utf8");
+  function chesmarSite(homes: Partial<Record<keyof typeof HOMES, string>> = {}): Site {
+    const site: Site = { [COMMUNITY]: live("chesmar-alsatian-oaks"), "https://www.chesmar.com/sitemap.xml": { status: 200, body: fixture("chesmar-sitemap.xml"), type: "application/xml" } };
+    for (let index = 1; index <= 7; index++) site[`https://www.chesmar.com/sitemap${index}.xml`] = { status: 200, body: fixture(`chesmar-sitemap${index}.xml`), type: "application/xml" };
+    for (const slug of PLANS) site[`${COMMUNITY}${slug}/`] = syntheticPlan;
+    for (const [path, name] of Object.entries(HOMES)) site[`${COMMUNITY}${path}`] = homes[path as keyof typeof HOMES] ?? live(name);
+    return site;
+  }
+  const config: CommunitySourceConfig = { builder: "Chesmar", sourceUrl: COMMUNITY, privateCommunityName: "Alsatian Oaks", scrubList: ["Alsatian Oaks", "Mountain Oak", "White Oak"] };
+
+  it("finds the live hold: the two homes' titles say 'Home For Sale in Alsatian Oaks', which the status reader did not know", () => {
+    expect(chesmarDetailFacts(live("chesmar-home-brandy-42210000-0044"))).toEqual({ price: 429_800, bedrooms: 3, bathrooms: 3, squareFeet: 2_142, status: "Quick Move-In", planName: "Brandy", address: "165 Mountain Oak" });
+    expect(chesmarDetailFacts(live("chesmar-home-lauren-42210000-0039"))).toEqual({ price: 479_800, bedrooms: 4, bathrooms: 3, squareFeet: 2_376, status: "Quick Move-In", planName: "Lauren", address: "331 Mountain Oak" });
+    // The model keeps its own wording: never a quick move-in.
+    expect(chesmarDetailFacts(live("chesmar-home-morgan-42210000-0001"))).toMatchObject({ status: "Model For Tour", price: null, planName: "Morgan", address: "242 White Oak" });
+  });
+
+  it("reads the live sitemaps and home pages: 2 quick move-ins and the model (plan pages synthetic)", async () => {
+    const { fetcher, requested } = siteFetcher(chesmarSite());
+    const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
+    expect(result.catalogOk).toBe(true);
+    expect(requested.filter((url) => /\/\d{8}-\d{4}\/$/.test(url)).sort()).toEqual(Object.keys(HOMES).map((path) => `${COMMUNITY}${path}`).sort());
+    expect(result.private.homes.map((home) => [home.privateAddress, home.privatePlanName, home.status, home.price, home.bedrooms, home.bathrooms, home.squareFeet]).sort()).toEqual([
+      ["165 Mountain Oak", "Brandy", "Quick Move-In", 429_800, 3, 3, 2_142],
+      ["242 White Oak", "Morgan", "Model For Tour", null, 3, 2, 2_301],
+      ["331 Mountain Oak", "Lauren", "Quick Move-In", 479_800, 4, 3, 2_376],
+    ]);
+    expect(result.private.plans).toHaveLength(PLANS.length);
+    for (const secret of ["Alsatian", "Mountain Oak", "White Oak", "Chesmar"]) expect(publicJson(result)).not.toContain(secret);
+  });
+
+  it("still gives no status to a title in other wording, or to 'Home For Sale' anywhere but the title (the sync holds the run)", async () => {
+    const page = live("chesmar-home-brandy-42210000-0044");
+    for (const variant of [page.replaceAll("| Home For Sale in Alsatian Oaks", "| Home Reserved in Alsatian Oaks"), page.replaceAll("| Home For Sale in Alsatian Oaks", "| Alsatian Oaks").replace("</body>", "<p>Home For Sale in Alsatian Oaks</p></body>")]) {
+      expect(chesmarDetailFacts(variant).status).toBeNull();
+      const result = await loadOfficialDeals(config, { fetcher: siteFetcher(chesmarSite({ "brandy/42210000-0044/": variant })).fetcher, now: () => NOW });
+      expect(result.private.homes.find((home) => home.privateAddress === "165 Mountain Oak")!.status).toBeNull();
+    }
   });
 });

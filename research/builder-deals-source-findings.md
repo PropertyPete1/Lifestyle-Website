@@ -1129,21 +1129,18 @@ Captures from about 11 PM Central (production User-Agent, redirects followed), r
   its `qmis` key out instead of `qmis: []`, and every model carries `qmiCount`. The reader took any model without the
   list as a changed shape. A model without the list now counts as none only when it says `qmiCount: 0`; without the
   list and without a zero count it still holds, and the site-plan total (`qmiSitePlanLots`) still has to be met.
-  Briggs Ranch reads 7 homes (count 7) and 7 plans. Shavano Highlands still holds: all six models say `qmiCount: 0`
-  while `qmiSitePlanLots` is 1, and the site plan's lot data (loaded in the browser) was not captured. The other 11
-  communities were not captured; they should read unless their counts disagree the same way.
+  Briggs Ranch reads 7 homes (count 7) and 7 plans. All 13 communities: see the follow-up below.
 - View Homes (Ladera, Enclave 35 held `expected_community_container_not_found`): both are coming-soon pages (hero
   badge "Coming Soon") with no homes-and-plans module at all; the reader required the module. Such a page now reads as
   a community with nothing for sale, but only when the roster lists it as coming soon (`soon` / "Coming Soon") with no
-  homes; a roster row that is selling or lists a home, a missing row, or any other hero badge still holds. The Texas
-  roster was not captured; the tests use a synthetic roster in its live shape.
+  homes; a roster row that is selling or lists a home, a missing row, or any other hero badge still holds. The live
+  roster lists both as `soon` with no homes (follow-up below).
 - Texas Homes, Enclave at Potranco Oaks (`invalid_inventory_response`): the page moved to `/enclave-at-potranco-oaks`
   while its eight plans stay at `/enclave-potranco-oaks/plan-…`, so every plan looked like another page's. Plans under
   one other one-segment path are now the community's when that path's words are the page's own less some (at least
   two words) and a plan there links its homes with the page's own neighborhood id (424, also the page's node id); a
   plan naming another id, plans under two other paths or under another community's name, or a page with no list
-  link of its own still hold. Plans read (8, Plan 1663 at $399,990 to Plan 3218 at $531,990). The quick move-in list
-  (`/move-in-ready?field_neighborhood_target_id=424`) was not captured, so the homes are unverified.
+  link of its own still hold. Plans read (8, Plan 1663 at $399,990 to Plan 3218 at $531,990); homes in the follow-up.
 - Texas Homes, Timbers: answers 403 to every client (46 KB block page); the current code holds it as
   `source_access_refused` after one request. Nothing is retried.
 - First America, Cordova Crossing (`unlabelled_home_status`): four cards say "Ready For You", the site's word for a
@@ -1152,11 +1149,52 @@ Captures from about 11 PM Central (production User-Agent, redirects followed), r
 - KB Home, Medina Crossing Villa Collection (`unlabelled_home_status`): both homes say `moveInDateCopy` "Available 3-6
   Months" (`moveInDate` "2027-01-01", a placeholder). "Available N-M Months" up to 12 months now reads as a quick
   move-in with no date; longer windows and other wording still give no status.
-- Coventry, Garden Grove (`invalid_inventory_response`, unchanged): the page is a parent over two collections
+- Coventry, Garden Grove (`invalid_inventory_response`): the page is a parent over two collections
   (`garden-grove-40/`, "10 Homes, 6 Plans"; `garden-grove-50/`, "8 Homes, 7 Plans"), every home sits under a
-  collection path, the page carries no plans, and one home card (4912 Hawkwell Lane) has no record. It holds until
-  the collection pages are captured. The captures also showed every home record repeated twice, which counted as two
+  collection path, the page carries no plans, and one home card (4912 Hawkwell Lane) has no record (read in the
+  follow-up below). The captures also showed every home record repeated twice, which counted as two
   homes against the cards and could have hidden a card with no record (that home would have been swept to sold).
   Repeated records now count once; copies that disagree hold `invalid_inventory_response`.
-- Chesmar, Alsatian Oaks (`unlabelled_home_status`, unchanged): the community page passes; statuses come from the
-  home pages' titles, found through the sitemap, neither of which was captured.
+- Chesmar, Alsatian Oaks (`unlabelled_home_status`): see the follow-up below.
+
+### Batch 2 follow-up (Oct 20, with the follow-up captures)
+
+- Toll Brothers, all 13 communities (each page, plus `GET /api/v1/community/14460` for Shavano Highlands):
+  - Two more shapes. (1) Homes whose plan has no model entry sit in an unnamed top-level entry flagged `isQMI` that
+    holds only `qmis` and its `communityUrl` (Legacy at Lake Dunlap: 1 of 4 homes; Sunset Ridge: all 12, no plans).
+    It is now read as a list holder; an `isQMI` entry with a name, URL or street of its own still holds, and one naming
+    another page holds `invalid_inventory_response`. (2) Regency at Esperanza and Mayfair are master pages
+    (`masterCommunityComponent`): the same model and home lists across collections, each home naming its collection's
+    `communityId`. Read now when every home sits under the master's path and names one of the master's
+    `communities[]`; each collection's `qmiSitePlanLots` must be met as well as the total. A home of an unlisted
+    collection has no status (the sync holds).
+  - Read: Briggs Ranch 7 homes / 7 plans, Flat Creek 3 / 6, Legacy at Lake Dunlap 4 / 6, Enchanted Bluff 3 / 5,
+    George's Ranch 2 / 6, Thornebrook 2 / 6, Windborne 2 / 6, Mayfair 3 / 0 (the last five carry an offer-only
+    `ambiguous_rate` hold from the national event text; the catalog publishes).
+  - Held (`expected_community_container_not_found`), each because the site plan counts one quick move-in home more
+    than the data lists: Shavano Highlands 1 vs 0, Caliza Reserve 3 vs 2, Nolte Farms 3 vs 2, Sunset Ridge 13 vs 12,
+    Regency at Esperanza's Sardana Collection 5 vs 4 (14 vs 15 in all). A decorated model exists in every community,
+    including those whose counts match, so it is not the extra lot; coming-soon homes are listed. The community API
+    carries the same counts and no lot list (Shavano: `qmiSitePlanLots` 1, every model `qmiCount` 0, no `qmis`), so
+    whether the extra lot is a home for sale cannot be told from the data: the holds stand. The site plan's lot data
+    (an SVG on `cdn.tollbrothers.com` and whatever the site plan viewer loads) is the remaining place to look.
+- View Homes: the live roster lists Ladera and Enclave 35 as `soon` with no homes; both read as coming soon (nothing
+  for sale). The live promotion lists 8 communities, neither of these, so no offer applies.
+- Texas Homes, Enclave at Potranco Oaks: the list (`/move-in-ready?field_neighborhood_target_id=424`) has 4 homes, the
+  menu's count: 142 Secretariat Ave $499,999 (was $554,900, 3 bd / 4 ba / 2,830 sq ft), 137 Gallant Fox $479,727,
+  130 Gallant Fox $469,767, 110 Thunder Gulch $599,777, all ready now. The home page (site-wide offer) was not
+  captured: offer-only hold in the tests.
+- Coventry, Garden Grove: a parent page (a `.child-list` of sibling pages named for it, "garden-grove" ->
+  "garden-grove-40") is now read through each collection's page: each must meet the count the parent states for it
+  ("10 Homes"), and every home the parent lists must be on one of them. 4912 Hawkwell Lane has no record on any page
+  (the parent, its collection, or its own page). A home with a card (`article.card-spec`) but no record is now read
+  from its card only when each card agrees with itself (`data-price` with the price shown, `data-square-feet` with the
+  "4 bed · 3 bath · 2,082 sqft" line) and every home with both a record and a card agrees exactly (price, beds,
+  baths, sq ft, street), at least three of them; otherwise the run holds as before. Garden Grove reads 10 + 8 homes
+  and 6 + 7 plans; Hawkwell Lane: La Salle, $318,490, 4 bd / 3 ba / 2,082 sq ft, under construction. First America's
+  cards are other markup (`div.card`), so the fallback never applies there.
+- Chesmar, Alsatian Oaks: inventory home titles now read "<address> | Home For Sale in Alsatian Oaks" (the model
+  still says "Model For Tour"), wording the status reader did not know, so both homes had no status. That title form now reads as a quick move-in (the words elsewhere on the page do not count). 165 Mountain Oak
+  (Brandy, $429,800, 3 bd / 3 ba / 2,142 sq ft) and 331 Mountain Oak (Lauren, $479,800, 4 bd / 3 ba / 2,376 sq ft)
+  read as quick move-ins, 242 White Oak (Morgan) as the model. The ten plan pages the sitemap lists were not captured:
+  the tests use the repository's synthetic plan page, so the plan figures are unverified.

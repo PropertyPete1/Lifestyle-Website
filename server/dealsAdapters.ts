@@ -1609,7 +1609,8 @@ export function detailStatBlock(html: string): { block: string; region: string; 
  * ("Beds: 4", "Baths: 3.5", "Sq. Ft.: 2,982"), a "Starting from $499,990"
  * price block, icon tiles ("2982 Square Feet"), the plan name in the
  * f-title block, the lot address in the breadcrumb, and the sale status in
- * the document title ("... | Model For Tour in ..."). Absent facts stay null.
+ * the document title ("... | Model For Tour in ...", or "... | Home For Sale
+ * in ..." for an inventory home). Absent facts stay null.
  */
 export function chesmarDetailFacts(html: string): { price: number | null; bedrooms: number | null; bathrooms: number | null; squareFeet: number | null; status: string | null; planName: string | null; address: string | null } {
   const text = htmlToText(html);
@@ -1623,7 +1624,10 @@ export function chesmarDetailFacts(html: string): { price: number | null; bedroo
   const bedrooms = numberMatch(text, /\bBeds?\s*:\s*(\d+(?:\.\d+)?)\b/i) ?? numberMatch(text, /\b(\d+(?:\.\d+)?)\s+Bedrooms?\b/i);
   const bathrooms = numberMatch(text, /\bBaths?\s*:\s*(\d+(?:\.\d+)?)\b/i) ?? numberMatch(text, /\b(\d+(?:\.\d+)?)\s+Bathrooms?\b/i);
   const squareFeet = numberMatch(text, /\bSq\.?\s*Ft\.?\s*:\s*([\d,]+)\b/i) ?? numberMatch(text, /\b([\d,]{3,})\s+Square\s+Feet\b/i);
-  return { price, bedrooms, bathrooms, squareFeet, status: extractStatus(title), planName, address };
+  // Since October 2026 an inventory home's title says "<address> | Home For Sale in <community>" (a model still says
+  // "Model For Tour"): a home for sale on its own lot page is a quick move-in. Only the title's form is read.
+  const forSale = /\|\s*Home\s+For\s+Sale\s+in\s+\S/i.test(title) ? "Quick Move-In" : null;
+  return { price, bedrooms, bathrooms, squareFeet, status: extractStatus(title) ?? forSale, planName, address };
 }
 
 /** Null when the page has neither labelled room facts nor an h1 stat block, or no gallery container; the caller holds. */

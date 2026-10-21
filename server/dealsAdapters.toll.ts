@@ -109,6 +109,8 @@ export type TollPage = {
   plans: PrivatePlanOrHome[];
   /** The site plan's count of homes for sale, when the page says. */
   sitePlanHomes: number | null;
+  /** On a master's page: true when a collection's site plan counts more homes than the lists give it. */
+  collectionShortfall: boolean;
   facts: { schoolDistrict: string | null; amenities: string[] };
   /** The national event or rate banner the page shows, as one text; null when there is none. */
   offer: string | null;
@@ -151,17 +153,28 @@ export function tollOfferText(events: unknown, now: Date = new Date()): string |
   return texts.find((text) => /\d+(?:\.\d+)?\s*%/.test(text)) ?? texts[0] ?? null;
 }
 
-/** The community on the page; null when the page has no community component or no plan list. */
+/**
+ * The community on the page; null when the page has no community component or no plan list. A master community's page
+ * (`masterCommunityComponent`, Regency at Esperanza and Toll Brothers at Mayfair in October 2026) has the same model and
+ * home lists across its collections: each home names its collection's `communityId`, which must be one of the master's
+ * `communities[]`, and each collection's site-plan count must be met as well as the master's.
+ */
 export function parseTollCommunity(html: string, pageUrl: string, now: Date = new Date()): TollPage | null {
   const community = asUrl(pageUrl);
   const data = parseNextData(html);
-  const component = obj(obj(obj(obj(data?.props)?.pageProps)?.pageData)?.communityComponent);
+  const pageData = obj(obj(obj(data?.props)?.pageProps)?.pageData);
+  const single = obj(pageData?.communityComponent);
+  const master = single ? null : obj(pageData?.masterCommunityComponent);
+  const component = single ?? master;
   if (!community || !component) return null;
+  const idOf = (value: unknown) => str(value) ?? (typeof value === "number" ? String(value) : null);
+  /** A master's collections by id, with their site-plan counts; null on a single community's page. */
+  const collections = master ? new Map(arr(master.communities).flatMap((raw) => { const item = obj(raw); const id = item ? idOf(item.communityId) : null; return id ? [[id, num(item!.qmiSitePlanLots)] as const] : []; })) : null;
   const models = obj(component.homes)?.models;
   if (!Array.isArray(models)) return null;
   const host = community.hostname;
   const office = obj(component.salesOffice);
-  const communityId = str(component.communityId) ?? (typeof component.communityId === "number" ? String(component.communityId) : null);
+  const communityId = master ? null : idOf(component.communityId);
   const name = str(component.name);
   const city = str(office?.city) ?? str(component.city);
   const zip = /^\d{5}/.exec(str(office?.zip) ?? str(component.zip) ?? "")?.[0] ?? null;
@@ -179,13 +192,21 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
   const homes: PrivatePlanOrHome[] = [];
   let shapeIntact = true;
   let foreignHome = false;
+  const listedByCollection = new Map<string, number>();
   const base = `${comparablePath(community.pathname.replace(/\/+$/, ""))}/`;
   for (const raw of models) {
     const model = obj(raw);
     if (!model) continue;
+    // Since October 2026 homes whose plan is not offered as a model sit in an unnamed entry flagged `isQMI` that holds only
+    // their list (and its community's page, `communityUrl`); it is no plan and no home of its own.
+    const holder = model.isQMI === true && Array.isArray(model.qmis) && !str(model.name) && !str(model.modelName) && !str(model.url) && !str(model.street) && !str(model.address);
+    if (holder) {
+      const holderPage = asUrl(str(model.communityUrl) ?? "");
+      if (holderPage && !(sameOfficialHost(holderPage, host) && `${comparablePath(holderPage.pathname.replace(/\/+$/, ""))}/`.startsWith(base))) foreignHome = true;
+    }
     // Every model carries its `qmis` list, or (since October 2026) leaves it out when it has none and says so with `qmiCount: 0`;
     // a model without the list that does not count zero, or a quick move-in home listed at the top level, is a changed shape.
-    if ((!Array.isArray(model.qmis) && !(model.qmis === undefined && model.qmiCount === 0)) || model.isQMI === true) shapeIntact = false;
+    if ((!Array.isArray(model.qmis) && !(model.qmis === undefined && model.qmiCount === 0)) || (model.isQMI === true && !holder)) shapeIntact = false;
     const planName = str(model.name) ?? str(model.modelName);
     const link = str(model.url);
     const page = link ? asUrl(link) : null;
@@ -214,11 +235,15 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
       // The home must belong here: the community id when given, and a page under this community's own path.
       const underCommunity = Boolean(homePage && sameOfficialHost(homePage, host) && comparablePath(homePage.pathname).startsWith(base));
       if (homePage && sameOfficialHost(homePage, host) && !underCommunity) foreignHome = true;
-      const ownCommunity = (communityId === null || home.communityId === undefined || String(home.communityId) === communityId) && underCommunity;
+      const ownCommunity = (collections
+        ? collections.has(idOf(home.communityId) ?? "")
+        : communityId === null || home.communityId === undefined || String(home.communityId) === communityId) && underCommunity;
       const readable = Boolean(street && homePage && sameOfficialHost(homePage, host) && ownCommunity);
       const price = num(home.pricedFrom);
       const status = tollStatus(str(home.moveInDate), home.isComingSoon === true, now);
       const lot = str(home.lotNumber);
+      const collectionId = idOf(home.communityId);
+      if (collectionId) listedByCollection.set(collectionId, (listedByCollection.get(collectionId) ?? 0) + 1);
       homes.push({
         sourceUrl: readable ? homePage!.toString() : `${community.origin}${community.pathname.replace(/\/+$/, "")}/Quick-Move-In/unreadable-${homes.length}`,
         privateName: street,
@@ -247,6 +272,7 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
     homes,
     plans,
     sitePlanHomes: num(component.qmiSitePlanLots),
+    collectionShortfall: collections ? Array.from(collections).some(([id, count]) => count !== null && (listedByCollection.get(id) ?? 0) < count) : false,
     facts: { schoolDistrict: str(obj(component.schoolInfo)?.schoolDistrict), amenities },
     offer: tollOfferText(component.events, now),
   };
@@ -302,7 +328,7 @@ export class TollBrothersAdapter implements DealAdapter {
     if (ownPage && (ownPage.origin.toLowerCase() !== community.origin.toLowerCase() || comparablePath(ownPage.pathname.replace(/\/+$/, "")) !== comparablePath(community.pathname.replace(/\/+$/, "")))) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     if (!parsed.shapeIntact) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The site plan counts the homes for sale; fewer homes in the data than that means the home list changed shape, not that homes sold.
-    if (parsed.sitePlanHomes !== null && parsed.homes.length < parsed.sitePlanHomes) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    if ((parsed.sitePlanHomes !== null && parsed.homes.length < parsed.sitePlanHomes) || parsed.collectionShortfall) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // A home listed under another community's path is never this community's inventory.
     if (parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     if (parsed.homes.length > TOLL_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);

@@ -1,6 +1,6 @@
 import {
   HOMEFINITI_HOSTS, asUrl, cardAroundLink, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
-  type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
 /**
@@ -175,64 +175,190 @@ export class HomefinitiAdapter implements DealAdapter {
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", this.host);
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
-    const records = parseHomefinitiRecords(page.text, this.host);
-    // Without the community's own record this is not one of the platform's community pages.
-    if (!records.community) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
-    if (records.homes.length > HOMEFINITI_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
-    // Two records of one home page that disagree on its figures: neither is read as the home.
-    const recordPaths = records.homes.map((home) => comparablePath(new URL(home.sourceUrl).pathname.replace(/\/+$/, "")));
-    if (new Set(recordPaths).size !== recordPaths.length) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
-    const root = parseHtmlElements(page.text);
-    if (!root) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
-    // A home record of another community on the same host (a "nearby homes" block) is never this community's inventory.
-    const communitySlug = community.pathname.split("/").filter(Boolean).at(-1)?.toLowerCase() ?? "";
-    if (records.homes.some((home) => !new URL(home.sourceUrl).pathname.toLowerCase().split("/").includes(communitySlug))) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
-    // More home cards on the page than home records means the records changed shape, not that homes sold. A card is a status
-    // element with links into this community near it, counted once per set of links (a featured strip repeats a card's home);
-    // a community-wide badge ("Now Selling") has no such link and is not a card.
-    const all = descendants(root);
-    const parents = new Map<HtmlElement, HtmlElement>();
-    for (const element of all) for (const child of element.children) parents.set(child, element);
-    const communityDepth = community.pathname.split("/").filter(Boolean).length;
-    const linksIntoCommunity = (scope: HtmlElement) => Array.from(new Set(descendants(scope).flatMap((item) => {
-      if (item.tag !== "a" || !item.attributes.href) return [];
-      const path = decodeHtmlEntities(item.attributes.href).split(/[?#]/)[0]!.toLowerCase().replace(/\/+$/, "");
-      return path.split("/").includes(communitySlug) && path.split("/").filter(Boolean).length > communityDepth ? [path] : [];
-    }))).sort();
-    const isStatus = (element: HtmlElement) => STATUS_CLASSES.some((token) => elementClass(element, token)) && elementText(element, page.text).length <= 40;
-    const cards = new Set<string>();
-    for (const element of all.filter(isStatus)) {
-      let scope: HtmlElement | undefined = element;
-      for (let up = 0; scope && up < 4; up++, scope = parents.get(scope)) {
-        // The card is the nearest block that links to a home and holds this one status; a block holding several is the list.
-        if (descendants(scope).filter(isStatus).length > 1) break;
-        const links = linksIntoCommunity(scope);
-        if (links.length) { cards.add(links.join(" ")); break; }
+    const children = homefinitiCollections(page.text, community, this.host);
+    let read: HomefinitiPageRead;
+    if (!children) read = readHomefinitiPage(page.text, community, this.host);
+    else {
+      // A parent page over collections (Coventry's Garden Grove: "Garden Grove 40'" and "Garden Grove 50'", October 2026) lists
+      // its homes under the collections' paths and no plans: each collection's own page is read as part of the community.
+      const parent = parseHomefinitiRecords(page.text, this.host);
+      if (!parent.community) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+      const childPaths = children.map((child) => pathKey(new URL(child.url)));
+      // Every home the parent lists must sit under one of its collections.
+      if (parent.homes.some((home) => !childPaths.some((path) => pathKey(new URL(home.sourceUrl)).startsWith(`${path}/`)))) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+      read = { homes: [], plans: [], facts: parseCommunityFacts(page.text) };
+      for (const child of children) {
+        const childPage = await getDocument(child.url, fetcher, "text/html,application/xhtml+xml", this.host);
+        if (!childPage.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(childPage, "community_fetch_failed")]);
+        privateSnapshot.pages.push(sourcePage("community", child.url, null));
+        const childRead = readHomefinitiPage(childPage.text, new URL(child.url), this.host);
+        if ("hold" in childRead) return failedResult(config, fetchedAt, privateSnapshot, [childRead.hold]);
+        // The parent counts each collection's homes ("10 Homes"): fewer on the collection's page is a partial list.
+        if (child.homes !== null && childRead.homes.length < child.homes) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+        read.homes.push(...childRead.homes);
+        read.plans.push(...childRead.plans);
       }
+      const readPaths = new Set(read.homes.map((home) => pathKey(new URL(home.sourceUrl))));
+      if (parent.homes.some((home) => !readPaths.has(pathKey(new URL(home.sourceUrl))))) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+      if (read.homes.length > HOMEFINITI_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     }
-    if (cards.size > records.homes.length) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
-    privateSnapshot.communityFacts = parseCommunityFacts(page.text);
-    const homePaths = records.homes.map((home) => new URL(home.sourceUrl).pathname);
-    for (const record of records.homes) {
-      const { kind: _kind, ...home } = record;
-      const card = cardFacts(page.text, root, new URL(home.sourceUrl).pathname, homePaths);
-      // A home listed without a card, or with a status word the reader does not know, is not published on a guess: the run is held.
-      const status = homefinitiStatus(card.status);
-      if (!status.status) return failedResult(config, fetchedAt, privateSnapshot, ["unlabelled_home_status"]);
-      privateSnapshot.homes.push({
-        ...home, status: status.status, readyNow: status.readyNow,
-        previousPrice: card.previousPrice && home.price && card.previousPrice > home.price ? card.previousPrice : null,
-        priceDrop: card.previousPrice && home.price && card.previousPrice > home.price ? card.previousPrice - home.price : null,
-      });
-      privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName));
-    }
-    for (const record of records.plans) {
-      const { kind: _kind, ...plan } = record;
-      privateSnapshot.plans.push(plan);
-    }
+    if ("hold" in read) return failedResult(config, fetchedAt, privateSnapshot, [read.hold]);
+    privateSnapshot.communityFacts = read.facts;
+    for (const home of read.homes) { privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }
+    for (const plan of read.plans) privateSnapshot.plans.push(plan);
     // The platform's promotions are site-wide banners ("Interest Rates Starting at 3.99%") whose terms are not published with them; none is read as a community incentive.
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config));
   }
+}
+
+const pathKey = (url: URL) => comparablePath(url.pathname.replace(/\/+$/, ""));
+
+type HomefinitiPageRead = { hold: DealHoldReason } | { homes: PrivatePlanOrHome[]; plans: PrivatePlanOrHome[]; facts: ReturnType<typeof parseCommunityFacts> };
+
+/**
+ * A parent page's collections: the links of its `.child-list` block to sibling pages named for it ("garden-grove" ->
+ * "garden-grove-40"), each with the home count its row states ("10 Homes"; null when the row states none). Null when
+ * the page lists no collections (an ordinary community page); a list with any other link is not read as collections.
+ */
+export function homefinitiCollections(html: string, community: URL, host: string): Array<{ url: string; homes: number | null }> | null {
+  const root = parseHtmlElements(html);
+  if (!root) return null;
+  const list = descendants(root).find((item) => elementClass(item, "child-list"));
+  if (!list) return null;
+  const parentParts = community.pathname.toLowerCase().split("/").filter(Boolean);
+  const slug = parentParts.at(-1) ?? "";
+  const out: Array<{ url: string; homes: number | null }> = [];
+  for (const row of list.children) {
+    const links = Array.from(new Set(descendants(row).filter((item) => item.tag === "a" && item.attributes.href).map((item) => decodeHtmlEntities(item.attributes.href!))));
+    if (!links.length) continue;
+    const urls = links.map((href) => asUrl(new URL(href, community).toString()));
+    const parts = urls.map((url) => url && sameOfficialHost(url, host) ? url.pathname.toLowerCase().split("/").filter(Boolean) : null);
+    // One collection per row, a sibling of the parent page whose slug extends the parent's.
+    const pages = new Set(parts.map((item) => item ? item.join("/") : ""));
+    const first = parts[0];
+    if (pages.size !== 1 || !first || first.length !== parentParts.length || first.slice(0, -1).join("/") !== parentParts.slice(0, -1).join("/") || !first.at(-1)!.startsWith(`${slug}-`)) return null;
+    const count = /\b(\d{1,3})\s+Homes?\b/i.exec(elementText(row, html));
+    out.push({ url: `${urls[0]!.origin}/${first.join("/")}/`, homes: count ? Number(count[1]) : null });
+  }
+  return out.length && out.length <= 8 ? out : null;
+}
+
+/** "4 bed · 2/1 bath · 1,645 sqft": beds, baths (full/half; at most two half baths are a count) and square feet. */
+function cardSpecs(text: string): { bedrooms: number; bathrooms: number; squareFeet: number } | null {
+  const match = /(\d{1,2})\s*bed\s*·\s*(\d{1,2})(?:\/(\d))?\s*bath\s*·\s*([\d,]{3,6})\s*sqft/i.exec(text.replace(/\s+/g, " "));
+  if (!match) return null;
+  const half = match[3] ? Number(match[3]) : 0;
+  if (half > 2) return null;
+  return { bedrooms: Number(match[1]), bathrooms: Number(match[2]) + half * 0.5, squareFeet: Number(match[4]!.replace(/,/g, "")) };
+}
+
+type CardHome = { path: string; street: string; city: string | null; price: number; bedrooms: number; bathrooms: number; squareFeet: number; image: string | null };
+
+/**
+ * The page's home cards (`article.card-spec`, Coventry's markup in October 2026): link, `data-price`, the
+ * "4 bed · 3 bath · 2,082 sqft" line, the address ("4912 Hawkwell Lane, San Antonio · Homesite 7-2-1"). A card whose
+ * figures do not agree with themselves (data attributes against the shown text), or two cards of one home that differ,
+ * read as nothing (null for that home).
+ */
+function parseCardHomes(html: string, root: HtmlElement, community: URL): Map<string, CardHome | null> {
+  const out = new Map<string, CardHome | null>();
+  for (const article of descendants(root).filter((item) => item.tag === "article" && elementClass(item, "card-spec"))) {
+    const inner = descendants(article);
+    const hrefs = Array.from(new Set(inner.filter((item) => item.tag === "a" && item.attributes.href).map((item) => decodeHtmlEntities(item.attributes.href!).split(/[?#]/)[0]!)));
+    const url = hrefs.length === 1 ? asUrl(new URL(hrefs[0]!, community).toString()) : null;
+    if (!url || !sameOfficialHost(url, community.hostname)) continue;
+    const path = pathKey(url);
+    const specs = inner.filter((item) => item.tag === "p").map((item) => cardSpecs(elementText(item, html))).find(Boolean) ?? null;
+    const price = num(article.attributes["data-price"]);
+    const shownPrice = inner.filter((item) => elementClass(item, "card-spec-price")).map((item) => /\$\s*([\d,]{5,9})/.exec(elementText(item, html))?.[1]).find(Boolean);
+    const address = inner.find((item) => item.tag === "address");
+    const place = address ? elementText(address, html).split("·")[0]!.split(",").map((part) => part.trim()) : [];
+    const image = inner.find((item) => item.tag === "img" && item.attributes.src)?.attributes.src ?? null;
+    const card: CardHome | null = specs && price && price > 0 && shownPrice && num(shownPrice) === price && num(article.attributes["data-square-feet"]) === specs.squareFeet && place[0]
+      ? { path, street: place[0], city: place[1] || null, price, ...specs, image }
+      : null;
+    if (out.has(path)) { const known = out.get(path); if (!known || !card || JSON.stringify(known) !== JSON.stringify(card)) out.set(path, null); }
+    else out.set(path, card);
+  }
+  return out;
+}
+
+/** One community page of the platform: its homes (records, and cards the records corroborate) and plans, or the hold. */
+function readHomefinitiPage(html: string, community: URL, host: string): HomefinitiPageRead {
+  const records = parseHomefinitiRecords(html, host);
+  // Without the community's own record this is not one of the platform's community pages.
+  if (!records.community) return { hold: "expected_community_container_not_found" };
+  if (records.homes.length > HOMEFINITI_MAX_HOMES) return { hold: "incomplete_inventory" };
+  // Two records of one home page that disagree on its figures: neither is read as the home.
+  const recordPaths = records.homes.map((home) => pathKey(new URL(home.sourceUrl)));
+  if (new Set(recordPaths).size !== recordPaths.length) return { hold: "invalid_inventory_response" };
+  const root = parseHtmlElements(html);
+  if (!root) return { hold: "expected_community_container_not_found" };
+  // A home record of another community on the same host (a "nearby homes" block) is never this community's inventory.
+  const communitySlug = community.pathname.split("/").filter(Boolean).at(-1)?.toLowerCase() ?? "";
+  if (records.homes.some((home) => !new URL(home.sourceUrl).pathname.toLowerCase().split("/").includes(communitySlug))) return { hold: "invalid_inventory_response" };
+  // More home cards on the page than home records means the records changed shape, not that homes sold. A card is a status
+  // element with links into this community near it, counted once per set of links (a featured strip repeats a card's home);
+  // a community-wide badge ("Now Selling") has no such link and is not a card.
+  const all = descendants(root);
+  const parents = new Map<HtmlElement, HtmlElement>();
+  for (const element of all) for (const child of element.children) parents.set(child, element);
+  const communityDepth = community.pathname.split("/").filter(Boolean).length;
+  const linksIntoCommunity = (scope: HtmlElement) => Array.from(new Set(descendants(scope).flatMap((item) => {
+    if (item.tag !== "a" || !item.attributes.href) return [];
+    const path = decodeHtmlEntities(item.attributes.href).split(/[?#]/)[0]!.toLowerCase().replace(/\/+$/, "");
+    return path.split("/").includes(communitySlug) && path.split("/").filter(Boolean).length > communityDepth ? [path] : [];
+  }))).sort();
+  const isStatus = (element: HtmlElement) => STATUS_CLASSES.some((token) => elementClass(element, token)) && elementText(element, html).length <= 40;
+  const cards = new Set<string>();
+  for (const element of all.filter(isStatus)) {
+    let scope: HtmlElement | undefined = element;
+    for (let up = 0; scope && up < 4; up++, scope = parents.get(scope)) {
+      // The card is the nearest block that links to a home and holds this one status; a block holding several is the list.
+      if (descendants(scope).filter(isStatus).length > 1) break;
+      const links = linksIntoCommunity(scope);
+      if (links.length) { cards.add(links.join(" ")); break; }
+    }
+  }
+  // A home with a card but no record (Coventry's 4912 Hawkwell Lane, October 2026: no record on any page) is read from its
+  // card only when the cards say exactly what the records say for every home that has both, and at least three do; a home
+  // page one level under a plan in this community, never another page.
+  const cardHomes = parseCardHomes(html, root, community);
+  const recordByPath = new Map(records.homes.map((home) => [pathKey(new URL(home.sourceUrl)), home] as const));
+  const homeDepth = pathKey(community).split("/").filter(Boolean).length + 2;
+  const unrecorded = Array.from(cardHomes.keys()).filter((path) => !recordByPath.has(path) && path.startsWith(`${pathKey(community)}/`) && path.split("/").filter(Boolean).length === homeDepth);
+  const fromCards: HomefinitiRecord[] = [];
+  if (unrecorded.length) {
+    const pairs = Array.from(recordByPath).filter(([path]) => cardHomes.has(path));
+    const agree = pairs.every(([path, record]) => {
+      const card = cardHomes.get(path);
+      return card && card.price === record.price && card.bedrooms === record.bedrooms && card.bathrooms === record.bathrooms && card.squareFeet === record.squareFeet && card.street.toLowerCase() === (record.privateName ?? "").toLowerCase();
+    });
+    if (agree && pairs.length >= 3 && unrecorded.every((path) => cardHomes.get(path))) {
+      for (const path of unrecorded) {
+        const card = cardHomes.get(path)!;
+        const url = new URL(path.replace(/\/?$/, "/"), community.origin);
+        fromCards.push({ kind: "home", sourceUrl: url.toString(), privateName: card.street, privateAddress: [card.street, card.city, "TX"].filter(Boolean).join(", "), privatePlanName: planNameFromPath(url.pathname.split("/").filter(Boolean).at(-2) ?? ""), status: null, price: card.price, bedrooms: card.bedrooms, bathrooms: card.bathrooms, squareFeet: card.squareFeet, readyNow: false, gallery: card.image ? gallery([card.image], false) : [] });
+      }
+    }
+  }
+  const homes = [...records.homes, ...fromCards];
+  if (cards.size > homes.length) return { hold: "expected_community_container_not_found" };
+  const homePaths = homes.map((home) => new URL(home.sourceUrl).pathname);
+  const out: PrivatePlanOrHome[] = [];
+  for (const record of homes) {
+    const { kind: _kind, ...home } = record;
+    const card = cardFacts(html, root, new URL(home.sourceUrl).pathname, homePaths);
+    // A home listed without a card, or with a status word the reader does not know, is not published on a guess: the run is held.
+    const status = homefinitiStatus(card.status);
+    if (!status.status) return { hold: "unlabelled_home_status" };
+    out.push({
+      ...home, status: status.status, readyNow: status.readyNow,
+      previousPrice: card.previousPrice && home.price && card.previousPrice > home.price ? card.previousPrice : null,
+      priceDrop: card.previousPrice && home.price && card.previousPrice > home.price ? card.previousPrice - home.price : null,
+    });
+  }
+  return { homes: out, plans: records.plans.map(({ kind: _kind, ...plan }) => plan), facts: parseCommunityFacts(html) };
 }
 
 /** Community page links on a builder's market page (Coventry lists its San Antonio communities at /new-homes/tx/san-antonio/). */

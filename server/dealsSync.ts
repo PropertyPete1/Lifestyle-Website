@@ -2,10 +2,11 @@ import { and, desc, eq, gte, inArray, isNull, lt, ne, or } from "drizzle-orm";
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealJobRuns, dealPhotos, dealSyncDigestEntries } from "../drizzle/schema";
 import { getDb } from "./db";
 import { chicagoClock, chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
-import { builderScrubConfig, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, publicTextResidue, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher } from "./dealsAdapters";
+import { builderScrubConfig, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, normalizeIncentiveText, publicTextResidue, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher } from "./dealsAdapters";
 export { builderScrubConfig };
 import { dealScrubTerms, emptyDealScrubConfig, mergeDealScrubConfig, normalizedDealSourceKey, normalizedText, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
 import { applyScrubExclusions, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
+import { AUTO_ACCEPTED_ADMIN_STATUS, AUTO_ACCEPTED_NO_DEADLINE, HELD_INCENTIVE_PUBLIC_LINE, deadlineOnlyHold, isAutoAcceptedIncentive, unreadDateIn } from "../shared/dealsHeldIncentive";
 import { processPendingDealPhotos } from "./dealsPhotos";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { refreshCommunityGeography } from "./dealsMap";
@@ -413,6 +414,19 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
   const activeManual = activeRows.find((row) => row.manual) ?? null;
   const same = rows.find((row) => row.normalizedText === norm) ?? null;
   const holdString = (list: readonly string[]) => `${Array.from(new Set(list)).sort().join(", ")} (text ${fingerprint})`;
+  // Deadline-only holds publish by themselves (owner's decision, 2026-10-21): the text names a deadline the parser could
+  // not read as a date and carries no other date-like phrase, so it is published as an admin's Accept with "no deadline in
+  // the text" would publish it, and follows the undated lapse rule. A date the parser could not read keeps it held, and
+  // nothing is published by itself while a manual override is live.
+  const unreadDate = unreadDateIn(normalizeIncentiveText(scraped.text), [facts.contractDeadline, facts.closingDeadline]);
+  const autoAcceptable = (list: readonly string[]) => deadlineOnlyHold(list) && unreadDate === null && !activeManual;
+  /** The e-mail detail of a held text: buyers see the neutral line meanwhile, and the Accept is optional. */
+  const heldDetail = (list: readonly string[], text: string) => [
+    deadlineOnlyHold(list) && unreadDate !== null ? `The text names a deadline with a date the reader could not read ("${unreadDate.slice(0, 40)}"), so it was not published by itself.` : null,
+    `Buyers see "${HELD_INCENTIVE_PUBLIC_LINE}" for this community until it is reviewed; Accept this update in Admin is optional and publishes the full offer.`,
+    `Held text: "${text.slice(0, 400)}"`,
+  ].filter(Boolean).join(" ");
+  const autoLine = (text: string) => `${AUTO_ACCEPTED_ADMIN_STATUS}: "${text.slice(0, 160)}"`;
 
   if (same) {
     // An admin's acceptance (or save) and a manual override are sticky for this builder text: the sync never re-judges them.
@@ -426,7 +440,7 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
         await tx.update(dealIncentives).set({ held: true, active: false, holdReason: JSON.stringify(unique), confirmedAt: now }).where(eq(dealIncentives.id, same.id));
       });
       summary.incentive.push(`${message} (${unique.join(", ")}): "${publicText.slice(0, 160)}"`);
-      await recordIncentiveHold(community, holdString(unique), now, holds, `Held text: "${publicText.slice(0, 400)}"`, notify);
+      await recordIncentiveHold(community, holdString(unique), now, holds, heldDetail(unique, publicText), notify);
     };
     /** A record an admin accepted before acceptance was recorded is marked accepted now and goes (back) live as the admin left it. */
     const adoptAccepted = async () => {
@@ -447,15 +461,18 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
       return;
     }
     if (same.active) {
-      if (!adminOwned && acceptedBeforeRecorded(same, unique)) { await adoptAccepted(); return; }
+      // A record the sync published by itself is never taken for an admin's legacy Accept.
+      if (!adminOwned && !isAutoAcceptedIncentive(same) && acceptedBeforeRecorded(same, unique)) { await adoptAccepted(); return; }
       // A scraped record published under earlier rules is judged again on every run: what this scrape cannot publish comes off and is held.
-      if (!adminOwned && unique.length) { await holdSame("Live incentive no longer passes the publication rules and is held", true); return; }
+      if (!adminOwned && unique.length && !autoAcceptable(unique)) { await holdSame("Live incentive no longer passes the publication rules and is held", true); return; }
       // Same promo re-confirmed: confirmedAt moves; a scraped (not admin-owned) record takes this scrape's figures. Dates and admin values are sticky.
       const figures = adminOwned ? {} : (({ headlineRate, followOnRate, followOnPeriod, apr, loanType, downPayment, repaymentTerms }) => ({ headlineRate, followOnRate, followOnPeriod, apr, loanType, downPayment, repaymentTerms }))(scrapedIncentiveValues(facts));
+      // A scraped record carries the deadline-only mark exactly while its reasons are deadline-only.
+      const mark = adminOwned ? {} : { holdReason: unique.length ? AUTO_ACCEPTED_NO_DEADLINE : null };
       await db.transaction(async (tx) => {
         await takeOffOthers(tx, same.id);
         await retireOtherHeld(tx, same.id);
-        await tx.update(dealIncentives).set({ confirmedAt: now, ...figures }).where(eq(dealIncentives.id, same.id));
+        await tx.update(dealIncentives).set({ confirmedAt: now, ...figures, ...mark }).where(eq(dealIncentives.id, same.id));
       });
       await recordIncentiveHold(community, null, now, holds);
       return;
@@ -471,20 +488,22 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
       // A manual override live beside it keeps the text held, as the new-text path does.
       const nextReasons = Array.from(new Set([...unique, ...adminReasons, ...(activeManual && activeManual.id !== same.id ? ["differs_from_manual_override"] : [])]));
       const figures = (({ headlineRate, followOnRate, followOnPeriod, apr, loanType, downPayment, repaymentTerms }) => ({ headlineRate, followOnRate, followOnPeriod, apr, loanType, downPayment, repaymentTerms }))(scrapedIncentiveValues(facts));
-      const release = nextReasons.length === 0;
+      // Deadline-only reasons release it too, marked as published by the sync itself.
+      const auto = nextReasons.length > 0 && autoAcceptable(nextReasons);
+      const release = nextReasons.length === 0 || auto;
       await db.transaction(async (tx) => {
         await takeOffOthers(tx, same.id);
         await retireOtherHeld(tx, same.id);
         // A released record takes this read's dates too (unless the admin set them), so it expires by them like any new record.
         const scrapedDates = scrapedIncentiveValues(facts);
         const dates = release ? { ...(same.contractByManual ? {} : { contractBy: scrapedDates.contractBy }), ...(same.closeByManual ? {} : { closeBy: scrapedDates.closeBy }), expiresAt: earliest(same.contractByManual ? same.contractBy : scrapedDates.contractBy, same.closeByManual ? same.closeBy : scrapedDates.closeBy) } : {};
-        await tx.update(dealIncentives).set({ confirmedAt: now, ...figures, ...dates, ...(release ? { held: false, active: true, holdReason: null } : { holdReason: JSON.stringify(nextReasons) }) }).where(eq(dealIncentives.id, same.id));
+        await tx.update(dealIncentives).set({ confirmedAt: now, ...figures, ...dates, ...(release ? { held: false, active: true, holdReason: auto ? AUTO_ACCEPTED_NO_DEADLINE : null } : { holdReason: JSON.stringify(nextReasons) }) }).where(eq(dealIncentives.id, same.id));
       });
       if (tookOff.length) summary.incentive.push(`The builder shows the held incentive again; the live one came off: "${tookOff[0]!.publicText.slice(0, 160)}"`);
       if (release) {
-        summary.incentive.push(`A held incentive now passes the publication rules and is live: "${same.publicText.slice(0, 160)}"`);
+        summary.incentive.push(auto ? autoLine(same.publicText) : `A held incentive now passes the publication rules and is live: "${same.publicText.slice(0, 160)}"`);
         await recordIncentiveHold(community, null, now, holds);
-      } else await recordIncentiveHold(community, holdString(nextReasons), now, holds, `Held text: "${same.publicText.slice(0, 400)}"`, false);
+      } else await recordIncentiveHold(community, holdString(nextReasons), now, holds, heldDetail(nextReasons, same.publicText), false);
       return;
     }
     if (activeManual && activeManual.id !== same.id) {
@@ -499,15 +518,17 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
     }
     // A superseded record was never published, and a lapsed or replaced scraped one was published under the rules of its
     // day: this scrape judges it again. An accepted one returns as the admin left it.
-    if (!adminOwned && same.holdReason !== "superseded" && acceptedBeforeRecorded(same, unique)) { await adoptAccepted(); return; }
-    if (!adminOwned && unique.length) { await holdSame("Incentive text returned and is held", same.holdReason !== "superseded"); return; }
-    // A lapsed (or replaced) record returns when a successful scrape confirms its text again.
+    if (!adminOwned && same.holdReason !== "superseded" && !isAutoAcceptedIncentive(same) && acceptedBeforeRecorded(same, unique)) { await adoptAccepted(); return; }
+    if (!adminOwned && unique.length && !autoAcceptable(unique)) { await holdSame("Incentive text returned and is held", same.holdReason !== "superseded"); return; }
+    // A lapsed (or replaced) record returns when a successful scrape confirms its text again; one held only for a deadline
+    // the text does not date returns marked as published by the sync itself.
+    const autoReturn = !adminOwned && unique.length > 0;
     await db.transaction(async (tx) => {
       await takeOffOthers(tx, same.id);
       await retireOtherHeld(tx, same.id);
-      await tx.update(dealIncentives).set({ active: true, held: false, holdReason: null, confirmedAt: now }).where(eq(dealIncentives.id, same.id));
+      await tx.update(dealIncentives).set({ active: true, held: false, holdReason: autoReturn ? AUTO_ACCEPTED_NO_DEADLINE : null, confirmedAt: now }).where(eq(dealIncentives.id, same.id));
     });
-    summary.incentive.push(`Incentive returned after ${same.holdReason === "lapsed_unconfirmed" ? "lapsing" : "being replaced"}: "${publicText.slice(0, 160)}"`);
+    summary.incentive.push(autoReturn ? autoLine(publicText) : `Incentive returned after ${same.holdReason === "lapsed_unconfirmed" ? "lapsing" : "being replaced"}: "${publicText.slice(0, 160)}"`);
     await recordIncentiveHold(community, null, now, holds);
     return;
   }
@@ -518,7 +539,8 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
   if (droppedManualDates.length) reasons.push("replaces_manual_date");
   if (activeManual) reasons.push("differs_from_manual_override");
   const values = { communityId: community.id, normalizedText: norm, publicText, ...scrapedIncentiveValues(facts), confirmedAt: now, manual: false, contractByManual: false, closeByManual: false };
-  if (reasons.length) {
+  const autoNew = reasons.length > 0 && autoAcceptable(Array.from(new Set(reasons)));
+  if (reasons.length && !autoNew) {
     const unique = Array.from(new Set(reasons));
     await db.transaction(async (tx) => {
       await takeOffOthers(tx, null);
@@ -529,7 +551,7 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
     const detail = [
       droppedManualDates.length ? `Dropped manual date(s): ${droppedManualDates.join(", ")}.` : null,
       activeManual ? `Manual override stays live: "${activeManual.publicText.slice(0, 160)}"` : null,
-      `Held text: "${publicText.slice(0, 400)}"`,
+      heldDetail(unique, publicText),
     ].filter(Boolean).join(" ");
     await recordIncentiveHold(community, holdString(unique), now, holds, detail);
     return;
@@ -537,9 +559,9 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
   await db.transaction(async (tx) => {
     await takeOffOthers(tx, null);
     await retireOtherHeld(tx, null);
-    await tx.insert(dealIncentives).values({ ...values, active: true, held: false, holdReason: null });
+    await tx.insert(dealIncentives).values({ ...values, active: true, held: false, holdReason: autoNew ? AUTO_ACCEPTED_NO_DEADLINE : null });
   });
-  summary.incentive.push(`New incentive published: "${publicText.slice(0, 160)}"`);
+  summary.incentive.push(autoNew ? autoLine(publicText) : `New incentive published: "${publicText.slice(0, 160)}"`);
   await recordIncentiveHold(community, null, now, holds);
 }
 
@@ -724,7 +746,7 @@ function summaryBody(summaries: readonly CommunityChangeSummary[]): string {
 
 function holdBody(holds: readonly HoldNotice[]): string {
   const lines = holds.flatMap((hold) => [`${hold.privateName} (${hold.builder}), ${hold.kind} hold: ${hold.reason}`, ...(hold.detail ? [`  ${hold.detail}`] : []), ""]);
-  return ["A builder page could not be published. The last good data stays live.", "", ...lines, "Catalog holds offer Dismiss hold or Switch to Manual; incentive holds offer Accept this update in Admin, Builder Deals: /admin/deals"].join("\n");
+  return ["A builder page could not be published. The last good data stays live.", "", ...lines, `Catalog holds offer Dismiss hold or Switch to Manual. A held incentive needs nothing from you: buyers see "${HELD_INCENTIVE_PUBLIC_LINE}" for that community until it is reviewed, and Accept this update (optional) publishes the full offer. Offers held only for a deadline the text does not date are published by themselves. Admin, Builder Deals: /admin/deals`].join("\n");
 }
 
 /** One change-summary email and one hold email per run; a failure never fails the sync, and is reported as false. */

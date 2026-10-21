@@ -258,7 +258,8 @@ function HoldBanner({ community, diagnostics }: { community: CommunityRow; diagn
           <p className="flex items-start gap-2 text-sm font-medium"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-gold" /> Incentive update held{diagnostics.incentiveHold ? ` (${ageLabel(diagnostics.incentiveHold.ageHours)})` : ""}</p>
           <p className="break-words text-sm">{held.publicText}</p>
           {held.reasons.length > 0 && <p className="text-xs text-muted-foreground">Reasons: {held.reasons.map((reason) => reason.replaceAll("_", " ")).join(", ")}</p>}
-          {held.missingFields.length > 0 && <p className="text-xs text-muted-foreground">Needed before publishing: {held.missingFields.map((field) => INCENTIVE_FIELD_LABELS[field as IncentiveFieldKey] ?? field).join(", ")}</p>}
+          {held.status && <p className="text-xs font-medium" data-deals-held-status="true">{held.status}. Accept is optional.</p>}
+          {held.missingFields.length > 0 && <p className="text-xs text-muted-foreground">Needed to publish the full offer: {held.missingFields.map((field) => INCENTIVE_FIELD_LABELS[field as IncentiveFieldKey] ?? field).join(", ")}</p>}
           {accepting === held.id ? <AcceptHoldForm held={held} onDone={() => setAccepting(null)} /> : (
             <div className="flex flex-col gap-2 sm:flex-row">
               <Button type="button" className={`${TAP} ${GOLD_BUTTON} w-full sm:w-auto`} onClick={() => setAccepting(held.id)}>Accept this update</Button>
@@ -324,6 +325,13 @@ function CommunityCard({ community, diagnostics, activeIncentive, builders }: { 
         </div>
       </div>
       {diagnostics && <HoldBanner community={community} diagnostics={diagnostics} />}
+      {diagnostics?.incentive?.status && (
+        <div className="space-y-1 border border-border bg-secondary/40 p-3" data-deals-auto-accepted="true">
+          <p className="flex items-start gap-2 text-sm font-medium"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold" /> {diagnostics.incentive.status}</p>
+          <p className="break-words text-sm">{diagnostics.incentive.publicText}</p>
+          <p className="text-xs text-muted-foreground">It shows with no dates and comes off by the lapse rule once the builder stops showing it. To add a date, open Incentive and save it.</p>
+        </div>
+      )}
       {showIncentive && <IncentiveEditor key={activeIncentive?.id ?? "none"} community={community} active={activeIncentive} />}
       {editing && <CommunityForm id={community.id} initial={draftFromCommunity(community, diagnostics)} builders={builders} onDone={() => setEditing(false)} />}
       <ConfirmDialog open={confirmRemove} title="Remove this community?" description="The community is archived: it leaves the public and gated pages immediately, while its homes, photos and lead history stay in admin. You can restore it later." confirmLabel="Remove community" pending={remove.isPending} onCancel={() => setConfirmRemove(false)} onConfirm={() => remove.mutate({ id: community.id, confirm: true })} />

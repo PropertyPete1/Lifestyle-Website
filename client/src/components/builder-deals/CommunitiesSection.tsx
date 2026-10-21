@@ -291,7 +291,7 @@ function CommunityCard({ community, diagnostics, activeIncentive, builders }: { 
     onError,
   });
   const testSource = trpc.deals.admin.testCommunitySource.useMutation({
-    onSuccess: (result) => toast[result.status >= 200 && result.status < 300 ? "success" : "warning"](result.error ? `Source test failed: ${result.error}` : `Source ${result.host} answered ${result.status}${result.redirected ? (result.redirectSameHost === false ? " (redirect to another host, not followed)" : " (after a same-host redirect)") : ""}${result.status === 401 || result.status === 403 ? ": the builder refuses automated reads; switch this community to Manual" : ""}, ${result.bytes.toLocaleString()} bytes read${result.truncated ? " (test capped at 64 KB; the reader reads the whole page)" : ""}.`),
+    onSuccess: (result) => toast[result.status >= 200 && result.status < 300 ? "success" : "warning"](result.error ? `Source test failed: ${result.error}` : `Source ${result.host} answered ${result.status}${result.redirected ? (result.redirectSameHost === false ? " (redirect to another host, not followed)" : " (after a same-host redirect)") : ""}${result.status === 401 || result.status === 403 ? ": the builder refuses automated reads; a one-off challenge can clear on its own, so if it keeps happening, switch this community to Manual" : ""}, ${result.bytes.toLocaleString()} bytes read${result.truncated ? " (test capped at 64 KB; the reader reads the whole page)" : ""}.`),
     onError,
   });
   const manual = community.builder === MANUAL_BUILDER || community.manualMode;

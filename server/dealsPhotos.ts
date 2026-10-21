@@ -1212,7 +1212,21 @@ function mergeDrainResults(a: DealPhotoDrainResult, b: DealPhotoDrainResult): De
 const dueNow = (now: Date) => and(eq(dealPhotos.processingState, "pending"), isNotNull(dealPhotos.nextProcessingAttemptAt), lte(dealPhotos.nextProcessingAttemptAt, now));
 const homeIsShown = sql`(${dealHomes.status} = 'available' AND ${dealCommunities.active} = 1 AND ${dealCommunities.paused} = 0)`;
 /** The home already shows at least one photo. Probes idx_deal_photos_home (home_id, processing_state). */
-const homeHasServedPhoto = sql`EXISTS (SELECT 1 FROM ${dealPhotos} AS served WHERE served.home_id = ${dealPhotos.homeId} AND served.processing_state = 'processed' AND served.automatic_hidden = 0 AND served.admin_hidden = 0)`;
+
+/**
+ * Homes that already show at least one photo, as a derived table joined to the
+ * queue. TiDB rejects a correlated EXISTS in ORDER BY (error 1054, "Unknown
+ * column … in 'where clause'"), which stopped every drain in production; a
+ * grouped derived table joined on home_id works on TiDB, MySQL and SQLite.
+ */
+type SelectBuilder = Pick<PhotoDb, "select">;
+function servedHomes(qb: SelectBuilder) {
+  return qb.select({ homeId: sql<number>`${dealPhotos.homeId}`.as("served_home_id") })
+    .from(dealPhotos)
+    .where(and(eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false)))
+    .groupBy(dealPhotos.homeId)
+    .as("served_homes");
+}
 
 /**
  * Queue order: photos of homes buyers can see first; among those, homes that
@@ -1220,41 +1234,37 @@ const homeHasServedPhoto = sql`EXISTS (SELECT 1 FROM ${dealPhotos} AS served WHE
  * home's second photo); then the cheapest homes (the ones the featured and
  * best-deal lists lead with); then the oldest due row.
  */
-export const DEAL_PHOTO_PRIORITY_ORDER = [
-  sql`CASE WHEN ${homeIsShown} THEN 0 ELSE 1 END`,
-  sql`CASE WHEN ${homeHasServedPhoto} THEN 1 ELSE 0 END`,
-  asc(dealPhotos.sortOrder),
-  sql`CASE WHEN ${dealHomes.price} IS NULL THEN 1 ELSE 0 END`,
-  asc(dealHomes.price),
-  asc(dealPhotos.nextProcessingAttemptAt),
-  asc(dealPhotos.id),
-];
+function dealPhotoPriorityOrder(served: ReturnType<typeof servedHomes>) {
+  return [
+    sql`CASE WHEN ${homeIsShown} THEN 0 ELSE 1 END`,
+    sql`CASE WHEN ${served.homeId} IS NULL THEN 0 ELSE 1 END`,
+    asc(dealPhotos.sortOrder),
+    sql`CASE WHEN ${dealHomes.price} IS NULL THEN 1 ELSE 0 END`,
+    asc(dealHomes.price),
+    asc(dealPhotos.nextProcessingAttemptAt),
+    asc(dealPhotos.id),
+  ];
+}
 
 type QueueRow = { id: number; sourceUrl: string; sourceHash: string; builder: string | null; communityId: number | null; originalVersion: string | null };
 
-/** The due candidates in priority order (exported for the ordering test). */
-export function selectDealPhotoCandidates(db: PhotoDb, now: Date, limit: number, excluded: readonly number[]) {
-  return db.select({ id: dealPhotos.id, sourceUrl: dealPhotos.sourceUrl, sourceHash: dealPhotos.sourceHash, builder: dealCommunities.builder, communityId: dealHomes.communityId, originalVersion: dealPhotos.originalVersion })
+/** The due candidates in priority order. Takes any select builder (the database, or a QueryBuilder in the ordering test). */
+export function dealPhotoCandidateQuery(qb: SelectBuilder, now: Date, limit: number, excluded: readonly number[]) {
+  const served = servedHomes(qb);
+  return qb.select({ id: dealPhotos.id, sourceUrl: dealPhotos.sourceUrl, sourceHash: dealPhotos.sourceHash, builder: dealCommunities.builder, communityId: dealHomes.communityId, originalVersion: dealPhotos.originalVersion })
     .from(dealPhotos)
     .leftJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
     .leftJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
+    .leftJoin(served, eq(served.homeId, dealPhotos.homeId))
     .where(and(dueNow(now), excluded.length ? notInArray(dealPhotos.id, [...excluded]) : undefined))
-    .orderBy(...DEAL_PHOTO_PRIORITY_ORDER)
+    .orderBy(...dealPhotoPriorityOrder(served))
     .limit(limit);
 }
 
-/**
- * One refill of a drain's work queue: the next due rows in priority order,
- * each followed by the due rows of the same builder and source (their work is
- * shared through the run context while it is still in memory), plus the
- * stored originals other rows of those sources already have.
- *
- * deal_photos has no index that leads with source_hash, so both lookups are
- * confined to the candidates' own communities: the planner reaches them through
- * idx_deal_homes_community_status and idx_deal_photos_home, i.e. those
- * communities' photos, never a scan of the whole table. The donor lookup only
- * runs when a candidate still needs its first download.
- */
+export function selectDealPhotoCandidates(db: PhotoDb, now: Date, limit: number, excluded: readonly number[]) {
+  return dealPhotoCandidateQuery(db, now, limit, excluded);
+}
+
 /** Plain due order (oldest due first): the fallback when the priority query fails on the host's database. */
 export function selectDealPhotoCandidatesPlain(db: PhotoDb, now: Date, limit: number, excluded: readonly number[]) {
   return db.select({ id: dealPhotos.id, sourceUrl: dealPhotos.sourceUrl, sourceHash: dealPhotos.sourceHash, builder: dealCommunities.builder, communityId: dealHomes.communityId, originalVersion: dealPhotos.originalVersion })

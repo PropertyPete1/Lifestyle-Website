@@ -249,6 +249,8 @@ describe("time-budgeted drain", () => {
     vi.stubGlobal("fetch", vi.fn(async () => imageResponse(jpeg)));
     expect(await photos.processPendingDealPhotos(2)).toMatchObject({ processed: 2 });
     const rest = await photos.processPendingDealPhotos({ budgetMs: 60_000 });
+    // The priority query itself ran (no plain-order fallback).
+    expect(rest.warning).toBeUndefined();
     expect(rest).toMatchObject({ processed: 1, stoppedForTime: false });
   });
 });
@@ -442,12 +444,13 @@ describe("priority order", () => {
     photo.run(11, 2, "pending", at(-120_000), 0, 1, 0); // B cover, oldest due
     photo.run(12, 2, "pending", at(-60_000), 0, 1, 0); // B cover duplicate gallery entry, newer
 
-    const fake = createFakeDb();
-    await photos.selectDealPhotoCandidates(fake.db as never, new Date(), 40, [12]);
-    const op = fake.opsFor("select", dealPhotos)[0];
-    const where = renderWhere(op.where);
-    const query = `SELECT \`deal_photos\`.\`id\` AS id FROM \`deal_photos\` ${op.joins.map((join, i) => `LEFT JOIN ${i === 0 ? "\`deal_homes\`" : "\`deal_communities\`"} ON ${renderWhere(join.on).sql}`).join(" ")} WHERE ${where.sql} ORDER BY ${renderOrderBy(op.orderBy).join(", ")} LIMIT ${op.limit}`;
-    const ids = sqlite.prepare(query).all(...(where.params as Array<string | number>)).map((row) => Number((row as { id: number }).id));
+    // The real query text, rendered by drizzle's MySQL query builder (backticks and ? placeholders run on SQLite too).
+    const { QueryBuilder } = await import("drizzle-orm/mysql-core");
+    const built = photos.dealPhotoCandidateQuery(new QueryBuilder() as never, new Date(), 40, [12]).toSQL();
+    // TiDB rejects a correlated subquery in ORDER BY (error 1054): the query must not contain one.
+    expect(built.sql).not.toMatch(/order by[^;]*exists/i);
+    const params = built.params.map((value) => typeof value === "boolean" ? Number(value) : value instanceof Date ? value.toISOString().slice(0, 23).replace("T", " ") : value) as Array<string | number>;
+    const ids = sqlite.prepare(built.sql).all(...params).map((row) => Number((row as { id: number }).id));
     // B's cover (11: shown, no photo, cover, 300k) before D (400k), F (450k), C (500k), then E (no price);
     // then B's second photo (no photo yet, position 1); then A's second photo (A already shows one);
     // then the homes nobody can see: sold (cheaper) and paused. 9 is not due, 10 is claimed, 12 was excluded.

@@ -1110,8 +1110,9 @@ const TRIGGER_TERM_LENGTH = /\b(\d{1,2})(?:[- ]?year|[- ]?yr)s?\b\.?[-,\s]*(?:fi
  */
 export function mentionsTriggeringTerm(input: string): boolean {
   // A warranty, HOA dues or an age in years is not a loan term ("10-year structural warranty", "2 years of HOA dues").
-  const text = normalizeIncentiveText(input).replace(/\b\d+[- ]?(?:years?|yrs?)\b\.?\s+(?:of\s+)?(?:[A-Za-z-]+\s+)?(?:warranty|warranties|HOA|dues|guarantee|old|anniversary)\b/gi, " ");
-  return TRIGGER_TERM_WORDING.test(text) || TRIGGER_TERM_AMOUNTS.test(text) || TRIGGER_TERM_LENGTH.test(text);
+  const text = normalizeIncentiveText(input).replace(/\b\d+[- ]?(?:years?|yrs?)\b\.?\s+(?:of\s+)?(?:(?!(?:fixed|mortgage|loan|term|financing|fha|va|usda|conventional|arm|jumbo|rate)\b)[A-Za-z-]+\s+){0,2}(?:warranty|warranties|HOA|dues|guarantee|old|anniversary)\b/gi, " ");
+  // Wording the parser's patterns do not need (it only checks them beside a stated rate): "amortized over 30 years", "pay $0 for 2 years".
+  return TRIGGER_TERM_WORDING.test(text) || TRIGGER_TERM_AMOUNTS.test(text) || TRIGGER_TERM_LENGTH.test(text) || /\bamortiz\w*\s+over\s+\d+\s+years?\b|\bpay\s+\$\s?0\b/i.test(text);
 }
 
 export function parsePromotionalRate(input: string): PromotionalRateFacts {

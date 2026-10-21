@@ -303,6 +303,9 @@ describe("N1: a payment, down payment or term is never shown without its APR (Re
   it("the triggering-term check finds each wording, and not a warranty or HOA dues", () => {
     for (const sentence of TERMS) expect(mentionsTriggeringTerm(sentence), sentence).toBe(true);
     for (const sentence of ["Builder pays 2 years of HOA dues.", "10-year structural warranty included.", "Up to $10,000 toward closing costs.", REST]) expect(mentionsTriggeringTerm(sentence), sentence).toBe(false);
+    // A loan word between the years and "warranty/HOA/guarantee" keeps it a loan term; two plain words still read as a warranty.
+    for (const sentence of ["30-year fixed HOA dues waived.", "30 year mortgage guarantee.", "Amortized over 30 years.", "Pay $0 for 2 years."]) expect(mentionsTriggeringTerm(sentence), sentence).toBe(true);
+    for (const sentence of ["10 Year Limited Structural Warranty.", "Homes 2 years old."]) expect(mentionsTriggeringTerm(sentence), sentence).toBe(false);
   });
 
   it("the $1,899 repro stays held behind the neutral line and is never published by itself", async () => {

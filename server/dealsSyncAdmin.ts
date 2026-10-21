@@ -72,7 +72,7 @@ export const CATALOG_HOLD_REASON_HELP: Partial<Record<DealHoldReason, string>> =
   invalid_source_url: "The saved source URL is not the builder's official community page.",
   unsupported_official_host: "A page redirected off the builder's official host.",
   community_fetch_failed: "The official community page could not be fetched.",
-  source_access_refused: "The builder's site refused our reader (HTTP 401/403): the builder blocks automated reads, and the reader does not work around it. Switch this community to Manual.",
+  source_access_refused: "The builder's site refused our reader (HTTP 401/403): the builder blocks automated reads, and the reader does not work around it. A one-off challenge page can clear on its own; if it keeps happening, switch this community to Manual.",
   sitemap_fetch_failed: "The builder's sitemap could not be fetched.",
   detail_fetch_failed: "A plan or home page could not be fetched.",
   missing_community_guid: "The community id could not be read from the official page.",

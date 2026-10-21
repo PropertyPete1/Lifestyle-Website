@@ -241,7 +241,7 @@ export function activeCatalogHold(row: Pick<CommunityRow, "catalogHoldReason">):
 }
 
 /** The e-mail line for a catalog hold the admin can only settle by hand. */
-export const SOURCE_ACCESS_REFUSED_DETAIL = "The builder's site refused our reader (HTTP 401/403): the builder is blocking automated reads, and the reader will not work around that. Switch this community to Manual in Admin, Builder Deals.";
+export const SOURCE_ACCESS_REFUSED_DETAIL = "The builder's site refused our reader (HTTP 401/403): the builder is blocking automated reads, and the reader will not work around that. A one-off challenge page can clear on its own; if it keeps happening, switch this community to Manual in Admin, Builder Deals.";
 
 async function recordCatalogHold(community: CommunityRow, reason: string, now: Date, holds: HoldNotice[]) {
   const db = await getDb();

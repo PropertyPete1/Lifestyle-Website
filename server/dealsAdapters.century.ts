@@ -219,6 +219,9 @@ export class CenturyAdapter implements DealAdapter {
     // Without the ProductGroup the available-homes block is the inventory; a page with neither is not one the reader knows.
     if (!records && !cards.hasAvailableSection) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     const homesRead = records ? records.homes : cards.available;
+    // Without the ProductGroup nothing but the cards proves the inventory: an available block with no card the reader
+    // can find (renamed card markup, cards rendered in the browser) is not read as a sold-out community.
+    if (!records && cards.available.length === 0) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (homesRead.length > CENTURY_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     // A variant of another community on the host (a nearby-homes block) is never this community's inventory.
     const base = community.pathname.replace(/\/+$/, "").toLowerCase();

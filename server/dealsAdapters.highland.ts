@@ -213,7 +213,8 @@ export function parseHighlandSections(html: string, communityUrl: string, now: D
     for (const square of inner.filter((element) => elementClass(element, "overview-2x2-square-item"))) {
       const label = descendants(square).find((element) => elementClass(element, "label"));
       const number = descendants(square).find((element) => elementClass(element, "number"));
-      if (label && number && /^quick\s*move-?\s*in$/i.test(normalize(elementText(label, html)))) quickMoveIn = Number(normalize(elementText(number, html))) || 0;
+      // A count that is not a plain number ("6+") is not a count: -1, so the section is held.
+      if (label && number && /^quick\s*move-?\s*in$/i.test(normalize(elementText(label, html)))) quickMoveIn = /^\d+$/.test(normalize(elementText(number, html))) ? Number(normalize(elementText(number, html))) : -1;
     }
     const seen = new Set<string>();
     const homes: PrivatePlanOrHome[] = [];
@@ -280,6 +281,9 @@ export class HighlandAdapter implements DealAdapter {
     const homes: PrivatePlanOrHome[] = [];
     for (const section of sections) {
       let sectionHomes = section.homes;
+      // Home cards with no readable "Quick Move-in" count (the square reworded, moved or unreadable): the preview of up to
+      // three proves nothing about the rest, so nothing is published.
+      if (section.quickMoveIn < 0 || (section.quickMoveIn === 0 && section.homes.length > 0)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
       if (sectionHomes.length < section.quickMoveIn) {
         // The preview is partial: the section page must show every home the count names, or nothing is published.
         if (!section.url) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

@@ -219,7 +219,7 @@ describe("official refresh: holds", () => {
     expect(emails().map((email) => email.category)).toEqual(["deals_sync_hold"]);
     expect(emails()[0].content).toContain("catalog hold: source_access_refused");
     expect(emails()[0].content).toContain("refused our reader (HTTP 401/403)");
-    expect(emails()[0].content).toContain("Switch this community to Manual");
+    expect(emails()[0].content).toContain("if it keeps happening, switch this community to Manual");
   });
 
   it("holds the run as unlabelled_home_status when a home card has no readable status, publishing nothing and sweeping nothing to sold", async () => {

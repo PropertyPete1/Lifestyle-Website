@@ -1299,7 +1299,9 @@ export function parseHtmlElements(html: string): HtmlElement | null {
   // A quote opens a quoted value only right after "=": a stray one inside an unquoted value (Highland's
   // `data-price=857646"`, October 2026) is a character, as browsers read it, never the start of a string that
   // swallows the next card's markup.
-  const tokens = /<!--[\s\S]*?-->|<(?:=\s*"[^"]*"|=\s*'[^']*'|[^>])*>/g;
+  // The alternatives never overlap (an "=" that opens a whole quoted value is read only as that value), so a "<" with
+  // no ">" after it fails in linear time instead of trying every split.
+  const tokens = /<!--[\s\S]*?-->|<(?:=\s*"[^"]*"|=\s*'[^']*'|=(?!\s*"[^"]*")(?!\s*'[^']*')|[^>=])*>/g;
   const voidTags = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
   let count = 0;
   let match: RegExpExecArray | null;

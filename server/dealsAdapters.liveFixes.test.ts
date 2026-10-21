@@ -185,7 +185,7 @@ describe("Ashton Woods: plan cards carry a property id too (October 20, 2026)", 
       ["1223 Higgins Cove", "Quick Move-In (November 2026)", 382_990, 4, 3, 1_938],
       ["1266 Hightower Ln", "Quick Move-In (November 2026)", 430_990, 5, 3, 2_930],
       ["1243 Higgins Cove", "Quick Move-In (November 2026)", 369_990, 3, 2, 1_741],
-      ["1262 Hightower Ln", "Quick Move-In (December 2026)", 404_990, 4, 2, 2_586],
+      ["1262 Hightower Ln", "Quick Move-In (December 2026)", 404_990, 4, 2.5, 2_586],
       ["1252 Higgins Cove", "Quick Move-In (December 2026)", 459_990, 5, 3, 2_983],
     ]);
     expect(result.private.plans.map((plan) => [plan.privatePlanName, plan.price])).toEqual([["Sycamore", 350_740], ["Sage", 366_740], ["Willow", 375_740], ["Yaupon", 390_740], ["Laurel", 395_740], ["Iris", 405_740]]);

@@ -145,10 +145,14 @@ export function parseAshtonCommunity(html: string, pageUrl: string, now: Date = 
     const link = page && sameOfficialHost(page, host) ? page : null;
     const features = inner.filter((item) => item.tag === "li").map((item) => elementText(item, html));
     const find = (pattern: RegExp) => { for (const feature of features) { const match = pattern.exec(feature); if (match) return match; } return null; };
-    const beds = find(/(\d+(?:\.\d)?)\s*beds?\b/i);
-    const baths = find(/(\d+(?:\.\d)?)\s*baths?\b/i);
+    // "4–5 Beds", "2–4 Baths | 1 Half Bath", "2–3 Car Garage": the low end (what the "From" price buys), never the
+    // high end; a half bath adds half a bath ("2 Baths" + "1 Half Baths" is 2.5).
+    const beds = find(/(\d+(?:\.\d)?)(?:\s*[–—-]\s*\d+(?:\.\d)?)?\s*beds?\b/i);
+    const fullBaths = find(/(\d+(?:\.\d)?)(?:\s*[–—-]\s*\d+(?:\.\d)?)?\s*baths?\b/i);
+    const halfBaths = find(/(\d+)(?:\s*[–—-]\s*\d+)?\s*half\s*baths?\b/i);
+    const baths = fullBaths ? [fullBaths[0], String(Number(fullBaths[1]) + (halfBaths ? Number(halfBaths[1]) * 0.5 : 0))] as const : null;
     const sqft = find(/([\d,]{3,6})\s*sq\.?\s*ft/i);
-    const garage = find(/(\d+(?:\.\d)?)\s*car\s+garage/i);
+    const garage = find(/(\d+(?:\.\d)?)(?:\s*[–—-]\s*\d+(?:\.\d)?)?\s*car\s+garage/i);
     const priceText = classText(inner, html, "property-card__price") ?? "";
     const strike = classText(inner, html, "property-card__price--strike");
     const reduced = classText(inner, html, "property-card__price--red");

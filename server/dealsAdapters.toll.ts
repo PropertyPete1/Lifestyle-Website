@@ -207,6 +207,8 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
     // Every model carries its `qmis` list, or (since October 2026) leaves it out when it has none and says so with `qmiCount: 0`;
     // a model without the list that does not count zero, or a quick move-in home listed at the top level, is a changed shape.
     if ((!Array.isArray(model.qmis) && !(model.qmis === undefined && model.qmiCount === 0)) || (model.isQMI === true && !holder)) shapeIntact = false;
+    // A model that counts its homes must list that many (every live page agrees, October 2026): fewer is a partial list.
+    if (Array.isArray(model.qmis) && typeof model.qmiCount === "number" && model.qmiCount !== model.qmis.length) shapeIntact = false;
     const planName = str(model.name) ?? str(model.modelName);
     const link = str(model.url);
     const page = link ? asUrl(link) : null;

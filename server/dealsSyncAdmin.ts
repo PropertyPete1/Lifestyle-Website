@@ -6,7 +6,7 @@ import { chicagoDay, chicagoEndOfDay, getDealSettings } from "./dealsService";
 import { normalizeExcludedTerms, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
 import { activeCatalogHold, builderScrubConfig, communityRefreshDue, leaseBuilder, refreshOfficialDeals, storedExcludedScrubTerms, storedScrubConfig, summarizeHolds } from "./dealsSync";
 import { communityAreaMap, refreshCommunityGeography } from "./dealsMap";
-import { AUTO_ACCEPTED_ADMIN_STATUS, HELD_INCENTIVE_ADMIN_STATUS, heldIncentiveShowsLine, isAutoAcceptedIncentive } from "../shared/dealsHeldIncentive";
+import { HELD_INCENTIVE_ADMIN_STATUS, autoAcceptedStatus, heldIncentiveShowsLine, isAutoAcceptedIncentive } from "../shared/dealsHeldIncentive";
 import { DEAL_SCRUB_CATEGORIES, hasPrivateTerm, mergeDealScrubConfig, normalizeRateFigure, normalizedText, scrubPrivateNames, type DealScrubConfig, type DealScrubConfigInput } from "../shared/deals";
 
 /**
@@ -486,7 +486,7 @@ export async function listCommunityDiagnostics(now = new Date()) {
         manual: homes.filter((home) => home.origin === "manual").length,
       },
       // A record the sync published by itself (deadline-only hold) says so; a human Accept or save never carries the mark.
-      incentive: active ? { id: active.id, publicText: active.publicText, manual: active.manual, confirmedAt: active.confirmedAt.toISOString(), expiresAt: active.expiresAt?.toISOString() ?? null, contractBy: active.contractBy?.toISOString() ?? null, closeBy: active.closeBy?.toISOString() ?? null, contractByManual: active.contractByManual, closeByManual: active.closeByManual, autoAccepted: isAutoAcceptedIncentive(active), status: isAutoAcceptedIncentive(active) ? AUTO_ACCEPTED_ADMIN_STATUS : null } : null,
+      incentive: active ? { id: active.id, publicText: active.publicText, manual: active.manual, confirmedAt: active.confirmedAt.toISOString(), expiresAt: active.expiresAt?.toISOString() ?? null, contractBy: active.contractBy?.toISOString() ?? null, closeBy: active.closeBy?.toISOString() ?? null, contractByManual: active.contractByManual, closeByManual: active.closeByManual, autoAccepted: isAutoAcceptedIncentive(active), status: isAutoAcceptedIncentive(active) ? autoAcceptedStatus(active) : null } : null,
       // What buyers see meanwhile: the neutral line while a held text waits (Accept is optional), unless a live offer shows.
       heldIncentives: held.map((row) => ({ id: row.id, publicText: row.publicText, reasons: parseIncentiveHoldReasons(row.holdReason), missingFields: heldIncentiveMissingFields(row, {}, categories), confirmedAt: row.confirmedAt.toISOString(), status: !active && heldIncentiveShowsLine(row, now, lapseDays) ? HELD_INCENTIVE_ADMIN_STATUS : null })),
       scrubConfig: categories,

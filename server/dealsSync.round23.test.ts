@@ -766,11 +766,14 @@ describe("incentive state machine: random sequences with offerRead", () => {
           log.push(`read ${pick}`); bump("read");
           const manualLive = live().some((row) => row.manual);
           const want = identity.get(text)!;
-          // The rules that hold any new text keep applying: one that replaces a live record with an admin's date, or a held
-          // text still carrying an admin-side reason, waits for the admin.
-          const datedByAdmin = live().some((row) => row.normalizedText !== want && ((row.contractBy && (row.contractByManual || row.manual)) || (row.closeBy && (row.closeByManual || row.manual))));
+          // A text that would take off a live record with an admin's date waits for the admin (new or returning), and a held
+          // text that replaced one keeps waiting while that admin's date still runs; otherwise nothing is carried.
+          const readAt = at(hours);
+          const adminDated = (row: Row) => Boolean((row.contractBy && (row.contractByManual || row.manual)) || (row.closeBy && (row.closeByManual || row.manual)));
+          const datedByAdmin = live().some((row) => row.normalizedText !== want && adminDated(row));
           const ownBefore = incentiveRows().find((row) => row.normalizedText === want && !row.manual);
-          const adminReasonBefore = Boolean(ownBefore?.held && /replaces_manual_date|differs_from_manual_override/.test(ownBefore.holdReason ?? ""));
+          const adminDateRuns = incentiveRows().some((row) => row.normalizedText !== want && !row.held && adminDated(row) && row.holdReason !== "dismissed" && row.holdReason !== "expired" && Boolean(row.expiresAt && row.expiresAt > readAt));
+          const waitsForAdmin = datedByAdmin || (Boolean(ownBefore?.held && /replaces_manual_date/.test(ownBefore.holdReason ?? "")) && adminDateRuns);
           await run(text, hours++, communityId);
           check("live non-manual row for another text", live().every((row) => row.manual || row.normalizedText === want));
           check("held row for another text", heldRows().every((row) => row.normalizedText === want));
@@ -779,7 +782,8 @@ describe("incentive state machine: random sequences with offerRead", () => {
           if (text === NO_DATE) {
             bump("deadline-only read");
             if (manualLive) check("published by itself beside a live manual override", !own.active && own.holdReason !== AUTO_ACCEPTED_NO_DEADLINE);
-            else if (!settledOff && !own.acceptedAt && !datedByAdmin && !adminReasonBefore) { bump("auto-published"); check("deadline-only text not published by itself", own.active && !own.held && own.holdReason === AUTO_ACCEPTED_NO_DEADLINE); }
+            else if (!settledOff && !own.acceptedAt && waitsForAdmin) { bump("held for an admin's date"); check("a text that would drop an admin's date was not held", own.held && JSON.parse(own.holdReason ?? "[]").includes("replaces_manual_date")); }
+            else if (!settledOff && !own.acceptedAt) { bump("auto-published"); check("deadline-only text not published by itself", own.active && !own.held && own.holdReason === AUTO_ACCEPTED_NO_DEADLINE); }
           }
           if (text === UNREAD_DATE) {
             check("a text with an unreadable date was published by itself", !(own.active && own.holdReason === AUTO_ACCEPTED_NO_DEADLINE));
@@ -848,6 +852,7 @@ describe("incentive state machine: random sequences with offerRead", () => {
     }
     console.log("STATS (auto-accept walk)", JSON.stringify(stats));
     expect(stats["auto-published"]).toBeGreaterThan(50);
+    expect(stats["held for an admin's date"]).toBeGreaterThan(5);
     expect(stats["neutral line shown"]).toBeGreaterThan(100);
     expect(violations.slice(0, 5)).toEqual([]);
   }, 300_000);

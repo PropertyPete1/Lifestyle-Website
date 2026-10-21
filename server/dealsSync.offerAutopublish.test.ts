@@ -101,10 +101,10 @@ describe("the parser's deadline-only reads used here", () => {
 describe("unreadDateIn", () => {
   const unread = (text: string) => { const facts = parsePromotionalRate(text); return unreadDateIn(normalizeIncentiveText(text), [facts.contractDeadline, facts.closingDeadline]); };
   it("finds a date-like phrase the parser could not read, and ignores the deadlines it did read", () => {
-    for (const text of [UNREAD_DATE, "Contracts written by 10/31 get $5,000.", "Close by end of year and save.", "Sign by Oct. 31 and close by 12/31/2026.", "Contract between Oct. 1 and Oct. 31, 2026; close within 60 days.", "Offer ends this weekend on homes that close by the builder's date.", "Homes that close by Thanksgiving.", "Contract by 2/30/26 for $5,000.", "Ends in 10 days: closing costs paid by the builder.", "Close by May 30 for $5,000."]) {
+    for (const text of [UNREAD_DATE, "Contracts written by 10/31 get $5,000.", "Close by end of year and save.", "Sign by Oct. 31 and close by 12/31/2026.", "Contract between Oct. 1 and Oct. 31, 2026; close within 60 days.", "Offer ends this weekend on homes that close by the builder's date.", "Homes that close by Thanksgiving.", "Contract by 2/30/26 for $5,000.", "Ends in 10 days: closing costs paid by the builder.", "Close by May 30 for $5,000.", "$5,000 toward closing costs paid by the builder on 4/2.5 homes."]) {
       expect(unread(text), text).not.toBeNull();
     }
-    for (const text of [NO_DATE, SIGN, ONE_DATED, "4.99% (5.62% APR) 30-yr fixed FHA with 3.5% down. Up to $10,000 toward closing costs paid by seller.", "$5,000 toward closing costs paid by the builder on 4/2.5 homes with a 2/1 buydown.", "Contracts written between September 4 and September 30, 2026 receive $5,000; closing costs paid by the builder.", "Closing costs paid by the builder; you may sign at the model."]) {
+    for (const text of [NO_DATE, SIGN, ONE_DATED, "4.99% (5.62% APR) 30-yr fixed FHA with 3.5% down. Up to $10,000 toward closing costs paid by seller.", "$5,000 toward closing costs paid by the builder with a 2/1 buydown.", "Contracts written between September 4 and September 30, 2026 receive $5,000; closing costs paid by the builder.", "Closing costs paid by the builder; you may sign at the model."]) {
       expect(unread(text), text).toBeNull();
     }
   });

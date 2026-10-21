@@ -329,7 +329,7 @@ function CommunityCard({ community, diagnostics, activeIncentive, builders }: { 
         <div className="space-y-1 border border-border bg-secondary/40 p-3" data-deals-auto-accepted="true">
           <p className="flex items-start gap-2 text-sm font-medium"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-gold" /> {diagnostics.incentive.status}</p>
           <p className="break-words text-sm">{diagnostics.incentive.publicText}</p>
-          <p className="text-xs text-muted-foreground">It shows with no dates and comes off by the lapse rule once the builder stops showing it. To add a date, open Incentive and save it.</p>
+          <p className="text-xs text-muted-foreground">{diagnostics.incentive.expiresAt ? `It comes off by its dated deadline (${displayDate(diagnostics.incentive.expiresAt)}).` : "It shows with no dates and comes off by the lapse rule once the builder stops showing it."} To add a date, open Incentive and save it.</p>
         </div>
       )}
       {showIncentive && <IncentiveEditor key={activeIncentive?.id ?? "none"} community={community} active={activeIncentive} />}

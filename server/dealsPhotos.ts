@@ -791,6 +791,8 @@ export type DealPhotoRunContext = {
   /** A stored original of the same builder and source, from an earlier run: read instead of downloaded again. */
   donors: Map<string, { storageKey: string; version: string }>;
   reused: DealPhotoReuseCounts;
+  /** Set when the priority query or the sharing lookups failed and the drain fell back to plain due order. */
+  warning?: string;
 };
 
 /** Small bounds: a handful of ~0.5 MB WebP buffers, so a drain's caches stay in the low megabytes. */
@@ -1166,6 +1168,10 @@ export type DealPhotoDrainResult = {
   timedOut?: number;
   /** The queue could not be read (for example the priority query failed); nothing more was started. */
   error?: "queue_read_failed";
+  /** The database's message for `error`, one line. */
+  errorDetail?: string;
+  /** The drain kept going in plain due order after a priority or sharing query failed. */
+  warning?: string;
 };
 
 export type DealPhotoDrainOptions = {
@@ -1198,6 +1204,8 @@ function mergeDrainResults(a: DealPhotoDrainResult, b: DealPhotoDrainResult): De
     elapsedMs: (a.elapsedMs ?? 0) + (b.elapsedMs ?? 0),
     ...(a.timedOut || b.timedOut ? { timedOut: (a.timedOut ?? 0) + (b.timedOut ?? 0) } : {}),
     ...(a.error || b.error ? { error: a.error ?? b.error } : {}),
+    ...(a.errorDetail || b.errorDetail ? { errorDetail: a.errorDetail ?? b.errorDetail } : {}),
+    ...(a.warning || b.warning ? { warning: a.warning ?? b.warning } : {}),
   };
 }
 
@@ -1247,9 +1255,41 @@ export function selectDealPhotoCandidates(db: PhotoDb, now: Date, limit: number,
  * communities' photos, never a scan of the whole table. The donor lookup only
  * runs when a candidate still needs its first download.
  */
+/** Plain due order (oldest due first): the fallback when the priority query fails on the host's database. */
+export function selectDealPhotoCandidatesPlain(db: PhotoDb, now: Date, limit: number, excluded: readonly number[]) {
+  return db.select({ id: dealPhotos.id, sourceUrl: dealPhotos.sourceUrl, sourceHash: dealPhotos.sourceHash, builder: dealCommunities.builder, communityId: dealHomes.communityId, originalVersion: dealPhotos.originalVersion })
+    .from(dealPhotos)
+    .leftJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
+    .leftJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
+    .where(and(dueNow(now), excluded.length ? notInArray(dealPhotos.id, [...excluded]) : undefined))
+    .orderBy(asc(dealPhotos.nextProcessingAttemptAt), asc(dealPhotos.id))
+    .limit(limit);
+}
+
+/** A database error's message for the health view: one line, no values longer than the message itself needs. */
+export function photoQueryErrorDetail(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  // Drizzle prefixes "Failed query: <sql>\nparams: …"; the cause carries the server's own message.
+  const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : "";
+  const text = (cause || raw).replace(/\s+/g, " ").replace(/params:.*$/i, "").trim();
+  return text.slice(0, 300);
+}
+
 async function nextDrainBatch(db: PhotoDb, now: Date, limit: number, exclude: ReadonlySet<number>, ctx: DealPhotoRunContext): Promise<number[]> {
   const excluded = Array.from(exclude);
-  const rows: QueueRow[] = await selectDealPhotoCandidates(db, now, limit, excluded);
+  let rows: QueueRow[];
+  if (ctx.warning) {
+    rows = await selectDealPhotoCandidatesPlain(db, now, limit, excluded);
+  } else {
+    try {
+      rows = await selectDealPhotoCandidates(db, now, limit, excluded);
+    } catch (error) {
+      // Keep photos moving in plain due order; the health check shows the reason.
+      ctx.warning = `priority query failed: ${photoQueryErrorDetail(error)}`;
+      console.error(`[deals-photo] ${ctx.warning}`);
+      rows = await selectDealPhotoCandidatesPlain(db, now, limit, excluded);
+    }
+  }
   const fresh = rows.filter((row) => !exclude.has(row.id));
   const shareable = fresh.filter((row) => row.builder && row.communityId !== null && row.communityId !== undefined && typeof row.sourceUrl === "string" && !isUploadSource(row.sourceUrl) && row.sourceHash);
   const queued = new Set(fresh.map((row) => row.id));
@@ -1275,7 +1315,12 @@ async function nextDrainBatch(db: PhotoDb, now: Date, limit: number, exclude: Re
           .where(and(inArray(dealHomes.communityId, donorCommunityIds), inArray(dealPhotos.sourceHash, donorHashes), isNotNull(dealPhotos.originalStorageKey), isNotNull(dealPhotos.originalVersion)))
           .limit(donorHashes.length * 2)
         : Promise.resolve([] as Array<{ sourceUrl: string; originalStorageKey: string | null; originalVersion: string | null; builder: string }>),
-    ]);
+    ]).catch((error) => {
+      // Sharing is an optimisation: without it each row is processed on its own.
+      ctx.warning ??= `shared-image lookup failed: ${photoQueryErrorDetail(error)}`;
+      console.error(`[deals-photo] shared-image lookup failed: ${photoQueryErrorDetail(error)}`);
+      return [[], []] as [Array<{ id: number; sourceUrl: string; builder: string }>, Array<{ sourceUrl: string; originalStorageKey: string | null; originalVersion: string | null; builder: string }>];
+    });
     for (const donor of donors) {
       if (!donor.builder || !donor.originalStorageKey || !donor.originalVersion || isUploadSource(donor.sourceUrl)) continue;
       const key = dealPhotoSourceKey(donor.builder, donor.sourceUrl);
@@ -1373,7 +1418,8 @@ async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: numbe
       refilling ??= refill().catch((error) => {
         exhausted = true;
         result.error = "queue_read_failed";
-        console.error(`[deals-photo] queue read failed: ${error instanceof Error ? error.message : "unknown"}`);
+        result.errorDetail = photoQueryErrorDetail(error);
+        console.error(`[deals-photo] queue read failed: ${result.errorDetail}`);
       }).finally(() => { refilling = null; });
       await refilling;
     }
@@ -1405,6 +1451,7 @@ async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: numbe
     ctx.ocr.clear();
   }
   result.reused = { ...ctx.reused };
+  if (ctx.warning) result.warning = ctx.warning;
   result.elapsedMs = options.clock() - startedAt;
   return result;
 }
@@ -1466,7 +1513,7 @@ export async function processPendingDealPhotos(input: number | DealPhotoDrainOpt
     drainRerunRequested = false;
     if (budgeted) {
       // One line per cron drain, so the host logs show the real throughput.
-      console.log(`[deals-photo] drain: ${total.processed} published, ${total.hidden} hidden, ${total.retried} retry, ${total.failed} failed, ${total.skipped} skipped, ${total.awaitingRegion} awaiting region in ${Math.round((total.elapsedMs ?? 0) / 1000)} s; reused originals ${total.reused?.originals ?? 0}, masters ${total.reused?.masters ?? 0}, OCR ${total.reused?.ocr ?? 0}${total.timedOut ? `; ${total.timedOut} timed out` : ""}${total.stoppedForTime ? "; budget spent, more due" : ""}${total.error ? `; ERROR ${total.error}` : ""}`);
+      console.log(`[deals-photo] drain: ${total.processed} published, ${total.hidden} hidden, ${total.retried} retry, ${total.failed} failed, ${total.skipped} skipped, ${total.awaitingRegion} awaiting region in ${Math.round((total.elapsedMs ?? 0) / 1000)} s; reused originals ${total.reused?.originals ?? 0}, masters ${total.reused?.masters ?? 0}, OCR ${total.reused?.ocr ?? 0}${total.timedOut ? `; ${total.timedOut} timed out` : ""}${total.stoppedForTime ? "; budget spent, more due" : ""}${total.error ? `; ERROR ${total.error}${total.errorDetail ? ` (${total.errorDetail})` : ""}` : ""}${total.warning ? `; WARNING ${total.warning}` : ""}`);
       // For the health check: a drain that cannot read the queue or moves nothing while photos are due is flagged.
       await recordDealPhotoDrainStatus(total).catch((error) => console.warn(`[deals-photo] drain status not recorded: ${error instanceof Error ? error.message : "unknown"}`));
     }

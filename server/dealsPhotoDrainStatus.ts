@@ -16,12 +16,18 @@ export const PHOTO_DRAIN_STALL_MINUTES = 30;
 export type DealPhotoDrainOutcome = {
   processed: number; hidden: number; awaitingRegion: number; retried: number; failed: number; skipped: number;
   timedOut?: number; error?: string;
+  /** The database's message for `error`. */
+  errorDetail?: string;
+  /** The drain kept going in plain due order after a priority or sharing query failed. */
+  warning?: string;
 };
 export type DealPhotoDrainStatus = {
   lastRunAt: string;
   /** Last drain without an error that moved a photo or found nothing to do. */
   lastHealthyAt: string | null;
   lastError: string | null;
+  /** Set while drains run in plain due order because the priority or sharing query fails. */
+  lastWarning?: string | null;
   last: DealPhotoDrainOutcome;
 };
 
@@ -59,7 +65,8 @@ export async function recordDealPhotoDrainStatus(outcome: DealPhotoDrainOutcome,
   const status: DealPhotoDrainStatus = {
     lastRunAt: now.toISOString(),
     lastHealthyAt: previousHealthy && previousHealthy > lastHealthyAt ? previousHealthy : lastHealthyAt,
-    lastError: outcome.error ?? null,
+    lastError: outcome.error ? `${outcome.error}${outcome.errorDetail ? `: ${outcome.errorDetail}` : ""}` : null,
+    lastWarning: outcome.warning ?? null,
     last: { processed: outcome.processed, hidden: outcome.hidden, awaitingRegion: outcome.awaitingRegion, retried: outcome.retried, failed: outcome.failed, skipped: outcome.skipped, ...(outcome.timedOut ? { timedOut: outcome.timedOut } : {}), ...(outcome.error ? { error: outcome.error } : {}) },
   };
   const value = JSON.stringify(status);
@@ -68,9 +75,9 @@ export async function recordDealPhotoDrainStatus(outcome: DealPhotoDrainOutcome,
 }
 
 /** Health view: minutes since the last healthy drain, when photos are due; null when there is nothing to judge. */
-export function photoDrainStall(status: DealPhotoDrainStatus | null, duePhotos: number, now = new Date()): { stalledMinutes: number | null; stalled: boolean; lastError: string | null } {
-  if (!status) return { stalledMinutes: null, stalled: false, lastError: null };
+export function photoDrainStall(status: DealPhotoDrainStatus | null, duePhotos: number, now = new Date()): { stalledMinutes: number | null; stalled: boolean; lastError: string | null; lastWarning: string | null } {
+  if (!status) return { stalledMinutes: null, stalled: false, lastError: null, lastWarning: null };
   const since = Date.parse(status.lastHealthyAt ?? status.lastRunAt);
   const stalledMinutes = duePhotos > 0 && Number.isFinite(since) ? Math.max(0, Math.floor((now.getTime() - since) / 60_000)) : null;
-  return { stalledMinutes, stalled: stalledMinutes !== null && stalledMinutes > PHOTO_DRAIN_STALL_MINUTES, lastError: status.lastError };
+  return { stalledMinutes, stalled: stalledMinutes !== null && stalledMinutes > PHOTO_DRAIN_STALL_MINUTES, lastError: status.lastError, lastWarning: status.lastWarning ?? null };
 }

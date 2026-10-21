@@ -84,7 +84,7 @@ function simulatedQueue(options: { communities: Community[]; homes: Home[]; phot
   const processedWrites: number[] = [];
   const candidateSelects: FakeOp[] = [];
   const lookupSelects: FakeOp[] = [];
-  let failNextCandidateRead = false;
+  let failNextCandidateRead = 0;
 
   const photoTables = new Set<unknown>([dealPhotos]);
   const selectPhotos = (op: FakeOp) => {
@@ -95,7 +95,7 @@ function simulatedQueue(options: { communities: Community[]; homes: Home[]; phot
       return photo ? [{ photo: { ...photo }, home: homeOf(photo), community: communityOf(photo) }] : [];
     }
     candidateSelects.push(op);
-    if (failNextCandidateRead) { failNextCandidateRead = false; throw new Error("priority query failed"); }
+    if (failNextCandidateRead > 0) { failNextCandidateRead--; throw new Error("priority query failed", { cause: new Error("Unknown column 'served.home_id' in 'where clause'") }); }
     const excluded = new Set(cols.get("id not in") ?? []);
     return Array.from(rows.values())
       .filter((photo) => due(photo) && !excluded.has(photo.id))
@@ -178,7 +178,7 @@ function simulatedQueue(options: { communities: Community[]; homes: Home[]; phot
     return [{ affectedRows: 0 }];
   });
   vi.mocked(getDb).mockResolvedValue(fake.db as never);
-  return { fake, rows, processedWrites, candidateSelects, lookupSelects, attachSchema, failNextCandidateRead: () => { failNextCandidateRead = true; } };
+  return { fake, rows, processedWrites, candidateSelects, lookupSelects, attachSchema, failNextCandidateRead: (times = 1) => { failNextCandidateRead = times; } };
 }
 
 const community = (id: number, builder: string, privateName = `Community ${id}`): Community => ({ id, builder, privateName, scrubList: JSON.stringify([builder, privateName]), active: true, paused: false });
@@ -609,11 +609,30 @@ describe("claims, leases and overlapping drains", () => {
       settings: { "Perry Homes": off("Perry Homes") },
     });
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    sim.failNextCandidateRead();
+    // Both the priority read and the plain fallback fail: nothing can be read.
+    sim.failNextCandidateRead(2);
     const result = await photos.processPendingDealPhotos({ budgetMs: 60_000 });
-    expect(result).toMatchObject({ processed: 0, error: "queue_read_failed" });
+    expect(result).toMatchObject({ processed: 0, error: "queue_read_failed", errorDetail: "Unknown column 'served.home_id' in 'where clause'" });
     const statusWrite = sim.fake.opsFor("insert", dealSettings).map((op) => op.values as { key: string; value: string }).find((values) => values.key === "photos.drain.status");
-    expect(JSON.parse(statusWrite?.value ?? "{}")).toMatchObject({ lastError: "queue_read_failed", last: { error: "queue_read_failed" } });
+    expect(JSON.parse(statusWrite?.value ?? "{}")).toMatchObject({ lastError: "queue_read_failed: Unknown column 'served.home_id' in 'where clause'", last: { error: "queue_read_failed" } });
+  });
+
+  it("keeps photos moving in plain due order when only the priority query fails, and reports why", async () => {
+    const sim = simulatedQueue({
+      communities: [community(1, "Perry Homes")],
+      homes: [home(1, 1)],
+      photos: [{ id: 1, homeId: 1, sourceUrl: "https://res.cloudinary.com/perryhomes/p/1.jpg" }],
+      settings: { "Perry Homes": off("Perry Homes") },
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn(async () => imageResponse(jpeg)));
+    sim.failNextCandidateRead(1);
+    const result = await photos.processPendingDealPhotos({ budgetMs: 60_000 });
+    expect(result.error).toBeUndefined();
+    expect(result.processed).toBe(1);
+    expect(result.warning).toBe("priority query failed: Unknown column 'served.home_id' in 'where clause'");
+    const statusWrite = sim.fake.opsFor("insert", dealSettings).map((op) => op.values as { key: string; value: string }).find((values) => values.key === "photos.drain.status");
+    expect(JSON.parse(statusWrite?.value ?? "{}")).toMatchObject({ lastError: null, lastWarning: "priority query failed: Unknown column 'served.home_id' in 'where clause'" });
   });
 
   it("drops a result whose lease was lost mid-flight instead of overwriting the row", async () => {

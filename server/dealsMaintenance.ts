@@ -488,7 +488,7 @@ type OperationalSnapshot = {
   funnel: { landed: number; consented: number; verificationSends: number; verified: number; listingViews: number; requests: number; newLeads: number };
   trecImport: { completedAt: Date | null; ageHours: number | null; state: HealthState };
   sourceUpdates: { activeCommunities: number; staleCommunities: number; heldCommunities: number; oldestAgeHours: number | null; lastSuccessfulSyncAt: Date | null; state: HealthState };
-  photos: { pending: number; processing: number; failed: number; awaitingRegion: number; oldestPendingAgeHours: number | null; oldestPendingMinutes: number | null; drainStalledMinutes: number | null; drainError: string | null; state: HealthState };
+  photos: { pending: number; processing: number; failed: number; awaitingRegion: number; oldestPendingAgeHours: number | null; oldestPendingMinutes: number | null; drainStalledMinutes: number | null; drainError: string | null; drainWarning?: string | null; state: HealthState };
   fubFailures: { jobs: number; leads: number; failingOverAnHour: number; state: HealthState };
   emailFailures: { failed: number; state: HealthState };
   jobFailures: { failed: number; jobs: string[]; state: HealthState };
@@ -613,7 +613,7 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
       trecImport: { completedAt: latestImport[0]?.completedAt ?? null, ageHours: importAgeHours, state: healthState(importAgeHours !== null && importAgeHours <= thresholds.trecImportHours) },
       // A held run does not count as on schedule; a dismissed hold is not a hold and does.
       sourceUpdates: { activeCommunities: managed.length, staleCommunities, heldCommunities, oldestAgeHours: finiteCommunityAges.length ? Math.max(...finiteCommunityAges) : null, lastSuccessfulSyncAt: lastSyncTimes.length ? new Date(Math.max(...lastSyncTimes)) : null, state: healthState(staleCommunities === 0 && heldCommunities === 0) },
-      photos: { pending, processing, failed, awaitingRegion, oldestPendingAgeHours, oldestPendingMinutes, drainStalledMinutes: drain.stalled ? drain.stalledMinutes : null, drainError: drain.lastError, state: healthState(failed === 0 && awaitingRegion === 0 && !drain.stalled && !drain.lastError && (oldestPendingMinutes === null || oldestPendingMinutes <= thresholds.pendingPhotoMinutes)) },
+      photos: { pending, processing, failed, awaitingRegion, oldestPendingAgeHours, oldestPendingMinutes, drainStalledMinutes: drain.stalled ? drain.stalledMinutes : null, drainError: drain.lastError, drainWarning: drain.lastWarning, state: healthState(failed === 0 && awaitingRegion === 0 && !drain.stalled && !drain.lastError && (oldestPendingMinutes === null || oldestPendingMinutes <= thresholds.pendingPhotoMinutes)) },
       fubFailures: { jobs: number(failedJobRows[0]?.count), leads: number(failedLeadRows[0]?.count), failingOverAnHour, state: healthState(failingOverAnHour === 0) },
       emailFailures: { failed: failedEmails, state: healthState(failedEmails === 0) },
       jobFailures: { failed: failedRunRows.length, jobs: failedRunNames, state: healthState(failedRunRows.length === 0) },
@@ -671,6 +671,7 @@ export async function builderDealsHealthCheck(now = new Date(), options: HealthC
     const drainError = operational.photos.drainError ? operational.photos.drainError.replaceAll("_", " ") : null;
     if (operational.photos.drainStalledMinutes !== null) attention.push(`Photo processing is stuck: no photo moved in ${operational.photos.drainStalledMinutes} minutes while ${operational.photos.pending - operational.photos.awaitingRegion} are queued${drainError ? ` (last run: ${drainError})` : ""}.`);
     else if (drainError) attention.push(`The last photo processing run failed: ${drainError}.`);
+    if (operational.photos.drainWarning) attention.push(`Photo processing is running in plain order (oldest first): ${operational.photos.drainWarning}.`);
     if (operational.photos.state === "attention") attention.push(`Photo queue: ${operational.photos.failed} failed, ${operational.photos.awaitingRegion} awaiting a builder watermark region (Set watermark region in Admin, Builder Deals, Photos), oldest pending ${operational.photos.oldestPendingMinutes ?? 0} minutes (limit ${thresholds.pendingPhotoMinutes}).`);
     if (operational.fubFailures.state === "attention") attention.push(`${operational.fubFailures.failingOverAnHour} FUB write${operational.fubFailures.failingOverAnHour === 1 ? " has" : "s have"} been failing for over ${thresholds.fubFailureMinutes} minutes.`);
     if (operational.emailFailures.state === "attention") attention.push(`${operational.emailFailures.failed} alert email${operational.emailFailures.failed === 1 ? "" : "s"} failed to send in the last ${thresholds.emailFailureHours} hours.`);

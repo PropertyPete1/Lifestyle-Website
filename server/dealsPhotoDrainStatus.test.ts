@@ -31,7 +31,7 @@ describe("photo drain status for the health check", () => {
     await recordDealPhotoDrainStatus({ ...zero, error: "queue_read_failed" }, new Date(T));
     let status = await readDealPhotoDrainStatus();
     expect(status).toMatchObject({ lastError: "queue_read_failed", lastHealthyAt: new Date(T).toISOString() });
-    expect(photoDrainStall(status, 500, new Date(T + 10 * 60_000))).toEqual({ stalled: false, stalledMinutes: 10, lastError: "queue_read_failed" });
+    expect(photoDrainStall(status, 500, new Date(T + 10 * 60_000))).toEqual({ stalled: false, stalledMinutes: 10, lastError: "queue_read_failed", lastWarning: null });
 
     // Still failing 40 minutes later: stalled.
     await recordDealPhotoDrainStatus({ ...zero, error: "queue_read_failed" }, new Date(T + 40 * 60_000));
@@ -46,6 +46,6 @@ describe("photo drain status for the health check", () => {
     expect(status).toMatchObject({ lastError: null, lastHealthyAt: new Date(T + 45 * 60_000).toISOString() });
     expect(photoDrainStall(status, 500, new Date(T + 50 * 60_000))).toMatchObject({ stalled: false, lastError: null });
     expect(db.rows(dealSettings).filter((row) => row.key === PHOTO_DRAIN_STATUS_KEY)).toHaveLength(1);
-    expect(photoDrainStall(null, 500)).toEqual({ stalled: false, stalledMinutes: null, lastError: null });
+    expect(photoDrainStall(null, 500)).toEqual({ stalled: false, stalledMinutes: null, lastError: null, lastWarning: null });
   });
 });

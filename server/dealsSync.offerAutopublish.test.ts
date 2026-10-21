@@ -303,7 +303,7 @@ describe("a held offer for any other reason", () => {
     expect(await featuredDeals({ view: "gated" })).toEqual(none.gated);
     expect(await featuredDeals({ view: "full", builderPages: true })).toEqual(none.full);
     // A published offer's rate does count (the comparison is not vacuous).
-    db.seed(dealIncentives, { communityId: id, normalizedText: "live", publicText: "x", headlineRate: "2.99%", loanType: "FHA", downPayment: "3.5%", confirmedAt: new Date(), active: true, held: false, manual: false });
+    db.seed(dealIncentives, { communityId: id, normalizedText: "live", publicText: "x", headlineRate: "2.99%", apr: "3.4%", loanType: "FHA", downPayment: "3.5%", confirmedAt: new Date(), active: true, held: false, manual: false });
     expect((await featuredDeals("public")).bestRate).not.toBeNull();
   });
 });

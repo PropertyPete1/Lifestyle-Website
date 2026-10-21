@@ -169,7 +169,7 @@ describe("Best Deals from the database, by viewer", () => {
     const sienna = community({});
     const sourceKey = "sienna-118";
     home(sienna, { sourceKey, price: 499_990 });
-    db.seed(dealIncentives, { communityId: sienna, normalizedText: "x", publicText: "x", headlineRate: "4.999%", loanType: "FHA", downPayment: "3.5%", confirmedAt: new Date(), active: true, held: false, manual: false });
+    db.seed(dealIncentives, { communityId: sienna, normalizedText: "x", publicText: "x", headlineRate: "4.999%", apr: "5.737%", loanType: "FHA", downPayment: "3.5%", confirmedAt: new Date(), active: true, held: false, manual: false });
     const vista = community({ builder: "M/I Homes", privateName: "Vista Gardens", publicLabel: "Southeast San Antonio | New Phase Now Selling", scrubList: JSON.stringify({ community: ["Vista Gardens"] }) });
     home(vista, { price: 354_990, privateAddress: "9 Vista Way" });
     const lennar = community({ builder: "Lennar", privateName: "Cheap Acres", publicLabel: "West San Antonio | Starter Homes", scrubList: "{}" });
@@ -207,7 +207,7 @@ describe("Best Deals from the database, by viewer", () => {
   it("never shows a lender's name from a typed loan type, and never a lot bigger than the home's own", async () => {
     const pulte = community({ privateName: "Pulte Place", publicLabel: "North San Antonio | Homesites from 0.15 to 0.5 acres", scrubList: JSON.stringify({ lender: ["Pulte Mortgage"], builder: ["Pulte"] }) });
     home(pulte, { price: 350_000, lotSize: "0.15 acres" });
-    db.seed(dealIncentives, { communityId: pulte, normalizedText: "x", publicText: "x", headlineRate: "4.99%", loanType: "Conventional with Pulte Mortgage", downPayment: "5%", confirmedAt: new Date(), active: true, held: false, manual: false });
+    db.seed(dealIncentives, { communityId: pulte, normalizedText: "x", publicText: "x", headlineRate: "4.99%", apr: "5.62%", loanType: "Conventional with Pulte Mortgage", downPayment: "5%", confirmedAt: new Date(), active: true, held: false, manual: false });
     for (const view of ["public", { view: "gated" as const }] as const) {
       const featured = await featuredDeals(view);
       expect(JSON.stringify(featured)).not.toMatch(/Pulte/i);
@@ -244,7 +244,7 @@ describe("Best Deals from the database, by viewer", () => {
     home(market, { price: 412_500 });
     const rated = community({ publicLabel: "North San Antonio | Lakes", areaLabel: "North San Antonio", sourceUrl: "https://www.chesmar.com/north/" });
     home(rated, { price: 374_990 });
-    db.seed(dealIncentives, { communityId: rated, normalizedText: "r", publicText: "Rates as low as 5.5% FHA with 3.5% down", confirmedAt: new Date(), active: true, held: false, manual: false, headlineRate: "5.5%" });
+    db.seed(dealIncentives, { communityId: rated, normalizedText: "r", publicText: "Rates as low as 5.5% FHA with 3.5% down", confirmedAt: new Date(), active: true, held: false, manual: false, headlineRate: "5.5%", apr: "6.1%" });
     const pub = await featuredDeals("public");
     const priceFromMonthly = (estMonthly: number, ratePercent: number, downPercent: number) => {
       const r = ratePercent / 100 / 12;
@@ -266,7 +266,7 @@ describe("Best Deals from the database, by viewer", () => {
     home(a, { price: 341_990 });
     const b = community({ publicLabel: "Northwest San Antonio | From the $300s", areaLabel: "Northwest San Antonio", sourceUrl: "https://www.chesmar.com/b/" });
     home(b, { price: 348_500 });
-    db.seed(dealIncentives, { communityId: b, normalizedText: "r", publicText: "Rates as low as 7.25% FHA with 3.5% down", confirmedAt: new Date(), active: true, held: false, manual: false, headlineRate: "7.25%" });
+    db.seed(dealIncentives, { communityId: b, normalizedText: "r", publicText: "Rates as low as 7.25% FHA with 3.5% down", confirmedAt: new Date(), active: true, held: false, manual: false, headlineRate: "7.25%", apr: "7.9%" });
     const c = community({ publicLabel: "North San Antonio | Lakes", areaLabel: "North San Antonio", sourceUrl: "https://www.chesmar.com/c/" });
     home(c, { price: 360_000 });
     const pub = await featuredDeals("public");

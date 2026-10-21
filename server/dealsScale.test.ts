@@ -83,6 +83,7 @@ describe("catalog reads at the scale of every community", () => {
     // What the M/I reader stores: a headline with a closing date, the body, and fine print with both deadlines.
     offer.publicText = "Fall Into Savings: first-year rates as low as 4.99% (6.2% APR) on selected quick move-in homes closing by 11/30, plus up to $10,000 paid closing costs. Selected Quick Move-In homes in this community receive a 1/0 buydown on a 30-year fixed FHA loan. Valid on full priced contracts written between 10/12/2026 and 11/8/2026. Buyer must close by 11/30/2026.";
     offer.headlineRate = "4.99%";
+    offer.apr = "6.2%";
     offer.contractBy = new Date("2026-11-08T06:00:00Z");
     offer.closeBy = new Date("2026-12-20T06:00:00Z");
     const pub = await publicDealsCatalog();

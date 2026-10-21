@@ -257,3 +257,41 @@ describe("Reg Z on the buyer strip: a builder rate is printed with its APR", () 
     }
   });
 });
+
+describe("Reg Z on every buyer surface: no rate without its stored APR", () => {
+  const NO_APR_TEXT = "Rates as low as 4.99% on a 30-year fixed FHA loan with 3.5% down payment. Plus up to $10,000 toward closing costs on select homes.";
+  it("the public, gated and team lists keep only the offer's non-rate wording, with no rate or financing-term fields", async () => {
+    const id = seedCommunity();
+    const lead = seedLead();
+    db.seed(dealIncentives, { communityId: id, normalizedText: "legacy", publicText: NO_APR_TEXT, headlineRate: "4.99%", loanType: "FHA", downPayment: "3.5% down payment", repaymentTerms: "30-year fixed", confirmedAt: new Date(), active: true, held: false, manual: false });
+    for (const incentive of [await landing(), await gated(lead), await team(lead)]) {
+      expect(incentive).toMatchObject({ headlineRate: null, followOnRate: null, apr: null, downPayment: null, repaymentTerms: null });
+      expect(incentive!.text).toBe("Plus up to $10,000 toward closing costs on select homes.");
+      expect(JSON.stringify(incentive)).not.toMatch(/4\.99|3\.5%|30-year/);
+    }
+  });
+
+  it("an offer that is nothing but a rate without an APR shows no incentive at all; one with its APR shows in full", async () => {
+    const id = seedCommunity();
+    const lead = seedLead();
+    const row = db.seed(dealIncentives, { communityId: id, normalizedText: "legacy", publicText: "Rates as low as 4.99% on select homes.", headlineRate: "4.99%", confirmedAt: new Date(), active: true, held: false, manual: false });
+    expect(await gated(lead)).toBeNull();
+    expect(await landing()).toBeNull();
+    (incentiveRows().find((candidate) => candidate.id === row) as { apr: string | null }).apr = "5.62%";
+    expect(await gated(lead)).toMatchObject({ text: "Rates as low as 4.99% on select homes.", headlineRate: "4.99%", apr: "5.62%" });
+  });
+
+  it("the featured strip never uses or prints a builder rate with no APR: those homes rank and print at the market rate", async () => {
+    const id = seedCommunity();
+    db.seed(dealHomes, { communityId: id, sourceKey: "home-a", sourceUrl: `${COMMUNITY_URL}/a`, privateAddress: "1 Fixture Patch", kind: "quick_move_in", status: "available", origin: "official", price: 400_000 });
+    const none = await featuredDeals("public");
+    db.seed(dealIncentives, { communityId: id, normalizedText: "legacy", publicText: NO_APR_TEXT, headlineRate: "4.99%", loanType: "FHA", downPayment: "3.5%", confirmedAt: new Date(), active: true, held: false, manual: false });
+    const featured = await featuredDeals("public");
+    expect(featured).toEqual(none);
+    expect(featured.bestRate).toBeNull();
+    const { rateLine } = await import("../client/src/components/deals/FeaturedDeals");
+    expect(rateLine(featured.lowestPayment[0]!)).toBe("at the 7.4% market rate, 5% down");
+    // A deal that says it has no APR prints no figure.
+    expect(rateLine({ ...featured.lowestPayment[0]!, rate: { ratePercent: 4.99, firstYearRatePercent: null, loanType: "FHA", builderOffer: true, aprPercent: null }, downPercent: 3.5 })).toBe("with the builder's financing, 3.5% down");
+  });
+});

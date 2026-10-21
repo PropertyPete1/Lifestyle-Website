@@ -108,6 +108,8 @@ export const RATE_CLASS = "text-lg font-medium text-gold";
  */
 export function incentiveRateLines(incentive: Pick<DealsIncentive, "headlineRate" | "followOnRate" | "followOnPeriod" | "apr">): string[] {
   if (!incentive.headlineRate && !incentive.apr) return [];
+  // Reg Z: a rate is printed only beside its APR (the server leaves such a rate out; this keeps the card safe on its own).
+  if (!incentive.apr) return [];
   const lines: string[] = [];
   if (incentive.headlineRate) lines.push(`${incentive.followOnPeriod ? "First year" : "Rate"}: ${incentive.headlineRate}`);
   if (incentive.followOnRate) lines.push(`${incentive.followOnPeriod ? `${incentive.followOnPeriod}: ` : ""}${incentive.followOnRate}`);

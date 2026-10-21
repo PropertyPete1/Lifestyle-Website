@@ -41,6 +41,7 @@ import { loanTypeLabel, priceBandFloor, priceBandLabel } from "../shared/dealsFe
 import { incentiveTeaser } from "../shared/dealsTeaser";
 import { heldIncentivePublicEntry, heldIncentiveShowsLine } from "../shared/dealsHeldIncentive";
 import { checkTwilioVerify } from "./dealsVerification";
+import { mentionsRate } from "./dealsAdapters";
 
 export type DealSettings = {
   allowCanada: boolean;
@@ -641,7 +642,8 @@ export async function publicDealsCatalog(src?: string | null) {
       homesAvailable: availableCount.get(community.id) ?? 0,
       // The landing card shows the teaser and figures; the full wording and the deadlines wait for sign-up.
       // A held offer shows the neutral line only, never a figure or name from its text.
-      incentive: incentive ? (({ text: _text, contractBy: _contractBy, closeBy: _closeBy, ...teaser }) => ({ ...teaser, text: teaser.teaser, contractBy: null, closeBy: null }))(publicIncentive(incentive, (value) => scrubPrivateNames(value, communityScrubConfig(community)))) : heldLine.has(community.id) ? heldIncentivePublicEntry() : null,
+      // A rate never shows without its APR (rateDisclosedIncentive).
+      incentive: incentive ? (() => { const shown = rateDisclosedIncentive(incentive); return shown ? (({ text: _text, contractBy: _contractBy, closeBy: _closeBy, ...teaser }) => ({ ...teaser, text: teaser.teaser, contractBy: null, closeBy: null }))(publicIncentive(shown, (value) => scrubPrivateNames(value, communityScrubConfig(community)))) : null; })() : heldLine.has(community.id) ? heldIncentivePublicEntry() : null,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       // A wide circle around the ZIP code centroid: "this side of town", never the community.
       areaMap: communityAreaMap(community, { variant: "public", radiusMiles: publicRadius }),
@@ -650,6 +652,21 @@ export async function publicDealsCatalog(src?: string | null) {
     result.push(entry);
   }
   return result;
+}
+
+/**
+ * Reg Z on every buyer surface: a rate is printed only beside its APR. A live record with a rate (a typed rate, or a
+ * rate in its wording) but no stored APR shows its non-rate wording only: the sentences that name a rate, the rate
+ * fields and the financing terms that go with them (down payment, repayment terms) are left out. Nothing left means no
+ * incentive at all. A record with an APR is returned as it is.
+ */
+export function rateDisclosedIncentive<T extends Pick<typeof dealIncentives.$inferSelect, "publicText" | "headlineRate" | "followOnRate" | "followOnPeriod" | "apr" | "downPayment" | "repaymentTerms">>(row: T): T | null {
+  if (normalizeRateFigure(row.apr)) return row;
+  const typedRate = Boolean(normalizeRateFigure(row.headlineRate) || normalizeRateFigure(row.followOnRate));
+  if (!typedRate && !mentionsRate(row.publicText)) return row;
+  const kept = row.publicText.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+(?=["“(]?[A-Z0-9$])/).filter((sentence) => sentence.trim() && !mentionsRate(sentence)).join(" ").trim();
+  if (!/[A-Za-z]/.test(kept)) return null;
+  return { ...row, publicText: kept, headlineRate: null, followOnRate: null, followOnPeriod: null, downPayment: null, repaymentTerms: null };
 }
 
 /**
@@ -773,7 +790,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
       reelUrl: community.reelUrl,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       // A held offer shows the neutral line only (the team reads the held text in Admin).
-      incentive: incentive ? publicIncentive(incentive, scrub, full) : heldLine.has(community.id) ? heldIncentivePublicEntry() : null,
+      incentive: incentive ? (() => { const shown = rateDisclosedIncentive(incentive); return shown ? publicIncentive(shown, scrub, full) : null; })() : heldLine.has(community.id) ? heldIncentivePublicEntry() : null,
       homes,
       ...(full ? { details: { builderName: community.builder === "Manual" ? null : community.builder, communityName: community.privateName, address: community.privateAddress || null, salesLine: view.builderPages ? community.salesPhone : null, builderPage: view.builderPages && /^https?:\/\//i.test(community.sourceUrl) ? community.sourceUrl : null } } : {}),
     };

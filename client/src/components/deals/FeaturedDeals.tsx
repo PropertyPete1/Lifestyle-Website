@@ -21,7 +21,8 @@ export function rateLine(deal: Pick<FeaturedDeal, "rate" | "downPercent">): stri
   const down = `${Number(deal.downPercent.toFixed(2))}% down`;
   if (!deal.rate.builderOffer) return `at the ${formatRate(deal.rate.ratePercent)} market rate, ${down}`;
   const firstYear = deal.rate.firstYearRatePercent !== null ? `${formatRate(deal.rate.firstYearRatePercent)} first year, then ` : "";
-  // A builder rate is printed with its APR (Reg Z) whenever the offer carries one.
+  // A builder rate is printed only with its APR (Reg Z); one known to have none prints no figure.
+  if (deal.rate.aprPercent === null) return `with the builder's financing, ${down}`;
   const apr = typeof deal.rate.aprPercent === "number" ? ` (${formatRate(deal.rate.aprPercent)} APR)` : "";
   return `at ${firstYear}${formatRate(deal.rate.ratePercent)}${apr}${deal.rate.loanType ? ` ${deal.rate.loanType}` : ""}, ${down}`;
 }

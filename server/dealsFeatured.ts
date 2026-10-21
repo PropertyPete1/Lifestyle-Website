@@ -82,8 +82,10 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
     const live = incentives.filter((row) => row.communityId === community.id && incentiveIsLive(row, now, settings.incentiveLapseDays))
       .sort((a, b) => b.confirmedAt.getTime() - a.confirmedAt.getTime())[0];
     const baseOffer = offerFromIncentive(live);
-    // The APR goes with the rate wherever the rate is printed (Reg Z).
-    const offer = baseOffer ? { ...baseOffer, aprPercent: mortgageRateFrom(live?.apr) } : null;
+    // The APR goes with the rate wherever the rate is printed (Reg Z): an offer with no APR is not a builder rate here,
+    // so its homes are figured (and printed) at the market rate.
+    const aprPercent = mortgageRateFrom(live?.apr);
+    const offer = baseOffer && aprPercent !== null ? { ...baseOffer, aprPercent } : null;
     // The smallest lot the community promises; a home's own lot size wins when it has one.
     const communityAcres = lotAcres(community.lotSizes, { field: true }) ?? lotAcres(community.publicLabel);
     const excluded = communityExcludedFromFeatured(community, config, excludedBuilders);

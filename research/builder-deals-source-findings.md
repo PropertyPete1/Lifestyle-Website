@@ -1090,3 +1090,28 @@ captured that day with the production User-Agent (fixtures in `server/fixtures/d
 - Legend Homes: a 401/403 from any official read is now its own catalog hold, `source_access_refused`, whose
   admin help and hold e-mail say the builder refuses automated reads and to switch the community to Manual. The
   reader never retries with another identity.
+
+### Live reader fixes, second pass (Oct 20, with the follow-up captures)
+
+- Highland Veramendi: the 70ft section page uses the older `a.homeSpec` cards with "6 quick move-in homes". It
+  first read only 3 cards, and the wrong figures for them: the card markup has `data-price=857646"` (a stray
+  quote), and the shared HTML tokenizer opened a string at that quote, swallowing the card's street and specs
+  so the next card's were read as its own (5 beds and 4,098 sq ft at $857,646). The tokenizer now opens a quoted
+  value only right after "=", as browsers do; every other reader's output on the captures is unchanged. Veramendi
+  reads all 6, each matching the community page's preview of the same lot. The live section page replaces the
+  synthetic one in the tests.
+- David Weekley: the three series pages (Briggs Ranch 45 and 60, Confluence Select Reserve) still carry the same
+  `window.pageData`; Briggs Ranch reads 7 + 4 = 11 homes and 18 plans, Confluence 8 homes and 7 plans. The market
+  list and promotion list were not captured (synthetic in the tests).
+- Perry (5): the real hold is `expected_detail_container_not_found`. The sitemap keeps listing sold homes; their
+  pages are a stub ("Thank you for your interest, but this home just sold.") with no home object, so one sold
+  home held the whole community. A home page whose payload has no home object and whose notice is exactly that
+  sentence is now a sold home (left out; the sync marks it sold). Any other page without its object still holds.
+  Only one home page and one plan page were captured, so the other ~140 detail pages of the five communities are
+  unverified until a live run.
+- Hakes Park Place: the same coming-soon shape as Mesa Vista; reads as coming soon (nothing for sale).
+- Drees: the areas list parses (San Antonio `pageId` 310095). The holding step is past it and needs the POST
+  answers (`/community` with `{"contentId":310095,"pageSize":1000,"pageNumber":1}`, `/qmi` and `/plan` with
+  `{"contentId":326325,"pageSize":1000,"pageNumber":1}`).
+- Highland discovery is left as is: new Highland pages have no office line or map pin, so discovery finds no
+  record for them (existing configured communities are unaffected).

@@ -3,13 +3,13 @@ import { gunzipSync } from "node:zlib";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_DOCUMENT_BYTES, getDocument, loadOfficialDeals, type CommunitySourceConfig, type HtmlFetcher } from "./dealsAdapters";
 import { parseCenturyCards } from "./dealsAdapters.century";
-import { parseDreesPage, resetDreesCaches } from "./dealsAdapters.drees";
+import { parseDreesAreaId, parseDreesPage, resetDreesCaches } from "./dealsAdapters.drees";
 import { hakesComingSoon } from "./dealsAdapters.hakes";
 import { parseHighlandSections } from "./dealsAdapters.highland";
 import { legendApiUrl } from "./dealsAdapters.legend";
-import { resetPerrySitemapCache } from "./dealsAdapters.perry";
+import { parsePerryDetail, perryHomeSold, resetPerrySitemapCache } from "./dealsAdapters.perry";
 import { parseWeekleyNeighborhood, resetWeekleyCaches, weekleyListingUrl, weekleyPromotionsUrl } from "./dealsAdapters.weekley";
-import { parseHtmlElements } from "./dealsAdapters";
+import { descendants, elementClass, elementText, parseHtmlElements } from "./dealsAdapters";
 
 /**
  * Regression tests on the community pages the official sites served on
@@ -69,32 +69,50 @@ describe("Highland Homes: the sectioned community page (October 20, 2026)", () =
     const sections = parseHighlandSections(page, VERAMENDI, NOW)!;
     expect(sections.map((section) => [section.url, section.quickMoveIn, section.homes.length])).toEqual([[SECTION, 6, 3], [`${VERAMENDI}/12-acre-lots/section`, 0, 0]]);
     const veramendi: CommunitySourceConfig = { builder: "Highland Homes", sourceUrl: VERAMENDI, privateCommunityName: "Veramendi", scrubList: ["Veramendi", "Haecker View", "New Braunfels"] };
-    // The live preview cards, three more cloned under other lots: the section page in the card markup the community page uses.
-    const cards = Array.from(page.matchAll(/<a\s+class="home-card[\s\S]*?<\/a>/g), (match) => match[0]);
-    expect(cards).toHaveLength(3);
-    const more = cards.map((card, index) => card.replace(/788-0\d\d/g, `788-1${index}0`).replace(/\d{4} Haecker View/, `19${index}0 Haecker View`));
-    const sectionPage = (list: string[]) => `<!DOCTYPE html><html><body><h1><strong>Veramendi</strong></h1><p class="secondLine">New Braunfels, TX 78132</p><div class="card-grid">${list.join("\n")}</div></body></html>`;
+    const sectionPage = live("highland-veramendi-70ft");
 
-    // Section page not captured on October 20: a missing page holds the run.
+    // Without the section page the run is held.
     const missing = siteFetcher({ [VERAMENDI]: page });
     const held = await loadOfficialDeals(veramendi, { fetcher: missing.fetcher, now: () => NOW });
     expect(held.holdReasons).toEqual(["detail_fetch_failed"]);
     expect(held.public.homes).toEqual([]);
     expect(missing.requested).toEqual([VERAMENDI, SECTION]);
 
-    const whole = siteFetcher({ [VERAMENDI]: page, [SECTION]: sectionPage([...cards, ...more]) });
+    // The live section page (the older a.homeSpec cards, "6 quick move-in homes"): all six, each with its own figures.
+    const whole = siteFetcher({ [VERAMENDI]: page, [SECTION]: sectionPage });
     const read = await loadOfficialDeals(veramendi, { fetcher: whole.fetcher, now: () => NOW });
     expect(read.holdReasons).toEqual([]);
-    expect(read.private.homes).toHaveLength(6);
-    expect(read.private.homes.map((home) => [home.price, home.bedrooms, home.bathrooms, home.squareFeet, home.moveInDate])).toContainEqual([925_139, 5, 5.5, 4_098, "December 2026"]);
-    expect(read.private.homes.every((home) => home.status === "Quick Move-In (December 2026)" && /, New Braunfels, TX 78132$/.test(home.privateAddress ?? ""))).toBe(true);
+    expect(whole.requested).toEqual([VERAMENDI, SECTION]);
+    expect(read.private.homes.map((home) => [home.sourceUrl.slice(VERAMENDI.length), home.privateAddress, home.price, home.bedrooms, home.bathrooms, home.squareFeet, home.garage, home.moveInDate])).toEqual([
+      ["/788-085", "1820 Haecker View, New Braunfels, TX 78132", 857_646, 4, 4.5, 3_610, 3, "December 2026"],
+      ["/788-079", "1815 Haecker View, New Braunfels, TX 78132", 925_139, 5, 5.5, 4_098, 4, "December 2026"],
+      ["/788-077", "1823 Haecker View, New Braunfels, TX 78132", 825_419, 4, 3.5, 3_042, 2, "December 2026"],
+      ["/788-063", "805 Dagger Street, New Braunfels, TX 78132", 730_357, 4, 3.5, 2_870, 3, "January 2027"],
+      ["/788-078", "1819 Haecker View, New Braunfels, TX 78132", 762_914, 4, 4.5, 3_050, 3, "January 2027"],
+      ["/788-083", "1828 Haecker View, New Braunfels, TX 78132", 814_242, 4, 4.5, 3_048, 3, "January 2027"],
+    ]);
+    // The section page's card agrees with the community page's preview of the same lot.
+    expect(read.private.homes.find((home) => home.sourceUrl.endsWith("/788-079"))).toMatchObject({ privateName: "1815 Haecker View", price: 925_139 });
+    for (const secret of ["Veramendi", "Haecker", "Dagger", "New Braunfels", "78132", "Highland"]) expect(publicJson(read)).not.toContain(secret);
 
     // Five of six: never a sale of the sixth, the run is held.
-    const short = siteFetcher({ [VERAMENDI]: page, [SECTION]: sectionPage([...cards, ...more.slice(0, 2)]) });
+    const short = siteFetcher({ [VERAMENDI]: page, [SECTION]: sectionPage.replace(/<a\s+href="\/san-antonio\/new-braunfels\/veramendi\/788-083"[\s\S]*?<\/a>/, "") });
     expect((await loadOfficialDeals(veramendi, { fetcher: short.fetcher, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
     // A section page in a layout the reader does not know (no cards): held.
     const reshaped = siteFetcher({ [VERAMENDI]: page, [SECTION]: "<html><body><div class=\"homes-app\"></div></body></html>" });
     expect((await loadOfficialDeals(veramendi, { fetcher: reshaped.fetcher, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+  });
+
+  it("never hands a card its neighbour's figures when a price attribute has a stray quote (data-price=857646\")", () => {
+    // Browsers read `data-price=857646"` as an unquoted value; a tokenizer that opened a string at that quote swallowed
+    // the card's own street and specs, and the next card's were read as its own (5 beds and 4,098 sq ft at $857,646).
+    const sectionPage = live("highland-veramendi-70ft");
+    expect(sectionPage).toContain('data-price=857646"');
+    const root = parseHtmlElements(sectionPage)!;
+    const cards = descendants(root).filter((element) => element.tag === "a" && elementClass(element, "homeSpec"));
+    expect(cards.map((card) => card.attributes.href)).toHaveLength(6);
+    expect(cards.map((card) => descendants(card).filter((element) => elementClass(element, "homeIdentifier")).map((element) => elementText(element, sectionPage)))).toEqual([["1820 Haecker View"], ["1815 Haecker View"], ["1823 Haecker View"], ["805 Dagger Street"], ["1819 Haecker View"], ["1828 Haecker View"]]);
+    expect(parseHtmlElements('<div><i data-price=5" data-x="a>b">x</i><span class="s">y</span></div>')!.children[0]!.children.map((element) => [element.tag, element.attributes["data-price"], element.attributes["data-x"]])).toEqual([["i", "5\"", "a>b"], ["span", undefined, undefined]]);
   });
 
   it("still holds a page that lacks the container: no hero place line, or no sections and no cards", async () => {
@@ -189,57 +207,79 @@ describe("David Weekley: the neighborhood page behind the TX -> tx redirect (Oct
   const NEIGHBORHOOD = `${HOST}/neighborhoods/tx/san-antonio/briggs-ranch`;
   const SERIES_45 = `${HOST}/new-homes/tx/san-antonio/san-antonio/briggs-ranch-45`;
   const SERIES_60 = `${HOST}/new-homes/tx/san-antonio/san-antonio/briggs-ranch-60`;
-  const config: CommunitySourceConfig = { builder: "David Weekley Homes", sourceUrl: CONFIGURED, privateCommunityName: "Briggs Ranch", scrubList: ["Briggs Ranch", "Fixture Willow", "Sweet Acacia"] };
-  /** A series community page with page data in the shape the reader has always read (synthetic: the series pages were not captured). */
-  const seriesPage = (url: string, id: string, count: number, base: number) => {
-    const path = new URL(url).pathname;
-    const slug = path.split("/").at(-1)!;
-    const homes = Array.from({ length: count }, (_, index) => ({
-      Token: `/homes-ready-soon/tx/san-antonio/san-antonio/${slug}/2423${base + index}`, Name: "Cassia", CommunityId: id, IsModel: false, Hidden: false, Ready: true, LostReadyStatus: null,
-      Address: { Line1: `${13200 + base + index} Fixture Willow`, City: "San Antonio", ZipCode: "78245" }, ReadyLabel: index % 2 ? "Ready Now" : "Ready 12/15/2026", ReadyDate: index % 2 ? "2026-07-31T00:00:00" : "2026-12-15T00:00:00",
-      Price: 380_000 + index * 10_000, HideQmiPrice: false, SquareFootage: 1_900 + index * 50, Bedrooms: 3 + (index % 2), FullBaths: 2, HalfBaths: index % 2, Garages: 2, JobNumber: `2423${base + index}`, ExteriorPhotos: [], InteriorPhotos: [],
-    }));
-    const data = { communityName: `Briggs Ranch ${slug}`, communityId: id, communityAvailability: "Active", basePrice: 365_480, url: path, city: "San Antonio",
-      salesOffices: [{ Address: "13222 Sweet Acacia<br />San Antonio, TX 78245", SearchableAddress: "29.39,-98.75" }],
-      floorplans: [{ Name: "Cassia", Token: `${path}/cassia`, IsActive: true, BasePrice: 367_990, PriceDisplay: "$367,990", Bedrooms: { Minimum: 3 }, FullBaths: { Minimum: 2 }, HalfBaths: { Minimum: 0 }, SquareFootage: { Minimum: 1_652 }, Garages: { Minimum: 2 } }],
-      quickMoveIns: homes };
-    return `<!DOCTYPE html><html><body><script>window.pageData= ${JSON.stringify(data)};\r\n</script></body></html>`;
-  };
-  const listing = JSON.stringify({ Communities: [{ Id: "communities/22915", Token: "/new-homes/tx/san-antonio/san-antonio/briggs-ranch-45", ShowcaseCount: 7 }, { Id: "communities/22916", Token: "/new-homes/tx/san-antonio/san-antonio/briggs-ranch-60", ShowcaseCount: 4 }] });
+  const CONFLUENCE = `${HOST}/neighborhoods/TX/san-antonio/confluence`;
+  const CONFLUENCE_SERIES = `${HOST}/new-homes/tx/san-antonio/marion/confluence-select-reserve-series`;
+  const config: CommunitySourceConfig = { builder: "David Weekley Homes", sourceUrl: CONFIGURED, privateCommunityName: "Briggs Ranch", scrubList: ["Briggs Ranch", "Hanging Willow", "Blackhaw Bend", "Mesquite Bloom", "Kissing Tree", "Ashland Flowers", "Sweet Acacia"] };
+  // The market list and promotion list were not captured: synthetic, in the shape the reader has always read.
+  const listing = JSON.stringify({ Communities: [{ Id: "communities/22915", Token: "/new-homes/tx/san-antonio/san-antonio/briggs-ranch-45", ShowcaseCount: 7 }, { Id: "communities/22916", Token: "/new-homes/tx/san-antonio/san-antonio/briggs-ranch-60", ShowcaseCount: 4 }, { Id: "communities/24417", Token: "/new-homes/tx/san-antonio/marion/confluence-select-reserve-series", ShowcaseCount: 8 }] });
   const promotions = JSON.stringify([{ Description: "Save $2,000 in flex dollars.", StartDate: "2026-01-05T00:00:00", EndDate: "2027-01-01T00:00:00", IsSiteWide: true, ShowOnCommunityIds: [] }]);
-  const site = (series45: string, series60: string): Site => ({
-    [CONFIGURED]: { status: 301, location: "/neighborhoods/tx/san-antonio/briggs-ranch" },
-    [NEIGHBORHOOD]: live("david-briggs-ranch"),
-    [SERIES_45]: series45, [SERIES_60]: series60,
+  const market: Site = {
     [weekleyListingUrl()]: { status: 200, body: listing, type: "application/json" },
     [weekleyPromotionsUrl()]: { status: 200, body: promotions, type: "application/json" },
+  };
+  const site = (overrides: Site = {}): Site => ({
+    [CONFIGURED]: { status: 301, location: "/neighborhoods/tx/san-antonio/briggs-ranch" },
+    [NEIGHBORHOOD]: live("david-briggs-ranch"),
+    [SERIES_45]: live("weekley-briggs-ranch-45"), [SERIES_60]: live("weekley-briggs-ranch-60"),
+    ...market, ...overrides,
   });
 
   it("parses the live neighborhood pages: each series' community page and its quick move-in count", () => {
     expect(parseWeekleyNeighborhood(live("david-briggs-ranch"), NEIGHBORHOOD)).toEqual({ name: "Briggs Ranch", series: [{ url: SERIES_45, quickMoveIns: 7 }, { url: SERIES_60, quickMoveIns: 4 }] });
-    expect(parseWeekleyNeighborhood(live("david-confluence"), `${HOST}/neighborhoods/tx/san-antonio/confluence`)).toEqual({ name: "Confluence", series: [{ url: `${HOST}/new-homes/tx/san-antonio/marion/confluence-select-reserve-series`, quickMoveIns: 8 }] });
+    expect(parseWeekleyNeighborhood(live("david-confluence"), `${HOST}/neighborhoods/tx/san-antonio/confluence`)).toEqual({ name: "Confluence", series: [{ url: CONFLUENCE_SERIES, quickMoveIns: 8 }] });
+    // A series page carries its page data: it is a community page, never a neighborhood.
+    expect(parseWeekleyNeighborhood(live("weekley-briggs-ranch-45"), SERIES_45)).toBeNull();
   });
 
-  it("follows the same-host 301, reads both series as one community and publishes all 11 homes", async () => {
-    const { fetcher, requested } = siteFetcher(site(seriesPage(SERIES_45, "communities/22915", 7, 0), seriesPage(SERIES_60, "communities/22916", 4, 50)));
+  it("Briggs Ranch: follows the same-host 301 and reads both live series pages as one community (7 + 4 homes)", async () => {
+    const { fetcher, requested } = siteFetcher(site());
     const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
     expect(result.holdReasons).toEqual([]);
     expect(requested.slice(0, 4)).toEqual([CONFIGURED, NEIGHBORHOOD, SERIES_45, SERIES_60]);
-    expect(result.private.homes).toHaveLength(11);
-    expect(result.private.plans).toHaveLength(2);
-    expect(result.private.homes.filter((home) => home.readyNow)).toHaveLength(5);
-    expect(result.private.homes.find((home) => !home.readyNow)).toMatchObject({ status: "Quick Move-In (December 2026)", moveInDate: "December 2026" });
+    expect(result.private.homes.map((home) => [home.privateName, home.status, home.price, home.bedrooms, home.bathrooms, home.squareFeet])).toEqual([
+      ["13224 Hanging Willow", "Quick Move-In (Move-In Ready)", 365_480, 3, 2, 1_891],
+      ["13223 Hanging Willow", "Quick Move-In (November 2026)", 383_990, 3, 2, 1_661],
+      ["13219 Hanging Willow", "Quick Move-In (November 2026)", 399_480, 3, 2, 2_093],
+      ["13207 Hanging Willow", "Quick Move-In (December 2026)", 416_480, 4, 2.5, 2_728],
+      ["4207 Blackhaw Bend", "Quick Move-In (Move-In Ready)", 419_480, 4, 3, 2_288],
+      ["13203 Hanging Willow", "Quick Move-In (November 2026)", 424_670, 4, 3, 2_546],
+      ["4203 Blackhaw Bend", "Quick Move-In (Move-In Ready)", 426_480, 4, 2.5, 2_748],
+      ["13207 Mesquite Bloom", "Quick Move-In (November 2026)", 548_698, 4, 3, 2_450],
+      ["13211 Mesquite Bloom", "Quick Move-In (November 2026)", 588_509, 5, 4.5, 3_698],
+      ["4117 Kissing Tree", "Quick Move-In (November 2026)", 588_603, 4, 3.5, 2_877],
+      ["13322 Ashland Flowers", "Quick Move-In (December 2026)", 616_335, 4, 3.5, 2_877],
+    ]);
+    expect(result.private.plans).toHaveLength(18);
+    expect(result.private.plans.every((plan) => plan.price === null || (plan.price > 300_000 && plan.price < 900_000))).toBe(true);
     expect(result.private.incentive?.text).toContain("$2,000");
-    for (const secret of ["Briggs", "Fixture Willow", "Weekley", "78245"]) expect(publicJson(result)).not.toContain(secret);
+    for (const secret of ["Briggs", "Hanging Willow", "Blackhaw", "Mesquite Bloom", "Weekley", "78245", "Cassia"]) expect(publicJson(result)).not.toContain(secret);
+  });
+
+  it("Confluence: one series behind the neighborhood page, 8 homes", async () => {
+    const { fetcher } = siteFetcher({
+      [CONFLUENCE]: { status: 301, location: "/neighborhoods/tx/san-antonio/confluence" },
+      [`${HOST}/neighborhoods/tx/san-antonio/confluence`]: live("david-confluence"),
+      [CONFLUENCE_SERIES]: live("weekley-confluence-select"),
+      ...market,
+    });
+    const result = await loadOfficialDeals({ builder: "David Weekley Homes", sourceUrl: CONFLUENCE, privateCommunityName: "Confluence", scrubList: ["Confluence", "Merging Rivers", "Converge Ct"] }, { fetcher, now: () => NOW });
+    expect(result.holdReasons).toEqual([]);
+    expect(result.private.homes).toHaveLength(8);
+    expect(result.private.homes.every((home) => home.price !== null && home.price >= 400_000 && home.price < 500_000 && /^Quick Move-In \((?:November 2026|December 2026|January 2027)\)$/.test(home.status ?? ""))).toBe(true);
+    expect(result.private.plans).toHaveLength(7);
   });
 
   it("holds when a series page is missing or shows fewer homes than the neighborhood counts, and never follows a redirect to another host", async () => {
-    const noSeries = siteFetcher({ ...site(seriesPage(SERIES_45, "communities/22915", 7, 0), ""), [SERIES_60]: { status: 404 } });
+    const noSeries = siteFetcher(site({ [SERIES_60]: { status: 404 } }));
     expect((await loadOfficialDeals(config, { fetcher: noSeries.fetcher, now: () => NOW })).holdReasons).toEqual(["community_fetch_failed"]);
-    const short = siteFetcher(site(seriesPage(SERIES_45, "communities/22915", 6, 0), seriesPage(SERIES_60, "communities/22916", 4, 50)));
+    // The neighborhood counts one more home in the 60' series than its page shows: never a sale, the run is held.
+    const short = siteFetcher(site({ [NEIGHBORHOOD]: live("david-briggs-ranch").replaceAll("Quick Move-ins (4)", "Quick Move-ins (5)") }));
     const held = await loadOfficialDeals(config, { fetcher: short.fetcher, now: () => NOW });
     expect(held.holdReasons).toEqual(["incomplete_inventory"]);
     expect(held.public.homes).toEqual([]);
+    // A series page in another layout (no page data) is not a community page.
+    const reshaped = siteFetcher(site({ [SERIES_45]: "<html><body><div id=\"app\"></div></body></html>" }));
+    expect((await loadOfficialDeals(config, { fetcher: reshaped.fetcher, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
     const offHost = siteFetcher({ [CONFIGURED]: { status: 301, location: "https://evil.example/neighborhoods/tx/san-antonio/briggs-ranch" } });
     expect((await loadOfficialDeals(config, { fetcher: offHost.fetcher, now: () => NOW })).holdReasons).toEqual(["unsupported_official_host"]);
     expect(offHost.requested).toEqual([CONFIGURED]);
@@ -260,6 +300,16 @@ describe("Hakes Brothers: the coming-soon page wording (October 20, 2026)", () =
     expect(result.private.plans).toEqual([]);
   });
 
+  it("reads Park Place, the same coming-soon page shape, the same way", async () => {
+    const PARK = "https://www.hakesbrothers.com/san-antonio/park-place";
+    const page = live("hakes-park-place");
+    expect(hakesComingSoon(page)).toBe(true);
+    const { fetcher } = siteFetcher({ [PARK]: page });
+    const result = await loadOfficialDeals({ builder: "Hakes Brothers", sourceUrl: PARK, privateCommunityName: "Park Place", scrubList: ["Park Place"] }, { fetcher, now: () => NOW });
+    expect(result.holdReasons).toEqual([]);
+    expect(result.private.homes).toEqual([]);
+  });
+
   it("still holds a tab-less page that does not say both: the cell alone, or the price line alone, is not proof", async () => {
     const page = live("hakes-mesa-vista");
     for (const variant of [page.replace("Interest List Now Forming", "Now Selling"), page.replace("Price Coming Soon", "From the $290s")]) {
@@ -270,10 +320,11 @@ describe("Hakes Brothers: the coming-soon page wording (October 20, 2026)", () =
   });
 });
 
-describe("Drees and Perry: the community pages still pass their checks (the holds are past them)", () => {
-  it("Drees Haby Hill names itself a parent community with its own id and URL; its homes come from the site's API (not captured)", async () => {
+describe("Drees: the community page and the market's areas list pass their checks (the POST answers were not captured)", () => {
+  it("Haby Hill names itself a parent community with its own id and URL; the areas list names San Antonio's page id", async () => {
     const page = live("drees-haby-hill");
     expect(parseDreesPage(page)).toEqual({ contentId: 326325, parent: true, url: "/new-homes-san-antonio/san-antonio/comm-haby-hills/" });
+    expect(parseDreesAreaId(gunzipSync(readFileSync(new URL("./fixtures/deals/live-2026-10-20/drees-areas.json.gz", import.meta.url))).toString("utf8"))).toBe(310095);
     const COMMUNITY = "https://www.dreeshomes.com/new-homes-san-antonio/san-antonio/comm-haby-hills/";
     const { fetcher, requested } = siteFetcher({ [COMMUNITY]: page });
     const result = await loadOfficialDeals({ builder: "Drees Custom Homes", sourceUrl: COMMUNITY, privateCommunityName: "Haby Hill", scrubList: ["Haby Hill"] }, { fetcher, now: () => NOW });
@@ -281,15 +332,50 @@ describe("Drees and Perry: the community pages still pass their checks (the hold
     expect(requested).toEqual([COMMUNITY, "https://www.dreeshomes.com/api/en/dreeshomes/areas"]);
     expect(result.holdReasons).toEqual(["community_fetch_failed"]);
   });
+});
 
-  it("Perry Alsatian Oaks and Esperanza carry their collections in the Flight payload; the reader goes on to the sitemap", async () => {
+describe("Perry Homes: a sold home the sitemap still lists (October 20, 2026)", () => {
+  const COMMUNITY = "https://www.perryhomes.com/new-homes/texas/san-antonio/alsatian-oaks";
+  const SOLD = `${COMMUNITY}/alsatian-oaks-50/173-mountain-oak`;
+  const PLAN = `${COMMUNITY}/alsatian-oaks-50/2561h`;
+  const config: CommunitySourceConfig = { builder: "Perry Homes", sourceUrl: COMMUNITY, privateCommunityName: "Alsatian Oaks", scrubList: ["Alsatian Oaks", "Mountain Oak"] };
+  const sitemap = gunzipSync(readFileSync(new URL("./fixtures/deals/live-2026-10-20/perry-sitemap-san-antonio.xml.gz", import.meta.url))).toString("utf8");
+  /** The live sitemap cut to the pages captured on October 20 (the community, its collections and sales centers, the sold home, one plan). */
+  const capturedSitemap = sitemap.replace(/<url>[\s\S]*?<\/url>/g, (entry) => /\/(?:173-mountain-oak|2561h|sales-center)<|alsatian-oaks(?:\/alsatian-oaks-\d\d)?<|perryhomes\.com\/<|florida/.test(entry) ? entry : "");
+
+  it("finds the live hold: the home page says it just sold and carries no home object, so the reader held the whole community", () => {
+    const page = live("perry-home-173-mountain-oak");
+    expect(parsePerryDetail(page, SOLD)).toBeNull();
+    expect(perryHomeSold(page, SOLD)).toBe(true);
+    // A plan page is never a sold home, and it still reads.
+    expect(perryHomeSold(live("perry-plan-2561h"), PLAN)).toBe(false);
+    expect(parsePerryDetail(live("perry-plan-2561h"), PLAN)).toMatchObject({ kind: "plan", privatePlanName: "Design 2561H", price: 541_900, bedrooms: 4, bathrooms: 3, squareFeet: 2_561, garage: 2 });
+    // The live sitemap still lists the sold home with the community's 16 homes and 44 plans.
+    expect(sitemap).toContain("/alsatian-oaks-50/173-mountain-oak<");
+  });
+
+  it("leaves the sold home out (the sync marks it sold) and publishes the rest", async () => {
+    const { fetcher, requested } = siteFetcher({ [COMMUNITY]: live("perry-alsatian-oaks"), "https://www.perryhomes.com/sitemap.xml": { status: 200, body: capturedSitemap, type: "application/xml" }, [SOLD]: live("perry-home-173-mountain-oak"), [PLAN]: live("perry-plan-2561h") });
+    const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
+    expect(result.holdReasons).toEqual([]);
+    expect(requested).toEqual([COMMUNITY, "https://www.perryhomes.com/sitemap.xml", SOLD, PLAN]);
+    expect(result.private.homes).toEqual([]);
+    expect(result.private.plans.map((plan) => [plan.sourceUrl, plan.price, plan.bedrooms, plan.squareFeet])).toEqual([[PLAN, 541_900, 4, 2_561]]);
+    for (const secret of ["Alsatian", "Mountain Oak", "Perry", "2561H"]) expect(publicJson(result)).not.toContain(secret);
+  });
+
+  it("still holds a home page that has no home object and does not say it sold, and the community check still holds a page without its collections", async () => {
+    const reshaped = live("perry-home-173-mountain-oak").replaceAll("but this home just sold.", "but this home is reserved.");
+    expect(perryHomeSold(reshaped, SOLD)).toBe(false);
+    const { fetcher } = siteFetcher({ [COMMUNITY]: live("perry-alsatian-oaks"), "https://www.perryhomes.com/sitemap.xml": { status: 200, body: capturedSitemap, type: "application/xml" }, [SOLD]: reshaped, [PLAN]: live("perry-plan-2561h") });
+    const held = await loadOfficialDeals(config, { fetcher, now: () => NOW });
+    expect(held.holdReasons).toEqual(["expected_detail_container_not_found"]);
+    expect(held.public.plans).toEqual([]);
     for (const [name, slug] of [["perry-alsatian-oaks", "alsatian-oaks"], ["perry-esperanza", "esperanza"]] as const) {
       resetPerrySitemapCache();
-      const COMMUNITY = `https://www.perryhomes.com/new-homes/texas/san-antonio/${slug}`;
-      const { fetcher, requested } = siteFetcher({ [COMMUNITY]: live(name) });
-      const result = await loadOfficialDeals({ builder: "Perry Homes", sourceUrl: COMMUNITY, privateCommunityName: slug, scrubList: [slug] }, { fetcher, now: () => NOW });
-      expect(result.holdReasons).toEqual(["sitemap_fetch_failed"]);
-      expect(requested).toContain("https://www.perryhomes.com/sitemap.xml");
+      const url = `https://www.perryhomes.com/new-homes/texas/san-antonio/${slug}`;
+      const passes = siteFetcher({ [url]: live(name) });
+      expect((await loadOfficialDeals({ ...config, sourceUrl: url }, { fetcher: passes.fetcher, now: () => NOW })).holdReasons).toEqual(["sitemap_fetch_failed"]);
     }
   });
 });

@@ -151,6 +151,22 @@ export function parsePerryDetail(html: string, pageUrl: string): PerryHome | nul
 }
 
 /**
+ * True when a home page is Perry's "just sold" stub: the page's own Flight
+ * payload carries no object for this home and its notice reads, as one whole
+ * text, "Thank you for your interest, but this home just sold." The sitemap
+ * keeps a sold home's address for a while (173 Mountain Oak on October 20,
+ * 2026), so such a page is a sale, not a changed layout.
+ */
+export function perryHomeSold(html: string, pageUrl: string): boolean {
+  const url = asUrl(pageUrl);
+  if (!url) return false;
+  const flight = decodeFlightPayload(html);
+  const path = url.pathname.replace(/\/+$/, "");
+  if (flight.includes(`"home_url":"${path}"`) || flight.includes("\"home_details\":{")) return false;
+  return /"children":"Thank you for your interest, but this home just sold\."/.test(flight);
+}
+
+/**
  * The home's own photos: Cloudinary images whose metadata carries this home's
  * job number. A plan gets the design's representative images. Never the
  * floor-plan drawing (it shows the plan name).
@@ -230,6 +246,8 @@ export class PerryHomesAdapter implements DealAdapter {
       const detail = await getDocument(key, fetcher, "text/html,application/xhtml+xml", PERRY_HOST);
       if (!detail.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(detail, "detail_fetch_failed")]);
       const parsed = parsePerryDetail(detail.text, key);
+      // A home the sitemap still lists but whose page says it just sold is left out (the sync marks it sold); only a home page can say so.
+      if (!parsed && kind === "home" && perryHomeSold(detail.text, key)) { privateSnapshot.pages.push(sourcePage("home", key, null)); continue; }
       if (!parsed) return failedResult(config, fetchedAt, privateSnapshot, ["expected_detail_container_not_found"]);
       privateSnapshot.pages.push(sourcePage(kind, key, parsed.privateName));
       const { kind: _kind, designId: _designId, ...item } = parsed;

@@ -60,4 +60,12 @@ the full page. `server/dealsAdapters.liveFixes.test.ts` reads them.
 | david-briggs-ranch, david-confluence | David Weekley neighborhood landing pages (no page data; series links with counts) |
 | hakes-mesa-vista | Hakes coming-soon page ("Price Coming Soon", "Interest List Now Forming") |
 | drees-haby-hill | Drees parent community app shell (`contentId` 326325, `isCommunityPage`) |
+| highland-veramendi-70ft | Highland section page (older `a.homeSpec` cards, "6 quick move-in homes", a stray-quote `data-price=857646"`) |
+| weekley-briggs-ranch-45, weekley-briggs-ranch-60, weekley-confluence-select | David Weekley series community pages (`window.pageData`) |
+| hakes-park-place | Hakes coming-soon page (same shape as Mesa Vista) |
+| drees-areas.json | Drees `GET /api/en/dreeshomes/areas` (San Antonio `pageId` 310095) |
 | perry-alsatian-oaks, perry-esperanza | Perry community pages (collections in the Flight payload) |
+| perry-alsatian-oaks-50 | Perry collection page (homes rendered client-side) |
+| perry-home-173-mountain-oak | Perry home page of a home the sitemap still lists: the "this home just sold" stub |
+| perry-plan-2561h | Perry plan page |
+| perry-sitemap-san-antonio.xml | The live Perry sitemap cut to its first three entries and the Alsatian Oaks and Esperanza URLs |

@@ -18,10 +18,11 @@ import { parseViewHomesCommunity, parseViewHomesRoster, resetViewHomesCaches, vi
  * removed, then gzipped; the markup and data the readers parse are as served.
  * The follow-up captures (the View Homes roster and promotion, the Texas Homes
  * quick move-in list, Coventry's collection pages, every Toll Brothers
- * community, Chesmar's sitemaps and home pages) were taken the same night;
- * Chesmar's sitemaps are cut to their first entry and Alsatian Oaks' entries.
- * Pages still not captured (Chesmar's plan pages) and the variants the hold
- * tests build are synthetic and say so where they are built.
+ * community, Chesmar's sitemaps, home pages and plan pages) were taken the same
+ * night; Chesmar's sitemaps are cut to their first entry and Alsatian Oaks'
+ * entries (and one entry's image list to three), and its pages keep their image
+ * source sets (its gallery reads them). The variants the hold tests build are
+ * synthetic and say so where they are built.
  */
 const NOW = new Date("2026-10-21T04:00:00Z");
 const fixture = (file: string) => gunzipSync(readFileSync(new URL(`./fixtures/deals/live-2026-10-20b/${file}.gz`, import.meta.url))).toString("utf8");
@@ -463,12 +464,10 @@ describe("Chesmar: inventory homes now say 'Home For Sale' in their title (Octob
   const COMMUNITY = "https://www.chesmar.com/texas/san-antonio-new-homes/castroville/alsatian-oaks/";
   const HOMES = { "brandy/42210000-0044/": "chesmar-home-brandy-42210000-0044", "lauren/42210000-0039/": "chesmar-home-lauren-42210000-0039", "morgan/42210000-0001/": "chesmar-home-morgan-42210000-0001" } as const;
   const PLANS = ["acadia", "aspen", "brandy", "brooks", "cayman", "hampton", "lauren", "morgan", "shenandoah", "summerton"];
-  /** The plan pages were not captured: each is the repository's synthetic plan page in the live layout (its figures are not asserted). */
-  const syntheticPlan = readFileSync(new URL("./fixtures/deals/chesmar-plan-page-live.html", import.meta.url), "utf8");
   function chesmarSite(homes: Partial<Record<keyof typeof HOMES, string>> = {}): Site {
     const site: Site = { [COMMUNITY]: live("chesmar-alsatian-oaks"), "https://www.chesmar.com/sitemap.xml": { status: 200, body: fixture("chesmar-sitemap.xml"), type: "application/xml" } };
     for (let index = 1; index <= 7; index++) site[`https://www.chesmar.com/sitemap${index}.xml`] = { status: 200, body: fixture(`chesmar-sitemap${index}.xml`), type: "application/xml" };
-    for (const slug of PLANS) site[`${COMMUNITY}${slug}/`] = syntheticPlan;
+    for (const slug of PLANS) site[`${COMMUNITY}${slug}/`] = live(`chesmar-plan-${slug}`);
     for (const [path, name] of Object.entries(HOMES)) site[`${COMMUNITY}${path}`] = homes[path as keyof typeof HOMES] ?? live(name);
     return site;
   }
@@ -481,7 +480,7 @@ describe("Chesmar: inventory homes now say 'Home For Sale' in their title (Octob
     expect(chesmarDetailFacts(live("chesmar-home-morgan-42210000-0001"))).toMatchObject({ status: "Model For Tour", price: null, planName: "Morgan", address: "242 White Oak" });
   });
 
-  it("reads the live sitemaps and home pages: 2 quick move-ins and the model (plan pages synthetic)", async () => {
+  it("reads the live sitemaps, plan pages and home pages: 10 plans, 2 quick move-ins and the model", async () => {
     const { fetcher, requested } = siteFetcher(chesmarSite());
     const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
     expect(result.catalogOk).toBe(true);
@@ -491,8 +490,13 @@ describe("Chesmar: inventory homes now say 'Home For Sale' in their title (Octob
       ["242 White Oak", "Morgan", "Model For Tour", null, 3, 2, 2_301],
       ["331 Mountain Oak", "Lauren", "Quick Move-In", 479_800, 4, 3, 2_376],
     ]);
-    expect(result.private.plans).toHaveLength(PLANS.length);
-    for (const secret of ["Alsatian", "Mountain Oak", "White Oak", "Chesmar"]) expect(publicJson(result)).not.toContain(secret);
+    expect(result.holdReasons).toEqual(["incentive_fetch_failed"]); // the site-wide incentives page was not captured: the offer alone holds
+    expect(result.private.plans.map((plan) => [plan.privatePlanName, plan.price, plan.bedrooms, plan.bathrooms, plan.squareFeet]).sort()).toEqual([
+      ["Acadia", 489_990, 5, 4, 3_065], ["Aspen", 374_990, 3, 2, 1_743], ["Brandy", 429_800, 3, 3, 2_142], ["Brooks", 429_990, 3, 3, 2_138], ["Cayman", 485_990, 4, 3.5, 2_700],
+      ["Hampton", 441_990, 4, 3, 2_399], ["Lauren", 451_990, 3, 3, 2_538], ["Morgan", 427_990, 3, 2, 2_301], ["Shenandoah", 482_990, 4, 3.5, 3_024], ["Summerton", 420_990, 4, 3, 2_052],
+    ]);
+    expect(result.private.plans.every((plan) => plan.sourceUrl.startsWith(COMMUNITY) && (plan.gallery?.length ?? 0) > 0)).toBe(true);
+    for (const secret of ["Alsatian", "Mountain Oak", "White Oak", "Chesmar", "Shenandoah", "Summerton"]) expect(publicJson(result)).not.toContain(secret);
   });
 
   it("still gives no status to a title in other wording, or to 'Home For Sale' anywhere but the title (the sync holds the run)", async () => {

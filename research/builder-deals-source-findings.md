@@ -1196,5 +1196,9 @@ Captures from about 11 PM Central (production User-Agent, redirects followed), r
 - Chesmar, Alsatian Oaks: inventory home titles now read "<address> | Home For Sale in Alsatian Oaks" (the model
   still says "Model For Tour"), wording the status reader did not know, so both homes had no status. That title form now reads as a quick move-in (the words elsewhere on the page do not count). 165 Mountain Oak
   (Brandy, $429,800, 3 bd / 3 ba / 2,142 sq ft) and 331 Mountain Oak (Lauren, $479,800, 4 bd / 3 ba / 2,376 sq ft)
-  read as quick move-ins, 242 White Oak (Morgan) as the model. The ten plan pages the sitemap lists were not captured:
-  the tests use the repository's synthetic plan page, so the plan figures are unverified.
+  read as quick move-ins, 242 White Oak (Morgan) as the model. The ten plan pages (captured later) read as served and
+  match their pages: Aspen $374,990 (3 bd / 2 ba / 1,743 sq ft), Summerton $420,990, Brooks $429,990, Brandy
+  $429,800, Morgan $427,990, Hampton $441,990, Lauren $451,990 (3 bd / 3 ba / 2,538 sq ft), Shenandoah $482,990,
+  Cayman $485,990 (4 bd / 3.5 ba / 2,700 sq ft), Acadia $489,990 (5 bd / 4 ba / 3,065 sq ft); the catalog reads, with
+  only the offer held in the tests (the site-wide incentives page was not captured). Chesmar's galleries read image
+  source sets, so its fixtures keep them.

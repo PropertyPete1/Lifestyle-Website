@@ -667,3 +667,31 @@ export const dealEmailLogs = mysqlTable("deal_email_logs", {
   deliveredAt: timestamp("delivered_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("idx_deal_email_logs_alert").on(t.alertId, t.createdAt), index("idx_deal_email_logs_created").on(t.createdAt)]);
+
+/**
+ * Supplied source import (docs/builder-deals-supplied-import.md). A builder with
+ * a key here is "supplied": its communities are read from the latest import the
+ * owner's own browser agent posted to /api/deals/import instead of being fetched.
+ * Only the SHA-256 of the key is stored; the plaintext is shown to the admin once.
+ */
+export const dealSuppliedImportKeys = mysqlTable("deal_supplied_import_keys", {
+  id: int("id").autoincrement().primaryKey(),
+  builder: varchar("builder", { length: 80 }).notNull().unique(),
+  keyHash: varchar("key_hash", { length: 64 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+/** The latest (and the previous) import per community. Private: the payload names homes, addresses and plans. */
+export const dealSuppliedImports = mysqlTable("deal_supplied_imports", {
+  id: int("id").autoincrement().primaryKey(),
+  communityId: int("community_id").notNull(),
+  builder: varchar("builder", { length: 80 }).notNull(),
+  payload: mediumtext("payload").notNull(),
+  capturedAt: timestamp("captured_at").notNull(),
+  receivedAt: timestamp("received_at").defaultNow().notNull(),
+}, (t) => [index("idx_deal_supplied_imports_community").on(t.communityId, t.capturedAt)]);
+/** One row per authenticated import call, for the per-builder hourly limit; rows older than a day are pruned. */
+export const dealSuppliedImportCalls = mysqlTable("deal_supplied_import_calls", {
+  id: int("id").autoincrement().primaryKey(),
+  builder: varchar("builder", { length: 80 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_deal_supplied_import_calls").on(t.builder, t.createdAt)]);

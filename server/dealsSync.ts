@@ -9,6 +9,8 @@ import { applyScrubExclusions, parseStoredScrubList, serializeStoredScrubList } 
 import { processPendingDealPhotos } from "./dealsPhotos";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { refreshCommunityGeography } from "./dealsMap";
+import { suppliedDealsSnapshot } from "./dealsAdapters.supplied";
+import { suppliedSourceFor } from "./dealsSuppliedStore";
 
 type CommunityRow = typeof dealCommunities.$inferSelect;
 type IncentiveRow = typeof dealIncentives.$inferSelect;
@@ -243,6 +245,22 @@ export function activeCatalogHold(row: Pick<CommunityRow, "catalogHoldReason">):
 /** The e-mail line for a catalog hold the admin can only settle by hand. */
 export const SOURCE_ACCESS_REFUSED_DETAIL = "The builder's site refused our reader (HTTP 401/403): the builder is blocking automated reads, and the reader will not work around that. A one-off challenge page can clear on its own; if it keeps happening, switch this community to Manual in Admin, Builder Deals.";
 
+/** The e-mail line for each supplied-import hold (docs/builder-deals-supplied-import.md); the last good data stays live meanwhile. */
+export const SUPPLIED_IMPORT_HOLD_DETAIL: Readonly<Record<string, string>> = {
+  supplied_import_missing: "This builder takes its data from the owner's browser agent (an import key exists), and no import has arrived for this community yet. Check that the agent's daily run includes this community's page exactly as saved in Admin.",
+  supplied_import_stale: "The browser agent's latest import for this community is more than 36 hours old, so it was not published. Check that the agent's daily run is still going and that it posts this community.",
+  supplied_import_incomplete: "The browser agent's import for this community was partial (it said the page was not read whole, or it sent a different number of homes than the page shows), so nothing was published or marked sold. The next complete import clears it.",
+  supplied_import_out_of_bounds: "The browser agent's import had a price, bed, bath or square-foot figure outside the sanity bounds, so nothing from this community was published. The import response lists the home and the figure.",
+  supplied_import_invalid_home: "The browser agent's import had a home whose link is not on the builder's site, whose address is not a street address, or whose move-in wording could not be read, so nothing from this community was published.",
+  supplied_import_duplicate_home: "The browser agent's import listed the same home twice (same link or address), so nothing from this community was published.",
+};
+
+/** The e-mail detail for a catalog hold: one line per reason that has one. */
+function catalogHoldDetail(reason: string): string | undefined {
+  const lines = reason.split(",").map((part) => part.trim()).map((part) => part === "source_access_refused" ? SOURCE_ACCESS_REFUSED_DETAIL : SUPPLIED_IMPORT_HOLD_DETAIL[part]).filter((line): line is string => Boolean(line));
+  return lines.length ? Array.from(new Set(lines)).join(" ") : undefined;
+}
+
 async function recordCatalogHold(community: CommunityRow, reason: string, now: Date, holds: HoldNotice[]) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
@@ -251,7 +269,8 @@ async function recordCatalogHold(community: CommunityRow, reason: string, now: D
   // The same parse result, held or dismissed, never produces a second email.
   if (storedReason === reason) return;
   await db.update(dealCommunities).set({ catalogHoldReason: reason, catalogHoldSeenAt: now, holdReason: summarizeHolds(reason, community.incentiveHoldReason) }).where(eq(dealCommunities.id, community.id));
-  holds.push({ communityId: community.id, privateName: community.privateName, builder: community.builder, kind: "catalog", reason, ...(reason.split(",").some((part) => part.trim() === "source_access_refused") ? { detail: SOURCE_ACCESS_REFUSED_DETAIL } : {}) });
+  const detail = catalogHoldDetail(reason);
+  holds.push({ communityId: community.id, privateName: community.privateName, builder: community.builder, kind: "catalog", reason, ...(detail ? { detail } : {}) });
 }
 
 /** Sets the community's incentive hold; a new hold is e-mailed unless `notify` is off (a hold that was e-mailed when it began). */
@@ -599,7 +618,13 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     await recordCatalogHold(community, "invalid_source_url", now, holds);
     return { ...base, ok: false, reason: "invalid_source_url" };
   }
-  const snapshot = await loadOfficialDeals(sourceConfig, heartbeat ? { fetcher: leaseRenewingFetcher(heartbeat) } : {});
+  // A builder that takes imports (it has an import key) is never fetched: its latest stored import is read instead and
+  // judged by the same rules below. If the import tables cannot be read, the community is read from the site as before.
+  const supplied = await suppliedSourceFor(community.builder, community.id).catch((error) => {
+    console.warn(`[deals-sync] community ${community.id} supplied-import lookup failed`, error instanceof Error ? error.message : error);
+    return null;
+  });
+  const snapshot = supplied ? suppliedDealsSnapshot(sourceConfig, supplied.latest, now) : await loadOfficialDeals(sourceConfig, heartbeat ? { fetcher: leaseRenewingFetcher(heartbeat) } : {});
   if (!snapshot.catalogOk) {
     const reason = snapshot.holdReasons.join(", ");
     await recordCatalogHold(community, reason, now, holds);
@@ -993,6 +1018,47 @@ export async function refreshDueCommunitiesBatch(options: { clock?: () => number
     digest,
     results,
   };
+}
+
+/**
+ * The refresh a supplied import triggers, awaited inside the import request (the
+ * production host suspends work left running after a response). It takes the
+ * builder's lease like a batch lane, so a batch never reads the same community at
+ * the same time; when the lease stays busy past `leaseWaitMs` nothing is refreshed
+ * and `processed` is false (the import is stored; the agent posts again). Each
+ * community's changes and holds go into the digest, as a batch's do.
+ */
+export async function refreshSuppliedCommunities(builder: string, communityIds: readonly number[], options: { now?: Date; leaseWaitMs?: number; pollMs?: number } = {}): Promise<{ processed: boolean; results: RefreshResult[] }> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  if (!communityIds.length) return { processed: true, results: [] };
+  const waitUntil = Date.now() + (options.leaseWaitMs ?? 20_000);
+  let lease = await leaseBuilder(builder, options.now ?? new Date());
+  while (!lease && Date.now() < waitUntil) {
+    await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 1_000));
+    lease = await leaseBuilder(builder, options.now ?? new Date());
+  }
+  if (!lease) return { processed: false, results: [] };
+  const results: RefreshResult[] = [];
+  try {
+    for (const id of communityIds) {
+      const now = options.now ?? new Date();
+      const row = (await db.select().from(dealCommunities).where(and(eq(dealCommunities.id, id), eq(dealCommunities.builder, builder))).limit(1))[0];
+      if (!row) continue;
+      const summaries: CommunityChangeSummary[] = [];
+      const holds: HoldNotice[] = [];
+      try {
+        results.push(await refreshCommunity(row, now, summaries, holds, lease.heartbeat));
+      } catch (error) {
+        results.push(await refreshFailed(row, now, holds, error));
+      }
+      await recordDigestEntry(summaries, holds);
+      await lease.heartbeat();
+    }
+  } finally {
+    await lease.release();
+  }
+  return { processed: true, results };
 }
 
 /**

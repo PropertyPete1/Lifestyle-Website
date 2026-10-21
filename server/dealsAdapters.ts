@@ -104,7 +104,19 @@ export type DealHoldReason =
   /** The offer states two different rate figures; the admin picks the one its APR belongs to. */
   | "ambiguous_rate"
   /** The APR read is below the rate, equal to it or equal to the down payment: the admin types the APR (and down payment). */
-  | "apr_check";
+  | "apr_check"
+  /** Supplied source (dealsAdapters.supplied.ts): the builder takes imports and none has arrived for this community yet. */
+  | "supplied_import_missing"
+  /** Supplied source: the latest import was captured more than 36 hours before this check. */
+  | "supplied_import_stale"
+  /** Supplied source: the import says the page was not read whole, or its home count differs from the page's own count. */
+  | "supplied_import_incomplete"
+  /** Supplied source: a price, bed, bath or square-foot figure is outside the sanity bounds. */
+  | "supplied_import_out_of_bounds"
+  /** Supplied source: a home's link is not on the builder's site, its address is not a street address, or its move-in wording is unreadable. */
+  | "supplied_import_invalid_home"
+  /** Supplied source: two homes in one community share a link or an address. */
+  | "supplied_import_duplicate_home";
 
 export interface DeadlineFact {
   /** What the official page said; it is not guessed or expanded. */

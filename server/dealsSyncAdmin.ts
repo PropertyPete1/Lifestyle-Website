@@ -87,6 +87,12 @@ export const CATALOG_HOLD_REASON_HELP: Partial<Record<DealHoldReason, string>> =
   adjustable_rate: "The offer is an adjustable-rate loan (ARM): the headline rate is a starting rate. Read the terms, then accept or edit the wording.",
   ambiguous_rate: "The offer names more than one rate (for example \"as low as 3.99%\" and \"4.99% fixed\", or a buydown whose figures were read out of order). Check the headline rate (and, for a buydown, the follow-on rate) against the wording before accepting.",
   apr_check: "The APR read does not fit the rate (it is below or equal to the rate, or equal to the down payment): read the builder's figures and type the APR (and the down payment) before accepting.",
+  supplied_import_missing: "This builder takes its data from the owner's browser agent (Supplied imports, below), and no import has arrived for this community yet. The agent must post this community's page exactly as saved here.",
+  supplied_import_stale: "The browser agent's latest import for this community is more than 36 hours old, so it was not published. Check the agent's daily run.",
+  supplied_import_incomplete: "The browser agent's import was partial (page not read whole, or a home count that differs from the page's own), so nothing was published or marked sold. The next complete import clears it.",
+  supplied_import_out_of_bounds: "The browser agent's import had a price (50,000 to 5,000,000), beds or baths (1 to 10) or square feet (400 to 15,000) outside the sanity bounds, so nothing from this community was published.",
+  supplied_import_invalid_home: "The browser agent's import had a home link off the builder's site, an address without a house number and street, or unreadable move-in wording, so nothing from this community was published.",
+  supplied_import_duplicate_home: "The browser agent's import listed the same home twice (same link or address), so nothing from this community was published.",
 };
 
 /** One line per stored reason (the sync joins several with ", "); unknown reasons fall back to the raw code. */

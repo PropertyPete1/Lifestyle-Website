@@ -12,6 +12,7 @@ import { TeamSection } from "@/components/builder-deals/TeamSection";
 import { ClientLinksSection } from "@/components/builder-deals/ClientLinksSection";
 import { BlocklistSection, KnownAgentsSection } from "@/components/builder-deals/ScreeningSections";
 import { SettingsSection } from "@/components/builder-deals/SettingsSection";
+import { SuppliedImportSection } from "@/components/builder-deals/SuppliedImportSection";
 import { TrecSection } from "@/components/builder-deals/TrecSection";
 import { DeliverySection } from "@/components/builder-deals/DeliverySection";
 
@@ -49,6 +50,7 @@ export default function BuilderDealsAdminPanel() {
 
 const JUMP_LINKS = [
   ["communities", "Communities"],
+  ["supplied-imports", "Supplied imports"],
   ["photos", "Photos"],
   ["manual-homes", "Manual homes"],
   ["leads", "Leads"],
@@ -123,6 +125,7 @@ function BuilderDealsAdminContent() {
       </div>
 
       <CommunitiesSection overview={overview} />
+      <SuppliedImportSection />
       <PhotosSection overview={overview} />
       <ManualHomesSection overview={overview} />
       <LeadsSection overview={overview} />

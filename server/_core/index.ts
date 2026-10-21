@@ -11,6 +11,7 @@ import { syncStatsHandler } from "../scheduledStatsHandler";
 import { ensureDealsCron, ensureStatsSyncCron } from "../registerCron";
 import { registerDealsRoutes } from "../dealsRoutes";
 import { scheduledDealsHandler } from "../scheduledDealsHandler";
+import { SUPPLIED_IMPORT_PATH, suppliedImportBodyLimit, suppliedImportHandler } from "../dealsSuppliedImport";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -45,6 +46,8 @@ async function startServer() {
   // req.ip from that hop only, protecting Deals consent and rate-limit keys.
   app.set("trust proxy", 1);
   const server = createServer(app);
+  // The supplied-import route reads its own body (2 MB cap) before the app-wide parser below can.
+  app.use(SUPPLIED_IMPORT_PATH, suppliedImportBodyLimit());
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -55,6 +58,8 @@ async function startServer() {
   // Heartbeat cron callbacks — must be mounted before the Vite/static fallthrough
   app.post("/api/scheduled/syncStats", syncStatsHandler);
   app.post("/api/scheduled/refreshDeals", scheduledDealsHandler);
+  // The owner's browser agent posts what it saw on a builder's pages (docs/builder-deals-supplied-import.md).
+  app.post(SUPPLIED_IMPORT_PATH, suppliedImportHandler);
   // tRPC API
   app.use(
     "/api/trpc",

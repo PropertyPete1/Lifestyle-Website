@@ -249,8 +249,8 @@ export function parseNdgPlans(brand: NdgBrand, body: string, communityPage: stri
   return plans;
 }
 
-/** Links, phone numbers, NMLS ids and e-mail addresses go; a sentence that only pointed at them goes with them. */
-function cleanOfferText(value: string): string {
+/** Links, phone numbers, NMLS ids and e-mail addresses go; a sentence that only pointed at them goes with them. Also used for a supplied import's offer text (dealsAdapters.supplied.ts). */
+export function cleanOfferText(value: string): string {
   return htmlToText(value)
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, " ")
     .replace(/\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, " ")

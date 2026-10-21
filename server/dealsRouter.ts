@@ -662,6 +662,15 @@ export const dealsRouter = router({
     dismissCatalogHold: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => adminCall(() => dismissCatalogHold(input.id))),
     /** Per-community holds with ages, held incentives with their missing fields, counts, area map and the last "Refresh now" run. */
     communityDiagnostics: adminProcedure.query(() => adminCall(() => listCommunityDiagnostics())),
+    /** Supplied source import (docs/builder-deals-supplied-import.md): builders that take imports, their communities and latest import times. */
+    suppliedImports: adminProcedure.query(async () => (await import("./dealsSuppliedStore")).suppliedImportOverview()),
+    /** A new import key for the builder (replaces any earlier one). The plaintext is in this response only; the database keeps its hash. */
+    generateImportKey: adminProcedure.input(z.object({ builder: z.string().trim().min(1).max(80) })).mutation(async ({ input }) => {
+      if (!officialHostFor(input.builder)) throw new TRPCError({ code: "BAD_REQUEST", message: "Import keys are only for builders with an official site." });
+      return (await import("./dealsSuppliedStore")).generateSuppliedImportKey(input.builder);
+    }),
+    /** Removes the builder's key: imports are refused and its communities are read from the builder's site again. */
+    revokeImportKey: adminProcedure.input(z.object({ builder: z.string().trim().min(1).max(80), confirm: z.literal(true) })).mutation(async ({ input }) => (await import("./dealsSuppliedStore")).revokeSuppliedImportKey(input.builder)),
     /** Builder choices for the add-community form. Served only to admins so no builder name ever ships in the public bundle. */
     builders: adminProcedure.query(() => [
       ...(Object.keys(OFFICIAL_BUILDER_HOSTS) as Array<keyof typeof OFFICIAL_BUILDER_HOSTS>).map((id) => ({ id, label: id, host: OFFICIAL_BUILDER_HOSTS[id], manual: false as const })),

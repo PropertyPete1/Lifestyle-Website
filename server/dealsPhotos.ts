@@ -16,12 +16,41 @@ const MAX_ORIGINAL_EDGE = 1_600;
 const MIN_MASTER_EDGE = 16;
 const MIN_OCR_WORD_CONFIDENCE = 70;
 const MAX_PROCESSING_ATTEMPTS = 5;
-const PROCESSING_LEASE_MS = 15 * 60_000;
+/**
+ * A claimed row whose run died (instance recycled, request cut off) is put back
+ * after this long. One photo takes seconds and at most about two minutes (20 s
+ * download cap plus two 30 s OCR deadlines), so ten minutes never steals a live claim.
+ */
+export const PROCESSING_LEASE_MS = 10 * 60_000;
 /** Spec step 5: only text inside the outer 20 percent of the height is ever cropped away. */
 const OUTER_BAND_FRACTION = 0.2;
 /** A region crop must leave this share of the height; otherwise the region is covered instead. */
 const MIN_REMAINING_HEIGHT_FRACTION = 0.4;
-const PHOTO_PROCESSING_CONCURRENCY = 2;
+/**
+ * Photos in flight per drain. OCR runs on one worker (serialized), so a second
+ * lane overlaps download, sharp work and storage writes with it; more lanes
+ * would mostly add memory and libuv threadpool pressure on the web instance.
+ */
+export const PHOTO_PROCESSING_CONCURRENCY = 2;
+/** At most this many downloads from one builder image host at a time, whatever the lane count. */
+const HOST_DOWNLOAD_CONCURRENCY = 2;
+/**
+ * Cron drains stop starting photos after this long; photos in flight then
+ * finish (seconds), so one call stays well under five minutes.
+ */
+export const PHOTO_DRAIN_BUDGET_MS = 210_000;
+/** Candidates read per queue refill (priority order). */
+const PHOTO_DRAIN_BATCH = 40;
+/** Same-source rows queued right behind a candidate per refill, so their work is reused while it is still in memory. */
+const PHOTO_SIBLINGS_PER_REFILL = 200;
+/**
+ * libwebp effort for the stored original and master. Effort trades CPU for a
+ * few percent of file size at the same quality setting; these are private
+ * intermediates (every lead render is re-encoded), so the cheaper setting
+ * is used (scripts/bench-deal-photos.mts: the normalize and master steps take
+ * about 20 percent less time than at effort 4).
+ */
+const STORED_WEBP_EFFORT = 2;
 const RENDER_CONCURRENCY = 3;
 const RENDER_MEMORY_ENTRIES = 50;
 /** Parked queue state: the builder is enabled for removal but has no saved region yet. */
@@ -580,7 +609,7 @@ export async function normalizeDealPhotoOriginal(original: Buffer): Promise<Buff
     return await sharp(original, { limitInputPixels: MAX_INPUT_PIXELS, animated: false })
       .rotate()
       .resize({ width: MAX_ORIGINAL_EDGE, height: MAX_ORIGINAL_EDGE, fit: "inside", withoutEnlargement: true })
-      .webp({ quality: 90, effort: 4, smartSubsample: true })
+      .webp({ quality: 90, effort: STORED_WEBP_EFFORT, smartSubsample: true })
       .toBuffer();
   } catch {
     throw new PhotoProcessingError("invalid_image");
@@ -673,7 +702,7 @@ export async function makeDealPhotoMaster(normalizedOriginal: Buffer, options: {
     if (!Number.isInteger(bottomCrop) || bottomCrop >= image.height - MIN_MASTER_EDGE) throw new PhotoProcessingError("invalid_crop");
     image = await extractRaw(image, { left: 0, top: 0, width: image.width, height: image.height - bottomCrop });
   }
-  const data = await fromRaw(image).webp({ quality: 88, effort: 4, smartSubsample: true }).toBuffer();
+  const data = await fromRaw(image).webp({ quality: 88, effort: STORED_WEBP_EFFORT, smartSubsample: true }).toBuffer();
   return { data, width: image.width, height: image.height, regionAction };
 }
 
@@ -697,7 +726,96 @@ export function outerBandForMatches(matches: OcrMatch[], height: number): "top" 
 export async function cropOuterBand(master: DealPhotoMaster, band: "top" | "bottom"): Promise<DealPhotoMaster> {
   const bandHeight = Math.ceil(master.height * OUTER_BAND_FRACTION);
   const image = await extractRaw(await decodeRaw(master.data), { left: 0, top: band === "top" ? bandHeight : 0, width: master.width, height: master.height - bandHeight });
-  return { data: await fromRaw(image).webp({ quality: 88, effort: 4, smartSubsample: true }).toBuffer(), width: image.width, height: image.height, regionAction: master.regionAction };
+  return { data: await fromRaw(image).webp({ quality: 88, effort: STORED_WEBP_EFFORT, smartSubsample: true }).toBuffer(), width: image.width, height: image.height, regionAction: master.regionAction };
+}
+
+type PhotoDb = NonNullable<Awaited<ReturnType<typeof getDb>>>;
+
+/**
+ * Least-recently-used map of in-flight or finished work for one drain. A
+ * second caller for a key awaits the first caller's promise instead of
+ * repeating the work; a rejected promise is dropped so a later caller retries.
+ */
+export class SingleFlightCache<V> {
+  private readonly entries: LruCache<Promise<V>>;
+  constructor(maxEntries: number) {
+    this.entries = new LruCache<Promise<V>>(maxEntries);
+  }
+  async get(key: string, work: () => Promise<V>): Promise<{ value: V; reused: boolean }> {
+    const existing = this.entries.get(key);
+    if (existing) return { value: await existing, reused: true };
+    const pending = work();
+    this.entries.set(key, pending);
+    try {
+      return { value: await pending, reused: false };
+    } catch (error) {
+      if (this.entries.get(key) === pending) this.entries.delete(key);
+      throw error;
+    }
+  }
+  /** A value already in hand (e.g. bytes read for another row), for later callers. */
+  set(key: string, value: V) { this.entries.set(key, Promise.resolve(value)); }
+  clear() { this.entries.clear(); }
+  get size() { return this.entries.size; }
+}
+
+type ReusableOriginal = { bytes: Buffer; version: string; donor: boolean };
+export type DealPhotoReuseCounts = { originals: number; masters: number; ocr: number };
+/**
+ * Work shared by the photos of one drain (many homes of one plan use the same
+ * gallery image). Only pure, deterministic steps are shared, and only inside
+ * one builder: the source download plus normalization (keyed by source URL),
+ * the master (keyed by original bytes, the builder's region and the row's
+ * bottom crop) and the OCR words (keyed by the exact master bytes). Each row
+ * still applies its own builder settings and its own hide terms (its address,
+ * house number, plan and community names) to those words, writes its own
+ * private objects, and is published or hidden on its own result.
+ */
+export type DealPhotoRunContext = {
+  originals: SingleFlightCache<ReusableOriginal>;
+  originalsByVersion: LruCache<Buffer>;
+  masters: SingleFlightCache<DealPhotoMaster>;
+  ocr: SingleFlightCache<OcrWord[]>;
+  /** A stored original of the same builder and source, from an earlier run: read instead of downloaded again. */
+  donors: Map<string, { storageKey: string; version: string }>;
+  reused: DealPhotoReuseCounts;
+};
+
+/** Small bounds: a handful of ~0.5 MB WebP buffers, so a drain's caches stay in the low megabytes. */
+export function createDealPhotoRunContext(): DealPhotoRunContext {
+  return {
+    originals: new SingleFlightCache<ReusableOriginal>(6),
+    originalsByVersion: new LruCache<Buffer>(6),
+    masters: new SingleFlightCache<DealPhotoMaster>(8),
+    ocr: new SingleFlightCache<OcrWord[]>(64),
+    donors: new Map(),
+    reused: { originals: 0, masters: 0, ocr: 0 },
+  };
+}
+
+/** Every reuse key starts with the builder, so nothing is ever shared across builders. */
+const reuseKey = (builder: string, ...parts: Array<string | number>) => [builderKey(builder), ...parts].join("\u0000");
+/** The source identity used for reuse; the same URL always gives the same key. */
+export const dealPhotoSourceKey = (builder: string, sourceUrl: string) => reuseKey(builder, "source", digest(sourceUrl));
+
+async function reuse<V>(ctx: DealPhotoRunContext | undefined, cache: (ctx: DealPhotoRunContext) => SingleFlightCache<V>, kind: keyof DealPhotoReuseCounts, key: string, work: () => Promise<V>): Promise<V> {
+  if (!ctx) return work();
+  const { value, reused } = await cache(ctx).get(key, work);
+  if (reused) ctx.reused[kind]++;
+  return value;
+}
+
+const hostLimiters = new Map<string, ReturnType<typeof createLimiter>>();
+/** Politeness: at most HOST_DOWNLOAD_CONCURRENCY downloads per builder image host in this process. */
+async function downloadPolitely(raw: string): Promise<Buffer> {
+  let host = "";
+  try { host = new URL(raw).hostname.toLowerCase(); } catch { /* downloadDealPhoto rejects it below */ }
+  let limiter = hostLimiters.get(host);
+  if (!limiter) {
+    limiter = createLimiter(HOST_DOWNLOAD_CONCURRENCY);
+    hostLimiters.set(host, limiter);
+  }
+  return limiter(() => downloadDealPhoto(raw));
 }
 
 async function claimDealPhoto(photoId: number) {
@@ -733,7 +851,17 @@ async function claimDealPhoto(photoId: number) {
   };
 }
 
-async function recordPhotoFailure(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, photoId: number, attempt: number, code: PhotoProcessingErrorCode) {
+/**
+ * Every write of a claimed row is fenced on the claim: still `processing` with
+ * the attempt count this claim set. If the lease expired and another run
+ * reclaimed the row (the count went up), or an admin requeued it (pending,
+ * count 0), this run's late result is dropped instead of overwriting theirs.
+ */
+export function dealPhotoLeaseWhere(photoId: number, attempts: number) {
+  return and(eq(dealPhotos.id, photoId), eq(dealPhotos.processingState, "processing"), eq(dealPhotos.processingAttempts, attempts));
+}
+
+async function recordPhotoFailure(db: PhotoDb, photoId: number, attempt: number, lease: ReturnType<typeof dealPhotoLeaseWhere>, code: PhotoProcessingErrorCode) {
   const retry = attempt < MAX_PROCESSING_ATTEMPTS && code !== "unapproved_source" && code !== "invalid_crop";
   await db.update(dealPhotos).set({
     automaticHidden: true,
@@ -742,7 +870,7 @@ async function recordPhotoFailure(db: NonNullable<Awaited<ReturnType<typeof getD
     processingStartedAt: null,
     lastProcessingError: code,
     ocrMatches: JSON.stringify([{ kind: "processing_error", code }]),
-  }).where(eq(dealPhotos.id, photoId));
+  }).where(lease);
   return retry;
 }
 
@@ -757,13 +885,25 @@ async function putPrivateObject(key: string, data: Buffer) {
 /**
  * Step 1 source of bytes. A stored original (admin upload, or any earlier run)
  * is reused and verified by digest, so reprocessing never depends on the
- * builder's CDN still serving the file; only a first import downloads.
+ * builder's CDN still serving the file; only a first import downloads. Within
+ * a drain, a row whose stored version is already in memory skips the read, and
+ * a first import of a source another row of the same builder already stored
+ * (or is downloading right now) reads or awaits that copy instead.
  */
-async function loadDealPhotoOriginal(photo: { sourceUrl: string; originalStorageKey: string | null; originalVersion: string | null }): Promise<{ bytes: Buffer; fromStorage: boolean }> {
+async function loadDealPhotoOriginal(photo: { sourceUrl: string; originalStorageKey: string | null; originalVersion: string | null }, builder: string, ctx?: DealPhotoRunContext): Promise<{ bytes: Buffer; fromStorage: boolean }> {
   if (photo.originalStorageKey && photo.originalVersion) {
+    const versionKey = reuseKey(builder, "version", photo.originalVersion);
+    const known = ctx?.originalsByVersion.get(versionKey);
+    if (ctx && known) {
+      ctx.reused.originals++;
+      return { bytes: known, fromStorage: true };
+    }
     try {
       const stored = await storageReadPrivate(photo.originalStorageKey);
-      if (digest(stored.data) === photo.originalVersion) return { bytes: stored.data, fromStorage: true };
+      if (digest(stored.data) === photo.originalVersion) {
+        ctx?.originalsByVersion.set(versionKey, stored.data);
+        return { bytes: stored.data, fromStorage: true };
+      }
     } catch {
       // A transient private-store failure falls through to a fresh download
       // when the source is remote; an upload has no other copy.
@@ -772,7 +912,25 @@ async function loadDealPhotoOriginal(photo: { sourceUrl: string; originalStorage
   } else if (isUploadSource(photo.sourceUrl)) {
     throw new PhotoProcessingError("source_unavailable");
   }
-  return { bytes: await normalizeDealPhotoOriginal(await downloadDealPhoto(photo.sourceUrl)), fromStorage: false };
+  const fetchNormalized = async () => normalizeDealPhotoOriginal(await downloadPolitely(photo.sourceUrl));
+  if (!ctx) return { bytes: await fetchNormalized(), fromStorage: false };
+  const sourceKey = dealPhotoSourceKey(builder, photo.sourceUrl);
+  const { value, reused } = await ctx.originals.get(sourceKey, async (): Promise<ReusableOriginal> => {
+    const donor = ctx.donors.get(sourceKey);
+    if (donor) {
+      try {
+        const stored = await storageReadPrivate(donor.storageKey);
+        if (digest(stored.data) === donor.version) return { bytes: stored.data, version: donor.version, donor: true };
+      } catch {
+        // The donor copy is gone or unreadable: download as a first import would.
+      }
+    }
+    const bytes = await fetchNormalized();
+    return { bytes, version: digest(bytes), donor: false };
+  });
+  if (reused || value.donor) ctx.reused.originals++;
+  ctx.originalsByVersion.set(reuseKey(builder, "version", value.version), value.bytes);
+  return { bytes: value.bytes, fromStorage: false };
 }
 
 export type DealPhotoProcessResult = {
@@ -786,48 +944,62 @@ export type DealPhotoProcessResult = {
   regionAction?: DealPhotoMaster["regionAction"];
   retryScheduled?: boolean;
   skipped?: boolean;
+  /** The claim expired or was taken back while this run worked; nothing was written. */
+  leaseLost?: boolean;
 };
+
+const regionReuseKey = (region: PhotoRegion | null) => region ? `${region.x},${region.y},${region.width},${region.height}` : "none";
 
 /**
  * Claims and processes one durable queue entry. No source error, signed URL, or
  * remote response is propagated to a browser or persisted as an admin message.
  * Steps 1 to 6 of the spec pipeline run here; an OCR hide still stores the
- * original and master so admin can preview, crop, and recover it.
+ * original and master so admin can preview, crop, and recover it. `ctx` (a
+ * drain's shared work, see DealPhotoRunContext) is optional.
  */
-export async function processDealPhoto(photoId: number): Promise<DealPhotoProcessResult> {
+export async function processDealPhoto(photoId: number, ctx?: DealPhotoRunContext): Promise<DealPhotoProcessResult> {
   const claimed = await claimDealPhoto(photoId);
   if (!claimed) return { ok: false, skipped: true };
   const { db, row } = claimed;
   if (!row) return { ok: false, skipped: true };
   const attempt = Math.max(1, row.photo.processingAttempts);
+  const lease = dealPhotoLeaseWhere(photoId, row.photo.processingAttempts);
+  const builder = row.community.builder;
 
   try {
-    const original = await loadDealPhotoOriginal(row.photo);
-    const originalVersion = digest(original.bytes);
+    // Nullable so the original's bytes can be let go once the master exists.
+    let { bytes: original, fromStorage }: { bytes: Buffer | null; fromStorage: boolean } = await loadDealPhotoOriginal(row.photo, builder, ctx);
+    const originalVersion = digest(original);
     // Stable keys overwrite obsolete private bytes on reprocess, so retries and
     // crop updates never create a new orphan object.
     let originalStorageKey = row.photo.originalStorageKey;
-    if (!original.fromStorage || !originalStorageKey) {
-      originalStorageKey = (await putPrivateObject(`${PRIVATE_PREFIX}originals/${photoId}.webp`, original.bytes)).key;
+    if (!fromStorage || !originalStorageKey) {
+      originalStorageKey = (await putPrivateObject(`${PRIVATE_PREFIX}originals/${photoId}.webp`, original)).key;
       // Persist the original before the region check so the admin sample
       // picker can show a builder's photos while they wait for a region.
-      await db.update(dealPhotos).set({ originalStorageKey, originalVersion }).where(eq(dealPhotos.id, photoId));
+      await db.update(dealPhotos).set({ originalStorageKey, originalVersion }).where(lease);
     }
 
-    const settings = await getBuilderPhotoSettings(row.community.builder);
+    const settings = await getBuilderPhotoSettings(builder);
     if (settings.enabled && !settings.region) {
-      await db.update(dealPhotos).set({
+      const parked = await db.update(dealPhotos).set({
         automaticHidden: true,
         processingState: "pending",
         processingAttempts: attempt - 1,
         nextProcessingAttemptAt: null,
         processingStartedAt: null,
         lastProcessingError: AWAITING_REGION,
-      }).where(eq(dealPhotos.id, photoId));
+      }).where(lease);
+      if (!wasUpdated(parked)) return { ok: false, skipped: true, leaseLost: true };
       return { ok: false, awaitingRegion: true };
     }
 
-    let master = await makeDealPhotoMaster(original.bytes, { region: settings.enabled ? settings.region : null, bottomCrop: row.photo.bottomCrop });
+    const region = settings.enabled ? settings.region : null;
+    const bottomCrop = row.photo.bottomCrop;
+    const masterOf = (bytes: Buffer) => reuse(ctx, (c) => c.masters, "masters", reuseKey(builder, "master", originalVersion, regionReuseKey(region), bottomCrop), () => makeDealPhotoMaster(bytes, { region, bottomCrop }));
+    let master = await masterOf(original);
+    // The original's bytes are not needed past this point; let them go before OCR.
+    original = null;
     const configuredTerms = Array.from(new Set([
       row.community.builder,
       row.community.privateName,
@@ -836,21 +1008,24 @@ export async function processDealPhoto(photoId: number): Promise<DealPhotoProces
       ...safeScrubList(row.community.scrubList),
     ].filter((term): term is string => Boolean(term.trim()))));
     const exactTerms = [dealPhotoHouseNumber(row.home.privateAddress)].filter((term): term is string => Boolean(term));
-    let matches = findDealPhotoHideMatches(await recognizeDealPhotoWords(master.data), configuredTerms, settings.keywords, exactTerms);
+    // OCR output depends only on the exact bytes; the hide decision below is always this row's own.
+    const wordsOf = (bytes: Buffer) => reuse(ctx, (c) => c.ocr, "ocr", reuseKey(builder, "ocr", digest(bytes)), () => recognizeDealPhotoWords(bytes));
+    let matches = findDealPhotoHideMatches(await wordsOf(master.data), configuredTerms, settings.keywords, exactTerms);
     let bandCropped: "top" | "bottom" | undefined;
     if (matches.length && settings.enabled) {
       const band = outerBandForMatches(matches, master.height);
       if (band) {
-        master = await cropOuterBand(master, band);
+        const uncropped = master;
+        master = await reuse(ctx, (c) => c.masters, "masters", reuseKey(builder, "band", band, digest(uncropped.data)), () => cropOuterBand(uncropped, band));
         bandCropped = band;
-        matches = findDealPhotoHideMatches(await recognizeDealPhotoWords(master.data), configuredTerms, settings.keywords, exactTerms);
+        matches = findDealPhotoHideMatches(await wordsOf(master.data), configuredTerms, settings.keywords, exactTerms);
       }
     }
 
     const version = digest(master.data);
     const processedStored = await putPrivateObject(`${PRIVATE_PREFIX}masters/${photoId}.webp`, master.data);
     const hidden = matches.length > 0;
-    await db.update(dealPhotos).set({
+    const written = await db.update(dealPhotos).set({
       // sourceHash remains the source-URL dedupe key used by dealsSync. The
       // deterministic bytes are represented by originalVersion/version keys.
       originalStorageKey,
@@ -864,7 +1039,11 @@ export async function processDealPhoto(photoId: number): Promise<DealPhotoProces
       processingStartedAt: null,
       lastProcessingError: null,
       processedAt: new Date(),
-    }).where(eq(dealPhotos.id, photoId));
+    }).where(lease);
+    if (!wasUpdated(written)) {
+      console.warn(`[deals-photo] lease lost for photo ${photoId}; result dropped`);
+      return { ok: false, skipped: true, leaseLost: true };
+    }
     if (row.photo.processedVersion && row.photo.processedVersion !== version) {
       void pruneDealPhotoRendersForPhoto(photoId).catch((error) => console.warn(`[deals-photo] render prune failed for photo ${photoId}: ${error instanceof Error ? error.message : "unknown"}`));
     }
@@ -872,7 +1051,7 @@ export async function processDealPhoto(photoId: number): Promise<DealPhotoProces
   } catch (error) {
     const code = photoErrorCode(error);
     console.warn(`[deals-photo] processing ${code} for photo ${photoId}`);
-    const retryScheduled = await recordPhotoFailure(db, photoId, attempt, code).catch(() => false);
+    const retryScheduled = await recordPhotoFailure(db, photoId, attempt, lease, code).catch(() => false);
     return { ok: false, hidden: true, retryScheduled };
   }
 }
@@ -917,17 +1096,140 @@ export async function reprocessBuilderPhotos(builder: string): Promise<number> {
   return affectedRows(result);
 }
 
-export type DealPhotoDrainResult = { processed: number; hidden: number; awaitingRegion: number; retried: number; failed: number; skipped: number; coalesced?: boolean };
+export type DealPhotoDrainResult = {
+  processed: number;
+  hidden: number;
+  awaitingRegion: number;
+  retried: number;
+  failed: number;
+  skipped: number;
+  coalesced?: boolean;
+  /** Work taken from another row of the same builder and source instead of repeated. */
+  reused?: DealPhotoReuseCounts;
+  /** The drain stopped starting photos because its time budget ran out (more may be due). */
+  stoppedForTime?: boolean;
+  elapsedMs?: number;
+  /** Time spent waiting for a drain already running in this process to finish first. */
+  waitedMs?: number;
+};
 
-const photoLimiter = createLimiter(PHOTO_PROCESSING_CONCURRENCY);
+export type DealPhotoDrainOptions = {
+  /** Stop starting photos after this long (photos in flight finish). Default PHOTO_DRAIN_BUDGET_MS. */
+  budgetMs?: number;
+  /** Optional cap on photos started; a cron drain normally runs on its budget alone. */
+  maxPhotos?: number;
+  /** Lanes (photos in flight), 1 to 4. Default PHOTO_PROCESSING_CONCURRENCY. */
+  concurrency?: number;
+  /** Test seam for the budget. */
+  clock?: () => number;
+};
+
 let drainInFlight: Promise<DealPhotoDrainResult> | null = null;
 let drainRerunRequested = false;
 let failedRowsRecovered = false;
 /** Failures that no code change can fix are left alone by the boot-time recovery. */
 const PERMANENT_FAILURE_CODES: PhotoProcessingErrorCode[] = ["unapproved_source", "invalid_crop", "invalid_image", "image_too_large", "image_too_small"];
 
-async function drainDealPhotoQueue(limit: number): Promise<DealPhotoDrainResult> {
-  const result: DealPhotoDrainResult = { processed: 0, hidden: 0, awaitingRegion: 0, retried: 0, failed: 0, skipped: 0 };
+const emptyDrainResult = (): DealPhotoDrainResult => ({ processed: 0, hidden: 0, awaitingRegion: 0, retried: 0, failed: 0, skipped: 0 });
+
+function mergeDrainResults(a: DealPhotoDrainResult, b: DealPhotoDrainResult): DealPhotoDrainResult {
+  return {
+    processed: a.processed + b.processed, hidden: a.hidden + b.hidden, awaitingRegion: a.awaitingRegion + b.awaitingRegion,
+    retried: a.retried + b.retried, failed: a.failed + b.failed, skipped: a.skipped + b.skipped,
+    reused: { originals: (a.reused?.originals ?? 0) + (b.reused?.originals ?? 0), masters: (a.reused?.masters ?? 0) + (b.reused?.masters ?? 0), ocr: (a.reused?.ocr ?? 0) + (b.reused?.ocr ?? 0) },
+    stoppedForTime: Boolean(a.stoppedForTime || b.stoppedForTime),
+    elapsedMs: (a.elapsedMs ?? 0) + (b.elapsedMs ?? 0),
+  };
+}
+
+const dueNow = (now: Date) => and(eq(dealPhotos.processingState, "pending"), isNotNull(dealPhotos.nextProcessingAttemptAt), lte(dealPhotos.nextProcessingAttemptAt, now));
+const homeIsShown = sql`(${dealHomes.status} = 'available' AND ${dealCommunities.active} = 1 AND ${dealCommunities.paused} = 0)`;
+/** The home already shows at least one photo. Probes idx_deal_photos_home (home_id, processing_state). */
+const homeHasServedPhoto = sql`EXISTS (SELECT 1 FROM ${dealPhotos} AS served WHERE served.home_id = ${dealPhotos.homeId} AND served.processing_state = 'processed' AND served.automatic_hidden = 0 AND served.admin_hidden = 0)`;
+
+/**
+ * Queue order: photos of homes buyers can see first; among those, homes that
+ * show no photo yet; then gallery position (every home's cover before any
+ * home's second photo); then the cheapest homes (the ones the featured and
+ * best-deal lists lead with); then the oldest due row.
+ */
+export const DEAL_PHOTO_PRIORITY_ORDER = [
+  sql`CASE WHEN ${homeIsShown} THEN 0 ELSE 1 END`,
+  sql`CASE WHEN ${homeHasServedPhoto} THEN 1 ELSE 0 END`,
+  asc(dealPhotos.sortOrder),
+  sql`CASE WHEN ${dealHomes.price} IS NULL THEN 1 ELSE 0 END`,
+  asc(dealHomes.price),
+  asc(dealPhotos.nextProcessingAttemptAt),
+  asc(dealPhotos.id),
+];
+
+type QueueRow = { id: number; sourceUrl: string; sourceHash: string; builder: string | null };
+
+/**
+ * One refill of a drain's work queue: the next due rows in priority order,
+ * each followed by the due rows of the same builder and source (their work is
+ * shared through the run context while it is still in memory), plus the
+ * stored originals other rows of those sources already have.
+ */
+async function nextDrainBatch(db: PhotoDb, now: Date, limit: number, exclude: ReadonlySet<number>, ctx: DealPhotoRunContext): Promise<number[]> {
+  const excluded = Array.from(exclude);
+  const rows: QueueRow[] = await db.select({ id: dealPhotos.id, sourceUrl: dealPhotos.sourceUrl, sourceHash: dealPhotos.sourceHash, builder: dealCommunities.builder })
+    .from(dealPhotos)
+    .leftJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
+    .leftJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
+    .where(and(dueNow(now), excluded.length ? notInArray(dealPhotos.id, excluded) : undefined))
+    .orderBy(...DEAL_PHOTO_PRIORITY_ORDER)
+    .limit(limit);
+  const fresh = rows.filter((row) => !exclude.has(row.id));
+  const shareable = fresh.filter((row) => row.builder && typeof row.sourceUrl === "string" && !isUploadSource(row.sourceUrl) && row.sourceHash);
+  const queued = new Set(fresh.map((row) => row.id));
+  const siblingsBySource = new Map<string, number[]>();
+  if (shareable.length) {
+    const hashes = Array.from(new Set(shareable.map((row) => row.sourceHash)));
+    const [siblings, donors] = await Promise.all([
+      db.select({ id: dealPhotos.id, sourceUrl: dealPhotos.sourceUrl, sourceHash: dealPhotos.sourceHash, builder: dealCommunities.builder })
+        .from(dealPhotos)
+        .innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
+        .innerJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
+        .where(and(dueNow(now), inArray(dealPhotos.sourceHash, hashes), notInArray(dealPhotos.id, [...excluded, ...Array.from(queued)])))
+        .orderBy(asc(dealPhotos.id))
+        .limit(PHOTO_SIBLINGS_PER_REFILL),
+      db.select({ sourceUrl: dealPhotos.sourceUrl, originalStorageKey: dealPhotos.originalStorageKey, originalVersion: dealPhotos.originalVersion, builder: dealCommunities.builder })
+        .from(dealPhotos)
+        .innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
+        .innerJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
+        .where(and(inArray(dealPhotos.sourceHash, hashes), isNotNull(dealPhotos.originalStorageKey), isNotNull(dealPhotos.originalVersion)))
+        .limit(PHOTO_DRAIN_BATCH * 4),
+    ]);
+    for (const donor of donors) {
+      if (!donor.builder || !donor.originalStorageKey || !donor.originalVersion || isUploadSource(donor.sourceUrl)) continue;
+      const key = dealPhotoSourceKey(donor.builder, donor.sourceUrl);
+      if (!ctx.donors.has(key)) ctx.donors.set(key, { storageKey: donor.originalStorageKey, version: donor.originalVersion });
+    }
+    for (const sibling of siblings) {
+      if (!sibling.builder || queued.has(sibling.id) || exclude.has(sibling.id)) continue;
+      const key = dealPhotoSourceKey(sibling.builder, sibling.sourceUrl);
+      siblingsBySource.set(key, [...(siblingsBySource.get(key) ?? []), sibling.id]);
+      queued.add(sibling.id);
+    }
+  }
+  // Each source's rows run back to back (the batch's own and the siblings read
+  // above), at the position of its highest-priority row.
+  const groups = new Map<string, number[]>();
+  for (const row of fresh) {
+    const key = row.builder && typeof row.sourceUrl === "string" && !isUploadSource(row.sourceUrl) ? dealPhotoSourceKey(row.builder, row.sourceUrl) : `row:${row.id}`;
+    const group = groups.get(key);
+    if (group) group.push(row.id);
+    else groups.set(key, [row.id]);
+  }
+  const order: number[] = [];
+  for (const [key, ids] of Array.from(groups.entries())) order.push(...ids, ...(siblingsBySource.get(key) ?? []));
+  return order;
+}
+
+async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: number; clock: () => number; concurrency: number }): Promise<DealPhotoDrainResult> {
+  const startedAt = options.clock();
+  const result: DealPhotoDrainResult = { ...emptyDrainResult(), stoppedForTime: false };
   const db = await getDb();
   if (!db) return result;
   const now = new Date();
@@ -950,42 +1252,126 @@ async function drainDealPhotoQueue(limit: number): Promise<DealPhotoDrainResult>
       .where(and(eq(dealPhotos.processingState, "failed"), or(isNull(dealPhotos.lastProcessingError), notInArray(dealPhotos.lastProcessingError, PERMANENT_FAILURE_CODES))));
   }
 
-  const due = await db.select({ id: dealPhotos.id }).from(dealPhotos)
-    .where(and(eq(dealPhotos.processingState, "pending"), isNotNull(dealPhotos.nextProcessingAttemptAt), lte(dealPhotos.nextProcessingAttemptAt, now)))
-    .orderBy(asc(dealPhotos.nextProcessingAttemptAt), asc(dealPhotos.id))
-    .limit(Math.max(1, Math.min(50, Math.floor(limit))));
-  await Promise.all(due.map((photo) => photoLimiter(async () => {
-    const outcome = await processDealPhoto(photo.id).catch((): DealPhotoProcessResult => ({ ok: false, skipped: true }));
-    if (outcome.skipped) result.skipped++;
-    else if (outcome.awaitingRegion) result.awaitingRegion++;
-    else if (outcome.processed && outcome.hidden) result.hidden++;
-    else if (outcome.processed) result.processed++;
-    else if (outcome.retryScheduled) result.retried++;
-    else result.failed++;
-  })));
+  const ctx = createDealPhotoRunContext();
+  const queue: number[] = [];
+  const seen = new Set<number>();
+  let started = 0;
+  let exhausted = false;
+  let refilling: Promise<void> | null = null;
+  const refill = async () => {
+    const want = Math.max(1, Math.min(PHOTO_DRAIN_BATCH, options.maxPhotos - started));
+    const ids = await nextDrainBatch(db, new Date(), want, seen, ctx);
+    if (!ids.length) exhausted = true;
+    for (const id of ids) {
+      seen.add(id);
+      queue.push(id);
+    }
+  };
+  // Lanes pull ids one at a time, so a lane never idles at a batch boundary and
+  // nothing is claimed before a lane is free to work on it.
+  const next = async (): Promise<number | null> => {
+    for (;;) {
+      if (started >= options.maxPhotos) return null;
+      if (options.clock() >= options.deadline) {
+        if (queue.length || !exhausted) result.stoppedForTime = true;
+        return null;
+      }
+      const id = queue.shift();
+      if (id !== undefined) {
+        started++;
+        return id;
+      }
+      if (exhausted) return null;
+      refilling ??= refill().catch((error) => {
+        exhausted = true;
+        console.warn(`[deals-photo] queue read failed: ${error instanceof Error ? error.message : "unknown"}`);
+      }).finally(() => { refilling = null; });
+      await refilling;
+    }
+  };
+  const lane = async () => {
+    for (let id = await next(); id !== null; id = await next()) {
+      const outcome = await processDealPhoto(id, ctx).catch((): DealPhotoProcessResult => ({ ok: false, skipped: true }));
+      if (outcome.skipped) result.skipped++;
+      else if (outcome.awaitingRegion) result.awaitingRegion++;
+      else if (outcome.processed && outcome.hidden) result.hidden++;
+      else if (outcome.processed) result.processed++;
+      else if (outcome.retryScheduled) result.retried++;
+      else result.failed++;
+    }
+  };
+  try {
+    await Promise.all(Array.from({ length: options.concurrency }, lane));
+  } finally {
+    ctx.originals.clear();
+    ctx.originalsByVersion.clear();
+    ctx.masters.clear();
+    ctx.ocr.clear();
+  }
+  result.reused = { ...ctx.reused };
+  result.elapsedMs = options.clock() - startedAt;
   return result;
 }
 
+async function waitAtMost(promise: Promise<unknown>, milliseconds: number) {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([promise.catch(() => undefined), new Promise<void>((resolve) => { timer = setTimeout(resolve, Math.max(0, milliseconds)); })]);
+  } finally { if (timer) clearTimeout(timer); }
+}
+
 /**
- * Drains due retries, abandoned leases, and new imports with at most two photos
- * in flight. One drain runs per process; an overlapping call (cron every few
- * minutes plus a sync kick) returns immediately and schedules one more pass so
- * rows inserted during the drain are still picked up promptly.
+ * Drains due photos (new imports, due retries, expired leases) in priority
+ * order with PHOTO_PROCESSING_CONCURRENCY photos in flight. One drain runs per
+ * process.
+ *
+ * - `processPendingDealPhotos(n)` (sync and admin kicks): at most n photos (50
+ *   max). An overlapping kick returns at once and asks the running drain for
+ *   one more pass, so rows inserted meanwhile are picked up promptly.
+ * - `processPendingDealPhotos({ budgetMs })` (the cron): keeps starting photos
+ *   until the budget is spent, then lets the ones in flight finish. If another
+ *   drain is running in this process it waits for it first (two drains side by
+ *   side would double the memory), within the same budget.
+ *
+ * Across processes, every row is claimed atomically when its lane starts it
+ * and every write is fenced on that claim, so overlapping drains on different
+ * instances never process a row twice; a claim left by a dead instance is put
+ * back after PROCESSING_LEASE_MS.
  */
-export async function processPendingDealPhotos(limit = 20): Promise<DealPhotoDrainResult> {
-  if (drainInFlight) {
+export async function processPendingDealPhotos(input: number | DealPhotoDrainOptions = 20): Promise<DealPhotoDrainResult> {
+  const budgeted = typeof input !== "number";
+  const options: DealPhotoDrainOptions = budgeted ? input : { maxPhotos: input };
+  const clock = options.clock ?? Date.now;
+  const begin = clock();
+  const deadline = begin + Math.max(0, options.budgetMs ?? PHOTO_DRAIN_BUDGET_MS);
+  const maxPhotos = budgeted
+    ? Math.max(1, Math.floor(options.maxPhotos ?? Number.MAX_SAFE_INTEGER))
+    : Math.max(1, Math.min(50, Math.floor(options.maxPhotos ?? 20)));
+  const concurrency = Math.max(1, Math.min(4, Math.floor(options.concurrency ?? PHOTO_PROCESSING_CONCURRENCY)));
+  if (!budgeted && drainInFlight) {
     drainRerunRequested = true;
-    return { processed: 0, hidden: 0, awaitingRegion: 0, retried: 0, failed: 0, skipped: 0, coalesced: true };
+    return { ...emptyDrainResult(), coalesced: true };
+  }
+  let waitedMs: number | undefined;
+  while (drainInFlight) {
+    const remaining = deadline - clock();
+    if (remaining <= 0) return { ...emptyDrainResult(), coalesced: true, waitedMs: clock() - begin };
+    await waitAtMost(drainInFlight, remaining);
+    waitedMs = clock() - begin;
   }
   const run = (async () => {
-    let total = await drainDealPhotoQueue(limit);
-    for (let reruns = 0; drainRerunRequested && reruns < 3; reruns++) {
+    let total = await drainDealPhotoQueue({ maxPhotos, deadline, clock, concurrency });
+    // A budgeted drain refills until its budget is spent, so it already picks up rows a kick asked for.
+    for (let reruns = 0; !budgeted && drainRerunRequested && reruns < 3; reruns++) {
       drainRerunRequested = false;
-      const again = await drainDealPhotoQueue(limit);
-      total = { processed: total.processed + again.processed, hidden: total.hidden + again.hidden, awaitingRegion: total.awaitingRegion + again.awaitingRegion, retried: total.retried + again.retried, failed: total.failed + again.failed, skipped: total.skipped + again.skipped };
+      total = mergeDrainResults(total, await drainDealPhotoQueue({ maxPhotos, deadline, clock, concurrency }));
     }
     drainRerunRequested = false;
-    return total;
+    if (budgeted) {
+      // One line per cron drain, so the host logs show the real throughput.
+      console.log(`[deals-photo] drain: ${total.processed} published, ${total.hidden} hidden, ${total.retried} retry, ${total.failed} failed, ${total.skipped} skipped, ${total.awaitingRegion} awaiting region in ${Math.round((total.elapsedMs ?? 0) / 1000)} s; reused originals ${total.reused?.originals ?? 0}, masters ${total.reused?.masters ?? 0}, OCR ${total.reused?.ocr ?? 0}${total.stoppedForTime ? "; budget spent, more due" : ""}`);
+    }
+    return waitedMs === undefined ? total : { ...total, waitedMs };
   })();
   drainInFlight = run.finally(() => { drainInFlight = null; });
   return drainInFlight;

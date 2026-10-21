@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   runPendingDealsFubJobs: vi.fn(),
   enqueueDailyActivityNote: vi.fn(),
   processPendingDealPhotos: vi.fn(),
+  catalogBatchPending: vi.fn(),
 }));
 
 vi.mock("./_core/sdk", () => ({
@@ -37,6 +38,8 @@ vi.mock("./dealsSync", () => ({
     mocks.refreshDueCommunitiesBatch(...args),
   revalidateDealIncentives: (...args: unknown[]) =>
     mocks.revalidateDealIncentives(...args),
+  catalogBatchPending: (...args: unknown[]) =>
+    mocks.catalogBatchPending(...args),
 }));
 vi.mock("./dealsTrec", () => ({
   importTrecLicenses: (...args: unknown[]) => mocks.importTrecLicenses(...args),
@@ -63,6 +66,7 @@ vi.mock("./dealsPhotos", () => ({
   processPendingDealPhotos: (...args: unknown[]) =>
     mocks.processPendingDealPhotos(...args),
   pruneDealPhotoRenders: () => Promise.resolve({ scanned: 0, expiredRows: 0, staleRows: 0, rowsDeleted: 0, objectsDeleted: 0, objectsFailed: 0 }),
+  PHOTO_DRAIN_BUDGET_MS: 210_000,
 }));
 
 import { dealJobRuns } from "../drizzle/schema";
@@ -129,15 +133,39 @@ describe("Builder Deals scheduled handler helpers", () => {
     ).toBe(true);
   });
 
-  it("drains the photo queue on every 10-minute callback without a daily job record", async () => {
+  it("drains the photo queue for a 3.5-minute budget per callback without a daily job record", async () => {
     mocks.processPendingDealPhotos.mockResolvedValue({ processed: 2, retried: 1, skipped: 0 });
+    mocks.chicagoClock.mockReturnValue({ hour: 6, minute: 5, weekday: "Mon" });
     const { response, json } = responseRecorder();
 
     await scheduledDealsHandler({ body: { job: "photos" } } as Request, response);
 
-    expect(mocks.processPendingDealPhotos).toHaveBeenCalledWith(40);
+    expect(mocks.processPendingDealPhotos).toHaveBeenCalledWith({ budgetMs: 210_000 });
     expect(json).toHaveBeenCalledWith({ ok: true, result: { processed: 2, retried: 1, skipped: 0 } });
     expect(mocks.getDb).not.toHaveBeenCalled();
+    // Minute 5-9 of each ten is the photo job's own slot: the catalog is not even asked.
+    expect(mocks.catalogBatchPending).not.toHaveBeenCalled();
+  });
+
+  it("steps aside in the catalog's slot only while the catalog has work, and always runs outside catalog hours", async () => {
+    mocks.processPendingDealPhotos.mockResolvedValue({ processed: 1 });
+    for (const [hour, minute, pending, runs] of [
+      [6, 0, true, false], // catalog slot, builders still due: yield
+      [6, 3, "error", false], // the check failed: yield to be safe
+      [6, 0, false, true], // catalog slot, nothing due today: use it
+      [23, 0, true, true], // outside 4 AM-10 PM there is no catalog run
+      [13, 15, true, true], // the photo job's own slot
+    ] as const) {
+      mocks.processPendingDealPhotos.mockClear();
+      mocks.catalogBatchPending.mockReset();
+      if (pending === "error") mocks.catalogBatchPending.mockRejectedValue(new Error("db down"));
+      else mocks.catalogBatchPending.mockResolvedValue(pending);
+      mocks.chicagoClock.mockReturnValue({ hour, minute, weekday: "Tue" });
+      const { response, json } = responseRecorder();
+      await scheduledDealsHandler({ body: { job: "photos" } } as Request, response);
+      expect(mocks.processPendingDealPhotos).toHaveBeenCalledTimes(runs ? 1 : 0);
+      expect(json).toHaveBeenCalledWith({ ok: true, result: runs ? { processed: 1 } : { skipped: "catalog_slot" } });
+    }
   });
 
   it("enqueues the daily activity note only inside the 1:30 AM Chicago window", async () => {

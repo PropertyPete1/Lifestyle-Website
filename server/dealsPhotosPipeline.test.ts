@@ -327,7 +327,8 @@ describe("processDealPhoto: download wiring and queue state machine", () => {
     const batches: number[][] = [[1, 2, 3, 4, 5], [], []];
     fake.onSelect(dealPhotos, (op: FakeOp) => {
       const fields = op.fields as Record<string, unknown> | undefined;
-      if (fields && "photo" in fields) return [photoRow({ photo: { id: renderWhere(op.where).params[0] as number } })];
+      // Distinct sources: rows sharing one source URL would share a single download (see dealsPhotosThroughput.test.ts).
+      if (fields && "photo" in fields) { const id = renderWhere(op.where).params[0] as number; return [photoRow({ photo: { id, sourceUrl: `https://dam.mihomes.com/gallery/${id}.jpg` } })]; }
       return (batches.shift() ?? []).map((id) => ({ id }));
     });
     fake.onSelect(dealSettings, [settingsRow("Chesmar", { enabled: false, region: null })]);

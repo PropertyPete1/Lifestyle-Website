@@ -199,10 +199,10 @@ async function upsertPhotos(homeId: number, gallery: Array<{ sourceUrl: string }
     });
     void result;
   }
-  // The DB rows are the source of truth. One guarded drain kick (max 2 photos in
-  // flight) processes the new rows; a restart cannot lose them because the 10-minute
-  // photo job and the sync drains pick up due pending records and expired leases.
-  void processPendingDealPhotos(20).catch((error) => console.warn("[deals-photo] queue drain failed", error));
+  // The DB rows are the source of truth: the photo cron (every 5 minutes, in its
+  // own request) processes them. No drain is kicked here, because this runs
+  // inside the catalog request and image work beside the page reads is what
+  // made the host answer 503.
 }
 
 /** Private, admin-only summary of what one refresh changed. */
@@ -931,6 +931,21 @@ export async function buildersInFlight(now = new Date()): Promise<string[]> {
   const rows = await db.select({ jobName: dealJobRuns.jobName }).from(dealJobRuns)
     .where(and(eq(dealJobRuns.chicagoDay, BUILDER_LEASE_DAY), eq(dealJobRuns.status, "running"), gte(dealJobRuns.startedAt, new Date(now.getTime() - BUILDER_LEASE_STALE_MS))));
   return rows.flatMap((row) => row.jobName.startsWith(BUILDER_LEASE_PREFIX) ? [row.jobName.slice(BUILDER_LEASE_PREFIX.length)] : []);
+}
+
+/**
+ * True while the catalog cron still has work in this slot: a community is due
+ * and checkable now, or a builder is being read under a live lease. The photo
+ * cron yields the catalog's slot only then, so the two never run their heavy
+ * work side by side.
+ */
+export async function catalogBatchPending(now = new Date()): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  if ((await buildersInFlight(now)).length) return true;
+  const { catalogRefreshDays } = await getDealSettings();
+  const rows = await db.select().from(dealCommunities).where(and(or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
+  return dueCandidates(rows, now, catalogRefreshDays).length > 0;
 }
 
 /** What one community's check found, written as its own digest entry the moment it finishes, so a restart loses nothing. */

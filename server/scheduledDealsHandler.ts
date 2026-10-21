@@ -3,11 +3,11 @@ import { and, eq } from "drizzle-orm";
 import { dealJobRuns } from "../drizzle/schema";
 import { sdk } from "./_core/sdk";
 import { getDb } from "./db";
-import { refreshDueCommunitiesBatch, revalidateDealIncentives } from "./dealsSync";
+import { catalogBatchPending, refreshDueCommunitiesBatch, revalidateDealIncentives } from "./dealsSync";
 import { importTrecLicenses } from "./dealsTrec";
 import { cleanupDealsTestRecords, runBuilderDealsHealthJob, sendBuilderDealsMondayReport, syncKnownAgentsFromFub, syncTeamAllowlistFromFub } from "./dealsMaintenance";
 import { enqueueDailyActivityNote, runPendingDealsFubJobs } from "./dealsFubJobs";
-import { processPendingDealPhotos, pruneDealPhotoRenders } from "./dealsPhotos";
+import { PHOTO_DRAIN_BUDGET_MS, processPendingDealPhotos, pruneDealPhotoRenders } from "./dealsPhotos";
 
 import { chicagoClock, chicagoDay } from "./dealsService";
 /** Pure Chicago wall-clock predicate used by the DST candidate cron callbacks. */
@@ -61,11 +61,19 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
     if (job === "team") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-team-sync", syncTeamAllowlistFromFub) });
     if (job === "agents") return res.json({ ok: true, result: await whenDue(dueAt(1, 45), "builder-deals-known-agent-sync", syncKnownAgentsFromFub) });
     if (job === "fub") return res.json({ ok: true, result: await runPendingDealsFubJobs() });
-    // Every 10 minutes: due pending photos and abandoned processing leases. Not a
-    // once-per-day job, so it is not recorded in deal_job_runs. 40 per call (about
-    // 2.6 s each, two at a time, so under two minutes): at launch the research list
-    // queued about 6,000 photos, which 10 per call would have taken four days to serve.
-    if (job === "photos") return res.json({ ok: true, result: await processPendingDealPhotos(40) });
+    // Every 5 minutes: due pending photos and abandoned processing leases, in
+    // priority order, for up to PHOTO_DRAIN_BUDGET_MS (3.5 min) per call rather
+    // than a fixed count (40 per 10 minutes left a 30,000-photo backlog five days
+    // deep). Not a once-per-day job, so it is not recorded in deal_job_runs.
+    // The catalog runs at :00, :10, ... for up to 4 minutes: while it still has
+    // builders to read, the photo call in its slot (minute 0-4 of each ten) steps
+    // aside, so heavy image work and page reads never share the instance.
+    if (job === "photos") {
+      const { hour, minute } = chicagoClock();
+      const catalogSlot = hour >= CATALOG_FIRST_HOUR && hour < CATALOG_LAST_HOUR && minute % 10 < 5;
+      if (catalogSlot && await catalogBatchPending().catch(() => true)) return res.json({ ok: true, result: { skipped: "catalog_slot" } });
+      return res.json({ ok: true, result: await processPendingDealPhotos({ budgetMs: PHOTO_DRAIN_BUDGET_MS }) });
+    }
     // 1:30 AM Chicago: one FUB activity note per lead for the previous day's views and tour requests.
     if (job === "activity") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-activity-note", () => enqueueDailyActivityNote()) });
     if (job === "alerts") {

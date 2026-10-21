@@ -577,19 +577,21 @@ export const dealsRouter = router({
         // The token stays server-side: admin sees who sent what to whom and whether it was used, never a link to open.
         db.select({ id: dealClientLinks.id, agentTeamId: dealClientLinks.agentTeamId, clientName: dealClientLinks.clientName, clientPhoneE164: dealClientLinks.clientPhoneE164, note: dealClientLinks.note, leadId: dealClientLinks.leadId, verifiedAt: dealClientLinks.verifiedAt, openedAt: dealClientLinks.openedAt, openCount: dealClientLinks.openCount, expiresAt: dealClientLinks.expiresAt, revokedAt: dealClientLinks.revokedAt, createdAt: dealClientLinks.createdAt }).from(dealClientLinks).orderBy(desc(dealClientLinks.createdAt)).limit(100),
       ]);
-      const [{ builderDealsEmailStatus }, { trecImportSummary }] = await Promise.all([import("./dealsEmail"), import("./dealsTrec")]);
-      const [settings, trecSummary, daily, leadStats, blockStats] = await Promise.all([
+      const [{ builderDealsEmailStatus }, { trecImportSummary }, { builderDealsAdminStats }] = await Promise.all([import("./dealsEmail"), import("./dealsTrec"), import("./dealsAdminStats")]);
+      const [settings, trecSummary, daily, leadStats, blockStats, stats] = await Promise.all([
         getDealSettings(), trecImportSummary(),
         db.select({ n: sql<number>`count(*)` }).from(dealEvents).where(and(eq(dealEvents.kind, "code_sent"), gte(dealEvents.createdAt, chicagoDayStart()), sql`COALESCE(${dealEvents.detail}, '') NOT LIKE '%;test'`)),
         db.select({ status: dealLeads.status, n: sql<number>`count(*)` }).from(dealLeads).groupBy(dealLeads.status),
         db.select({ n: sql<number>`count(*)` }).from(dealBlocklist),
+        // Whole-table counts: the lists above are capped for display and must not be counted.
+        builderDealsAdminStats(db),
       ]);
       const dailyCount = Number(daily[0]?.n ?? 0);
       // The agents behind the links are read directly: the team list above is capped and may not include them.
       const linkAgentIds = Array.from(new Set(clientLinks.map((link) => link.agentTeamId)));
       const linkAgents = linkAgentIds.length ? await db.select({ id: dealTeamAllowlist.id, name: dealTeamAllowlist.name, email: dealTeamAllowlist.email }).from(dealTeamAllowlist).where(inArray(dealTeamAllowlist.id, linkAgentIds)) : [];
       const clientLinkRows = clientLinks.map((link) => { const agent = linkAgents.find((member) => member.id === link.agentTeamId); return { ...link, agentName: agent?.name || agent?.email || `team #${link.agentTeamId}` }; });
-      return { communities, leads, blocks, homes, photos, agents, team, tours, fubJobs, doNotAutoImport, alerts, emailLogs, incentives, clientLinks: clientLinkRows, email: builderDealsEmailStatus(settings.alertRecipients), import: imports[0] ?? null, trecSummary, dailyCount, capReached: dailyCount >= settings.dailyVerificationCap, leadCounts: Object.fromEntries(leadStats.map((row) => [row.status, Number(row.n)])), blockCount: Number(blockStats[0]?.n ?? 0), limits: { homes: 500, photos: 200, recentActivity: 100 } };
+      return { communities, leads, blocks, homes, photos, agents, team, tours, fubJobs, doNotAutoImport, alerts, emailLogs, incentives, clientLinks: clientLinkRows, email: builderDealsEmailStatus(settings.alertRecipients), import: imports[0] ?? null, trecSummary, dailyCount, capReached: dailyCount >= settings.dailyVerificationCap, leadCounts: Object.fromEntries(leadStats.map((row) => [row.status, Number(row.n)])), blockCount: Number(blockStats[0]?.n ?? 0), stats, limits: { homes: 500, photos: 200, recentActivity: 100 } };
     }),
     leads: adminProcedure.input(z.object({ search: z.string().trim().max(190).default(""), status: z.enum(["all", "verified", "blocked", "expired", "team"]).default("all"), fubStatus: z.enum(["all", "pending", "synced", "failed"]).default("all"), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(100).default(25) })).query(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });

@@ -207,7 +207,8 @@ describe("D.R. Horton reader: a community", () => {
     expect((await loadOfficialDeals(config, { fetcher: partial })).holdReasons).toEqual(["incomplete_inventory"]);
     expect(partial.mock.calls).toHaveLength(1);
     const challenge = vi.fn(async () => new Response("<html><head><title>Just a moment...</title></head><body><div id=\"cf-chl-widget\"></div></body></html>", { status: 403, headers: { "content-type": "text/html" } }));
-    expect((await loadOfficialDeals(config, { fetcher: challenge })).holdReasons).toEqual(["community_fetch_failed"]);
+    // A bot challenge (HTTP 403) is the site refusing the reader: held as such, never worked around.
+    expect((await loadOfficialDeals(config, { fetcher: challenge })).holdReasons).toEqual(["source_access_refused"]);
   });
 
   it("never mistakes a card the reader cannot read for a sold home: fewer cards than the block says, a restyled card, or a card without a street all hold the run", async () => {

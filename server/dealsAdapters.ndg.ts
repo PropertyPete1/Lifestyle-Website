@@ -1,5 +1,5 @@
 import {
-  asUrl, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  asUrl, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   NMLS_ID_PATTERN_ALL, type AdapterRunOptions, type BuilderId, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -322,13 +322,13 @@ export class NdgAdapter implements DealAdapter {
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     const api = async (relative: string) => getDocument(ndgApiUrl(brand, relative), fetcher, "application/json", brand.apiHost);
     privateSnapshot.pages.push(sourcePage("community", communityPage, config.privateCommunityName));
-    // The slug resolves to the community's id, as the page itself resolves it (HTTP 400 is "no such community"; anything else — a server error, a timeout, a 404 or 429 — is a failed read).
+    // The slug resolves to the community's id, as the page itself resolves it (HTTP 400 is "no such community"; 401/403 is the builder refusing the reader; anything else — a server error, a timeout, a 404 or 429 — is a failed read).
     const lookup = await getDocument(ndgApiUrl(brand, path.lookup), fetcher, "application/json", brand.apiHost);
-    if (!lookup.ok) return failedResult(config, fetchedAt, privateSnapshot, [lookup.redirectedOffOfficialHost ? "unsupported_official_host" : lookup.status === 400 ? "expected_community_container_not_found" : "community_fetch_failed"]);
+    if (!lookup.ok) return failedResult(config, fetchedAt, privateSnapshot, [lookup.status === 400 && !lookup.redirectedOffOfficialHost ? "expected_community_container_not_found" : fetchFailureHold(lookup, "community_fetch_failed")]);
     const id = num(obj(parseJson(lookup.text))?.id);
     if (id === null || !Number.isInteger(id) || id <= 0) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     const detail = await api(`public-drb/community/${id}`);
-    if (!detail.ok) return failedResult(config, fetchedAt, privateSnapshot, [detail.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!detail.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(detail, "community_fetch_failed")]);
     const parsed = parseNdgCommunity(detail.text);
     // The row must be this community, with its name and sales address.
     if (!parsed || parsed.id !== id || !parsed.record) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
@@ -339,13 +339,13 @@ export class NdgAdapter implements DealAdapter {
       api(`public/community/${id}/plans?page=1&limit=1000`),
       api(`public/offers-v2/by-community/${id}`),
     ]);
-    if (!homesBody.ok) return failedResult(config, fetchedAt, privateSnapshot, [homesBody.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!homesBody.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(homesBody, "community_fetch_failed")]);
     const homes = parseNdgHomes(brand, homesBody.text, id, communityPage, parsed.record, now());
     if (!homes) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (homes.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     // The list must be whole: the API's own total, and the community's count of move-in-ready homes, never exceed it.
     if (homes.homes.length > NDG_MAX_HOMES || (homes.total !== null && homes.listed < homes.total) || (parsed.moveInNowCount !== null && homes.homes.length < parsed.moveInNowCount)) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
-    if (!plansBody.ok) return failedResult(config, fetchedAt, privateSnapshot, [plansBody.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!plansBody.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(plansBody, "community_fetch_failed")]);
     const plans = parseNdgPlans(brand, plansBody.text, communityPage);
     if (!plans) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     privateSnapshot.communityFacts = { fromPrice: parsed.record.priceFrom && parsed.record.priceFrom >= 50_000 ? parsed.record.priceFrom : null, schoolDistrict: null, lotSizes: null, amenities: [] };

@@ -118,7 +118,8 @@ describe("official page fetches", () => {
     const forbidden = vi.fn(async () => new Response("forbidden", { status: 403 }));
     const refused = await loadOfficialDeals(config, { fetcher: forbidden });
     expect(refused.catalogOk).toBe(false);
-    expect(refused.holdReasons).toEqual(["community_fetch_failed"]);
+    // A 403 is the builder refusing the reader: its own hold, so the admin switches the community to Manual (never retried, never evaded).
+    expect(refused.holdReasons).toEqual(["source_access_refused"]);
     expect(forbidden).toHaveBeenCalledTimes(1);
     void page;
   }, 20_000);

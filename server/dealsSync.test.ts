@@ -212,6 +212,16 @@ describe("official refresh: holds", () => {
     expect(community()).toMatchObject({ catalogHoldReason: null, catalogHoldSeenAt: null, holdReason: null });
   });
 
+  it("tells the admin in the hold e-mail when a builder's site refuses the reader, so the community is switched to Manual", async () => {
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ catalogOk: false, holdReasons: ["source_access_refused"] }));
+    expect(await refreshOfficialDeals({ communityId, now: T0 })).toEqual([{ communityId, reelCode: "vg1", ok: false, reason: "source_access_refused" }]);
+    expect(db.rows(dealCommunities)[0]).toMatchObject({ catalogHoldReason: "source_access_refused", holdReason: "catalog: source_access_refused" });
+    expect(emails().map((email) => email.category)).toEqual(["deals_sync_hold"]);
+    expect(emails()[0].content).toContain("catalog hold: source_access_refused");
+    expect(emails()[0].content).toContain("refused our reader (HTTP 401/403)");
+    expect(emails()[0].content).toContain("Switch this community to Manual");
+  });
+
   it("holds the run as unlabelled_home_status when a home card has no readable status, publishing nothing and sweeping nothing to sold", async () => {
     mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }, { sourceUrl: home("8305-b") }], incentiveText: FULL_TEXT }));
     await refreshOfficialDeals({ communityId, now: T0 });

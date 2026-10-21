@@ -41,3 +41,23 @@ so the served HTML only carries an empty results container; plan and home pages 
 `#heroSlider` carousel of `<picture>` elements with `.webp` and `.jpg` sources, their facts in a labelled
 Overview list and icon tiles, the plan name in `.f-title`, the lot address in the breadcrumb, and the sale
 status in the document title ("... | Model For Tour in ..."). `server/dealsAdapters.live.test.ts` covers them.
+
+## Live captures, October 20, 2026 (`live-2026-10-20/`)
+
+Unlike the files above, these are real captures of public builder community pages, taken on launch day with the
+readers' own User-Agent (`LifestyleDesignRealtyDeals/1.0 (read-only official-page parser)`), following redirects,
+when the nightly sync held these communities. To keep them small they were trimmed (every `<script>` except
+JSON-LD, Next.js Flight chunks, Drees' `contentId` block and Weekley's `pageData`; styles, inline SVG, comments,
+`<link>`/`<source>` tags and `srcset`/`sizes` attributes removed; whitespace between tags collapsed) and gzipped.
+The markup the readers parse is as served, and every reader returns the same result on the trimmed copy as on
+the full page. `server/dealsAdapters.liveFixes.test.ts` reads them.
+
+| File | Page |
+| --- | --- |
+| highland-alsatian-oaks, highland-veramendi | Highland sectioned community pages (`div.wrapper` sections, `a.home-card` previews) |
+| century-agave, century-senna | Century pages with "Available homes" and "ALREADY TAKEN" blocks (Senna has no ProductGroup) |
+| ashton-arcadia-ridge | Ashton Woods page whose plan cards carry `data-property-id="chp:…"` |
+| david-briggs-ranch, david-confluence | David Weekley neighborhood landing pages (no page data; series links with counts) |
+| hakes-mesa-vista | Hakes coming-soon page ("Price Coming Soon", "Interest List Now Forming") |
+| drees-haby-hill | Drees parent community app shell (`contentId` 326325, `isCommunityPage`) |
+| perry-alsatian-oaks, perry-esperanza | Perry community pages (collections in the Flight payload) |

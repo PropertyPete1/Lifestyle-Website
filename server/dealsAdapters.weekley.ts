@@ -1,5 +1,5 @@
 import {
-  WEEKLEY_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, htmlToText, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  WEEKLEY_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, makePublicSnapshot, parsePromotionalRate, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -29,12 +29,20 @@ import {
  * operational data.
  *
  * Page shapes (October 2026):
+ * - neighborhood: /neighborhoods/tx/san-antonio/<slug>     (since October 20, 2026 the old /neighborhoods/TX/… path
+ *   answers 301 to it). No page data: a `#neighborhood` landing page with the
+ *   sales offices and one `.single-listing` per series ("Briggs Ranch – Select
+ *   Classic Series"), each linking its community page with "View Quick
+ *   Move-ins (7)" and "View Floor Plans (8)". The reader reads every series
+ *   page as one community and checks each against its count.
  * - community: /new-homes/tx/san-antonio/<city>/<slug>        (about 930 KB)
  * - home:      /homes-ready-soon/tx/san-antonio/<city>/<slug>/<job number>
  * - plan:      /new-homes/tx/san-antonio/<city>/<slug>/<plan>
  */
 /** A community with more homes for sale than this is held, never truncated. */
 export const WEEKLEY_MAX_HOMES = 150;
+/** A neighborhood listing more series than this is held, never read in part. */
+export const WEEKLEY_MAX_SERIES = 6;
 export const WEEKLEY_ASSET_HOST = "assetcontentdeliveryapi.davidweekleyhomes.com";
 export const WEEKLEY_MARKET_ID = "markets/3";
 export const weekleyListingUrl = () => `https://${WEEKLEY_HOST}/search/CommunityData?marketId=${WEEKLEY_MARKET_ID}`;
@@ -321,6 +329,41 @@ export function weekleyShowcaseCounts(body: string): Map<string, number> | null 
   return counts;
 }
 
+export type WeekleyNeighborhood = { name: string; series: Array<{ url: string; quickMoveIns: number | null }> };
+
+/**
+ * A neighborhood landing page (`#neighborhood`, no page data): its name and
+ * each series' community page with the quick move-in count it shows; null
+ * when the page is not one, when a series link leaves the official host's
+ * /new-homes/ pages, or when one series shows two different counts.
+ */
+export function parseWeekleyNeighborhood(html: string, pageUrl: string): WeekleyNeighborhood | null {
+  const page = asUrl(pageUrl);
+  const root = parseHtmlElements(html);
+  if (!page || !root || parseWeekleyPageData(html)) return null;
+  const all = descendants(root);
+  const container = all.find((element) => element.attributes.id === "neighborhood");
+  if (!container) return null;
+  const inside = descendants(container);
+  const title = inside.find((element) => element.tag === "h1" && elementClass(element, "page-title"));
+  const name = title ? elementText(title, html) : "";
+  if (!name) return null;
+  const series = new Map<string, number | null>();
+  for (const listing of inside.filter((element) => elementClass(element, "single-listing"))) {
+    const within = descendants(listing);
+    const links = within.filter((element) => element.tag === "h3" && elementClass(element, "blue")).flatMap((heading) => descendants(heading).filter((element) => element.tag === "a" && element.attributes.href));
+    const urls = Array.from(new Set(links.map((link) => { const url = asUrl(new URL(decodeHtmlEntities(link.attributes.href!), page).toString()); return url ? `${url.origin}${url.pathname}` : ""; })));
+    if (urls.length !== 1) return null;
+    const url = asUrl(urls[0]!);
+    if (!url || !sameOfficialHost(url, page.hostname) || !/^\/new-homes\/[a-z]{2}\/[a-z0-9-]+\/[a-z0-9-]+\/[a-z0-9-]+$/i.test(url.pathname)) return null;
+    const counts = new Set(within.filter((element) => elementClass(element, "showcase-link")).map((element) => /quick\s+move-?ins?\s*\((\d+)\)/i.exec(elementText(element, html))?.[1]).filter((value): value is string => value !== undefined).map(Number));
+    if (counts.size > 1) return null;
+    series.set(url.toString(), counts.size ? Array.from(counts)[0]! : null);
+  }
+  if (!series.size) return null;
+  return { name, series: Array.from(series, ([url, quickMoveIns]) => ({ url, quickMoveIns })) };
+}
+
 /** The community's record for discovery, from its page. */
 export function weekleyRecord(html: string, pageUrl: string): WeekleyCommunityRecord | null {
   const parsed = parseWeekleyCommunity(html, pageUrl);
@@ -339,29 +382,56 @@ export class DavidWeekleyAdapter implements DealAdapter {
     if (!sameOfficialHost(community, WEEKLEY_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", WEEKLEY_HOST);
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
-    const parsed = parseWeekleyCommunity(page.text, community.toString(), now());
-    // Without the page data, its arrays or the sales office this is not a community page.
-    if (!parsed || !parsed.record?.street) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
-    // The page says how the community is selling; wording the reader does not know is not read as a sold-out community.
-    if (parsed.availability && !/^(?:active|close\s*out|coming\s+soon|call\s+for\s+pricing)$/i.test(parsed.availability)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
-    if (parsed.homes.length > WEEKLEY_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
-    // The data has always carried the community's id; without it neither the homes nor the market count can be tied to this community.
-    if (parsed.communityId === null) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
-    // The data must describe this community (a same-host redirect to another page does not); a home or plan under another community's slug is never this community's.
-    if (parsed.foreignPage || parsed.foreignPlan || parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
-    // The market list counts each community's homes for sale; fewer homes on the page than that is a changed page, not homes sold. With the list unreachable, an empty page is not trusted.
-    const showcase = await showcaseCount(fetcher, now().getTime(), privateSnapshot, parsed.communityId);
-    if (showcase === "unavailable" ? parsed.homes.length === 0 : showcase !== null && parsed.homes.length < showcase) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
-    privateSnapshot.communityFacts = { fromPrice: parsed.record.priceFrom && parsed.record.priceFrom >= 50_000 ? parsed.record.priceFrom : null, schoolDistrict: parsed.facts.schoolDistrict, lotSizes: null, amenities: parsed.facts.amenities };
-    for (const home of parsed.homes) { privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }
-    for (const plan of parsed.plans) { privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }
+    // A neighborhood landing page: each series' community page is read as part of this community.
+    const neighborhood = parseWeekleyNeighborhood(page.text, community.toString());
+    const pages: Array<{ url: string; text: string; expectedHomes: number | null }> = [];
+    if (neighborhood) {
+      if (neighborhood.series.length > WEEKLEY_MAX_SERIES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+      for (const series of neighborhood.series) {
+        const seriesPage = await getDocument(series.url, fetcher, "text/html,application/xhtml+xml", WEEKLEY_HOST);
+        if (!seriesPage.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(seriesPage, "community_fetch_failed")]);
+        privateSnapshot.pages.push(sourcePage("community", series.url, null));
+        pages.push({ url: series.url, text: seriesPage.text, expectedHomes: series.quickMoveIns });
+      }
+    } else pages.push({ url: community.toString(), text: page.text, expectedHomes: null });
+    const read: WeekleyPage[] = [];
+    for (const entry of pages) {
+      const parsed = parseWeekleyCommunity(entry.text, entry.url, now());
+      // Without the page data, its arrays or the sales office this is not a community page.
+      if (!parsed || !parsed.record?.street) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+      // The page says how the community is selling; wording the reader does not know is not read as a sold-out community.
+      if (parsed.availability && !/^(?:active|close\s*out|coming\s+soon|call\s+for\s+pricing)$/i.test(parsed.availability)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+      if (parsed.homes.length > WEEKLEY_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+      // The data has always carried the community's id; without it neither the homes nor the market count can be tied to this community.
+      if (parsed.communityId === null) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+      // The data must describe this community (a same-host redirect to another page does not); a home or plan under another community's slug is never this community's.
+      if (parsed.foreignPage || parsed.foreignPlan || parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+      // A series page must show at least the homes its neighborhood listing counts.
+      if (entry.expectedHomes !== null && parsed.homes.filter((home) => home.status !== "Model").length < entry.expectedHomes) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+      // The market list counts each community's homes for sale; fewer homes on the page than that is a changed page, not homes sold. With the list unreachable, an empty page is not trusted.
+      const showcase = await showcaseCount(fetcher, now().getTime(), privateSnapshot, parsed.communityId);
+      if (showcase === "unavailable" ? parsed.homes.length === 0 : showcase !== null && parsed.homes.length < showcase) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+      read.push(parsed);
+    }
+    if (read.reduce((total, parsed) => total + parsed.homes.length, 0) > WEEKLEY_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+    const prices = read.map((parsed) => parsed.record!.priceFrom).filter((price): price is number => price !== null && price >= 50_000);
+    privateSnapshot.communityFacts = { fromPrice: prices.length ? Math.min(...prices) : null, schoolDistrict: read.find((parsed) => parsed.facts.schoolDistrict)?.facts.schoolDistrict ?? null, lotSizes: null, amenities: Array.from(new Set(read.flatMap((parsed) => parsed.facts.amenities))) };
+    for (const parsed of read) {
+      for (const home of parsed.homes) { if (privateSnapshot.homes.some((other) => other.sourceUrl === home.sourceUrl)) continue; privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }
+      for (const plan of parsed.plans) { if (privateSnapshot.plans.some((other) => other.sourceUrl === plan.sourceUrl)) continue; privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }
+    }
     const incentiveHolds: DealHoldReason[] = [];
-    const offer = await promotions(fetcher, now().getTime(), privateSnapshot, parsed.communityId);
-    if ("hold" in offer) incentiveHolds.push(offer.hold);
+    const offers: Array<{ text: string | null } | { hold: DealHoldReason }> = [];
+    for (const parsed of read) offers.push(await promotions(fetcher, now().getTime(), privateSnapshot, parsed.communityId));
+    const failed = offers.find((offer): offer is { hold: DealHoldReason } => "hold" in offer);
+    const texts = Array.from(new Set(offers.map((offer) => "hold" in offer ? null : offer.text)));
+    if (failed) incentiveHolds.push(failed.hold);
+    // Series of one neighborhood with different promotions: one would be published as the other's; the admin reads them instead.
+    else if (texts.length > 1) incentiveHolds.push("expected_incentive_container_not_found");
     else privateSnapshot.offerRead = true;
-    if (!("hold" in offer) && offer.text) privateSnapshot.incentive = { sourceUrl: weekleyPromotionsUrl(), text: offer.text, facts: parsePromotionalRate(offer.text) };
+    if (!failed && texts.length === 1 && texts[0]) privateSnapshot.incentive = { sourceUrl: weekleyPromotionsUrl(), text: texts[0], facts: parsePromotionalRate(texts[0]) };
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));
   }
 }

@@ -1,5 +1,5 @@
 import {
-  EMPIRE_HOST, NMLS_ID_PATTERN_ALL, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  EMPIRE_HOST, NMLS_ID_PATTERN_ALL, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -361,7 +361,7 @@ export class EmpireHomesAdapter implements DealAdapter {
     if (!sameOfficialHost(community, EMPIRE_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", EMPIRE_HOST);
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseEmpireCommunity(page.text, community.toString());
     // Without the sales office and the listing widget this is not a selling community's page (a sold-out one keeps the map and drops both).
@@ -370,7 +370,7 @@ export class EmpireHomesAdapter implements DealAdapter {
     // The homes: the site's own listing query for the widget's community name, whole or held.
     const homesUrl = empireListingUrl(parsed.community, "homes");
     const homesBody = await getDocument(homesUrl, fetcher, "application/json", EMPIRE_HOST);
-    if (!homesBody.ok) return failedResult(config, fetchedAt, privateSnapshot, [homesBody.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!homesBody.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(homesBody, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("inventory", homesUrl, null));
     const listing = parseEmpireListing(homesBody.text);
     if (!listing) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
@@ -383,7 +383,7 @@ export class EmpireHomesAdapter implements DealAdapter {
     if (parsed.hasPlansWidget) {
       const plansUrl = empireListingUrl(parsed.community, "plans");
       const plansBody = await getDocument(plansUrl, fetcher, "application/json", EMPIRE_HOST);
-      if (!plansBody.ok) return failedResult(config, fetchedAt, privateSnapshot, [plansBody.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+      if (!plansBody.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(plansBody, "community_fetch_failed")]);
       privateSnapshot.pages.push(sourcePage("inventory", plansUrl, null));
       const planListing = parseEmpireListing(plansBody.text);
       if (!planListing) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

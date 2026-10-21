@@ -1,5 +1,5 @@
 import {
-  NMLS_ID_PATTERN_ALL, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, htmlToText, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  NMLS_ID_PATTERN_ALL, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -229,7 +229,7 @@ async function marketListings(host: string, brand: PulteGroupBrand, fetcher: Htm
   if (cached && now - cached.fetchedAt < CACHE_MS) return { listings: cached.listings };
   const url = pulteListingUrl(host, brand);
   const page = await getDocument(url, fetcher, "application/json", host);
-  if (!page.ok) return { hold: page.redirectedOffOfficialHost ? "unsupported_official_host" : "inventory_fetch_failed" };
+  if (!page.ok) return { hold: fetchFailureHold(page, "inventory_fetch_failed") };
   snapshot.pages.push(sourcePage("inventory", url, null));
   const listings = parsePulteListing(page.text);
   if (!listings) return { hold: "invalid_inventory_response" };
@@ -279,7 +279,7 @@ export class PulteGroupAdapter implements DealAdapter {
     const qmiUrl = `https://${this.host}/api/plan/qmiplans?communityId=${id}`;
     const plansUrl = `https://${this.host}/api/plan/homeplans?communityId=${id}`;
     const [qmiPage, plansPage] = [await getDocument(qmiUrl, fetcher, "application/json", this.host), await getDocument(plansUrl, fetcher, "application/json", this.host)];
-    for (const page of [qmiPage, plansPage]) if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "inventory_fetch_failed"]);
+    for (const page of [qmiPage, plansPage]) if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "inventory_fetch_failed")]);
     const qmis = jsonArray(qmiPage.ok ? qmiPage.text : "");
     const plans = jsonArray(plansPage.ok ? plansPage.text : "");
     if (!qmis || !plans) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);

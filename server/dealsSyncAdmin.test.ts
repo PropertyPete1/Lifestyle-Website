@@ -195,7 +195,7 @@ describe("testCommunitySource", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("reads at most 64 KB of the body and reports a redirect without following it", async () => {
+  it("reads at most 64 KB of the body, follows a same-host redirect as the readers do, and reports one to another host without following it", async () => {
     const big = new Uint8Array(200 * 1024).fill(97);
     const fetcher = vi.fn(async () => new Response(new ReadableStream({ start(controller) { for (let offset = 0; offset < big.length; offset += 16 * 1024) controller.enqueue(big.slice(offset, offset + 16 * 1024)); controller.close(); } }), { status: 200 }));
     const result = await testCommunitySource(communityId, fetcher as never);
@@ -205,6 +205,15 @@ describe("testCommunitySource", () => {
     const redirecting = vi.fn(async () => new Response(null, { status: 301, headers: { location: "https://attacker.example/" } }));
     expect(await testCommunitySource(communityId, redirecting as never)).toMatchObject({ status: 301, redirected: true, redirectSameHost: false, bytes: 0 });
     expect(redirecting).toHaveBeenCalledTimes(1);
+    // The 301 from /TX/ to /tx/ on the official host is followed, with the readers' own User-Agent.
+    const sameHost = vi.fn(async (input: string) => input.includes("/TX/") ? new Response(null, { status: 301, headers: { location: "/new-homes/tx/fixture" } }) : new Response("<html>page</html>", { status: 200 }));
+    db.rows(dealCommunities)[0].sourceUrl = "https://www.mihomes.com/new-homes/TX/fixture";
+    expect(await testCommunitySource(communityId, sameHost as never)).toMatchObject({ status: 200, redirected: true, redirectSameHost: true, bytes: 17, truncated: false });
+    expect(sameHost.mock.calls.map((call) => call[0])).toEqual(["https://www.mihomes.com/new-homes/TX/fixture", "https://www.mihomes.com/new-homes/tx/fixture"]);
+    expect((sameHost.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toMatchObject({ "User-Agent": expect.stringContaining("LifestyleDesignRealtyDeals/1.0") });
+    // A builder that refuses the reader answers the test the same way.
+    const refused = vi.fn(async () => new Response("forbidden", { status: 403 }));
+    expect(await testCommunitySource(communityId, refused as never)).toMatchObject({ status: 403, redirected: false });
   });
 });
 

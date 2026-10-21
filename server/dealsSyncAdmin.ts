@@ -72,6 +72,7 @@ export const CATALOG_HOLD_REASON_HELP: Partial<Record<DealHoldReason, string>> =
   invalid_source_url: "The saved source URL is not the builder's official community page.",
   unsupported_official_host: "A page redirected off the builder's official host.",
   community_fetch_failed: "The official community page could not be fetched.",
+  source_access_refused: "The builder's site refused our reader (HTTP 401/403): the builder blocks automated reads, and the reader does not work around it. Switch this community to Manual.",
   sitemap_fetch_failed: "The builder's sitemap could not be fetched.",
   detail_fetch_failed: "A plan or home page could not be fetched.",
   missing_community_guid: "The community id could not be read from the official page.",
@@ -365,7 +366,11 @@ const SOURCE_TEST_LIMIT_BYTES = 64 * 1024;
 /**
  * Operator diagnostic for the preconfigured official URL only: Manual
  * communities are refused, the host must be the adapter's exact www host, at
- * most 64 KB of the body is read, and redirects are reported, never followed.
+ * most 64 KB of the body is read (the readers themselves read the whole page,
+ * up to their 8 MB bound), and a redirect is followed only on the same host,
+ * as the readers follow it (at most five hops); one to another host is
+ * reported, never followed. It sends the readers' own User-Agent, so a site
+ * that refuses the reader (HTTP 403) refuses this test too.
  */
 export async function testCommunitySource(communityId: number, fetcher: typeof fetch = fetch): Promise<{ host: string; status: number; bytes: number; truncated: boolean; redirected: boolean; redirectSameHost: boolean | null; error?: string }> {
   const community = await requireCommunity(communityId);
@@ -379,15 +384,32 @@ export async function testCommunitySource(communityId: number, fetcher: typeof f
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20_000);
   try {
-    const response = await fetcher(url.toString(), {
-      method: "GET",
-      redirect: "manual",
-      signal: controller.signal,
-      headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "LifestyleDesignRealty Builder Deals health check/1.0" },
-    });
+    let redirected = false;
+    let redirectSameHost: boolean | null = null;
+    let target = url;
+    let response: Response;
+    for (let hop = 0; ; hop++) {
+      response = await fetcher(target.toString(), {
+        method: "GET",
+        redirect: "manual",
+        signal: controller.signal,
+        headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "LifestyleDesignRealtyDeals/1.0 (read-only official-page parser)" },
+      });
+      if (response.status < 300 || response.status >= 400) break;
+      redirected = true;
+      const location = response.headers.get("location");
+      let next: URL | null = null;
+      try { next = location ? new URL(location, target) : null; } catch { next = null; }
+      const sameHost = next !== null && next.protocol === "https:" && !next.port && !next.username && !next.password && next.hostname.toLowerCase() === host;
+      redirectSameHost = location ? sameHost : null;
+      // Off the official host (or past five hops): reported, never followed.
+      if (!sameHost || hop >= 5) { await response.body?.cancel().catch(() => undefined); break; }
+      await response.body?.cancel().catch(() => undefined);
+      target = next!;
+    }
     let bytes = 0;
     let truncated = false;
-    const reader = response.body?.getReader();
+    const reader = response.status >= 300 && response.status < 400 ? undefined : response.body?.getReader();
     if (reader) {
       for (;;) {
         const { done, value } = await reader.read();
@@ -395,12 +417,6 @@ export async function testCommunitySource(communityId: number, fetcher: typeof f
         bytes += value?.byteLength ?? 0;
         if (bytes >= SOURCE_TEST_LIMIT_BYTES) { truncated = true; await reader.cancel().catch(() => undefined); break; }
       }
-    }
-    const redirected = response.status >= 300 && response.status < 400;
-    let redirectSameHost: boolean | null = null;
-    if (redirected) {
-      const location = response.headers.get("location");
-      try { redirectSameHost = location ? new URL(location, url).hostname.toLowerCase() === host : null; } catch { redirectSameHost = false; }
     }
     return { host, status: response.status, bytes: Math.min(bytes, SOURCE_TEST_LIMIT_BYTES), truncated, redirected, redirectSameHost };
   } catch (error) {

@@ -1,5 +1,5 @@
 import {
-  NMLS_ID_PATTERN_ALL, STARLIGHT_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  NMLS_ID_PATTERN_ALL, STARLIGHT_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 import { jsonLdRecords } from "./dealsAdapters.homefiniti";
@@ -258,7 +258,7 @@ export class StarlightAdapter implements DealAdapter {
     if (!sameOfficialHost(community, STARLIGHT_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", STARLIGHT_HOST);
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseStarlightCommunity(page.text, community.toString(), now());
     // Without the business record and its sales address this is not a community page.

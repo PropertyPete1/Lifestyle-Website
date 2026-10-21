@@ -1,5 +1,5 @@
 import {
-  LGI_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parseCommunityFacts, sameOfficialHost, sourcePage, successfulResult,
+  LGI_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 import { parseNextData } from "./dealsAdapters.davidson";
@@ -203,7 +203,7 @@ export class LgiHomesAdapter implements DealAdapter {
     if (!sameOfficialHost(community, LGI_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", LGI_HOST);
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseLgiCommunity(page.text, community.toString());
     // Without the community route, its floor-plan component or its sales address this is not a community page.

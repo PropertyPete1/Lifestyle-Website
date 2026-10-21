@@ -72,6 +72,8 @@ export type DealHoldReason =
   | "invalid_source_url"
   | "unsupported_official_host"
   | "community_fetch_failed"
+  /** The builder's site answered 401 or 403 to the reader: it refuses automated reads. Never evaded; the admin switches the community to Manual. */
+  | "source_access_refused"
   | "sitemap_fetch_failed"
   | "detail_fetch_failed"
   | "incentive_fetch_failed"
@@ -390,6 +392,42 @@ export function sourcePage(kind: PrivateSourcePage["kind"], sourceUrl: string, p
   return { kind, sourceUrl, privateName };
 }
 
+/**
+ * The catalog hold for a failed official read: a redirect off the official
+ * host, the site refusing the reader (HTTP 401/403 — the builder blocks
+ * automated reads; the reader never retries with another identity), or the
+ * given fetch failure.
+ */
+export function fetchFailureHold(result: { redirectedOffOfficialHost: boolean; status: number | null }, otherwise: DealHoldReason): DealHoldReason {
+  if (result.redirectedOffOfficialHost) return "unsupported_official_host";
+  if (result.status === 401 || result.status === 403) return "source_access_refused";
+  return otherwise;
+}
+
+/** The most of one official response body the reader keeps; a larger answer is refused, never truncated. */
+export const MAX_DOCUMENT_BYTES = 8_000_000;
+
+/**
+ * The body as text, read as a stream and abandoned once it passes
+ * MAX_DOCUMENT_BYTES (null then), so a huge answer is never buffered whole.
+ * UTF-8, as Response.text() decodes.
+ */
+async function readBodyBounded(response: Response): Promise<string | null> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let bytes = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > MAX_DOCUMENT_BYTES) { await reader.cancel().catch(() => undefined); return null; }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
 /** Plain GET only. There are no form submissions, click goals, or browser automation here. */
 export async function getDocument(
   url: string,
@@ -449,8 +487,8 @@ async function postJsonOnce(
       return { ok: false, redirectedOffOfficialHost: target !== null && !sameOfficialHost(target, expectedHost), retryable: false, status: response.status };
     }
     if (!response.ok) return { ok: false, redirectedOffOfficialHost: false, retryable: response.status === 429 || response.status >= 500, status: response.status };
-    const text = await response.text();
-    if (text.length > 8_000_000) return { ok: false, redirectedOffOfficialHost: false, retryable: false, status: response.status };
+    const text = await readBodyBounded(response);
+    if (text === null) return { ok: false, redirectedOffOfficialHost: false, retryable: false, status: response.status };
     return { ok: true, text };
   } catch {
     return { ok: false, redirectedOffOfficialHost: false, retryable: true, status: null };
@@ -484,8 +522,9 @@ async function getDocumentOnce(
         continue;
       }
       if (!response.ok) return { ok: false, redirectedOffOfficialHost: false, retryable: response.status === 429 || response.status >= 500, status: response.status };
-      const text = await response.text();
-      if (text.length > 8_000_000) return { ok: false, redirectedOffOfficialHost: false, retryable: false, status: response.status };
+      // The whole page is read (no small cap: real community pages run 100-700 KB), up to the hard bound.
+      const text = await readBodyBounded(response);
+      if (text === null) return { ok: false, redirectedOffOfficialHost: false, retryable: false, status: response.status };
       return { ok: true, text };
     }
     return { ok: false, redirectedOffOfficialHost: false, retryable: false, status: null };
@@ -1938,7 +1977,7 @@ async function fetchDiscoveredProperties(
     const strict = mode === "approved" || strictPaths.has(normalizePathname(new URL(url).pathname));
     const page = await getDocument(url, fetcher, "text/html,application/xhtml+xml", expectedHost);
     if (!page.ok) {
-      const hold: DealHoldReason = page.redirectedOffOfficialHost ? "unsupported_official_host" : "detail_fetch_failed";
+      const hold: DealHoldReason = fetchFailureHold(page, "detail_fetch_failed");
       return { hold, property: null, skipped: false };
     }
     if (kind === "plan" && !strict && !looksLikeChesmarPlanPage(page.text)) return { hold: null, property: null, skipped: true };
@@ -2007,7 +2046,7 @@ async function chesmarSitemapCandidates(fetcher: HtmlFetcher, snapshot: PrivateD
     if (seen.size >= 32) return { urls: [], holds: ["incomplete_inventory"] };
     const url = pending.shift()!; if (seen.has(url)) continue; seen.add(url);
     const page = await getDocument(url, fetcher, "application/xml,text/xml", CHESMAR_HOST);
-    if (!page.ok) return { urls: [], holds: [page.redirectedOffOfficialHost ? "unsupported_official_host" : "sitemap_fetch_failed"] };
+    if (!page.ok) return { urls: [], holds: [fetchFailureHold(page, "sitemap_fetch_failed")] };
     snapshot.pages.push(sourcePage("sitemap", url, null));
     const locations = Array.from(page.text.matchAll(/<loc\b[^>]*>\s*([\s\S]*?)\s*<\/loc>/gi), (match) => decodeHtmlEntities(match[1]).trim());
     if (/^\s*(?:<\?xml\b[^>]*>\s*)?<sitemapindex\b/i.test(page.text) && /<\/sitemapindex\s*>\s*$/i.test(page.text)) {
@@ -2049,7 +2088,7 @@ class ChesmarAdapter implements DealAdapter {
     const community = configuredCommunity;
     const fetcher = options.fetcher ?? fetch;
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", CHESMAR_HOST);
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     if (!containsExpectedChesmarCommunityContainer(page.text)) {
       return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
@@ -2347,7 +2386,7 @@ class MiHomesAdapter implements DealAdapter {
     const community = configuredCommunity;
     const fetcher = options.fetcher ?? fetch;
     const communityPage = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", MI_HOST);
-    if (!communityPage.ok) return failedResult(config, fetchedAt, privateSnapshot, [communityPage.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!communityPage.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(communityPage, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     if (!containsExpectedMiCommunityContainer(communityPage.text)) {
       return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

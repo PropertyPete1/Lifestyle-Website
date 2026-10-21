@@ -240,6 +240,9 @@ export function activeCatalogHold(row: Pick<CommunityRow, "catalogHoldReason">):
   return row.catalogHoldReason && !row.catalogHoldReason.startsWith("dismissed:") ? row.catalogHoldReason : null;
 }
 
+/** The e-mail line for a catalog hold the admin can only settle by hand. */
+export const SOURCE_ACCESS_REFUSED_DETAIL = "The builder's site refused our reader (HTTP 401/403): the builder is blocking automated reads, and the reader will not work around that. Switch this community to Manual in Admin, Builder Deals.";
+
 async function recordCatalogHold(community: CommunityRow, reason: string, now: Date, holds: HoldNotice[]) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
@@ -248,7 +251,7 @@ async function recordCatalogHold(community: CommunityRow, reason: string, now: D
   // The same parse result, held or dismissed, never produces a second email.
   if (storedReason === reason) return;
   await db.update(dealCommunities).set({ catalogHoldReason: reason, catalogHoldSeenAt: now, holdReason: summarizeHolds(reason, community.incentiveHoldReason) }).where(eq(dealCommunities.id, community.id));
-  holds.push({ communityId: community.id, privateName: community.privateName, builder: community.builder, kind: "catalog", reason });
+  holds.push({ communityId: community.id, privateName: community.privateName, builder: community.builder, kind: "catalog", reason, ...(reason.split(",").some((part) => part.trim() === "source_access_refused") ? { detail: SOURCE_ACCESS_REFUSED_DETAIL } : {}) });
 }
 
 /** Sets the community's incentive hold; a new hold is e-mailed unless `notify` is off (a hold that was e-mailed when it began). */

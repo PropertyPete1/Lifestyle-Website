@@ -1051,3 +1051,42 @@ Collected 2026-10-18 for the two launch communities. This file is internal only.
 - A loan type named right after the figure ("3% for conventional", "3.5% (FHA)", "0% for VA buyers") is that figure's own type, whatever else its sentence names.
 - Triggering terms also include "$N per mo", "(little to) no money down", "nothing down", "100% financing", spelled-out "thirty-year" terms and "360-month".
 - Adjustable wording also includes "adj. rate", "rate may/can/will change/increase/adjust after/every…", "subject to change after year N / the initial period" and "then N-month adjustable". "Rates subject to change without notice" still publishes.
+
+## Live reader fixes (Oct 20)
+
+Launch-night holds ("expected community container not found") traced by running the real readers on the pages
+captured that day with the production User-Agent (fixtures in `server/fixtures/deals/live-2026-10-20/`, tests in
+`server/dealsAdapters.liveFixes.test.ts`).
+
+- Not a body cap or a redirect bug. The readers read the whole page (`getDocument`; the bound is 8 MB, now
+  enforced while streaming, so a huge answer is abandoned instead of buffered) and always followed same-host
+  redirects (five hops, off-host refused before the request). "65,536 bytes read (capped)" and "301, 0 bytes"
+  came from the Admin "Test source" button, which reads 64 KB and did not follow redirects. That button now
+  follows same-host redirects as the readers do and sends the readers' User-Agent.
+- Highland Homes (16/16): the community page changed to lot sections (`div.wrapper` with `h2.display_name`, an
+  "N Quick Move-in" square, up to three `a.home-card` previews, a link to `/<community>/<section>/section`), with no
+  sales-office line (the hero's `p.secondLine` gives city and ZIP). The reader reads each section's cards; when a
+  preview shows fewer than the section counts it reads the section page and holds unless that page shows them
+  all. Alsatian Oaks reads 4 homes from the page alone. Veramendi (70ft: 3 shown of 6) needs its section page,
+  which was not captured: its markup is unverified, so it holds until a live run proves it (safe either way).
+  Discovery of new Highland communities still needs the old office line and map pin (none now): unchanged.
+- Century Communities (9 of 13): an "ALREADY TAKEN" block ("Homes reserved or under contract") now follows
+  "Available homes"; its cards were counted against the ProductGroup and held the run. Taken cards no longer
+  count (and a record also shown as taken holds). Some pages (Senna) carry no ProductGroup at all; the
+  available cards are then read directly (street, lot, price, was-price, specs, plan, completion). Agave 8,
+  Senna 13; on Agave the cards and the ProductGroup agree home for home.
+- Ashton Woods (2): plan ("series") cards now carry `data-property-id="chp:…"`, so the id count (11) exceeded the
+  homes (5). Only non-series cards count. Arcadia Ridge: 5 homes, 6 plans.
+- David Weekley (4): the configured `/neighborhoods/TX/…` URL answers 301 to `/neighborhoods/tx/…`, a landing page
+  with no page data that lists each series ("Briggs Ranch – Select Classic Series", "View Quick Move-ins (7)").
+  The reader now reads every series page as part of the community, checks each against its count and the
+  market list, and holds the incentive when the series show different promotions. The series pages were not
+  captured; their page-data shape is assumed unchanged (tests use synthetic series pages).
+- Hakes Brothers (2): Mesa Vista is a coming-soon page that says "Interest List Now Forming" with "Price Coming
+  Soon" instead of a "Coming Soon" cell. Both together now read as coming soon (nothing for sale); either alone
+  still holds. Park Place was not captured.
+- Drees (Haby Hill) and Perry (5): the captured community pages pass their checks; the holds come from pages
+  that were not captured (Drees' JSON API for parent 326325; Perry's sitemap and home/plan pages). Not changed.
+- Legend Homes: a 401/403 from any official read is now its own catalog hold, `source_access_refused`, whose
+  admin help and hold e-mail say the builder refuses automated reads and to switch the community to Manual. The
+  reader never retries with another identity.

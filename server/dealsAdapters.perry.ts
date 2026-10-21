@@ -1,5 +1,5 @@
 import {
-  PERRY_HOST, asUrl, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parseCommunityFacts, parseSitemapUrls, sameOfficialHost, sourcePage, successfulResult,
+  PERRY_HOST, asUrl, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseSitemapUrls, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -184,7 +184,7 @@ function collectPerryImages(flight: string, jobNumber: string | null, designId: 
 async function perrySitemapUrls(fetcher: HtmlFetcher, snapshot: PrivateDealSnapshot, now: number): Promise<{ urls: string[]; holds: DealHoldReason[] }> {
   if (sitemapCache && now - sitemapCache.fetchedAt < SITEMAP_CACHE_MS) return { urls: sitemapCache.urls, holds: [] };
   const page = await getDocument(PERRY_SITEMAP, fetcher, "application/xml,text/xml", PERRY_HOST);
-  if (!page.ok) return { urls: [], holds: [page.redirectedOffOfficialHost ? "unsupported_official_host" : "sitemap_fetch_failed"] };
+  if (!page.ok) return { urls: [], holds: [fetchFailureHold(page, "sitemap_fetch_failed")] };
   snapshot.pages.push(sourcePage("sitemap", PERRY_SITEMAP, null));
   const parsed = parseSitemapUrls(page.text);
   if (!parsed || !parsed.length) return { urls: [], holds: ["sitemap_fetch_failed"] };
@@ -204,7 +204,7 @@ export class PerryHomesAdapter implements DealAdapter {
     if (!sameOfficialHost(community, PERRY_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
     const fetcher = options.fetcher ?? fetch;
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", PERRY_HOST);
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     // The community page carries its collections in the Flight payload; without them this is not a community page.
     const flight = decodeFlightPayload(page.text);
@@ -228,7 +228,7 @@ export class PerryHomesAdapter implements DealAdapter {
       if (seen.has(key)) continue;
       seen.add(key);
       const detail = await getDocument(key, fetcher, "text/html,application/xhtml+xml", PERRY_HOST);
-      if (!detail.ok) return failedResult(config, fetchedAt, privateSnapshot, [detail.redirectedOffOfficialHost ? "unsupported_official_host" : "detail_fetch_failed"]);
+      if (!detail.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(detail, "detail_fetch_failed")]);
       const parsed = parsePerryDetail(detail.text, key);
       if (!parsed) return failedResult(config, fetchedAt, privateSnapshot, ["expected_detail_container_not_found"]);
       privateSnapshot.pages.push(sourcePage(kind, key, parsed.privateName));

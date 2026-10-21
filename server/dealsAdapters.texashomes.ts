@@ -1,5 +1,5 @@
 import {
-  NMLS_ID_PATTERN_ALL, TEXASHOMES_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  NMLS_ID_PATTERN_ALL, TEXASHOMES_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -432,7 +432,7 @@ export class TexasHomesAdapter implements DealAdapter {
     if (!sameOfficialHost(community, TEXASHOMES_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", TEXASHOMES_HOST);
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseTexasHomesCommunity(page.text, community.toString());
     // Without the heading and the sales address or pin this is not a community page.
@@ -446,7 +446,7 @@ export class TexasHomesAdapter implements DealAdapter {
     if (parsed.neighborhoodId !== null) {
       listUrl = texasHomesHomesUrl(parsed.neighborhoodId);
       const list = await getDocument(listUrl, fetcher, "text/html,application/xhtml+xml", TEXASHOMES_HOST);
-      if (!list.ok) return failedResult(config, fetchedAt, privateSnapshot, [list.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+      if (!list.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(list, "community_fetch_failed")]);
       const listing = parseTexasHomesListing(list.text, listUrl, now(), cityLine, parsed.logo);
       if (!listing) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
       // The list must be this community's: its rows carry the community's logo, its filter names the community's id, and its

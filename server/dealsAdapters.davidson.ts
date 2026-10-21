@@ -1,5 +1,5 @@
 import {
-  DAVIDSON_HOST, NMLS_ID_PATTERN_ALL, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  DAVIDSON_HOST, NMLS_ID_PATTERN_ALL, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -219,7 +219,7 @@ export class DavidsonAdapter implements DealAdapter {
     if (!sameOfficialHost(community, DAVIDSON_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", DAVIDSON_HOST);
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseDavidsonCommunity(page.text, community.toString(), now());
     if (!parsed) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

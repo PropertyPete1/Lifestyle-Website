@@ -1,5 +1,5 @@
 import {
-  NMLS_ID_PATTERN_ALL, VIEWHOMES_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, getDocument, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  NMLS_ID_PATTERN_ALL, VIEWHOMES_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -408,7 +408,7 @@ export function parseViewHomesPromo(html: string, pageUrl: string): ViewHomesPro
 async function roster(fetcher: HtmlFetcher, now: number): Promise<{ communities: ViewHomesListedCommunity[] } | { hold: DealHoldReason }> {
   if (rosterCache && now - rosterCache.fetchedAt < CACHE_MS) return { communities: rosterCache.communities };
   const page = await getDocument(viewHomesListingUrl(), fetcher, "text/html,application/xhtml+xml", VIEWHOMES_HOST);
-  if (!page.ok) return { hold: page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed" };
+  if (!page.ok) return { hold: fetchFailureHold(page, "community_fetch_failed") };
   const communities = parseViewHomesRoster(page.text, VIEWHOMES_HOST);
   if (!communities) return { hold: "expected_community_container_not_found" };
   rosterCache = { fetchedAt: now, communities };
@@ -438,7 +438,7 @@ export class ViewHomesAdapter implements DealAdapter {
     if (!sameOfficialHost(community, VIEWHOMES_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", VIEWHOMES_HOST);
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseViewHomesCommunity(page.text, community.toString());
     // Without the hero heading and the homes-and-plans module this is not a community page.

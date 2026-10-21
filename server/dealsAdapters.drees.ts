@@ -1,5 +1,5 @@
 import {
-  DREES_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parsePromotionalRate, postJsonDocument, sameOfficialHost, sourcePage, successfulResult,
+  DREES_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parsePromotionalRate, postJsonDocument, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -257,11 +257,11 @@ export function dreesOfferText(promos: unknown): string | null {
 async function marketNeighborhoods(fetcher: HtmlFetcher, now: number): Promise<{ neighborhoods: Json[] } | { hold: DealHoldReason }> {
   if (listCache && now - listCache.fetchedAt < LIST_CACHE_MS) return { neighborhoods: listCache.neighborhoods };
   const areas = await getDocument(dreesListingUrl(), fetcher, "application/json", DREES_HOST);
-  if (!areas.ok) return { hold: areas.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed" };
+  if (!areas.ok) return { hold: fetchFailureHold(areas, "community_fetch_failed") };
   const areaId = parseDreesAreaId(areas.text);
   if (areaId === null) return { hold: "expected_community_container_not_found" };
   const list = await postJsonDocument(dreesApiUrl("community"), fetcher, { contentId: areaId, ...PAGE }, DREES_HOST);
-  if (!list.ok) return { hold: list.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed" };
+  if (!list.ok) return { hold: fetchFailureHold(list, "community_fetch_failed") };
   let parsed: unknown;
   try { parsed = JSON.parse(list.text); } catch { return { hold: "expected_community_container_not_found" }; }
   const rows = obj(obj(parsed)?.data)?.neighborhoods;
@@ -283,7 +283,7 @@ export class DreesAdapter implements DealAdapter {
     if (!sameOfficialHost(community, DREES_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", DREES_HOST);
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const own = parseDreesPage(page.text);
     // Without the page's own id and kind this is not a community page.
@@ -305,13 +305,13 @@ export class DreesAdapter implements DealAdapter {
       postJsonDocument(dreesApiUrl("qmi"), fetcher, { contentId: own.contentId, ...PAGE }, DREES_HOST),
       postJsonDocument(dreesApiUrl("plan"), fetcher, { contentId: own.contentId, ...PAGE }, DREES_HOST),
     ]);
-    if (!homesBody.ok) return failedResult(config, fetchedAt, privateSnapshot, [homesBody.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!homesBody.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(homesBody, "community_fetch_failed")]);
     const homes = parseDreesHomes(homesBody.text, communityPage, now());
     if (!homes) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (homes.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     // The list must be whole: the query's own total, and the market list's count of homes for sale, never exceed it.
     if (homes.homes.length > DREES_MAX_HOMES || (homes.total !== null && homes.listed < homes.total) || (row.qmiCount !== null && homes.homes.length < row.qmiCount)) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
-    if (!plansBody.ok) return failedResult(config, fetchedAt, privateSnapshot, [plansBody.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!plansBody.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(plansBody, "community_fetch_failed")]);
     const plans = parseDreesPlans(plansBody.text, communityPage);
     if (!plans) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (plans.foreignPlan) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);

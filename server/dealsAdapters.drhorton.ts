@@ -1,5 +1,5 @@
 import {
-  DRHORTON_HOST, asUrl, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, getDocument, htmlToText, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
+  DRHORTON_HOST, asUrl, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -204,7 +204,7 @@ export class DrHortonAdapter implements DealAdapter {
     if (!sameOfficialHost(community, DRHORTON_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", DRHORTON_HOST);
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const cards = parseDrhCommunityCards(page.text, community.toString());
     if (!cards) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
@@ -223,7 +223,7 @@ export class DrHortonAdapter implements DealAdapter {
       const { kind: _kind, detailPath, stories: _stories, ...home } = card;
       if (detailPath) {
         const detail = await getDocument(home.sourceUrl, fetcher, "text/html,application/xhtml+xml", DRHORTON_HOST);
-        if (!detail.ok) return failedResult(config, fetchedAt, privateSnapshot, [detail.redirectedOffOfficialHost ? "unsupported_official_host" : "detail_fetch_failed"]);
+        if (!detail.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(detail, "detail_fetch_failed")]);
         const parsed = parseDrhHomeDetail(detail.text, home.sourceUrl);
         if (!parsed) return failedResult(config, fetchedAt, privateSnapshot, ["expected_detail_container_not_found"]);
         privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName));

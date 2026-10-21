@@ -1,5 +1,5 @@
 import {
-  ASHTON_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
+  ASHTON_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 import { jsonLdRecords } from "./dealsAdapters.homefiniti";
@@ -108,6 +108,8 @@ export type AshtonPage = {
   foreignPage: boolean;
   homes: PrivatePlanOrHome[];
   plans: PrivatePlanOrHome[];
+  /** Elements that carry a `data-property-id` and are not plan ("series") cards: the page's own count of home cards. */
+  homeCardCount: number;
 };
 
 /** The business record's own page URL, when the record names one on the official host. */
@@ -124,7 +126,10 @@ export function parseAshtonCommunity(html: string, pageUrl: string, now: Date = 
   const root = parseHtmlElements(html);
   if (!community || !root) return null;
   const record = ashtonRecord(html);
-  const cards = descendants(root).filter((element) => elementClass(element, "js-property-card"));
+  const all = descendants(root);
+  const cards = all.filter((element) => elementClass(element, "js-property-card"));
+  // Plan cards carry a property id too since October 20, 2026 ("chp:4546"); only the others are homes.
+  const homeCardCount = all.filter((element) => element.attributes["data-property-id"] !== undefined && !elementClass(element, "property-card--is-series")).length;
   if (!record || !cards.length) return null;
   const host = community.hostname;
   const own = ashtonRecordUrl(html, host);
@@ -181,7 +186,7 @@ export function parseAshtonCommunity(html: string, pageUrl: string, now: Date = 
       readyNow: status.readyNow, moveInDate: status.moveInDate, gallery: images,
     });
   }
-  return { record, foreignPage, homes, plans };
+  return { record, foreignPage, homes, plans, homeCardCount };
 }
 
 /** The text lines of a fragment, split at line breaks. */
@@ -228,16 +233,15 @@ export class AshtonWoodsAdapter implements DealAdapter {
     if (!sameOfficialHost(community, ASHTON_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     const page = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", ASHTON_HOST);
-    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [page.redirectedOffOfficialHost ? "unsupported_official_host" : "community_fetch_failed"]);
+    if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseAshtonCommunity(page.text, community.toString(), now());
     // Without the business record or a single property card this is not a community page (a sold-out page shape is a live check).
     if (!parsed) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The page must be this community's (a same-host redirect to another one is not).
     if (parsed.foreignPage) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
-    // The page's own count of homes: the "data-property-id" cards; fewer homes read than cards means the card markup changed.
-    const cardCount = (page.text.match(/\bdata-property-id="/g) ?? []).length;
-    if (parsed.homes.length < cardCount) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // The page's own count of homes: the "data-property-id" cards that are not plan cards; fewer homes read than cards means the card markup changed.
+    if (parsed.homes.length < parsed.homeCardCount) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (parsed.homes.length > ASHTON_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     const facts = parseCommunityFacts(page.text);
     const planPrices = parsed.plans.map((plan) => plan.price).filter((price): price is number => price !== null);

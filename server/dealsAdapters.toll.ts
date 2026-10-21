@@ -9,7 +9,8 @@ import { parseNextData } from "./dealsAdapters.davidson";
  * `__NEXT_DATA__.props.pageProps.pageData.communityComponent` carries the
  * whole community: `homes.models[]` (the plans: `name`, `pricedFrom` number,
  * `minBed`, `minBath`, `minHalfBath`, `minSqft`, `minGarage`, `url`,
- * `headShot.media.url`) each with `qmis[]` (the quick move-in homes: `street`,
+ * `headShot.media.url`, `qmiCount`) each with `qmis[]` (left out when
+ * `qmiCount` is 0; the quick move-in homes: `street`,
  * `pricedFrom`, `moveInDate` "2026-11-30", `isComingSoon`, `lotNumber`, `url`,
  * `communityId`, `headShot`, `elevations[]`), `qmiSitePlanLots` (how many homes
  * the site plan shows for sale), `salesOffice` (street, city, zip, phone, lat,
@@ -100,7 +101,7 @@ export type TollPage = {
   communityId: string | null;
   /** The community page's own URL in the data, compared with the one configured. */
   pageUrl: string | null;
-  /** False when a model has no `qmis` array or a quick move-in home is listed as a top-level model: the home list changed shape. */
+  /** False when a model has no `qmis` array (and does not say `qmiCount: 0`) or a quick move-in home is listed as a top-level model: the home list changed shape. */
   shapeIntact: boolean;
   /** True when a home's page sits under another community's path on the host: not this community's inventory. */
   foreignHome: boolean;
@@ -182,8 +183,9 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
   for (const raw of models) {
     const model = obj(raw);
     if (!model) continue;
-    // Every model carries its `qmis` list (empty when none); a model without one, or a quick move-in home listed at the top level, is a changed shape.
-    if (!Array.isArray(model.qmis) || model.isQMI === true) shapeIntact = false;
+    // Every model carries its `qmis` list, or (since October 2026) leaves it out when it has none and says so with `qmiCount: 0`;
+    // a model without the list that does not count zero, or a quick move-in home listed at the top level, is a changed shape.
+    if ((!Array.isArray(model.qmis) && !(model.qmis === undefined && model.qmiCount === 0)) || model.isQMI === true) shapeIntact = false;
     const planName = str(model.name) ?? str(model.modelName);
     const link = str(model.url);
     const page = link ? asUrl(link) : null;

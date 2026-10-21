@@ -1,5 +1,5 @@
 import {
-  HOMEFINITI_HOSTS, asUrl, cardAroundLink, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
+  HOMEFINITI_HOSTS, asUrl, cardAroundLink, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
@@ -101,7 +101,27 @@ export function parseHomefinitiRecords(html: string, host: string): { homes: Hom
       plans.push({ kind: "plan", ...base, privateName: name, privatePlanName: name, status: null, gallery: gallery(record.image, true) });
     }
   }
-  return { homes, plans, community };
+  return { homes: once(homes), plans: once(plans), community };
+}
+
+/**
+ * One record per page. A page may repeat a record (a list and a map strip):
+ * the copies are one home, so a repeat never counts as a second home against
+ * the cards (a card without a record of its own still holds the run). Copies
+ * whose figures differ are not one home: both are kept, and the reader holds.
+ */
+function once(records: HomefinitiRecord[]): HomefinitiRecord[] {
+  const out: HomefinitiRecord[] = [];
+  const seen = new Map<string, string>();
+  const facts = (record: HomefinitiRecord) => JSON.stringify([record.privateName, record.privateAddress, record.privatePlanName, record.price, record.bedrooms, record.bathrooms, record.squareFeet]);
+  for (const record of records) {
+    const key = comparablePath(new URL(record.sourceUrl).pathname.replace(/\/+$/, ""));
+    const known = seen.get(key);
+    if (known === facts(record)) continue;
+    seen.set(key, known ?? facts(record));
+    out.push(record);
+  }
+  return out;
 }
 
 /** ".../applewhite-meadows/vail/" -> "Vail". */
@@ -129,7 +149,8 @@ export function homefinitiStatus(cardStatus: string | null): { status: string | 
   if (!label) return { status: null, readyNow: false };
   if (/sold|under\s+contract|pending/i.test(label)) return { status: "Sold", readyNow: false };
   if (/model/i.test(label)) return { status: "Model Home", readyNow: false };
-  if (/^(?:move[- ]?in\s+ready|ready\s+now|available\s+now|completed?|quick\s+move[- ]?in)!?$/i.test(label)) return { status: "Quick Move-In (Move-In Ready)", readyNow: true };
+  // "Ready For You" is First America's card word for a finished home (October 2026), the other card word being "Under Construction".
+  if (/^(?:move[- ]?in\s+ready|ready\s+now|ready\s+for\s+you|available\s+now|completed?|quick\s+move[- ]?in)!?$/i.test(label)) return { status: "Quick Move-In (Move-In Ready)", readyNow: true };
   if (/^under\s+construction!?$/i.test(label)) return { status: "Quick Move-In (Under Construction)", readyNow: false };
   return { status: null, readyNow: false };
 }
@@ -158,6 +179,9 @@ export class HomefinitiAdapter implements DealAdapter {
     // Without the community's own record this is not one of the platform's community pages.
     if (!records.community) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (records.homes.length > HOMEFINITI_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+    // Two records of one home page that disagree on its figures: neither is read as the home.
+    const recordPaths = records.homes.map((home) => comparablePath(new URL(home.sourceUrl).pathname.replace(/\/+$/, "")));
+    if (new Set(recordPaths).size !== recordPaths.length) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     const root = parseHtmlElements(page.text);
     if (!root) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // A home record of another community on the same host (a "nearby homes" block) is never this community's inventory.

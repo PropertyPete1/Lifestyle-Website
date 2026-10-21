@@ -90,7 +90,8 @@ export function kbMoveInCount(html: string, emptyList = false): number | null {
 
 /**
  * "Available Now" is ready; "Nov 2026" or "Est. completion November 2026"
- * names a month (a past one is a stale estimate: no date); only sale words
+ * names a month (a past one is a stale estimate: no date); "Available 3-6
+ * Months" is a quick move-in with no date; only sale words
  * sell ("pending" in a date field is an unknown date); other wording gives no
  * status (the run is held).
  */
@@ -99,6 +100,14 @@ export function kbStatus(copy: string | null, now: Date = new Date()): { status:
   if (!text) return { status: null, readyNow: false, moveInDate: null };
   if (/\bsold\b|under\s+contract/i.test(text)) return { status: "Sold", readyNow: false, moveInDate: null };
   if (/^(?:available\s+now|move[- ]?in\s+ready|ready\s+now)!?$/i.test(text)) return { status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null };
+  // "Available 3-6 Months" (October 2026): a home under construction listed for sale, ready within a window of months the page
+  // does not pin to a month (its `moveInDate` is a placeholder), so no date. A window past a year is not a quick move-in: held.
+  const window = /^available\s+(?:in\s+)?(\d{1,2})(?:\s*(?:-|–|to)\s*(\d{1,2}))?\s+months?$/i.exec(text);
+  if (window) {
+    const low = Number(window[1]);
+    const high = window[2] ? Number(window[2]) : low;
+    return low >= 1 && high >= low && high <= 12 ? { status: "Quick Move-In", readyNow: false, moveInDate: null } : { status: null, readyNow: false, moveInDate: null };
+  }
   const month = /^(?:est\.?\s*(?:completion)?\s*|available\s+|move[- ]?in\s+)?([A-Za-z]{3,9})\.?\s+(20\d{2})$/i.exec(text);
   const key = month ? month[1]!.toLowerCase().slice(0, 3) : "";
   const name = MONTHS[key];

@@ -213,18 +213,41 @@ export function parseTexasHomesCommunity(html: string, pageUrl: string): TexasHo
   }
   const plans: PrivatePlanOrHome[] = [];
   let foreignPlan = false;
-  for (const teaser of all.filter((item) => elementClass(item, "plan-teaser"))) {
+  const teasers = all.filter((item) => elementClass(item, "plan-teaser")).flatMap((teaser) => {
     const inner = descendants(teaser);
     const title = inner.find((item) => item.tag === "h2");
     const link = title ? descendants(title).find((item) => item.tag === "a" && item.attributes.href) : undefined;
     const planName = title ? elementText(title, html) : "";
     const url = link ? asUrl(new URL(decodeHtmlEntities(link.attributes.href!), community).toString()) : null;
-    if (!planName || !url || !sameOfficialHost(url, host)) continue;
-    if (!`${pagePath(url)}/`.startsWith(base) || pagePath(url) === pagePath(community)) { foreignPlan = true; continue; }
-    for (const homesLink of inner.filter((item) => item.tag === "a" && /move-in-ready-plan\?/.test(item.attributes.href ?? ""))) {
+    if (!planName || !url || !sameOfficialHost(url, host)) return [];
+    const ids = inner.filter((item) => item.tag === "a" && /move-in-ready-plan\?/.test(item.attributes.href ?? "")).flatMap((homesLink) => {
       const id = /[?&]neighborhood_id=(\d+)/.exec(decodeHtmlEntities(homesLink.attributes.href!));
-      if (id && neighborhoodId !== null && Number(id[1]) !== neighborhoodId) foreignPlan = true;
-    }
+      return id ? [Number(id[1])] : [];
+    });
+    return [{ inner, planName, url, ids }];
+  });
+  // A renamed community keeps its plans under the old path (The Enclave at Potranco Oaks, October 2026: the page at
+  // /enclave-at-potranco-oaks, its plans at /enclave-potranco-oaks/plan-1663). Plans under one other parent path are this
+  // community's only when that path is one segment whose words are the page's own less some ("enclave potranco oaks" in
+  // "enclave at potranco oaks"; at least two words), and when the page links its own quick move-in list and a plan there
+  // links its homes with that same neighborhood id; any other plan path is another page's.
+  const parentOf = (url: URL) => pagePath(url).split("/").slice(0, -1).join("/");
+  const words = (path: string) => new Set(path.split("/").filter(Boolean).join("-").split("-").filter(Boolean));
+  const pageWords = words(pagePath(community));
+  const renamedFrom = (parent: string) => {
+    const old = words(parent);
+    const [small, large] = old.size <= pageWords.size ? [old, pageWords] : [pageWords, old];
+    return parent.split("/").filter(Boolean).length === 1 && pagePath(community).split("/").filter(Boolean).length === 1 && small.size >= 2 && Array.from(small).every((word) => large.has(word));
+  };
+  const outside = teasers.filter((teaser) => !`${pagePath(teaser.url)}/`.startsWith(base) && pagePath(teaser.url) !== pagePath(community));
+  const aliasParents = new Set(outside.map((teaser) => parentOf(teaser.url)));
+  const onlyParent = aliasParents.size === 1 ? Array.from(aliasParents)[0]! : null;
+  const alias = onlyParent && renamedFrom(onlyParent) && neighborhoodId !== null && outside.some((teaser) => teaser.ids.includes(neighborhoodId!)) ? onlyParent : null;
+  for (const { inner, planName, url, ids } of teasers) {
+    const underPage = `${pagePath(url)}/`.startsWith(base) && pagePath(url) !== pagePath(community);
+    const underAlias = alias !== null && alias !== "" && parentOf(url) === alias && pagePath(url) !== pagePath(community);
+    if (!underPage && !underAlias) { foreignPlan = true; continue; }
+    if (neighborhoodId !== null && ids.some((id) => id !== neighborhoodId)) foreignPlan = true;
     const baths = feature(inner, html, "baths");
     const half = feature(inner, html, "half-baths");
     plans.push({

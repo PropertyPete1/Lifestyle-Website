@@ -17,7 +17,8 @@ import {
  *   Sq. Ft./Beds/Baths/Garage, a link to `/communities/<slug>/homes/<street
  *   slug>/`) and one `.floorplan-preview` card per plan ("Starting From
  *   $369,990", specs, a link to `/communities/<slug>/floorplans/<plan>/`).
- *   A community with no homes for sale has no "Available Homes" tab at all.
+ *   A community with no homes for sale has no "Available Homes" tab at all; a
+ *   coming-soon page (hero badge "Coming Soon") has no module at all.
  * - The region page `/region/texas/` embeds the market roster as JSON
  *   (`oceanFloorModules.communitiesMapList.push({ …, regions: [...] })`):
  *   every Texas community with its page URL, status, sales address with
@@ -264,7 +265,7 @@ export type ViewHomesPage = {
   priceFrom: number | null;
   /** True when the page's canonical link names another page on the host: a same-host redirect to another community. */
   foreignPage: boolean;
-  /** True when the page has the homes-and-plans module at all. */
+  /** True when the page has the homes-and-plans module at all (a coming-soon page has none). */
   hasModule: boolean;
   /** True when the module has an "Available Homes" tab (a community with no homes for sale has none). */
   hasHomesTab: boolean;
@@ -441,8 +442,10 @@ export class ViewHomesAdapter implements DealAdapter {
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseViewHomesCommunity(page.text, community.toString());
-    // Without the hero heading and the homes-and-plans module this is not a community page.
-    if (!parsed || !parsed.hasModule) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // Without the hero heading and the homes-and-plans module this is not a community page, unless the hero says "Coming Soon":
+    // a coming-soon page has no module at all (Ladera, Enclave 35 in October 2026), which the roster must corroborate below.
+    const comingSoonPage = Boolean(parsed && !parsed.hasModule && /^coming\s+soon!?$/i.test(parsed.heroStatus ?? ""));
+    if (!parsed || (!parsed.hasModule && !comingSoonPage)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The page must be this community's (a same-host redirect to another one is not), and so must its homes and plans.
     if (parsed.foreignPage || parsed.foreignHome || parsed.foreignPlan) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     const market = await roster(fetcher, now().getTime());
@@ -451,6 +454,8 @@ export class ViewHomesAdapter implements DealAdapter {
     const row = market.communities.find((item) => pagePath(new URL(item.url)) === pagePath(community));
     // The roster must list the page's community.
     if (!row) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // A page without the module is a community with nothing for sale only when the roster also lists it as coming soon, with no homes.
+    if (comingSoonPage && !((/^soon$/i.test(row.status.value ?? "") || /^coming\s+soon$/i.test(row.status.label ?? "")) && row.homes.length === 0)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The page's home cards and the roster's homes must be the same set; an "Available Homes" tab with no cards is a changed page.
     const listedUrls = row.homes.map((home) => pagePath(new URL(home.url)));
     const cardUrls = parsed.homeUrls.map((url) => pagePath(new URL(url)));

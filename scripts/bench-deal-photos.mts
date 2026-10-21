@@ -61,7 +61,7 @@ for (const lanes of [1, 2, 3]) {
     await recognizeDealPhotoWords(master.data);
   })));
   const perPhoto = ms(start) / count;
-  console.log(`${lanes} lane(s): ${perPhoto.toFixed(0)} ms/photo wall -> ${Math.round(3_600_000 / perPhoto)} photos/hour of busy time, ${Math.round(210_000 / perPhoto)} per 3.5-minute call`);
+  console.log(`${lanes} lane(s): ${perPhoto.toFixed(0)} ms/photo wall -> ${Math.round(3_600_000 / perPhoto)} photos/hour of busy time, ${Math.round(150_000 / perPhoto)} per 2.5-minute call`);
 }
 clearInterval(sampler);
 console.log(`peak RSS ${(peakRss / 1024 / 1024).toFixed(0)} MB (includes the tsx loader and the OCR worker)`);

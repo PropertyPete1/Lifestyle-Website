@@ -303,7 +303,22 @@ export class FakeDealsDb {
           return [{ insertId, affectedRows: Array.isArray(values) ? values.length : 1 }];
         };
         const promise = execute();
-        return Object.assign(promise, { onDuplicateKeyUpdate: () => promise });
+        // The insert above already ran (synchronously). A single row whose primary key
+        // (an explicit one such as deal_settings.key) already existed becomes an update
+        // of that row, as MySQL's ON DUPLICATE KEY UPDATE would do.
+        const onDuplicateKeyUpdate = (config?: { set?: Row }) => {
+          if (Array.isArray(values)) return promise;
+          const rows = this.rows(table);
+          const inserted = rows[rows.length - 1];
+          const primaryKeys = Object.entries(getTableColumns(table)).filter(([, column]) => column.primary).map(([key]) => key);
+          const existing = primaryKeys.length ? rows.find((row) => row !== inserted && primaryKeys.every((key) => row[key] === inserted?.[key])) : undefined;
+          if (existing && inserted) {
+            rows.splice(rows.indexOf(inserted), 1);
+            Object.assign(existing, config?.set ?? {});
+          }
+          return promise;
+        };
+        return Object.assign(promise, { onDuplicateKeyUpdate });
       },
     };
   }

@@ -16,6 +16,7 @@ import {
   UPLOAD_SOURCE_PREFIX,
   builderKey,
   builderSettingsKey,
+  isDealPhotoClaimToken,
   normalizeDealPhotoOriginal,
   processPendingDealPhotos,
   readBuilderPhotoSettings,
@@ -312,7 +313,7 @@ export async function getDealPhotoPreview(input: { id: number; maxEdge?: number;
     try {
       const stored = await storageReadPrivate(storageKey);
       const image = await dataUrlFor(stored.data, maxEdge);
-      return { id: photo.id, source, ...image, processingState: photo.processingState, automaticHidden: photo.automaticHidden, adminHidden: photo.adminHidden, lastProcessingError: photo.lastProcessingError, ocrMatches: matches };
+      return { id: photo.id, source, ...image, processingState: photo.processingState, automaticHidden: photo.automaticHidden, adminHidden: photo.adminHidden, lastProcessingError: isDealPhotoClaimToken(photo.lastProcessingError) ? null : photo.lastProcessingError, ocrMatches: matches };
     } catch {
       // Try the other stored copy.
     }

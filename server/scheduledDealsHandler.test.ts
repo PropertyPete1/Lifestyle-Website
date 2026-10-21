@@ -66,7 +66,7 @@ vi.mock("./dealsPhotos", () => ({
   processPendingDealPhotos: (...args: unknown[]) =>
     mocks.processPendingDealPhotos(...args),
   pruneDealPhotoRenders: () => Promise.resolve({ scanned: 0, expiredRows: 0, staleRows: 0, rowsDeleted: 0, objectsDeleted: 0, objectsFailed: 0 }),
-  PHOTO_DRAIN_BUDGET_MS: 210_000,
+  PHOTO_DRAIN_BUDGET_MS: 150_000,
 }));
 
 import { dealJobRuns } from "../drizzle/schema";
@@ -133,14 +133,14 @@ describe("Builder Deals scheduled handler helpers", () => {
     ).toBe(true);
   });
 
-  it("drains the photo queue for a 3.5-minute budget per callback without a daily job record", async () => {
+  it("drains the photo queue for a 2.5-minute budget per callback without a daily job record", async () => {
     mocks.processPendingDealPhotos.mockResolvedValue({ processed: 2, retried: 1, skipped: 0 });
     mocks.chicagoClock.mockReturnValue({ hour: 6, minute: 5, weekday: "Mon" });
     const { response, json } = responseRecorder();
 
     await scheduledDealsHandler({ body: { job: "photos" } } as Request, response);
 
-    expect(mocks.processPendingDealPhotos).toHaveBeenCalledWith({ budgetMs: 210_000 });
+    expect(mocks.processPendingDealPhotos).toHaveBeenCalledWith({ budgetMs: 150_000 });
     expect(json).toHaveBeenCalledWith({ ok: true, result: { processed: 2, retried: 1, skipped: 0 } });
     expect(mocks.getDb).not.toHaveBeenCalled();
     // Minute 5-9 of each ten is the photo job's own slot: the catalog is not even asked.

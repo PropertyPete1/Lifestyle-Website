@@ -62,7 +62,7 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
     if (job === "agents") return res.json({ ok: true, result: await whenDue(dueAt(1, 45), "builder-deals-known-agent-sync", syncKnownAgentsFromFub) });
     if (job === "fub") return res.json({ ok: true, result: await runPendingDealsFubJobs() });
     // Every 5 minutes: due pending photos and abandoned processing leases, in
-    // priority order, for up to PHOTO_DRAIN_BUDGET_MS (3.5 min) per call rather
+    // priority order, for up to PHOTO_DRAIN_BUDGET_MS (2.5 min, plus at most PHOTO_TIMEOUT_MS for the photos in flight) per call rather
     // than a fixed count (40 per 10 minutes left a 30,000-photo backlog five days
     // deep). Not a once-per-day job, so it is not recorded in deal_job_runs.
     // The catalog runs at :00, :10, ... for up to 4 minutes: while it still has

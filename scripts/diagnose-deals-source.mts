@@ -6,13 +6,16 @@
  * hold reasons. Use it when the admin diagnostics show a catalog hold or a
  * community whose cards have no photos.
  *
- *   DATABASE_URL=... pnpm tsx scripts/diagnose-deals-source.mts [community id]
+ *   DATABASE_URL=... pnpm tsx scripts/diagnose-deals-source.mts [community id ...]
+ *
+ * With ids, those communities are diagnosed whether or not they are active yet
+ * (communities added automatically stay inactive until their first clean update).
  *
  * Output never includes photo URLs, secrets or lead data; request lines show
  * the path on the official host only.
  */
 import "dotenv/config";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { dealCommunities } from "../drizzle/schema";
 import { getDb } from "../server/db";
 import { loadOfficialDeals, type HtmlFetcher } from "../server/dealsAdapters";
@@ -23,17 +26,16 @@ if (!process.env.DATABASE_URL) {
   process.exit(2);
 }
 
-const onlyId = process.argv[2] ? Number(process.argv[2]) : null;
+const onlyIds = process.argv.slice(2).map(Number).filter((id) => Number.isInteger(id) && id > 0);
 const db = await getDb();
 if (!db) {
   console.error("Database unavailable.");
   process.exit(2);
 }
-const rows = await db.select().from(dealCommunities).where(eq(dealCommunities.active, true)).orderBy(asc(dealCommunities.id));
+const rows = await db.select().from(dealCommunities).where(onlyIds.length ? inArray(dealCommunities.id, onlyIds) : eq(dealCommunities.active, true)).orderBy(asc(dealCommunities.id));
 let exitCode = 0;
 
 for (const community of rows) {
-  if (onlyId !== null && community.id !== onlyId) continue;
   const config = communitySourceConfig(community);
   if (!config) {
     console.log(`[diagnose] #${community.id} ${community.builder}: manual or unconfigured, skipped`);

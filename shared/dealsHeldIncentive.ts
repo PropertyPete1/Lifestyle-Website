@@ -89,8 +89,10 @@ const MONTH_WORD = "(?!APR\\b)(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)
 const DEADLINE_CUE = "(?:by|through|thru|until|till|til|before|ends?|ending|ended|expires?|expiring|expiration|deadline|on|valid|good|limited[- ]time|starting|beginning|between|in)";
 /** A figure that can be a day or a month: one or two digits, not money, not a percentage, not a loan length or an area. */
 const DAY_FIGURE = "(?<![$\\d.,])\\d{1,2}(?:st|nd|rd|th)?(?![\\d%]|\\s*%|,\\d{3}|\\.\\d+\\s*%|[-\\s]*(?:years?|yrs?|percent|sq|square|acres?)\\b)";
+/** Counts written out ("thirty days from today"). */
+const COUNT_WORD = "(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fourteen|fifteen|twenty|twenty-one|thirty|forty|forty-five|fifty|sixty|seventy-five|ninety)";
 /** Holidays and calendar periods a builder writes as a deadline (anywhere in the text they count). */
-const PERIOD_CORE = "(?:EO[MYQ]|month'?s?[- ]end|year'?s?[- ]end|quarter'?s?[- ]end|end\\s+of\\s+(?:the\\s+)?(?:month|year|quarter|week|day|season|sales?\\s+event|event|promotion|program|" + MONTH_WORD + ")|(?:first|second|third|fourth|last|1st|2nd|3rd|4th)\\s+quarter|Q[1-4]|(?:this|next)\\s+(?:weekend|week|month|quarter|year|season|spring|summer|fall|autumn|winter|holidays?)|mid[- ]?" + MONTH_WORD + "|Halloween|Thanksgiving|Christmas|Xmas|Hanukkah|Easter|New\\s+Year'?s?(?:\\s+(?:Eve|Day))?|Black\\s+Friday|Cyber\\s+Monday|(?:Labor|Memorial|Independence|Presidents'?|Veterans'?|Columbus|Valentine'?s|Mother'?s|Father'?s)\\s+Day|Fourth\\s+of\\s+July|(?:the\\s+)?holidays|holiday\\s+season|weekend|(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day)";
+const PERIOD_CORE = "(?:EO[MYQDW]|COB|close\\s+of\\s+business|last\\s+(?:business\\s+)?day\\s+of(?:\\s+(?:the\\s+)?[A-Za-z]+)?|month'?s?[- ]end|year'?s?[- ]end|quarter'?s?[- ]end|end\\s+of\\s+(?:the\\s+)?(?:month|year|quarter|week|day|season|sales?\\s+event|event|promotion|program|" + MONTH_WORD + ")|(?:first|second|third|fourth|last|1st|2nd|3rd|4th)\\s+quarter|Q[1-4]|(?:this|next)\\s+(?:weekend|week|month|quarter|year|season|spring|summer|fall|autumn|winter|holidays?)|mid[- ]?" + MONTH_WORD + "|Halloween|Thanksgiving|Christmas|Xmas|Hanukkah|Easter|New\\s+Year'?s?(?:\\s+(?:Eve|Day))?|Black\\s+Friday|Cyber\\s+Monday|(?:Labor|Memorial|Independence|Presidents'?|Veterans'?|Columbus|Valentine'?s|Mother'?s|Father'?s)\\s+Day|Fourth\\s+of\\s+July|(?:the\\s+)?holidays|holiday\\s+season|weekend|(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day)";
 /** Also a deadline right after a deadline word: a season or a day word ("by fall", "ends today"); alone they are names or sales talk. */
 const PERIOD_WORD = `(?:${PERIOD_CORE}|spring|summer|fall|autumn|winter|today|tomorrow|tonight)`;
 
@@ -111,6 +113,8 @@ const DATE_LIKE: readonly RegExp[] = [
   /\b20\d{2}\b/,
   /\b\d{1,2}(?:st|nd|rd|th)\b(?![\s-]*(?:year|yr|month|mo\b|time|anniversary|floor|buyers?|percentile|lien|mortgage|loan))/i,
   /\b(?:ends?|expires?|left|remaining)\b[^.]{0,20}\b\d+\s+(?:days?|weeks?)\b|\b\d+\s+(?:days?|weeks?)\s+(?:left|only|remaining)\b/i,
+  // A period counted from an event: "thirty days from today", "60 days of contract", "two weeks after purchase".
+  new RegExp(`\\b(?:\\d+|${COUNT_WORD})\\s+(?:business\\s+|calendar\\s+)?(?:days?|weeks?|months?)\\s+(?:from|after|of|following)\\s+(?:the\\s+)?(?:today|now|purchase|contract|contracting|signing|acceptance|ratification|execution|date|offer)\\b`, "i"),
 ];
 
 /** A numeric pair that is a buydown or an adjustable-rate figure ("2/1 buydown", "5/1 ARM", "2-1 buydown"), not a date. */

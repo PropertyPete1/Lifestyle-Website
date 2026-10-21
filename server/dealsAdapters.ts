@@ -1096,6 +1096,24 @@ function relativeRateFigures(text: string): number[] {
   return out;
 }
 
+/** Reg Z 1026.24(d)(1) triggering wording: an N-year term, payments, a down payment ("3.5% down"). */
+const TRIGGER_TERM_WORDING = /\b(?:\d+[- ]year|\d+[- ]?\s*yrs?|payments?|down\s+payment)\b|\d%\*?\s+(?:min(?:imum|\.)?\s+)?down\b/i;
+/** Reg Z 1026.24(d)(1) triggering amounts and terms: a loan length, a monthly payment amount, "$0/zero/no money down", "100% financing". */
+const TRIGGER_TERM_AMOUNTS = /\bfor\s+(?:10|15|20|25|30|40)\s+years\b|\$\s?[\d,]+(?:\.\d{2})?\s*(?:\/\s*mo(?:nth)?\b|per\s+month\b|a\s+month\b|monthly\b)|\bmonthly\s+(?:P\s?&\s?I|principal)\b|(?:\$0|\bzero)\s+down\b|\$\s?[\d,]+(?:\.\d{2})?\s*per\s+mo\b|\b(?:little\s+(?:or|to)\s+)?no\s+money\s+down\b|\bnothing\s+down\b|\b100%\s+financing\b|\b(?:ten|fifteen|twenty|twenty-five|thirty|forty)[- ]years?\b|\b\d{3}[- ]months?\b|\b\d+(?:\.\d+)?\s+percent\s+down\b/i;
+/** The loan-term reads the parser uses ("30-year fixed", "a term of 30 years"). */
+const TRIGGER_TERM_LENGTH = /\b(\d{1,2})(?:[- ]?year|[- ]?yr)s?\b\.?[-,\s]*(?:fixed|mortgage|loan|term|financing|amortiz|fha\b|va\b|usda|conventional)|\b(?:term|mortgage|loan|financing|fixed)\s+(?:of\s+|for\s+)?(\d{1,2})(?:[- ]?year|[- ]?yr)s?\b/i;
+
+/**
+ * Whether the text states a Reg Z triggering term (a payment amount, a down payment, a number of payments or a repayment
+ * period): the same wording parsePromotionalRate checks when a rate is stated, here for any offer, so an offer that states
+ * one without an APR is never published by itself or shown with the term. Expects any offer text (normalised here).
+ */
+export function mentionsTriggeringTerm(input: string): boolean {
+  // A warranty, HOA dues or an age in years is not a loan term ("10-year structural warranty", "2 years of HOA dues").
+  const text = normalizeIncentiveText(input).replace(/\b\d+[- ]?(?:years?|yrs?)\b\.?\s+(?:of\s+)?(?:[A-Za-z-]+\s+)?(?:warranty|warranties|HOA|dues|guarantee|old|anniversary)\b/gi, " ");
+  return TRIGGER_TERM_WORDING.test(text) || TRIGGER_TERM_AMOUNTS.test(text) || TRIGGER_TERM_LENGTH.test(text);
+}
+
 export function parsePromotionalRate(input: string): PromotionalRateFacts {
   const text = normalizeIncentiveText(input);
   // "2/1 Program … year one … year two" is a temporary buydown as surely as "buydown" is.
@@ -1146,9 +1164,9 @@ export function parsePromotionalRate(input: string): PromotionalRateFacts {
   // "3.5% down", "no down payment" and "30-yr" are triggering terms too (Reg Z 1026.24(d)(1)).
   // so are a term or down payment the parser itself read ("fixed for 30 years"), a loan-length "for 30 years", a monthly
   // payment amount ("$1,899/mo", "$1,899 a month", "monthly P&I"), "$0/zero down" and "5 percent down" (Reg Z 1026.24(d)(1)(i)-(iii)).
-  const triggersTerms = /\b(?:\d+[- ]year|\d+[- ]?\s*yrs?|payments?|down\s+payment)\b|\d%\*?\s+(?:min(?:imum|\.)?\s+)?down\b/i.test(text) ||
+  const triggersTerms = TRIGGER_TERM_WORDING.test(text) ||
     repaymentTermYears !== null || downPaymentPercent !== null ||
-    /\bfor\s+(?:10|15|20|25|30|40)\s+years\b|\$\s?[\d,]+(?:\.\d{2})?\s*(?:\/\s*mo(?:nth)?\b|per\s+month\b|a\s+month\b|monthly\b)|\bmonthly\s+(?:P\s?&\s?I|principal)\b|(?:\$0|\bzero)\s+down\b|\$\s?[\d,]+(?:\.\d{2})?\s*per\s+mo\b|\b(?:little\s+(?:or|to)\s+)?no\s+money\s+down\b|\bnothing\s+down\b|\b100%\s+financing\b|\b(?:ten|fifteen|twenty|twenty-five|thirty|forty)[- ]years?\b|\b\d{3}[- ]months?\b|\b\d+(?:\.\d+)?\s+percent\s+down\b/i.test(text);
+    TRIGGER_TERM_AMOUNTS.test(text);
   // The span must not run into the closing clause (as in the finder): "contracts … closing by 11/30" names a closing deadline only.
   const namesContractDeadline = /\b(?:contracts?|purchase\s+agreements?|contract\s+sales?|sign(?:ed|ing)?)\b(?:(?!\bclos)[^.]){0,100}\b(?:by|through|until|between|from|written)\b/i.test(text);
   const namesClosingDeadline = /\b(?:clos(?:e|ing))\b[^.]{0,35}\b(?:by|before|than|through)\b/i.test(text);

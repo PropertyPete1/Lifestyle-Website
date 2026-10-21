@@ -2,7 +2,7 @@ import { and, desc, eq, gte, inArray, isNull, lt, ne, or } from "drizzle-orm";
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealJobRuns, dealPhotos, dealSyncDigestEntries } from "../drizzle/schema";
 import { getDb } from "./db";
 import { chicagoClock, chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
-import { builderScrubConfig, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, normalizeIncentiveText, publicTextResidue, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher } from "./dealsAdapters";
+import { builderScrubConfig, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, mentionsTriggeringTerm, normalizeIncentiveText, publicTextResidue, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher } from "./dealsAdapters";
 export { builderScrubConfig };
 import { dealScrubTerms, emptyDealScrubConfig, mergeDealScrubConfig, normalizedDealSourceKey, normalizedText, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
 import { applyScrubExclusions, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
@@ -419,10 +419,14 @@ async function applyScrapedIncentive(community: CommunityRow, snapshot: DealAdap
   // the text" would publish it, and follows the undated lapse rule. A date the parser could not read keeps it held, and
   // nothing is published by itself while a manual override is live.
   const unreadDate = unreadDateIn(normalizeIncentiveText(scraped.text), [facts.contractDeadline, facts.closingDeadline]);
-  const autoAcceptable = (list: readonly string[]) => deadlineOnlyHold(list) && unreadDate === null && !activeManual;
+  // A payment, down payment or term stated without an APR (Reg Z 1026.24(d)) is never published by itself either: the
+  // parser checks those only beside a rate, so this read is made here for any offer.
+  const undisclosedTerms = facts.aprPercent === null && mentionsTriggeringTerm(scraped.text);
+  const autoAcceptable = (list: readonly string[]) => deadlineOnlyHold(list) && unreadDate === null && !undisclosedTerms && !activeManual;
   /** The e-mail detail of a held text: what buyers see meanwhile (the manual override, or the neutral line), and the Accept is optional. */
   const heldDetail = (list: readonly string[], text: string) => [
     deadlineOnlyHold(list) && unreadDate !== null ? `The text names a deadline with a date the reader could not read ("${unreadDate.slice(0, 40)}"), so it was not published by itself.` : null,
+    deadlineOnlyHold(list) && undisclosedTerms ? "The text states a payment, down payment or loan term without an APR, so it was not published by itself." : null,
     activeManual
       ? "Buyers keep seeing the manual override; Accept this update in Admin is optional."
       : `Buyers see "${HELD_INCENTIVE_PUBLIC_LINE}" for this community until it is reviewed; Accept this update in Admin is optional and publishes the full offer.`,

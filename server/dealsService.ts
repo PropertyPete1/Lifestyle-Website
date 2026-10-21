@@ -41,7 +41,7 @@ import { loanTypeLabel, priceBandFloor, priceBandLabel } from "../shared/dealsFe
 import { incentiveTeaser } from "../shared/dealsTeaser";
 import { heldIncentivePublicEntry, heldIncentiveShowsLine } from "../shared/dealsHeldIncentive";
 import { checkTwilioVerify } from "./dealsVerification";
-import { mentionsRate } from "./dealsAdapters";
+import { mentionsRate, mentionsTriggeringTerm } from "./dealsAdapters";
 
 export type DealSettings = {
   allowCanada: boolean;
@@ -655,16 +655,15 @@ export async function publicDealsCatalog(src?: string | null) {
 }
 
 /**
- * Reg Z on every buyer surface: a rate is printed only beside its APR. A live record with a rate (a typed rate, or a
- * rate in its wording) but no stored APR shows its non-rate wording only: the sentences that name a rate, the rate
- * fields and the financing terms that go with them (down payment, repayment terms) are left out. Nothing left means no
- * incentive at all. A record with an APR is returned as it is.
+ * Reg Z on every buyer surface (1026.24(c), (d)): a rate, and any triggering term (a payment amount, a down payment, a
+ * number of payments or a repayment period), is printed only beside its APR. A live record with no stored APR shows
+ * only its sentences that state neither; its rate, follow-on, down payment and repayment-term fields are left out.
+ * Nothing left means no incentive at all. A record with an APR is returned as it is.
  */
 export function rateDisclosedIncentive<T extends Pick<typeof dealIncentives.$inferSelect, "publicText" | "headlineRate" | "followOnRate" | "followOnPeriod" | "apr" | "downPayment" | "repaymentTerms">>(row: T): T | null {
   if (normalizeRateFigure(row.apr)) return row;
-  const typedRate = Boolean(normalizeRateFigure(row.headlineRate) || normalizeRateFigure(row.followOnRate));
-  if (!typedRate && !mentionsRate(row.publicText)) return row;
-  const kept = row.publicText.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+(?=["“(]?[A-Z0-9$])/).filter((sentence) => sentence.trim() && !mentionsRate(sentence)).join(" ").trim();
+  const discloses = (sentence: string) => mentionsRate(sentence) || mentionsTriggeringTerm(sentence);
+  const kept = row.publicText.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+(?=["“(]?[A-Z0-9$])/).filter((sentence) => sentence.trim() && !discloses(sentence)).join(" ").trim();
   if (!/[A-Za-z]/.test(kept)) return null;
   return { ...row, publicText: kept, headlineRate: null, followOnRate: null, followOnPeriod: null, downPayment: null, repaymentTerms: null };
 }

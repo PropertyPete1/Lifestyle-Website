@@ -18,7 +18,7 @@ vi.mock("./dealsMap", () => ({ refreshCommunityGeography: (...args: unknown[]) =
 vi.mock("./dealsPhotos", () => ({ processDealPhoto: (...args: unknown[]) => mocks.processDealPhoto(...args), processPendingDealPhotos: (...args: unknown[]) => mocks.processPendingDealPhotos(...args), pruneDealPhotoRenders: vi.fn() }));
 vi.mock("./dealsAdapters", async (importOriginal) => ({ ...(await importOriginal<typeof import("./dealsAdapters")>()), loadOfficialDeals: (...args: unknown[]) => mocks.loadOfficialDeals(...args) }));
 
-import { normalizeIncentiveText, parsePromotionalRate } from "./dealsAdapters";
+import { mentionsTriggeringTerm, normalizeIncentiveText, parsePromotionalRate } from "./dealsAdapters";
 import { refreshOfficialDeals, revalidateDealIncentives } from "./dealsSync";
 import { listCommunityDiagnostics, saveIncentiveForCommunity } from "./dealsSyncAdmin";
 import { gatedDealsCatalog, publicDealsCatalog } from "./dealsService";
@@ -293,5 +293,59 @@ describe("Reg Z on every buyer surface: no rate without its stored APR", () => {
     expect(rateLine(featured.lowestPayment[0]!)).toBe("at the 7.4% market rate, 5% down");
     // A deal that says it has no APR prints no figure.
     expect(rateLine({ ...featured.lowestPayment[0]!, rate: { ratePercent: 4.99, firstYearRatePercent: null, loanType: "FHA", builderOffer: true, aprPercent: null }, downPercent: 3.5 })).toBe("with the builder's financing, 3.5% down");
+  });
+});
+
+describe("N1: a payment, down payment or term is never shown without its APR (Reg Z 1026.24(d))", () => {
+  const TERMS = ["Only 3.5% down with FHA.", "Payments as low as $1,899/mo.", "Monthly payments from $1,899.", "30-year term available.", "$0 down for VA buyers.", "Just 3.5% down!", "Own for $1,899 a month.", "360 payments.", "5% down required.", "No money down options."];
+  const REST = "Closing costs paid by the builder.";
+
+  it("the triggering-term check finds each wording, and not a warranty or HOA dues", () => {
+    for (const sentence of TERMS) expect(mentionsTriggeringTerm(sentence), sentence).toBe(true);
+    for (const sentence of ["Builder pays 2 years of HOA dues.", "10-year structural warranty included.", "Up to $10,000 toward closing costs.", REST]) expect(mentionsTriggeringTerm(sentence), sentence).toBe(false);
+  });
+
+  it("the $1,899 repro stays held behind the neutral line and is never published by itself", async () => {
+    const T = "Payments as low as $1,899/mo with only 3.5% down on select homes. Closing costs paid by the builder.";
+    expect(parsePromotionalRate(T)).toMatchObject({ rateKind: "none", aprPercent: null, holdReasons: ["missing_closing_deadline"] });
+    const id = seedCommunity();
+    const lead = seedLead();
+    await run(T, 0, id);
+    expect(live()).toHaveLength(0);
+    expect(incentiveRows().some((row) => row.holdReason === AUTO_ACCEPTED_NO_DEADLINE)).toBe(false);
+    for (const incentive of [await landing(), await gated(lead), await team(lead)]) expect(incentive).toEqual(heldIncentivePublicEntry());
+    expect(JSON.stringify(await publicDealsCatalog())).not.toMatch(/1,899|3\.5%/);
+    expect(holdEmails()[0]!.content).toContain("states a payment, down payment or loan term without an APR");
+  });
+
+  for (const sentence of TERMS) {
+    it(`a live offer with no APR drops "${sentence}" from the public, gated and team lists and the landing teaser`, async () => {
+      const id = seedCommunity();
+      const lead = seedLead();
+      db.seed(dealIncentives, { communityId: id, normalizedText: "legacy", publicText: `${sentence} ${REST}`, loanType: "FHA", downPayment: "3.5% down payment", repaymentTerms: "30-year fixed", confirmedAt: new Date(), active: true, held: false, manual: false });
+      for (const incentive of [await landing(), await gated(lead), await team(lead)]) {
+        expect(incentive).toMatchObject({ text: REST, downPayment: null, repaymentTerms: null, apr: null });
+        if ("teaser" in incentive!) expect(incentive!.teaser).toBe(REST);
+        expect(JSON.stringify(incentive)).not.toContain(sentence.slice(0, 12));
+      }
+      expect((await landing() as { teaser?: string }).teaser).toBe(REST);
+    });
+  }
+
+  it("with its APR stored, the same offer shows in full", async () => {
+    const id = seedCommunity();
+    const lead = seedLead();
+    db.seed(dealIncentives, { communityId: id, normalizedText: "legacy", publicText: `Only 3.5% down with FHA. ${REST}`, apr: "6.1%", downPayment: "3.5% down payment", confirmedAt: new Date(), active: true, held: false, manual: false });
+    expect(await gated(lead)).toMatchObject({ text: `Only 3.5% down with FHA. ${REST}`, downPayment: "3.5% down payment", apr: "6.1%" });
+  });
+});
+
+describe("more deadline wordings the date check must catch", () => {
+  const unread = (text: string) => { const facts = parsePromotionalRate(text); return unreadDateIn(normalizeIncentiveText(text), [facts.contractDeadline, facts.closingDeadline]); };
+  it("last day of a period, close of business, EOD/EOW/COB, and periods counted from an event", () => {
+    for (const text of ["Contracts by the last day of the month get $5,000.", "Close by the last business day of the quarter.", "Sign by close of business for $5,000.", "Contracts by COB.", "Sign by EOD.", "Close by EOW.", "Close within thirty days from today.", "Close within 45 days of contract.", "Close two weeks after purchase."]) {
+      expect(unread(text), text).not.toBeNull();
+    }
+    expect(unread(NO_DATE)).toBeNull();
   });
 });

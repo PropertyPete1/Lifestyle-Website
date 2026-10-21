@@ -64,6 +64,7 @@ the full page. `server/dealsAdapters.liveFixes.test.ts` reads them.
 | weekley-briggs-ranch-45, weekley-briggs-ranch-60, weekley-confluence-select | David Weekley series community pages (`window.pageData`) |
 | hakes-park-place | Hakes coming-soon page (same shape as Mesa Vista) |
 | drees-areas.json | Drees `GET /api/en/dreeshomes/areas` (San Antonio `pageId` 310095) |
+| drees-community-310095.json, drees-qmi-326325.json, drees-plan-326325.json | Drees `POST /api/en/dreeshomes/community`, `/qmi`, `/plan` answers (`{ contentId, pageSize: 1000, pageNumber: 1 }`), as served |
 | perry-alsatian-oaks, perry-esperanza | Perry community pages (collections in the Flight payload) |
 | perry-alsatian-oaks-50 | Perry collection page (homes rendered client-side) |
 | perry-home-173-mountain-oak | Perry home page of a home the sitemap still lists: the "this home just sold" stub |

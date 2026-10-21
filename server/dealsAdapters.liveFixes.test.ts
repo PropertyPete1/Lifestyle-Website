@@ -3,7 +3,7 @@ import { gunzipSync } from "node:zlib";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_DOCUMENT_BYTES, getDocument, loadOfficialDeals, type CommunitySourceConfig, type HtmlFetcher } from "./dealsAdapters";
 import { parseCenturyCards } from "./dealsAdapters.century";
-import { parseDreesAreaId, parseDreesPage, resetDreesCaches } from "./dealsAdapters.drees";
+import { parseDreesAreaId, parseDreesNeighborhoods, parseDreesPage, resetDreesCaches, withParentAddress } from "./dealsAdapters.drees";
 import { hakesComingSoon } from "./dealsAdapters.hakes";
 import { parseHighlandSections } from "./dealsAdapters.highland";
 import { legendApiUrl } from "./dealsAdapters.legend";
@@ -320,17 +320,67 @@ describe("Hakes Brothers: the coming-soon page wording (October 20, 2026)", () =
   });
 });
 
-describe("Drees: the community page and the market's areas list pass their checks (the POST answers were not captured)", () => {
-  it("Haby Hill names itself a parent community with its own id and URL; the areas list names San Antonio's page id", async () => {
-    const page = live("drees-haby-hill");
-    expect(parseDreesPage(page)).toEqual({ contentId: 326325, parent: true, url: "/new-homes-san-antonio/san-antonio/comm-haby-hills/" });
-    expect(parseDreesAreaId(gunzipSync(readFileSync(new URL("./fixtures/deals/live-2026-10-20/drees-areas.json.gz", import.meta.url))).toString("utf8"))).toBe(310095);
-    const COMMUNITY = "https://www.dreeshomes.com/new-homes-san-antonio/san-antonio/comm-haby-hills/";
-    const { fetcher, requested } = siteFetcher({ [COMMUNITY]: page });
-    const result = await loadOfficialDeals({ builder: "Drees Custom Homes", sourceUrl: COMMUNITY, privateCommunityName: "Haby Hill", scrubList: ["Haby Hill"] }, { fetcher, now: () => NOW });
-    // Past the page: the market list is asked for next (here 404, so a fetch failure, not a changed page).
-    expect(requested).toEqual([COMMUNITY, "https://www.dreeshomes.com/api/en/dreeshomes/areas"]);
-    expect(result.holdReasons).toEqual(["community_fetch_failed"]);
+describe("Drees Custom Homes: a parent community listed without its sub-neighborhoods (October 20, 2026)", () => {
+  const COMMUNITY = "https://www.dreeshomes.com/new-homes-san-antonio/san-antonio/comm-haby-hills/";
+  const API = "https://www.dreeshomes.com/api/en/dreeshomes/";
+  const json = (name: string) => gunzipSync(readFileSync(new URL(`./fixtures/deals/live-2026-10-20/${name}.json.gz`, import.meta.url))).toString("utf8");
+  const config: CommunitySourceConfig = { builder: "Drees Custom Homes", sourceUrl: COMMUNITY, privateCommunityName: "Haby Hill", scrubList: ["Haby Hill", "Haby Hollow", "Habys Cove"] };
+  /** The live answers: the page, GET areas, then the POSTs as the reader sends them (the market list with San Antonio's id, the homes and plans with Haby Hill's). */
+  function dreesSite(overrides: { page?: string; community?: string } = {}) {
+    const requests: string[] = [];
+    const fetcher = vi.fn(async (input: string, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) as { contentId: number; pageSize: number; pageNumber: number } : null;
+      requests.push(`${init?.method ?? "GET"} ${input}${body ? ` ${body.contentId}` : ""}`);
+      const answer = (text: string) => new Response(text, { status: 200, headers: { "content-type": "application/json" } });
+      if (input === COMMUNITY) return new Response(overrides.page ?? live("drees-haby-hill"), { status: 200, headers: { "content-type": "text/html" } });
+      if (input === `${API}areas` && !body) return answer(json("drees-areas"));
+      if (input === `${API}community` && body?.contentId === 310095 && body.pageSize === 1000) return answer(overrides.community ?? json("drees-community-310095"));
+      if (input === `${API}qmi` && body?.contentId === 326325) return answer(json("drees-qmi-326325"));
+      if (input === `${API}plan` && body?.contentId === 326325) return answer(json("drees-plan-326325"));
+      return new Response("not found", { status: 404 });
+    });
+    return { fetcher: fetcher as unknown as HtmlFetcher, requests };
+  }
+
+  it("finds the live hold: the market list carries the parent row only (no address, no Haby Hill 50s/60s rows), which the address check refused", () => {
+    expect(parseDreesPage(live("drees-haby-hill"))).toEqual({ contentId: 326325, parent: true, url: "/new-homes-san-antonio/san-antonio/comm-haby-hills/" });
+    expect(parseDreesAreaId(json("drees-areas"))).toBe(310095);
+    const rows = parseDreesNeighborhoods(json("drees-community-310095"), "www.dreeshomes.com")!;
+    const parent = rows.find((row) => row.contentId === 326325)!;
+    expect(parent).toMatchObject({ parent: true, qmiCount: 7, url: COMMUNITY, record: { name: "Haby Hill", street: null, zip: "78253" } });
+    expect(rows.filter((row) => row.url.includes("comm-haby-hills/") && row.contentId !== 326325)).toEqual([]);
+    expect(withParentAddress(rows).find((row) => row.contentId === 326325)!.record.street).toBeNull();
+  });
+
+  it("reads Haby Hill's 7 homes and 17 plans from the live API answers, the homes under its sub-neighborhoods", async () => {
+    const { fetcher, requests } = dreesSite();
+    const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
+    expect(result.holdReasons).toEqual([]);
+    expect(requests).toEqual([`GET ${COMMUNITY}`, `GET ${API}areas`, `POST ${API}community 310095`, `POST ${API}qmi 326325`, `POST ${API}plan 326325`]);
+    expect(result.private.homes.map((home) => [home.privateAddress, home.status, home.price, home.bedrooms, home.bathrooms, home.squareFeet, home.moveInDate])).toEqual([
+      ["203 Haby Hollow, San Antonio, TX 78253", "Quick Move-In (November 2026)", 574_900, 5, 4.5, 3_615, "November 2026"],
+      ["346 Haby Hollow, San Antonio, TX 78253", "Quick Move-In", 549_900, 5, 4.5, 3_102, null],
+      ["375 Haby Hollow, San Antonio, TX 78253", "Quick Move-In (January 2027)", 499_900, 4, 3, null, "January 2027"],
+      ["155 Habys Cove, San Antonio, TX 78253", "Quick Move-In (November 2026)", 549_900, 4, 3, 2_839, "November 2026"],
+      ["264 Haby Hill, San Antonio, TX 78253", "Quick Move-In", 524_900, 4, 3.5, 3_240, null],
+      ["305 Haby Hill, San Antonio, TX 78253", "Quick Move-In", 549_900, 4, 3, 2_852, null],
+      ["221 Haby Hollow, San Antonio, TX 78253", "Quick Move-In", 424_900, 3, 2.5, 2_246, null],
+    ]);
+    expect(result.private.homes.every((home) => home.sourceUrl.startsWith(`${COMMUNITY}haby-hill-`))).toBe(true);
+    expect(result.private.plans).toHaveLength(17);
+    // A suppressed price stays hidden; the Wagner plan's "4 full and 4 half baths" (high 2) is not a count to publish.
+    expect(result.private.plans.find((plan) => plan.privatePlanName === "Lewis")).toMatchObject({ price: null, bedrooms: 4, bathrooms: 3.5, squareFeet: 3_141 });
+    expect(result.private.plans.find((plan) => plan.privatePlanName === "Wagner")).toMatchObject({ price: 705_900, bedrooms: 4, bathrooms: null, squareFeet: 3_822 });
+    expect(result.private.incentive?.text).toContain("Save Your Way Up To $50,000!");
+    for (const secret of ["Haby", "Drees", "78253", "Brendan", "Wagner"]) expect(publicJson(result)).not.toContain(secret);
+  });
+
+  it("still holds a neighborhood (not a parent) whose row has no address, and a page the market list does not name", async () => {
+    const neighborhood = dreesSite({ page: live("drees-haby-hill").replace("var isCommunityPage = true;", "var isNeighborhoodPage = true;") });
+    expect((await loadOfficialDeals(config, { fetcher: neighborhood.fetcher, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    resetDreesCaches(); // the market list is read once an hour
+    const unlisted = dreesSite({ community: json("drees-community-310095").replace('"contentId":326325', '"contentId":1') });
+    expect((await loadOfficialDeals(config, { fetcher: unlisted.fetcher, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
   });
 });
 

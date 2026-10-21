@@ -59,6 +59,16 @@ const num = (value: unknown): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 const positive = (value: unknown): number | null => { const parsed = num(value); return parsed && parsed > 0 ? parsed : null; };
+/**
+ * Full baths plus half a bath per half bath; null when the figures are not a plausible count (more than two half
+ * baths: Haby Hill's Wagner plan lists 4 full and 4 half, with a "high" of 2, on October 20, 2026), never a guess.
+ */
+const bathCount = (full: unknown, half: unknown): number | null => {
+  const fullBaths = num(full);
+  const halfBaths = num(half) ?? 0;
+  if (fullBaths === null || halfBaths < 0 || halfBaths > 2) return null;
+  return fullBaths + halfBaths * 0.5;
+};
 
 let listCache: { fetchedAt: number; neighborhoods: Json[] } | null = null;
 export function resetDreesCaches(): void { listCache = null; }
@@ -180,7 +190,6 @@ export function parseDreesHomes(body: string, communityPage: string, now: Date):
     const status = dreesStatus(str(home.moveInDate), now);
     const price = positive(home.discountedPrice) ?? positive(home.priceLow);
     const before = positive(home.actualPrice);
-    const full = num(home.bathLow);
     const city = str(home.cityName);
     const zip = /^\d{5}/.exec(str(home.zipCode) ?? "")?.[0] ?? null;
     const model = home.isModelHome === true;
@@ -195,7 +204,7 @@ export function parseDreesHomes(body: string, communityPage: string, now: Date):
       previousPrice: before && price && before > price ? before : null,
       priceDrop: before && price && before > price ? before - price : null,
       bedrooms: num(home.bedLow),
-      bathrooms: full === null ? null : full + (num(home.halfBathLow) ?? 0) * 0.5,
+      bathrooms: bathCount(home.bathLow, home.halfBathLow),
       squareFeet: positive(home.sqFtLow),
       garage: num(home.garagesLow),
       readyNow: false,
@@ -225,7 +234,6 @@ export function parseDreesPlans(body: string, communityPage: string): { plans: P
     if (!plan || !name || !page || !sameOfficialHost(page, community.hostname)) continue;
     if (!comparablePath(page.pathname).startsWith(base)) { foreignPlan = true; continue; }
     if (plan.isPlanAvailable === false) continue;
-    const full = num(plan.bathLow);
     plans.push({
       sourceUrl: `${page.origin}${page.pathname}`,
       privateName: name,
@@ -233,7 +241,7 @@ export function parseDreesPlans(body: string, communityPage: string): { plans: P
       status: null,
       price: plan.suppressPrice === true ? null : positive(plan.priceLow),
       bedrooms: num(plan.bedLow),
-      bathrooms: full === null ? null : full + (num(plan.halfBathLow) ?? 0) * 0.5,
+      bathrooms: bathCount(plan.bathLow, plan.halfBathLow),
       squareFeet: positive(plan.sqFtLow),
       garage: num(plan.garagesLow),
       readyNow: false,
@@ -297,8 +305,11 @@ export class DreesAdapter implements DealAdapter {
     if ("hold" in market) return failedResult(config, fetchedAt, privateSnapshot, [market.hold]);
     const listed = withParentAddress(parseDreesNeighborhoods(JSON.stringify({ data: { neighborhoods: market.neighborhoods } }), DREES_HOST) ?? []);
     const row = listed.find((item) => item.contentId === own.contentId);
-    // The market list must name the page's community, with its own URL and its sales address.
-    if (!row || !row.record.street) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // The market list must name the page's community, with its own URL and its sales address. A parent community's
+    // row names no address of its own, and its sub-neighborhoods need not be listed (Haby Hill on October 20, 2026:
+    // the parent row only, its homes under haby-hill-50s/ and -60s/): a parent row is accepted on its id, its URL and
+    // the page's own word that it is a parent, and its home count still corroborates the homes read below.
+    if (!row || (!row.record.street && !(row.parent && own.parent))) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (comparablePath(new URL(row.url).pathname.replace(/\/+$/, "")) !== comparablePath(community.pathname.replace(/\/+$/, ""))) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     const communityPage = `${community.origin}${community.pathname.replace(/\/+$/, "")}/`;
     const [homesBody, plansBody] = await Promise.all([

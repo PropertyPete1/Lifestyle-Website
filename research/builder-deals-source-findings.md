@@ -1110,8 +1110,12 @@ captured that day with the production User-Agent (fixtures in `server/fixtures/d
   Only one home page and one plan page were captured, so the other ~140 detail pages of the five communities are
   unverified until a live run.
 - Hakes Park Place: the same coming-soon shape as Mesa Vista; reads as coming soon (nothing for sale).
-- Drees: the areas list parses (San Antonio `pageId` 310095). The holding step is past it and needs the POST
-  answers (`/community` with `{"contentId":310095,"pageSize":1000,"pageNumber":1}`, `/qmi` and `/plan` with
-  `{"contentId":326325,"pageSize":1000,"pageNumber":1}`).
+- Drees Haby Hill: the market list (`POST …/community` for San Antonio, 310095) carries the parent row only
+  (`isCommunity`, no address, `qmiCount` 7, `neighborhoodCount` 2) and no rows for its sub-neighborhoods
+  (haby-hill-50s/, haby-hill-60s/), so `withParentAddress` found no address and the reader held
+  (`expected_community_container_not_found`). A parent row is now accepted on its id, its URL and the page's own
+  `isCommunityPage`; a neighborhood row still needs its address. Haby Hill reads 7 homes (count matches the row)
+  and 17 plans. Wagner's plan data says 4 full and 4 half baths (high 2): more than two half baths is not a
+  count, so its baths are left empty rather than published as 6.
 - Highland discovery is left as is: new Highland pages have no office line or map pin, so discovery finds no
   record for them (existing configured communities are unaffected).

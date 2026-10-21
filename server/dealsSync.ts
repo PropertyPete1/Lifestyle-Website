@@ -201,10 +201,10 @@ async function upsertPhotos(homeId: number, gallery: Array<{ sourceUrl: string }
     });
     void result;
   }
-  // The DB rows are the source of truth. One guarded drain kick (max 2 photos in
-  // flight) processes the new rows; a restart cannot lose them because the 10-minute
-  // photo job and the sync drains pick up due pending records and expired leases.
-  void processPendingDealPhotos(20).catch((error) => console.warn("[deals-photo] queue drain failed", error));
+  // The DB rows are the source of truth: the photo cron (every 5 minutes, in its
+  // own request) processes them. No drain is kicked here, because this runs
+  // inside the catalog request and image work beside the page reads is what
+  // made the host answer 503.
 }
 
 /** Private, admin-only summary of what one refresh changed. */
@@ -985,6 +985,15 @@ async function queuedRefreshRequests(now: Date): Promise<RefreshRequest[]> {
   });
 }
 
+/** Read-only: whether any "Refresh now" request is waiting for a batch (catalogBatchPending; it closes nothing). */
+async function hasQueuedRefreshRequest(): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db.select({ id: dealJobRuns.id }).from(dealJobRuns)
+    .where(and(like(dealJobRuns.jobName, `${REFRESH_JOB_PREFIX}%`), eq(dealJobRuns.status, "running"), eq(dealJobRuns.detail, REFRESH_QUEUED))).limit(1);
+  return rows.length > 0;
+}
+
 /** Takes a queued request for this batch; false when another batch already took it. */
 async function takeRefreshRequest(rowId: number, at: Date): Promise<boolean> {
   const db = await getDb();
@@ -1009,6 +1018,24 @@ function refreshRequestOutcome(result: RefreshResult): { status: "ok" | "failed"
   if (result.ok) return { status: "ok", detail: "refreshed" };
   if (result.reason === REFRESH_FAILED) return { status: "failed", detail: "failed: the reader hit an unexpected error on this community's pages; nothing was published or marked sold" };
   return { status: "ok", detail: `held: ${result.reason ?? "unknown"}` };
+}
+
+/**
+ * True while the catalog cron still has work in this slot: a community is due
+ * and checkable now, a "Refresh now" request is queued, or a builder is being
+ * read under a live lease. The photo
+ * cron yields the catalog's slot only then, so the two never run their heavy
+ * work side by side.
+ */
+export async function catalogBatchPending(now = new Date()): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  if ((await buildersInFlight(now)).length) return true;
+  // An admin's "Refresh now" waiting for this batch counts too: the photo job yields the slot to it.
+  if (await hasQueuedRefreshRequest()) return true;
+  const { catalogRefreshDays } = await getDealSettings();
+  const rows = await db.select().from(dealCommunities).where(and(or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
+  return dueCandidates(rows, now, catalogRefreshDays).length > 0;
 }
 
 /** What one community's check found, written as its own digest entry the moment it finishes, so a restart loses nothing. */

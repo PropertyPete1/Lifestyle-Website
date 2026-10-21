@@ -93,6 +93,9 @@ function scenario(options: { row?: Row; settings?: ReturnType<typeof settingsRow
 }
 
 const finalPhotoUpdate = (fake: FakeDb) => fake.updatesFor(dealPhotos).at(-1) ?? {};
+/** Masters are content-addressed: masters/<photo id>-<sha256>.webp. */
+const masterKeys = (photoId: number) => Array.from(objects.keys()).filter((key) => key.startsWith(`builder-deals-private/masters/${photoId}-`));
+const masterOf = (photoId: number) => { const keys = masterKeys(photoId); expect(keys.length).toBe(1); return objects.get(keys[0]) as Buffer; };
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 async function waitFor(condition: () => boolean, attempts = 400) {
   for (let i = 0; i < attempts && !condition(); i++) await tick();
@@ -136,7 +139,7 @@ describe("processDealPhoto: pipeline steps 1 to 6", () => {
     expect(JSON.parse(JSON.stringify(photos.defaultBuilderPhotoSettings("M/I Homes")))).toMatchObject({ enabled: true, region: photos.DEFAULT_LAUNCH_WATERMARK_REGION });
     expect(photos.defaultBuilderPhotoSettings("Perry Homes")).toMatchObject({ enabled: false, region: null });
 
-    const master = objects.get("builder-deals-private/masters/7.webp");
+    const master = masterOf(7);
     const original = objects.get("builder-deals-private/originals/7.webp");
     expect(master && original).toBeTruthy();
     const masterMeta = await sharp(master as Buffer).metadata();
@@ -148,7 +151,7 @@ describe("processDealPhoto: pipeline steps 1 to 6", () => {
       processingState: "processed",
       automaticHidden: false,
       ocrMatches: "[]",
-      processedStorageKey: "builder-deals-private/masters/7.webp",
+      processedStorageKey: photos.dealPhotoMasterKey(7, sha256(master as Buffer)),
       originalStorageKey: "builder-deals-private/originals/7.webp",
       processedVersion: sha256(master as Buffer),
       originalVersion: sha256(original as Buffer),
@@ -183,7 +186,7 @@ describe("processDealPhoto: pipeline steps 1 to 6", () => {
 
     expect(result).toMatchObject({ ok: true, processed: true, hidden: false, bandCropped: "bottom", regionAction: "covered" });
     expect(ocr.calls).toBe(2);
-    const masterMeta = await sharp(objects.get("builder-deals-private/masters/7.webp") as Buffer).metadata();
+    const masterMeta = await sharp(masterOf(7)).metadata();
     expect(masterMeta.height).toBe(HEIGHT - Math.ceil(HEIGHT * 0.2));
     expect(masterMeta.width).toBe(WIDTH);
     expect(finalPhotoUpdate(fake)).toMatchObject({ processingState: "processed", automaticHidden: false, ocrMatches: "[]" });
@@ -201,7 +204,7 @@ describe("processDealPhoto: pipeline steps 1 to 6", () => {
     expect(result.matches).toEqual([expect.objectContaining({ term: "8310", words: ["8310"] })]);
     expect(ocr.calls).toBe(1);
     expect(objects.has("builder-deals-private/originals/7.webp")).toBe(true);
-    expect(objects.has("builder-deals-private/masters/7.webp")).toBe(true);
+    expect(masterKeys(7).length).toBe(1);
     const update = finalPhotoUpdate(fake);
     expect(update).toMatchObject({ processingState: "processed", automaticHidden: true, lastProcessingError: null, nextProcessingAttemptAt: null });
     expect(JSON.parse(String(update.ocrMatches))).toEqual([expect.objectContaining({ term: "8310" })]);
@@ -232,7 +235,7 @@ describe("processDealPhoto: pipeline steps 1 to 6", () => {
     expect(result).toEqual({ ok: false, awaitingRegion: true });
     expect(ocr.calls).toBe(0);
     expect(objects.has("builder-deals-private/originals/7.webp")).toBe(true);
-    expect(objects.has("builder-deals-private/masters/7.webp")).toBe(false);
+    expect(masterKeys(7).length).toBe(0);
     expect(finalPhotoUpdate(fake)).toMatchObject({ processingState: "pending", processingAttempts: 0, nextProcessingAttemptAt: null, lastProcessingError: "awaiting_region", automaticHidden: true });
   });
 
@@ -250,9 +253,9 @@ describe("processDealPhoto: pipeline steps 1 to 6", () => {
     expect(result).toMatchObject({ ok: true, processed: true, regionAction: "cropped" });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(vi.mocked(storageReadPrivate)).toHaveBeenCalledWith("builder-deals-private/originals/7.webp");
-    expect(vi.mocked(storagePut).mock.calls.map(([key]) => key)).toEqual(["builder-deals-private/masters/7.webp"]);
+    expect(vi.mocked(storagePut).mock.calls.map(([key]) => key)).toEqual([photos.dealPhotoMasterKey(7, sha256(masterOf(7)))]);
     // Admin bottom crop applies unconditionally after the region crop; no approval flag is consulted.
-    const masterMeta = await sharp(objects.get("builder-deals-private/masters/7.webp") as Buffer).metadata();
+    const masterMeta = await sharp(masterOf(7)).metadata();
     expect(masterMeta.height).toBe(HEIGHT - Math.round(HEIGHT * 0.12) - 100);
     // A changed master invalidates that photo's cached renders (rows and objects).
     await waitFor(() => fake.opsFor("delete", dealPhotoRenders).length === 1);
@@ -302,7 +305,8 @@ describe("processDealPhoto: download wiring and queue state machine", () => {
     const before = Date.now();
     expect(await photos.processDealPhoto(7)).toMatchObject({ ok: false, retryScheduled: true });
     const claim = fake.opsFor("update", dealPhotos)[0];
-    expect(claim.set).toMatchObject({ processingState: "processing", processingStartedAt: expect.any(Date), lastProcessingError: null });
+    // The claim writes a random token that every later write of this run is fenced on.
+    expect(claim.set).toMatchObject({ processingState: "processing", processingStartedAt: expect.any(Date), lastProcessingError: expect.stringMatching(/^claim:[0-9a-f]{24}$/) });
     const claimWhere = renderWhere(claim.where);
     expect(claimWhere.sql).toMatch(/is not null/i);
     expect(claimWhere.params).toEqual(expect.arrayContaining([7, "pending"]));
@@ -327,7 +331,8 @@ describe("processDealPhoto: download wiring and queue state machine", () => {
     const batches: number[][] = [[1, 2, 3, 4, 5], [], []];
     fake.onSelect(dealPhotos, (op: FakeOp) => {
       const fields = op.fields as Record<string, unknown> | undefined;
-      if (fields && "photo" in fields) return [photoRow({ photo: { id: renderWhere(op.where).params[0] as number } })];
+      // Distinct sources: rows sharing one source URL would share a single download (see dealsPhotosThroughput.test.ts).
+      if (fields && "photo" in fields) { const id = renderWhere(op.where).params[0] as number; return [photoRow({ photo: { id, sourceUrl: `https://dam.mihomes.com/gallery/${id}.jpg` } })]; }
       return (batches.shift() ?? []).map((id) => ({ id }));
     });
     fake.onSelect(dealSettings, [settingsRow("Chesmar", { enabled: false, region: null })]);
@@ -357,13 +362,15 @@ describe("processDealPhoto: download wiring and queue state machine", () => {
     expect(maxInFlight).toBe(2);
     expect(result).toMatchObject({ processed: 5, hidden: 0, retried: 0, failed: 0, skipped: 0, awaitingRegion: 0 });
     expect(batches.length).toBe(1); // the coalesced call triggered exactly one rerun (two of three batches consumed)
-    const maintenance = fake.updatesFor(dealPhotos).slice(0, 3);
-    expect(maintenance[0]).toMatchObject({ processingState: "pending", lastProcessingError: "processing_lease_expired" });
-    expect(maintenance[1]).toMatchObject({ nextProcessingAttemptAt: expect.any(Date) });
+    const maintenance = fake.updatesFor(dealPhotos).slice(0, 4);
+    // Abandoned claims: failed for good once out of attempts, otherwise back in the queue after a pause.
+    expect(maintenance[0]).toMatchObject({ processingState: "failed", lastProcessingError: "processing_abandoned" });
+    expect(maintenance[1]).toMatchObject({ processingState: "pending", lastProcessingError: "processing_lease_expired" });
+    expect(maintenance[2]).toMatchObject({ nextProcessingAttemptAt: expect.any(Date) });
     // Once per boot: rows that failed under earlier code get fresh attempts, except permanent failures.
-    expect(maintenance[2]).toMatchObject({ processingState: "pending", processingAttempts: 0, nextProcessingAttemptAt: expect.any(Date) });
-    const recoveryWhere = renderWhere(fake.opsFor("update", dealPhotos)[2].where);
-    expect(recoveryWhere.params).toEqual(expect.arrayContaining(["failed", "unapproved_source", "invalid_crop", "invalid_image"]));
+    expect(maintenance[3]).toMatchObject({ processingState: "pending", processingAttempts: 0, nextProcessingAttemptAt: expect.any(Date) });
+    const recoveryWhere = renderWhere(fake.opsFor("update", dealPhotos)[3].where);
+    expect(recoveryWhere.params).toEqual(expect.arrayContaining(["failed", "unapproved_source", "invalid_crop", "invalid_image", "processing_abandoned"]));
     expect(recoveryWhere.sql).toMatch(/not in/i);
     const recoveries = () => fake.opsFor("update", dealPhotos).filter((op) => renderWhere(op.where).params.includes("unapproved_source")).length;
     expect(recoveries()).toBe(1);
@@ -425,7 +432,8 @@ describe("renderDealPhotoForLead", () => {
     fake.onSelect(dealPhotos, (op: FakeOp) => {
       const photoId = renderWhere(op.where).params[0] as number;
       return [{
-        photo: { id: photoId, processedStorageKey: `builder-deals-private/masters/${photoId}.webp`, processedVersion: `v-${photoId}` },
+        // Legacy per-photo key (rows published before content-addressed masters) with its true version.
+        photo: { id: photoId, processedStorageKey: `builder-deals-private/masters/${photoId}.webp`, processedVersion: sha256(objects.get(`builder-deals-private/masters/${photoId}.webp`) ?? Buffer.alloc(0)) },
         home: { id: 3 }, community: { id: 2 },
         lead: { id: 9, name: null, instagramHandle: "propertypete", phoneE164: "+15125550100", status: options.leadStatus ?? "verified", expiresAt: future },
       }];
@@ -480,7 +488,8 @@ describe("renderDealPhotoForLead", () => {
   });
 
   it("limits uncached renders to three in flight and keeps a fifty-entry in-memory LRU", async () => {
-    for (let id = 1; id <= 60; id++) objects.set(`builder-deals-private/masters/${id}.webp`, await master());
+    // Distinct bytes per photo: the render cache is keyed by master version, so identical masters would share one render.
+    for (let id = 1; id <= 60; id++) objects.set(`builder-deals-private/masters/${id}.webp`, await master(64 + id, 64));
     renderScenario();
     let inFlight = 0;
     let maxInFlight = 0;

@@ -17,10 +17,16 @@ export type FakeOp = {
   where?: unknown;
   joins: Array<{ table: unknown; on: unknown }>;
   limit?: number;
+  orderBy?: unknown[];
 };
 export type SelectHandler = (op: FakeOp) => unknown[];
 
 const dialect = new MySqlDialect();
+
+/** Renders a captured order-by list (one SQL fragment per key). */
+export function renderOrderBy(orderBy: unknown[] | undefined): string[] {
+  return (orderBy ?? []).map((part) => dialect.sqlToQuery(sql`${part}`).sql);
+}
 
 /** Renders a captured where clause so tests can check which predicates and params were sent. */
 export function renderWhere(where: unknown): { sql: string; params: unknown[] } {
@@ -57,7 +63,7 @@ export function createFakeDb() {
       leftJoin: (table: unknown, on: unknown) => { op.joins.push({ table, on }); return self; },
       where: (where: unknown) => { op.where = where; return self; },
       limit: (limit: number) => { op.limit = limit; return self; },
-      orderBy: () => self,
+      orderBy: (...args: unknown[]) => { op.orderBy = args; return self; },
       groupBy: () => self,
       set: (set: Record<string, unknown>) => { op.set = set; return self; },
       values: (values: Record<string, unknown>) => { op.values = values; return self; },

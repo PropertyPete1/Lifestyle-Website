@@ -18,6 +18,7 @@ import { makeMatchingLeadsTeam, revokeOrphanedTeamPreviewLinks } from "./dealsEl
 import { resendConfiguration, sendBuilderDealsEmail } from "./dealsEmail";
 import { cleanupBuilderDealsFubRecord, formatChicagoDateTime, stripBuilderDealsTestTag } from "./dealsFub";
 import { pruneDealPhotoRenders, type DealPhotoRenderPruneResult } from "./dealsPhotos";
+import { photoDrainStall, readDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
 import { PRIVACY_RESIDUE_EVENT_KIND, getDealSettings, privacyResidueCommunityId, privacyResidueSinceStart } from "./dealsService";
 import { hasBuilderReader } from "./dealsAdapters";
 import { heldReasonsOf } from "../shared/dealsHeldIncentive";
@@ -487,7 +488,7 @@ type OperationalSnapshot = {
   funnel: { landed: number; consented: number; verificationSends: number; verified: number; listingViews: number; requests: number; newLeads: number };
   trecImport: { completedAt: Date | null; ageHours: number | null; state: HealthState };
   sourceUpdates: { activeCommunities: number; staleCommunities: number; heldCommunities: number; oldestAgeHours: number | null; lastSuccessfulSyncAt: Date | null; state: HealthState };
-  photos: { pending: number; processing: number; failed: number; awaitingRegion: number; oldestPendingAgeHours: number | null; oldestPendingMinutes: number | null; state: HealthState };
+  photos: { pending: number; processing: number; failed: number; awaitingRegion: number; oldestPendingAgeHours: number | null; oldestPendingMinutes: number | null; drainStalledMinutes: number | null; drainError: string | null; drainWarning?: string | null; state: HealthState };
   fubFailures: { jobs: number; leads: number; failingOverAnHour: number; state: HealthState };
   emailFailures: { failed: number; state: HealthState };
   jobFailures: { failed: number; jobs: string[]; state: HealthState };
@@ -502,7 +503,7 @@ const emptyOperationalSnapshot = (): OperationalSnapshot => ({
   funnel: { landed: 0, consented: 0, verificationSends: 0, verified: 0, listingViews: 0, requests: 0, newLeads: 0 },
   trecImport: { completedAt: null, ageHours: null, state: "unknown" },
   sourceUpdates: { activeCommunities: 0, staleCommunities: 0, heldCommunities: 0, oldestAgeHours: null, lastSuccessfulSyncAt: null, state: "unknown" },
-  photos: { pending: 0, processing: 0, failed: 0, awaitingRegion: 0, oldestPendingAgeHours: null, oldestPendingMinutes: null, state: "unknown" },
+  photos: { pending: 0, processing: 0, failed: 0, awaitingRegion: 0, oldestPendingAgeHours: null, oldestPendingMinutes: null, drainStalledMinutes: null, drainError: null, state: "unknown" },
   fubFailures: { jobs: 0, leads: 0, failingOverAnHour: 0, state: "unknown" },
   emailFailures: { failed: 0, state: "unknown" },
   jobFailures: { failed: 0, jobs: [], state: "unknown" },
@@ -582,6 +583,7 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
     const pending = number(photo?.pending), processing = number(photo?.processing), failed = number(photo?.failed), awaitingRegion = number(photo?.awaitingRegion);
     const oldestPendingAgeHours = ageHours(photo?.oldestPendingAt, now);
     const oldestPendingMinutes = ageMinutes(photo?.oldestPendingAt, now);
+    const drain = photoDrainStall(await readDealPhotoDrainStatus().catch(() => null), Math.max(0, pending - awaitingRegion), now);
     const communityLabel = (communityId: number) => {
       const community = communities.find((row) => row.id === communityId);
       return community ? `${community.privateName} (${community.publicLabel})` : `community ${communityId}`;
@@ -611,7 +613,7 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
       trecImport: { completedAt: latestImport[0]?.completedAt ?? null, ageHours: importAgeHours, state: healthState(importAgeHours !== null && importAgeHours <= thresholds.trecImportHours) },
       // A held run does not count as on schedule; a dismissed hold is not a hold and does.
       sourceUpdates: { activeCommunities: managed.length, staleCommunities, heldCommunities, oldestAgeHours: finiteCommunityAges.length ? Math.max(...finiteCommunityAges) : null, lastSuccessfulSyncAt: lastSyncTimes.length ? new Date(Math.max(...lastSyncTimes)) : null, state: healthState(staleCommunities === 0 && heldCommunities === 0) },
-      photos: { pending, processing, failed, awaitingRegion, oldestPendingAgeHours, oldestPendingMinutes, state: healthState(failed === 0 && awaitingRegion === 0 && (oldestPendingMinutes === null || oldestPendingMinutes <= thresholds.pendingPhotoMinutes)) },
+      photos: { pending, processing, failed, awaitingRegion, oldestPendingAgeHours, oldestPendingMinutes, drainStalledMinutes: drain.stalled ? drain.stalledMinutes : null, drainError: drain.lastError, drainWarning: drain.lastWarning, state: healthState(failed === 0 && awaitingRegion === 0 && !drain.stalled && !drain.lastError && (oldestPendingMinutes === null || oldestPendingMinutes <= thresholds.pendingPhotoMinutes)) },
       fubFailures: { jobs: number(failedJobRows[0]?.count), leads: number(failedLeadRows[0]?.count), failingOverAnHour, state: healthState(failingOverAnHour === 0) },
       emailFailures: { failed: failedEmails, state: healthState(failedEmails === 0) },
       jobFailures: { failed: failedRunRows.length, jobs: failedRunNames, state: healthState(failedRunRows.length === 0) },
@@ -666,6 +668,10 @@ export async function builderDealsHealthCheck(now = new Date(), options: HealthC
     if (operational.trecImport.state === "attention") attention.push(operational.trecImport.completedAt ? `TREC file is ${hoursLabel(operational.trecImport.ageHours)} old (limit ${thresholds.trecImportHours}h).` : "No TREC import has completed yet.");
     if (operational.sourceUpdates.staleCommunities > 0) attention.push(`Last builder update is over ${thresholds.communityUpdateHours / 24} days old for ${operational.sourceUpdates.staleCommunities} of ${operational.sourceUpdates.activeCommunities} active communities (oldest ${hoursLabel(operational.sourceUpdates.oldestAgeHours)}).`);
     if (operational.sourceUpdates.heldCommunities > 0) attention.push(`${operational.sourceUpdates.heldCommunities} community update${operational.sourceUpdates.heldCommunities === 1 ? " is" : "s are"} held, which does not count as on schedule.`);
+    const drainError = operational.photos.drainError ? operational.photos.drainError.replaceAll("_", " ") : null;
+    if (operational.photos.drainStalledMinutes !== null) attention.push(`Photo processing is stuck: no photo moved in ${operational.photos.drainStalledMinutes} minutes while ${operational.photos.pending - operational.photos.awaitingRegion} are queued${drainError ? ` (last run: ${drainError})` : ""}.`);
+    else if (drainError) attention.push(`The last photo processing run failed: ${drainError}.`);
+    if (operational.photos.drainWarning) attention.push(`Photo processing is running in plain order (oldest first): ${operational.photos.drainWarning}.`);
     if (operational.photos.state === "attention") attention.push(`Photo queue: ${operational.photos.failed} failed, ${operational.photos.awaitingRegion} awaiting a builder watermark region (Set watermark region in Admin, Builder Deals, Photos), oldest pending ${operational.photos.oldestPendingMinutes ?? 0} minutes (limit ${thresholds.pendingPhotoMinutes}).`);
     if (operational.fubFailures.state === "attention") attention.push(`${operational.fubFailures.failingOverAnHour} FUB write${operational.fubFailures.failingOverAnHour === 1 ? " has" : "s have"} been failing for over ${thresholds.fubFailureMinutes} minutes.`);
     if (operational.emailFailures.state === "attention") attention.push(`${operational.emailFailures.failed} alert email${operational.emailFailures.failed === 1 ? "" : "s"} failed to send in the last ${thresholds.emailFailureHours} hours.`);

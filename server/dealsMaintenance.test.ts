@@ -24,7 +24,7 @@ vi.mock("./dealsEmail", async (importOriginal) => ({
   sendBuilderDealsEmail: (...args: unknown[]) => mocks.sendBuilderDealsEmail(...args),
 }));
 
-import { dealCommunities, dealEmailLogs, dealEvents, dealFubJobs, dealIncentives, dealJobRuns, dealLeads, dealPhotos, dealTeamAllowlist, dealTrecImports } from "../drizzle/schema";
+import { dealCommunities, dealEmailLogs, dealEvents, dealFubJobs, dealIncentives, dealJobRuns, dealLeads, dealPhotos, dealSettings, dealTeamAllowlist, dealTrecImports } from "../drizzle/schema";
 import { createFakeDealsDb, jsonResponse } from "./dealsFubFakeDb.test-support";
 import { privacyResidueDetail } from "./dealsService";
 import { summarizeHolds } from "./dealsSync";
@@ -152,7 +152,7 @@ function communityRow(input: { id: number; privateName: string; publicLabel: str
     holdReason: summarizeHolds(catalogHoldReason, incentiveHoldReason),
   };
 }
-function snapshotDb(now: Date, options: { healthy?: boolean; communities?: CommunityRow[]; residueRows?: Array<{ detail: string | null }> } = {}) {
+function snapshotDb(now: Date, options: { healthy?: boolean; communities?: CommunityRow[]; residueRows?: Array<{ detail: string | null }>; photos?: Record<string, unknown>; drainStatus?: Record<string, unknown> } = {}) {
   const healthy = options.healthy ?? false;
   const communities = options.communities ?? (healthy
     ? [communityRow({ id: 7, privateName: "Private Grove", publicLabel: "Community A", lastSuccessfulSyncAt: hoursAgo(20, now) })]
@@ -170,7 +170,8 @@ function snapshotDb(now: Date, options: { healthy?: boolean; communities?: Commu
     [dealLeads, [{ count: healthy ? 0 : 1 }]],
     [dealTrecImports, [{ completedAt: hoursAgo(healthy ? 10 : 40, now) }]],
     [dealCommunities, communities],
-    [dealPhotos, [{ pending: healthy ? 0 : 1, processing: 0, failed: 0, oldestPendingAt: healthy ? null : new Date(now.getTime() - 90 * 60_000) }]],
+    [dealPhotos, [options.photos ?? { pending: healthy ? 0 : 1, processing: 0, failed: 0, oldestPendingAt: healthy ? null : new Date(now.getTime() - 90 * 60_000) }]],
+    [dealSettings, options.drainStatus ? [{ key: "photos.drain.status", value: JSON.stringify(options.drainStatus) }] : []],
     [dealFubJobs, [{ count: healthy ? 0 : 2 }]],
     [dealFubJobs, [{ count: healthy ? 0 : 1 }]],
     [dealIncentives, healthy ? [] : [{ id: 5, communityId: 7, holdReason: "Promotional rate needs its follow-on period", createdAt: hoursAgo(30, now) }]],
@@ -226,6 +227,24 @@ describe("Builder Deals daily health check", () => {
     expect(health.operational.sourceUpdates).toMatchObject({ activeCommunities: 3, staleCommunities: 1, heldCommunities: 1, state: "attention" });
     expect(health.attention.filter((item) => /community update/.test(item))).toHaveLength(1);
     expect(health.attention.some((item) => /residue/.test(item))).toBe(false);
+  });
+
+  it("flags a stuck photo queue (photos due, no healthy drain for over 30 minutes, or a failing queue read) apart from a merely long one", async () => {
+    mockServices({ balance: "250.00" });
+    vi.stubEnv("RESEND_FROM_EMAIL", "deals@lifestyledesignrealty.com");
+    const queued = { pending: 400, processing: 2, failed: 0, awaitingRegion: 0, oldestPendingAt: new Date(now.getTime() - 20 * 60_000) };
+    // Drains are moving photos: a 20-minute-old queue is fine.
+    mocks.getDb.mockResolvedValue(snapshotDb(now, { healthy: true, photos: queued, drainStatus: { lastRunAt: hoursAgo(0.05, now).toISOString(), lastHealthyAt: hoursAgo(0.05, now).toISOString(), lastError: null, last: { processed: 120 } } }));
+    let health = await builderDealsHealthCheck(now);
+    expect(health.operational.photos).toMatchObject({ drainStalledMinutes: null, drainError: null, state: "ok" });
+    expect(health.attention.some((item) => /stuck/.test(item))).toBe(false);
+
+    // Every drain for 45 minutes failed to read the queue.
+    mocks.getDb.mockResolvedValue(snapshotDb(now, { healthy: true, photos: queued, drainStatus: { lastRunAt: hoursAgo(0.05, now).toISOString(), lastHealthyAt: hoursAgo(0.75, now).toISOString(), lastError: "queue_read_failed", last: { processed: 0, error: "queue_read_failed" } } }));
+    health = await builderDealsHealthCheck(now);
+    expect(health.operational.photos).toMatchObject({ drainStalledMinutes: 45, drainError: "queue_read_failed", state: "attention" });
+    expect(health.attention).toEqual(expect.arrayContaining([expect.stringContaining("Photo processing is stuck: no photo moved in 45 minutes while 400 are queued (last run: queue read failed)")]));
+    expect(health.state).toBe("attention");
   });
 
   it("reads the hold columns, not the summary: an incentive-only hold is never a community hold and a dismissed catalog hold is not a hold", async () => {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealSettings, dealSyncDigestEntries } from "../drizzle/schema";
+import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealJobRuns, dealPhotos, dealSettings, dealSyncDigestEntries } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 import type { DealAdapterResult, DealHoldReason, PrivatePlanOrHome } from "./dealsAdapters";
 
@@ -27,7 +27,7 @@ vi.mock("./_core/heartbeat", () => ({
 }));
 
 import { parsePromotionalRate } from "./dealsAdapters";
-import { buildersInFlight, communityRefreshDue, leaseBuilder, leaseRenewingFetcher, refreshDueCommunitiesBatch, refreshOfficialDeals, revalidateDealIncentives, sendSyncDigestIfReady, storedScrubConfig } from "./dealsSync";
+import { buildersInFlight, catalogBatchPending, communityRefreshDue, leaseBuilder, leaseRenewingFetcher, refreshDueCommunitiesBatch, refreshOfficialDeals, revalidateDealIncentives, sendSyncDigestIfReady, storedScrubConfig } from "./dealsSync";
 import { DEALS_JOB_DEFINITIONS, ensureDealsCron } from "./registerCron";
 import { chicagoEndOfDay } from "./dealsService";
 
@@ -773,5 +773,39 @@ describe("scheduling", () => {
     expect(mocks.updateHeartbeatJob).toHaveBeenCalledWith("stale-catalog", expect.objectContaining({ cron: catalog.cron, path: catalog.path, payload: catalog.payload }), "");
     expect(mocks.createHeartbeatJob).toHaveBeenCalledTimes(DEALS_JOB_DEFINITIONS.length - 2);
     expect(mocks.createHeartbeatJob.mock.calls.map(([job]) => (job as { payload: { job: string } }).payload.job)).toEqual(expect.arrayContaining(["photos", "activity"]));
+  });
+});
+
+describe("photo cron: catalog slot check", () => {
+  it("reports catalog work while a community is due or a builder lease is live, and the catalog batch queues photos without draining them", async () => {
+    const at = Date.parse("2026-10-21T11:00:00Z");
+    // The seeded community was never pulled: due.
+    expect(await catalogBatchPending(new Date(at))).toBe(true);
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a"), gallery: [{ sourceUrl: "https://dam.mihomes.com/gallery/8301-front.jpg" }] }] }));
+    expect(await refreshDueCommunitiesBatch({ clock: () => at })).toMatchObject({ checked: 1, ok: 1 });
+    expect(db.rows(dealPhotos).map((row) => [row.sourceUrl, row.processingState])).toEqual([["https://dam.mihomes.com/gallery/8301-front.jpg", "pending"]]);
+    // Image work stays out of the catalog request: the photo cron picks the row up.
+    expect(mocks.processPendingDealPhotos).not.toHaveBeenCalled();
+    expect(await catalogBatchPending(new Date(at + 60_000))).toBe(false);
+    const lease = await leaseBuilder("M/I Homes", new Date(at + 60_000));
+    expect(lease).not.toBeNull();
+    expect(await catalogBatchPending(new Date(at + 120_000))).toBe(true);
+    await lease?.release();
+    expect(await catalogBatchPending(new Date(at + 180_000))).toBe(false);
+  });
+
+  it("counts a queued Refresh now as catalog work, so the photo job yields its slot until the batch has read it", async () => {
+    const at = Date.parse("2026-10-21T11:00:00Z");
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));
+    await refreshDueCommunitiesBatch({ clock: () => at });
+    expect(await catalogBatchPending(new Date(at + 60_000))).toBe(false);
+    // Pulled today, so only the admin's request makes it due again.
+    db.seed(dealJobRuns, { jobName: `deals-refresh-community-${communityId}`, chicagoDay: "2026-10-21", status: "running", detail: "queued", startedAt: new Date(at + 60_000) });
+    expect(await catalogBatchPending(new Date(at + 120_000))).toBe(true);
+    // The check is read-only: the request is still queued for the batch.
+    expect(db.rows(dealJobRuns).find((row) => row.jobName.startsWith("deals-refresh-community-"))).toMatchObject({ status: "running", detail: "queued" });
+    expect(await refreshDueCommunitiesBatch({ clock: () => at + 180_000 })).toMatchObject({ checked: 1, ok: 1 });
+    expect(db.rows(dealJobRuns).find((row) => row.jobName.startsWith("deals-refresh-community-"))).toMatchObject({ status: "ok", detail: "refreshed" });
+    expect(await catalogBatchPending(new Date(at + 240_000))).toBe(false);
   });
 });

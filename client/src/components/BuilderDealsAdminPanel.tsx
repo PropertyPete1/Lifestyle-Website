@@ -94,9 +94,11 @@ function BuilderDealsAdminContent() {
 
   const activeCommunities = overview.communities.filter((community) => community.active && !community.paused).length;
   const pausedCommunities = overview.communities.filter((community) => community.active && community.paused).length;
-  const availableHomes = overview.homes.filter((home) => home.status === "available").length;
+  // Whole-table counts from the server: overview.homes and overview.photos are capped display lists.
+  const availableHomes = overview.stats.homes.available;
   const failedFub = overview.fubJobs.filter((job) => job.status === "failed").length;
-  const servedPhotos = overview.photos.filter((photo) => photo.processingState === "processed" && !photo.automaticHidden && !photo.adminHidden).length;
+  const servedPhotos = overview.stats.photos.served;
+  const queuedPhotos = overview.stats.photos.queued + overview.stats.photos.processing;
 
   return (
     <div className="space-y-8">
@@ -120,7 +122,7 @@ function BuilderDealsAdminContent() {
         <Metric label="Verified leads" value={overview.leadCounts.verified ?? 0} detail={`${overview.leadCounts.team ?? 0} team, ${overview.leadCounts.blocked ?? 0} blocked`} />
         <Metric label="Sends today" value={overview.dailyCount.toLocaleString()} detail={overview.capReached ? "Daily cap reached" : "Under the daily cap"} tone={overview.capReached ? "warning" : "default"} />
         <Metric label="Active communities" value={activeCommunities} detail={`${pausedCommunities} paused`} />
-        <Metric label="Available homes" value={availableHomes} detail={`${servedPhotos} photos served`} />
+        <Metric label="Available homes" value={availableHomes.toLocaleString()} detail={`${servedPhotos.toLocaleString()} photos served${queuedPhotos ? `, ${queuedPhotos.toLocaleString()} queued` : ""}`} />
         <Metric label="Failed FUB jobs" value={failedFub} detail={`${overview.blockCount.toLocaleString()} active blocks`} tone={failedFub ? "warning" : "default"} />
       </div>
 

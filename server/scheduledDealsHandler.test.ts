@@ -135,7 +135,7 @@ describe("Builder Deals scheduled handler helpers", () => {
 
     await scheduledDealsHandler({ body: { job: "photos" } } as Request, response);
 
-    expect(mocks.processPendingDealPhotos).toHaveBeenCalledWith(10);
+    expect(mocks.processPendingDealPhotos).toHaveBeenCalledWith(40);
     expect(json).toHaveBeenCalledWith({ ok: true, result: { processed: 2, retried: 1, skipped: 0 } });
     expect(mocks.getDb).not.toHaveBeenCalled();
   });

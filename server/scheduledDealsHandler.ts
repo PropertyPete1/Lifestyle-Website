@@ -62,8 +62,10 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
     if (job === "agents") return res.json({ ok: true, result: await whenDue(dueAt(1, 45), "builder-deals-known-agent-sync", syncKnownAgentsFromFub) });
     if (job === "fub") return res.json({ ok: true, result: await runPendingDealsFubJobs() });
     // Every 10 minutes: due pending photos and abandoned processing leases. Not a
-    // once-per-day job, so it is not recorded in deal_job_runs.
-    if (job === "photos") return res.json({ ok: true, result: await processPendingDealPhotos(10) });
+    // once-per-day job, so it is not recorded in deal_job_runs. 40 per call (about
+    // 2.6 s each, two at a time, so under two minutes): at launch the research list
+    // queued about 6,000 photos, which 10 per call would have taken four days to serve.
+    if (job === "photos") return res.json({ ok: true, result: await processPendingDealPhotos(40) });
     // 1:30 AM Chicago: one FUB activity note per lead for the previous day's views and tour requests.
     if (job === "activity") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-activity-note", () => enqueueDailyActivityNote()) });
     if (job === "alerts") {

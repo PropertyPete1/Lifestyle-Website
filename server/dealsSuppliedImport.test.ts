@@ -409,6 +409,80 @@ describe("supplied import through the normal sync", () => {
   });
 });
 
+describe("supplied import: review regressions (foreign homes, empty imports, stale estimates, link case)", () => {
+  /** A home under the given community's page. */
+  const homeUnder = (n: number, communityUrl: string, over: Partial<Home> = {}): Home => ({ ...home(n), url: `${communityUrl}/quick-move-in-homes/${n}-fixture-way`, ...over });
+
+  it("a home whose page is under another community of the builder holds this community and never moves the other's home", async () => {
+    await generateSuppliedImportKey(BUILDER);
+    const c1 = seedCommunity();
+    const c2 = seedCommunity({ privateName: "Fixture Crossing", sourceUrl: C2 });
+    const now = new Date();
+    expect((await importNow(payload([community([homeUnder(201, C2)], { communityUrl: C2 })], hoursAgo(2, now)), now)).response.communities[0]!.status).toBe("published");
+    expect(available(c2).map((row) => row.sourceUrl)).toEqual([`${C2}/quick-move-in-homes/201-fixture-way`]);
+    // C1's list carries C2's home (a "nearby homes" card the agent copied): the whole of C1 holds, C2's home stays C2's.
+    const { response } = await importNow(payload([community([home(101), homeUnder(201, C2)])], hoursAgo(1, now)), now);
+    expect(response.communities[0]).toMatchObject({ status: "held", reasons: ["supplied_import_invalid_home"] });
+    expect(response.communities[0]!.problems).toContain("homes[1]: url is not under this community's page");
+    expect(homesOf(c1)).toEqual([]);
+    expect(available(c2).map((row) => row.communityId)).toEqual([c2]);
+    expect(communityRow(c1).catalogHoldReason).toBe("supplied_import_invalid_home");
+    // The rule itself: a link on the builder's site but outside the community's page, or one that only shares its prefix, is not a home of it.
+    for (const url of [`${SITE}/communities/san-antonio/quick-move-in-homes/101-fixture-way`, `${C1}-north/quick-move-in-homes/101-fixture-way`]) {
+      expect(checkSuppliedCommunity(BUILDER, { capturedAt: now, community: community([home(101, { url })]) }, now).reasons).toEqual(["supplied_import_invalid_home"]);
+    }
+    expect(checkSuppliedCommunity(BUILDER, { capturedAt: now, community: community([home(101)]) }, now).reasons).toEqual([]);
+  });
+
+  it("an import with no homes for sale sweeps nothing until an earlier, separate import agreed; a resent copy is not a second visit", async () => {
+    await generateSuppliedImportKey(BUILDER);
+    const c1 = seedCommunity();
+    const now = new Date();
+    await importNow(payload([community([home(101), home(102), home(103)])], hoursAgo(30, now)), now);
+    expect(available(c1)).toHaveLength(3);
+    // The list failed to load: "complete" and a count of 0. Held, all three stay live.
+    const empty = (at: Date) => importNow(payload([community([], { homesShownCount: 0 })], at), now);
+    expect((await empty(hoursAgo(20, now))).response.communities[0]).toMatchObject({ status: "held", reasons: ["supplied_import_incomplete"] });
+    expect(available(c1)).toHaveLength(3);
+    // The same capture resent (a 503 retry): still one visit, still held.
+    expect((await empty(hoursAgo(20, now))).response.communities[0]).toMatchObject({ status: "held", reasons: ["supplied_import_incomplete"] });
+    expect(available(c1)).toHaveLength(3);
+    // A later, separate import says the same: the community really is sold out.
+    expect((await empty(hoursAgo(2, now))).response.communities[0]).toMatchObject({ status: "published", reasons: [] });
+    expect(available(c1)).toEqual([]);
+    expect(homesOf(c1).every((row) => row.status === "sold")).toBe(true);
+  });
+
+  it("a first import with no homes for sale holds; an empty list whose sold homes are listed still counts as empty", async () => {
+    await generateSuppliedImportKey(BUILDER);
+    const c1 = seedCommunity();
+    const now = new Date();
+    const { response } = await importNow(payload([community([home(101, { status: "sold", price: null })], { homesShownCount: 0 })], hoursAgo(1, now)), now);
+    expect(response.communities[0]).toMatchObject({ status: "held", reasons: ["supplied_import_incomplete"] });
+    expect(homesOf(c1)).toEqual([]);
+  });
+
+  it("an under-construction home whose month has passed publishes with no date; a coming month and a finished home read as before", () => {
+    const now = new Date(Date.UTC(2026, 9, 21, 15));
+    const read = (over: Partial<Home>) => checkSuppliedCommunity(BUILDER, { capturedAt: now, community: community([home(101, over)]) }, now);
+    expect(read({ status: "under_construction", moveIn: "August 2026" })).toMatchObject({ reasons: [], homes: [expect.objectContaining({ status: "Quick Move-In", readyNow: false, moveInDate: null })] });
+    expect(read({ status: "under_construction", moveIn: "October 2026" }).homes[0]).toMatchObject({ status: "Quick Move-In (October 2026)", moveInDate: "October 2026" });
+    expect(read({ status: "under_construction", moveIn: "January 2027" }).homes[0]).toMatchObject({ status: "Quick Move-In (January 2027)", readyNow: false, moveInDate: "January 2027" });
+    expect(read({ status: "available", moveIn: "August 2026" }).homes[0]).toMatchObject({ status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null });
+  });
+
+  it("the same home sent with its link in another letter case is the same home: one row, still for sale, never swept to sold", async () => {
+    await generateSuppliedImportKey(BUILDER);
+    const c1 = seedCommunity();
+    const now = new Date();
+    await importNow(payload([community([home(101)])], hoursAgo(5, now)), now);
+    const { response } = await importNow(payload([community([home(101, { url: `${C1}/Quick-Move-In-Homes/101-Fixture-Way` })])], hoursAgo(1, now)), now);
+    expect(response.communities[0]).toMatchObject({ status: "published", reasons: [] });
+    expect(homesOf(c1).map((row) => [row.sourceUrl, row.status])).toEqual([[`${C1}/quick-move-in-homes/101-fixture-way`, "available"]]);
+    expect(digestSummaries().flatMap((summary) => summary.sold)).toEqual([]);
+  });
+});
+
 describe("POST /api/deals/import over HTTP", () => {
   let server: Server;
   let base: string;

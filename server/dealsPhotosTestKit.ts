@@ -69,6 +69,17 @@ export function createFakeDb() {
       values: (values: Record<string, unknown>) => { op.values = values; return self; },
       onDuplicateKeyUpdate: () => self,
       getSQL: () => sql`(subquery)`,
+      // A select turned into a derived table (`.as(alias)`) is never run on its own: drop it from the
+      // recorded ops and hand back its selected fields as `alias`.`field` references.
+      as: (alias: string) => {
+        const index = ops.indexOf(op);
+        if (index >= 0) ops.splice(index, 1);
+        const fields = (op.fields ?? {}) as Record<string, unknown>;
+        return Object.fromEntries(Object.keys(fields).map((key) => {
+          const field = fields[key] as { fieldAlias?: string } | undefined;
+          return [key, sql.raw(`\`${alias}\`.\`${field?.fieldAlias ?? key}\``)];
+        }));
+      },
       then: (onFulfilled?: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) => run().then(onFulfilled, onRejected),
       catch: (onRejected?: (reason: unknown) => unknown) => run().catch(onRejected),
       finally: (onFinally?: () => void) => run().finally(onFinally),

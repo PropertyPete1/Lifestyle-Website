@@ -76,7 +76,7 @@ describe("known-agent sync against FUB rate limits and the cron time limit", () 
   it("gives up after a few 429s with a precise reason (page, tries, Retry-After, context), changing nothing", async () => {
     mockFub({ people: rateLimited("20") });
     const result = await syncKnownAgentsFromFub({ clock, sleep });
-    expect(result).toMatchObject({ ok: false, reason: "fub_rate_limited", detail: expect.stringMatching(/^\/people page 1 \(0 read so far\): \/people: HTTP 429 after 5 tries \(Retry-After 20, context global\)$/) });
+    expect(result).toMatchObject({ ok: false, reason: "fub_rate_limited", detail: expect.stringMatching(/^\/people page 1 \(0 read so far\): \/people: HTTP 429 after 5 tries \(Retry-After 20, context global\); scan: 0 people in 0 pages and 1 users page, \d+s of a 180s scan budget$/) });
     expect(sleeps).toEqual([20_000, 20_000, 20_000, 20_000]);
     expect(db.rows(dealKnownAgents)).toEqual([]);
   });
@@ -132,6 +132,46 @@ describe("known-agent sync against FUB rate limits and the cron time limit", () 
     expect(db.rows(dealJobRuns)).toHaveLength(1);
     expect(db.rows(dealJobRuns)[0]).toMatchObject({ detail: null });
     expect(rows().filter((row) => !row.active).map((row) => row.fubPersonId)).toEqual(["999"]);
+  });
+
+  it("gives the people scan its own budget: a scan that cannot finish in it stops with its size recorded and writes nothing", async () => {
+    // A big account: every people page is full and points to a next page.
+    let page = 0;
+    mockFub({ people: () => { page += 1; return jsonResponse({ people: Array.from({ length: 100 }, (_, index) => ({ id: page * 1_000 + index, name: "Buyer", tags: ["Buyer"] })), _metadata: { next: `cursor-${page}` } }); } });
+    const result = await syncKnownAgentsFromFub({ clock, sleep, budgetMs: 60_000, scanBudgetMs: 10_000 });
+    expect(result).toMatchObject({ ok: false, reason: "time_budget_exceeded", peopleFetched: 900, scan: { peopleFetched: 900, peoplePages: 9, usersPages: 1 } });
+    expect((result as { detail: string }).detail).toMatch(/; scan: 900 people in 9 pages and 1 users page, 10s of a 10s scan budget$/);
+    expect(db.rows(dealKnownAgents)).toEqual([]);
+    expect(db.rows(dealJobRuns)).toEqual([]);
+  });
+
+  it("lets the notes pass use what the scan left, up to the overall cap, and records the scan's size", async () => {
+    const notesAt: number[] = [];
+    let page = 0;
+    mockFub({
+      people: () => { page += 1; return page < 5 ? jsonResponse({ people: [{ id: 9_000 + page, tags: ["Buyer"] }], _metadata: { next: `c${page}` } }) : jsonResponse({ people: Array.from({ length: 12 }, (_, index) => recruit(101 + index)) }); },
+      notes: () => { notesAt.push(now); return jsonResponse({ notes: [] }); },
+    });
+    const start = now;
+    const result = await syncKnownAgentsFromFub({ clock, sleep, budgetMs: 60_000, scanBudgetMs: 10_000 });
+    expect(result).toMatchObject({ ok: true, recruitTagged: 12, upserted: 12, notesDeferred: 0, scan: { peopleFetched: 16, peoplePages: 5, usersPages: 1, ms: 6_000 } }); // six answers at one fake second each
+    // Notes ran past the scan's 10 s, inside the 60 s cap less the 20 s kept for writes.
+    expect(Math.max(...notesAt) - start).toBeGreaterThan(10_000);
+    expect(Math.max(...notesAt) - start).toBeLessThanOrEqual(40_000);
+  });
+
+  it("reads new recruits (no rows yet) first, ahead of the rotating pass, without moving its cursor for them", async () => {
+    const people = Array.from({ length: 12 }, (_, index) => recruit(101 + index));
+    // 101..110 are mirrored; 111 and 112 joined since the last pass. The last pass stopped after 103.
+    for (const person of people.slice(0, 10)) db.seed(dealKnownAgents, { name: person.name, phoneE164: `+1210555${String(1000 + person.id).slice(-4)}`, source: "fub_recruit", fubPersonId: String(person.id), fubIdentityKey: `fub:${person.id}:+1210555${String(1000 + person.id).slice(-4)}`, active: true });
+    db.seed(dealJobRuns, { jobName: "builder-deals-known-agent-cursor", chicagoDay: "cursor", status: "ok", detail: "103" });
+    const notesFor: string[] = [];
+    mockFub({ people: jsonResponse({ people }), notes: (url) => { notesFor.push(url.searchParams.get("personId")!); return jsonResponse({ notes: [] }); } });
+    const result = await syncKnownAgentsFromFub({ clock, sleep, budgetMs: 30_000 });
+    expect(notesFor).toEqual(["111", "112", "104", "105", "106", "107", "108", "109"]);
+    expect(result).toMatchObject({ ok: true, newRecruits: 2, notesDeferred: 4 });
+    expect(db.rows(dealKnownAgents).filter((row) => row.fubPersonId === "111" || row.fubPersonId === "112")).toHaveLength(2);
+    expect(db.rows(dealJobRuns).find((row) => row.jobName === "builder-deals-known-agent-cursor")).toMatchObject({ detail: "109" });
   });
 
   it("keeps the default budget under the catalog batch's few minutes per cron call", () => {

@@ -29,6 +29,14 @@ const RECRUIT_TAG_PREFIX = "recruit";
  * answers and records a result (a request the host cuts off leaves its run "running" with no reason at all).
  */
 export const KNOWN_AGENT_SYNC_BUDGET_MS = 4 * 60_000;
+/**
+ * The people and users scan has its own share of that budget: a large account (tens of thousands of people at 100 a
+ * page) must not leave the notes pass nothing, nor run the whole budget and end every night "time_budget_exceeded".
+ * The notes pass gets whatever the scan left, up to the overall cap.
+ */
+export const KNOWN_AGENT_SCAN_BUDGET_MS = 3 * 60_000;
+/** FUB answers about one notes request a second ("notes": 10 per 10 seconds). */
+const NOTES_PER_SECOND = 1;
 /** Time kept for the database writes after the last notes read. */
 const WRITE_RESERVE_MS = 20_000;
 /** A 429 is retried this many times, waiting what FUB's Retry-After says (capped), while the budget allows. */
@@ -47,13 +55,18 @@ type FubFailureReason = "fub_not_configured" | "fub_unavailable" | "fub_invalid_
 type FubFetchResult = { ok: true; body: FubRecord } | { ok: false; reason: FubFailureReason; detail: string };
 
 /** Timing for the FUB reads of one sync; tests pass a fake clock and sleep. */
-export type KnownAgentSyncOptions = { clock?: () => number; sleep?: (ms: number) => Promise<void>; budgetMs?: number };
-type FubClient = { deadline: number; clock: () => number; sleep: (ms: number) => Promise<void>; requests: number; rateLimited: number; pausedUntil: Map<string, number> };
+export type KnownAgentSyncOptions = { clock?: () => number; sleep?: (ms: number) => Promise<void>; budgetMs?: number; scanBudgetMs?: number };
+/** `deadline` is the current phase's (the scan's, then the overall cap); `end` is the overall cap. */
+type FubClient = { start: number; deadline: number; end: number; clock: () => number; sleep: (ms: number) => Promise<void>; requests: number; rateLimited: number; pausedUntil: Map<string, number> };
 
 function fubClient(options: KnownAgentSyncOptions = {}): FubClient {
   const clock = options.clock ?? Date.now;
+  const start = clock();
+  const end = start + (options.budgetMs ?? KNOWN_AGENT_SYNC_BUDGET_MS);
   return {
-    deadline: clock() + (options.budgetMs ?? KNOWN_AGENT_SYNC_BUDGET_MS),
+    start,
+    end,
+    deadline: Math.min(end, start + (options.scanBudgetMs ?? KNOWN_AGENT_SCAN_BUDGET_MS)),
     clock,
     sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
     requests: 0,
@@ -87,7 +100,15 @@ export type KnownAgentSkipLists = {
 };
 
 /** How the FUB reads went: requests made, 429s met, and recruits whose notes this run's time budget did not reach (their rows stay as they were). */
-export type KnownAgentsSyncRun = { fubRequests?: number; rateLimited?: number; notesDeferred?: number };
+export type KnownAgentsSyncRun = {
+  fubRequests?: number;
+  rateLimited?: number;
+  notesDeferred?: number;
+  /** The people and users scan, to size the budget from deals.admin.jobRuns: people read, pages, and how long it took. */
+  scan?: { peopleFetched: number; peoplePages: number; usersPages: number; ms: number };
+  /** Recruits with no rows yet, whose notes are read before the rotating pass. */
+  newRecruits?: number;
+};
 
 export type KnownAgentsSyncResult =
   | ({
@@ -311,7 +332,7 @@ async function getFubJson(path: string, client: FubClient): Promise<FubFetchResu
   }
 }
 
-type FubListResult = { ok: true; values: FubRecord[] } | { ok: false; reason: FubFailureReason; detail: string };
+type FubListResult = ({ ok: true; values: FubRecord[] } | { ok: false; reason: FubFailureReason; detail: string }) & { pages: number; read: number };
 
 /** Uses FUB's keyset cursor when present, with offset fallback for older responses. A failure names the page and how far the scan got. */
 async function listAllFub(path: string, collection: string, params: Record<string, string>, client: FubClient): Promise<FubListResult> {
@@ -324,27 +345,28 @@ async function listAllFub(path: string, collection: string, params: Record<strin
     if (cursor) query.set("next", cursor); else query.set("offset", String(offset));
     const response = await getFubJson(`${path}?${query.toString()}`, client);
     const at = `${path} page ${page + 1} (${values.length.toLocaleString("en-US")} read so far)`;
-    if (!response.ok) return { ...response, detail: `${at}: ${response.detail}` };
+    const progress = { pages: page, read: values.length };
+    if (!response.ok) return { ...response, detail: `${at}: ${response.detail}`, ...progress };
     const raw = response.body[collection];
-    if (!Array.isArray(raw)) return { ok: false, reason: "fub_invalid_response", detail: `${at}: no "${collection}" list` };
+    if (!Array.isArray(raw)) return { ok: false, reason: "fub_invalid_response", detail: `${at}: no "${collection}" list`, ...progress };
     const batch = raw.filter((value): value is FubRecord => Boolean(value) && typeof value === "object" && !Array.isArray(value));
-    if (batch.length !== raw.length) return { ok: false, reason: "fub_invalid_response", detail: `${at}: a non-object entry` };
+    if (batch.length !== raw.length) return { ok: false, reason: "fub_invalid_response", detail: `${at}: a non-object entry`, ...progress };
     values.push(...batch);
     const metadata = response.body._metadata && typeof response.body._metadata === "object" ? response.body._metadata as FubRecord : {};
     const next = nonEmpty(metadata.next, 2_000);
     if (next) {
-      if (cursors.has(next)) return { ok: false, reason: "fub_invalid_response", detail: `${at}: the next cursor repeated` };
+      if (cursors.has(next)) return { ok: false, reason: "fub_invalid_response", detail: `${at}: the next cursor repeated`, pages: page + 1, read: values.length };
       cursors.add(next);
       cursor = next;
       continue;
     }
     const total = Number(metadata.total);
-    if (Number.isFinite(total) && total >= 0 && values.length < total && batch.length === 0) return { ok: false, reason: "fub_invalid_response", detail: `${at}: an empty page before the reported total ${total}` };
-    if (batch.length < FUB_PAGE_SIZE || (Number.isFinite(total) && values.length >= total)) return { ok: true, values };
+    if (Number.isFinite(total) && total >= 0 && values.length < total && batch.length === 0) return { ok: false, reason: "fub_invalid_response", detail: `${at}: an empty page before the reported total ${total}`, pages: page + 1, read: values.length };
+    if (batch.length < FUB_PAGE_SIZE || (Number.isFinite(total) && values.length >= total)) return { ok: true, values, pages: page + 1, read: values.length };
     cursor = null;
     offset += batch.length;
   }
-  return { ok: false, reason: "fub_invalid_response", detail: `${path}: more than ${MAX_FUB_PAGES} pages` };
+  return { ok: false, reason: "fub_invalid_response", detail: `${path}: more than ${MAX_FUB_PAGES} pages`, pages: MAX_FUB_PAGES, read: values.length };
 }
 
 /**
@@ -432,6 +454,12 @@ function notesOrder(people: readonly FubRecord[], cursor: string | null): FubRec
 
 type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
+/** FUB person ids that already have mirror rows (active or not). */
+async function mirroredPersonIds(db: Db): Promise<Set<string>> {
+  const rows = await db.select({ fubPersonId: dealKnownAgents.fubPersonId }).from(dealKnownAgents).where(eq(dealKnownAgents.source, "fub_recruit"));
+  return new Set(rows.map((row) => row.fubPersonId).filter((value): value is string => Boolean(value)));
+}
+
 async function readNotesCursor(db: Db): Promise<{ value: string | null; exists: boolean }> {
   try {
     const row = (await db.select({ detail: dealJobRuns.detail }).from(dealJobRuns).where(and(eq(dealJobRuns.jobName, NOTES_CURSOR_JOB), eq(dealJobRuns.chicagoDay, NOTES_CURSOR_DAY))).limit(1))[0];
@@ -487,11 +515,16 @@ export async function syncKnownAgentsFromFub(options: KnownAgentSyncOptions = {}
     listAllFub("/people", "people", { fields: PEOPLE_FIELDS }, client),
     listAllFub("/users", "users", {}, client),
   ]);
+  const scan = { peopleFetched: peopleResult.read, peoplePages: peopleResult.pages, usersPages: usersResult.pages, ms: client.clock() - client.start };
+  const scanLine = `scan: ${scan.peopleFetched.toLocaleString("en-US")} people in ${scan.peoplePages} page${scan.peoplePages === 1 ? "" : "s"} and ${scan.usersPages} users page${scan.usersPages === 1 ? "" : "s"}, ${Math.round(scan.ms / 1000)}s of a ${Math.round((client.deadline - client.start) / 1000)}s scan budget`;
+  // The notes pass may use what the scan left, up to the overall cap.
+  client.deadline = client.end;
   if (!peopleResult.ok || !usersResult.ok) {
+    // A partial scan writes nothing: the ownership checks need every person.
     const failure = !peopleResult.ok ? peopleResult : usersResult as Extract<FubListResult, { ok: false }>;
     return {
       ok: false,
-      peopleFetched: peopleResult.ok ? peopleResult.values.length : 0,
+      peopleFetched: peopleResult.read,
       recruitTagged: 0,
       upserted: 0,
       skipped: 0,
@@ -499,9 +532,10 @@ export async function syncKnownAgentsFromFub(options: KnownAgentSyncOptions = {}
       linksKilled: 0,
       skippedBy,
       reason: failure.reason,
-      detail: failure.detail,
+      detail: `${failure.detail}; ${scanLine}`,
       fubRequests: client.requests,
       rateLimited: client.rateLimited,
+      scan,
     };
   }
 
@@ -559,14 +593,22 @@ export async function syncKnownAgentsFromFub(options: KnownAgentSyncOptions = {}
     // FUB allows about one notes request a second, so a large recruit list may not fit one night's budget. The pass
     // resumes where the last one stopped; a recruit it does not reach keeps its rows exactly as a notes failure does.
     const cursor = await readNotesCursor(db);
-    for (const person of notesOrder(selected, cursor.value)) {
+    // When the pass may not reach everyone tonight (more recruits than about one notes read a second fits, or a pass
+    // already rotating), recruits with no rows yet go first: they are not screened at all until they are read.
+    const capacity = Math.floor(((client.end - client.clock() - WRITE_RESERVE_MS) / 1_000) * NOTES_PER_SECOND);
+    const known = cursor.value || selected.length > capacity ? await mirroredPersonIds(db) : null;
+    const fresh = known ? notesOrder(selected.filter((person) => !known.has(fubId(person.id) ?? "")), null) : [];
+    const freshIds = new Set(fresh.map((person) => fubId(person.id)));
+    const rotating = notesOrder(known ? selected.filter((person) => !freshIds.has(fubId(person.id))) : selected, cursor.value);
+    for (const person of [...fresh, ...rotating]) {
       const id = fubId(person.id);
       if (!id) { skipped += 1; continue; }
       if (client.clock() >= client.deadline - WRITE_RESERVE_MS) { notesDeferred += 1; retainPersonIds.add(id); continue; }
       const noteResult = await fullNotePhones(person, systemNoteIds, client);
       skippedBy.systemNotes += noteResult.systemNotesSkipped;
       if (noteResult.fetchFailed && noteResult.failure === "time_budget_exceeded") { notesDeferred += 1; retainPersonIds.add(id); continue; }
-      lastRead = id;
+      // The cursor marks the rotating pass only; new recruits are read ahead of it.
+      if (!freshIds.has(id)) lastRead = id;
       if (noteResult.fetchFailed) {
         // Notes are part of the privacy exclusion check. If they cannot be
         // read, importing would be less safe than waiting for the next pass,
@@ -613,6 +655,8 @@ export async function syncKnownAgentsFromFub(options: KnownAgentSyncOptions = {}
       fubRequests: client.requests,
       rateLimited: client.rateLimited,
       notesDeferred,
+      newRecruits: fresh.length,
+      scan,
     };
   } catch (error) {
     // The error text can carry SQL values (phone numbers), so it goes to the server log only.
@@ -627,9 +671,10 @@ export async function syncKnownAgentsFromFub(options: KnownAgentSyncOptions = {}
       linksKilled: 0,
       skippedBy,
       reason: "database_unavailable",
-      detail: "a database read or write failed after the FUB scan; nothing past that point was changed",
+      detail: `a database read or write failed after the FUB scan; nothing past that point was changed; ${scanLine}`,
       fubRequests: client.requests,
       rateLimited: client.rateLimited,
+      scan,
     };
   }
 }

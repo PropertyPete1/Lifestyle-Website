@@ -1190,20 +1190,29 @@ export async function refreshSuppliedCommunities(builder: string, communityIds: 
  * spent it. A slot whose send failed (status "failed") may be taken again, so
  * a bad email minute never loses a day's changes.
  */
+/** A digest slot that failed this many sends stops retrying for the day; its entries stay unsent for the next slot. */
+export const DIGEST_MAX_ATTEMPTS = 6;
+const attemptsIn = (detail: string | null | undefined) => Number(/^attempt (\d+)/.exec(detail ?? "")?.[1] ?? 0);
+
 async function claimDigestSlot(slot: "morning" | "evening", now: Date): Promise<{ done: (ok: boolean, detail?: string) => Promise<void> } | null> {
   const db = await getDb();
   if (!db) return null;
   const jobName = `builder-deals-sync-digest-${slot}`;
   const day = chicagoDay(now);
   const existing = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).limit(1))[0];
+  let attempt = 1;
   if (existing) {
-    const retaken = await db.update(dealJobRuns).set({ status: "running", startedAt: now, completedAt: null })
+    // A part the notification keeps refusing must not be retried every ten minutes all day: after the last attempt
+    // the slot stays failed (recorded on its row) and the evening follow-up, or tomorrow's summary, carries the entries.
+    attempt = attemptsIn(existing.detail) + 1;
+    if (existing.status === "failed" && attempt > DIGEST_MAX_ATTEMPTS) return null;
+    const retaken = await db.update(dealJobRuns).set({ status: "running", startedAt: now, completedAt: null, detail: `attempt ${attempt}: sending` })
       .where(and(eq(dealJobRuns.id, existing.id), or(eq(dealJobRuns.status, "failed"), and(eq(dealJobRuns.status, "running"), lt(dealJobRuns.startedAt, new Date(now.getTime() - BUILDER_LEASE_STALE_MS))))));
     if (Number((retaken as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) !== 1) return null;
   } else {
     try {
       // The (job, day) unique key settles two batches racing for the same slot.
-      await db.insert(dealJobRuns).values({ jobName, chicagoDay: day, status: "running", startedAt: now });
+      await db.insert(dealJobRuns).values({ jobName, chicagoDay: day, status: "running", startedAt: now, detail: "attempt 1: sending" });
     } catch {
       return null;
     }
@@ -1212,7 +1221,8 @@ async function claimDigestSlot(slot: "morning" | "evening", now: Date): Promise<
     done: async (ok, detail) => {
       const connection = await getDb();
       if (!connection) return;
-      await connection.update(dealJobRuns).set({ status: ok ? "ok" : "failed", completedAt: new Date(), ...(detail ? { detail: detail.slice(0, 2_000) } : {}) }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).catch(() => undefined);
+      const last = !ok && attempt >= DIGEST_MAX_ATTEMPTS ? ` No more tries in this slot (${DIGEST_MAX_ATTEMPTS} attempts): the unsent entries go out with the next slot.` : "";
+      await connection.update(dealJobRuns).set({ status: ok ? "ok" : "failed", completedAt: new Date(), detail: `attempt ${attempt}: ${detail ?? (ok ? "sent" : "failed")}${last}`.slice(0, 2_000) }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).catch(() => undefined);
     },
   };
 }

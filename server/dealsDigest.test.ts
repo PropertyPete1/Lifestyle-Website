@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dealCommunities, dealJobRuns, dealSyncDigestEntries } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 import { realisticDigestDay } from "./dealsDigest.test-support";
-import { EMAIL_PART_MAX, EMAIL_SUBJECT_MAX, OWNER_NOTIFICATION_CONTENT_MAX, OWNER_NOTIFICATION_TITLE_MAX, capSubject, packEmailParts, splitEmailContent } from "./dealsEmailLimits";
+import { EMAIL_PART_MAX, EMAIL_SUBJECT_MAX, OWNER_NOTIFICATION_CONTENT_MAX, OWNER_NOTIFICATION_TITLE_MAX, capSubject, emailSize, packEmailParts, splitEmailContent } from "./dealsEmailLimits";
 import { composeBuilderDealsDigest, deliveredEntryIds } from "./dealsDigest";
 
 const mocks = vi.hoisted(() => ({ getDb: vi.fn(), sendBuilderDealsEmail: vi.fn(), processPendingDealPhotos: vi.fn() }));
@@ -10,7 +10,7 @@ vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }))
 vi.mock("./dealsEmail", () => ({ sendBuilderDealsEmail: (...args: unknown[]) => mocks.sendBuilderDealsEmail(...args) }));
 vi.mock("./dealsPhotos", () => ({ processPendingDealPhotos: (...args: unknown[]) => mocks.processPendingDealPhotos(...args) }));
 
-import { DIGEST_KEEP_DAYS, sendSyncDigestIfReady } from "./dealsSync";
+import { DIGEST_KEEP_DAYS, DIGEST_MAX_ATTEMPTS, sendSyncDigestIfReady } from "./dealsSync";
 
 type Sent = { category: string; subject: string; content: string; recipients: string[] };
 const sent = () => mocks.sendBuilderDealsEmail.mock.calls.map(([input]) => input as Sent);
@@ -59,9 +59,54 @@ describe("email limits", () => {
     expect(giant.every((part) => part.length <= 18_000)).toBe(true);
     expect(giant.join("").replace(/Part \d of \d[^\n]*\n\n/g, "").length).toBe(45_000);
   });
+
+  it("caps every part by UTF-8 bytes as well as characters", () => {
+    // "—" and "é" are 3 and 2 bytes: 18,000 characters of them would be far over 18,000 bytes.
+    const lines = Array.from({ length: 600 }, (_, index) => `- Résidence ${index} — Château Élan: ${"—".repeat(40)}`);
+    const parts = splitEmailContent(lines.join("\n"), 18_000);
+    expect(parts.length).toBeGreaterThan(1);
+    for (const part of parts) { expect(emailSize(part)).toBeLessThanOrEqual(18_000); expect(part.length).toBeLessThanOrEqual(18_000); }
+    for (const index of [0, 299, 599]) expect(parts.some((part) => part.includes(`- Résidence ${index} —`))).toBe(true);
+    // A single multi-byte line longer than a part is cut on a character boundary, never mid-character.
+    const giant = splitEmailContent("😀".repeat(10_000), 18_000);
+    expect(giant.every((part) => emailSize(part) <= 18_000 && !part.includes("\uFFFD"))).toBe(true);
+    expect(giant.join("").replace(/Part \d of \d[^\n]*\n\n/g, "")).toBe("😀".repeat(10_000));
+  });
 });
 
 describe("Builder Deals digest", () => {
+  it("says accurately what a multi-part summary holds: every community, with long lists shortened", () => {
+    const day = realisticDigestDay();
+    const messages = composeBuilderDealsDigest(day.summaries.map((summaries, index) => ({ id: index + 1, summaries, holds: day.holds[index]! })), { label: "morning summary" });
+    expect(messages.length).toBeGreaterThan(1);
+    for (const message of messages) {
+      expect(message.content.startsWith(`Part ${message.part} of ${messages.length}`)).toBe(true);
+      expect(message.content.split("\n")[0]).toContain(`Every community in this summary is included across the ${messages.length} parts; long lists of homes and offers are shortened ("+N more")`);
+      expect(message.content).not.toContain("Nothing was left out");
+      expect(emailSize(message.content)).toBeLessThanOrEqual(EMAIL_PART_MAX);
+    }
+  });
+
+  it("stops retrying a slot after its last attempt, records it, and lets the evening follow-up carry the entries", async () => {
+    seedDay(realisticDigestDay({ communities: 6, seed: 5 }));
+    mocks.sendBuilderDealsEmail.mockResolvedValue({ ok: false, status: "owner_only_fallback", deliveryLog: "owner only", error: "Owner notification was not accepted" });
+    for (let attempt = 1; attempt <= DIGEST_MAX_ATTEMPTS; attempt++) expect(await sendSyncDigestIfReady(new Date(MORNING.getTime() + attempt * 10 * 60_000), true)).toBe("waiting");
+    expect(sent()).toHaveLength(DIGEST_MAX_ATTEMPTS);
+    const slot = () => db.rows(dealJobRuns).find((row) => row.jobName === "builder-deals-sync-digest-morning")!;
+    expect(slot()).toMatchObject({ status: "failed", detail: expect.stringMatching(new RegExp(`^attempt ${DIGEST_MAX_ATTEMPTS}: .*No more tries in this slot`)) });
+    // The rest of the day's batches leave the morning slot alone.
+    mocks.sendBuilderDealsEmail.mockClear();
+    expect(await sendSyncDigestIfReady(new Date(MORNING.getTime() + 3 * 3_600_000), true)).toBe("waiting");
+    expect(sent()).toEqual([]);
+    expect(db.rows(dealSyncDigestEntries).every((row) => row.sentAt === null)).toBe(true);
+    // 7:05 PM: the evening follow-up sends them.
+    mocks.sendBuilderDealsEmail.mockResolvedValue({ ok: true, status: "owner_only_fallback", deliveryLog: "owner only" });
+    expect(await sendSyncDigestIfReady(new Date("2026-10-22T00:05:00Z"), true)).toBe("sent");
+    expect(sent()[0]!.subject).toMatch(/^Builder Deals evening follow-up: /);
+    expect(db.rows(dealSyncDigestEntries).every((row) => row.sentAt !== null)).toBe(true);
+    expect(db.rows(dealJobRuns).find((row) => row.jobName === "builder-deals-sync-digest-evening")).toMatchObject({ status: "ok", detail: expect.stringMatching(/^attempt 1: /) });
+  });
+
   it("was over the owner-notification limit in the old format (the root cause) and now fits in numbered parts that lose nothing", () => {
     const day = realisticDigestDay();
     const entries = day.summaries.map((summaries, index) => ({ id: index + 1, summaries, holds: day.holds[index]! })).filter((entry) => entry.summaries.length || entry.holds.length);

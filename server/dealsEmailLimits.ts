@@ -12,7 +12,7 @@ export const OWNER_NOTIFICATION_TITLE_MAX = 1_200;
 export const OWNER_NOTIFICATION_CONTENT_MAX = 20_000;
 /** Every subject stays far below the notification limit and the 255-character email log column. */
 export const EMAIL_SUBJECT_MAX = 200;
-/** One body part: room is left for the fallback's "To:" line and a part header. */
+/** One body part, in UTF-8 bytes (so also in characters): room is left for the fallback's "To:" line and a part header. */
 export const EMAIL_PART_MAX = 18_000;
 /** Room kept in every part for the "Part 2 of 3" header. */
 const PART_HEADER_RESERVE = 120;
@@ -36,44 +36,64 @@ export function partSubject(subject: string, index: number, total: number, max =
 /** A piece of a message that should stay together; `tags` travel with the part it lands in (the digest's entry ids). */
 export type EmailBlock<T = never> = { text: string; tags?: readonly T[] };
 export type EmailPart<T = never> = { content: string; tags: T[] };
+export type PackOptions = {
+  /** The sentence after "Part i of n." in every part; the default only says the message continues. */
+  note?: (total: number) => string;
+};
+
+/** A part's size: UTF-8 bytes, which is never less than its length in characters, so one cap covers both limits. */
+export const emailSize = (text: string) => Buffer.byteLength(text, "utf8");
+
+/** The longest prefix of `text` (by characters) whose UTF-8 size fits `limit`, never splitting a surrogate pair. */
+function fittingPrefix(text: string, limit: number): string {
+  let end = Math.min(text.length, limit);
+  while (end > 0 && emailSize(text.slice(0, end)) > limit) end = Math.max(0, end - Math.max(1, Math.ceil((emailSize(text.slice(0, end)) - limit) / 4)));
+  if (end > 0 && end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]!)) end -= 1;
+  return text.slice(0, Math.max(1, end));
+}
 
 /** Cuts a block that is too big for one part at line breaks, and a line that is too long at the limit. */
 function splitOversized<T>(block: EmailBlock<T>, limit: number): EmailBlock<T>[] {
-  if (block.text.length <= limit) return [block];
+  if (emailSize(block.text) <= limit) return [block];
   const pieces: EmailBlock<T>[] = [];
   let current = "";
   const flush = () => { if (current) pieces.push({ text: current, tags: block.tags }); current = ""; };
   for (const line of block.text.split("\n")) {
-    for (let start = 0; start < Math.max(line.length, 1); start += limit) {
-      const chunk = line.slice(start, start + limit);
-      if (current && current.length + 1 + chunk.length > limit) flush();
+    let rest = line;
+    do {
+      const chunk = emailSize(rest) <= limit ? rest : fittingPrefix(rest, limit);
+      rest = rest.slice(chunk.length);
+      if (current && emailSize(current) + 1 + emailSize(chunk) > limit) flush();
       current = current ? `${current}\n${chunk}` : chunk;
-    }
+    } while (rest.length);
   }
   flush();
   return pieces;
 }
 
+const defaultNote = (total: number) => `The message continues in the other part${total > 2 ? "s" : ""}.`;
+
 /**
- * Packs blocks (joined by a line break) into as few parts as fit `limit`
- * characters each, header included. A message that fits is one part with no
- * header; otherwise every part opens with "Part i of n." so the reader knows
- * nothing was cut. Nothing is ever dropped.
+ * Packs blocks (joined by a line break) into as few parts as fit `limit` each, header included, measured in UTF-8
+ * bytes (so the character limit holds too). A message that fits is one part with no header; otherwise every part
+ * opens with "Part i of n." and the caller's note. No block is ever dropped.
  */
-export function packEmailParts<T = never>(blocks: readonly EmailBlock<T>[], limit = EMAIL_PART_MAX): EmailPart<T>[] {
+export function packEmailParts<T = never>(blocks: readonly EmailBlock<T>[], limit = EMAIL_PART_MAX, options: PackOptions = {}): EmailPart<T>[] {
   const whole = blocks.map((block) => block.text).join("\n");
-  if (whole.length <= limit) return [{ content: whole, tags: Array.from(new Set(blocks.flatMap((block) => block.tags ?? []))) }];
-  const room = Math.max(200, limit - PART_HEADER_RESERVE);
+  if (emailSize(whole) <= limit) return [{ content: whole, tags: Array.from(new Set(blocks.flatMap((block) => block.tags ?? []))) }];
+  const note = options.note ?? defaultNote;
+  const reserve = PART_HEADER_RESERVE + emailSize(note(999));
+  const room = Math.max(200, limit - reserve);
   const bodies: Array<{ text: string; tags: Set<T> }> = [];
   let current: { text: string; tags: Set<T> } | null = null;
   for (const block of blocks.flatMap((value) => splitOversized(value, room))) {
-    if (current && current.text.length + 1 + block.text.length > room) { bodies.push(current); current = null; }
+    if (current && emailSize(current.text) + 1 + emailSize(block.text) > room) { bodies.push(current); current = null; }
     if (!current) current = { text: block.text, tags: new Set(block.tags ?? []) };
     else { current.text = `${current.text}\n${block.text}`; for (const tag of block.tags ?? []) current.tags.add(tag); }
   }
   if (current) bodies.push(current);
   return bodies.map((body, index) => ({
-    content: `Part ${index + 1} of ${bodies.length}${index ? ` (continued from part ${index})` : ""}. Nothing was left out: the rest is in the other part${bodies.length > 2 ? "s" : ""}.\n\n${body.text.replace(/^\n+/, "")}`,
+    content: `Part ${index + 1} of ${bodies.length}${index ? ` (continued from part ${index})` : ""}. ${note(bodies.length)}\n\n${body.text.replace(/^\n+/, "")}`,
     tags: Array.from(body.tags),
   }));
 }

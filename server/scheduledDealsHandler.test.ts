@@ -249,4 +249,24 @@ describe("Builder Deals once-per-day job records", () => {
     await scheduledDealsHandler({ body: { job: "agents" } } as Request, responseRecorder().response);
     expect(runRows(db)[1]!.set).toMatchObject({ status: "failed", detail: "threw: Database unavailable" });
   });
+
+  it("never stores or answers a database error's values: first line only, no params, quoted values replaced", async () => {
+    mocks.chicagoClock.mockReturnValue({ hour: 1, minute: 46, weekday: "Wed" });
+    mocks.syncKnownAgentsFromFub.mockRejectedValue(new Error("Failed query: insert into `deal_known_agents` (`name`, `phone_e164`, `email`) values (?, ?, ?)\nparams: Jane Doe,+12105550123,jane@example.com"));
+    const db = freshDb();
+    mocks.getDb.mockResolvedValue(db);
+    const recorder = responseRecorder();
+    await scheduledDealsHandler({ body: { job: "agents" } } as Request, recorder.response);
+    const set = runRows(db)[1]!.set as { detail: string };
+    expect(set.detail).toBe("threw: Failed query: insert into `deal_known_agents` (`name`, `phone_e164`, `email`) values (?, ?, ?)");
+    expect(recorder.json).toHaveBeenCalledWith({ error: "Failed query: insert into `deal_known_agents` (`name`, `phone_e164`, `email`) values (?, ?, ?)" });
+
+    mocks.syncKnownAgentsFromFub.mockRejectedValue(new Error("Duplicate entry '+12105550123-jane@example.com' for key 'idx_deal_known_agent_identity'"));
+    const duplicate = freshDb();
+    mocks.getDb.mockResolvedValue(duplicate);
+    const second = responseRecorder();
+    await scheduledDealsHandler({ body: { job: "agents" } } as Request, second.response);
+    expect((runRows(duplicate)[1]!.set as { detail: string }).detail).toBe("threw: Duplicate entry '?' for key '?'");
+    expect(JSON.stringify(second.json.mock.calls)).not.toMatch(/2105550123|jane@/);
+  });
 });

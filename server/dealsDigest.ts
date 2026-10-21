@@ -213,7 +213,9 @@ export function composeBuilderDealsDigest(entries: readonly DigestEntry[], optio
         return `Builder Deals hold: ${names.length <= 120 && catalogHeld.length + incentiveHeld.length <= 5 ? names : plural(unique([...catalogHeld, ...incentiveHeld]).length, "community", "communities")}`;
       })();
   const category = holds ? "deals_sync_hold" as const : "deals_sync_summary" as const;
-  const parts = packEmailParts(blocks, options.limit ?? EMAIL_PART_MAX);
+  const parts = packEmailParts(blocks, options.limit ?? EMAIL_PART_MAX, {
+    note: (total) => `Every community in this summary is included across the ${total} parts; long lists of homes and offers are shortened ("+N more"), and Admin, Builder Deals has the full detail.`,
+  });
   return parts.map((part, index) => ({
     category,
     subject: parts.length > 1 ? partSubject(subject, index + 1, parts.length) : capSubject(subject),

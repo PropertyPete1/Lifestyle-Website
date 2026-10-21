@@ -1,7 +1,7 @@
 import { dealEmailLogs } from "../drizzle/schema";
 import { notifyOwner } from "./_core/notification";
 import { getDb } from "./db";
-import { OWNER_NOTIFICATION_CONTENT_MAX, capSubject, partSubject, splitEmailContent } from "./dealsEmailLimits";
+import { OWNER_NOTIFICATION_CONTENT_MAX, capSubject, emailSize, partSubject, splitEmailContent } from "./dealsEmailLimits";
 
 export type BuilderDealsEmailInput = {
   alertId?: number | null;
@@ -69,8 +69,8 @@ async function persistEmailLog(input: BuilderDealsEmailInput, result: BuilderDea
  */
 async function ownerOnlyFallback(normalized: BuilderDealsEmailInput, recipients: string[], configurationError?: string): Promise<BuilderDealsEmailResult> {
   const prefix = `To: ${recipients.join(", ")} (owner-only fallback: these recipients were NOT emailed)\n\n`;
-  const room = Math.max(2_000, OWNER_NOTIFICATION_CONTENT_MAX - prefix.length - 500);
-  const parts = normalized.content.length <= room ? [normalized.content] : splitEmailContent(normalized.content, room);
+  const room = Math.max(2_000, OWNER_NOTIFICATION_CONTENT_MAX - emailSize(prefix) - 500);
+  const parts = emailSize(normalized.content) <= room ? [normalized.content] : splitEmailContent(normalized.content, room);
   const rejected: number[] = [];
   for (let index = 0; index < parts.length; index++) {
     const title = parts.length > 1 ? partSubject(normalized.subject, index + 1, parts.length) : normalized.subject;

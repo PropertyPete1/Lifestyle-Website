@@ -7,6 +7,7 @@ import { catalogBatchPending, refreshDueCommunitiesBatch, revalidateDealIncentiv
 import { importTrecLicenses } from "./dealsTrec";
 import { cleanupDealsTestRecords, runBuilderDealsHealthJob, sendBuilderDealsMondayReport, syncKnownAgentsFromFub, syncTeamAllowlistFromFub } from "./dealsMaintenance";
 import { enqueueDailyActivityNote, runPendingDealsFubJobs } from "./dealsFubJobs";
+import { looksLikeDbError, redactJobError } from "./dealsJobRuns";
 import { PHOTO_DRAIN_BUDGET_MS, processPendingDealPhotos, pruneDealPhotoRenders } from "./dealsPhotos";
 
 import { chicagoClock, chicagoDay } from "./dealsService";
@@ -40,14 +41,15 @@ async function once(jobName: string, work: () => Promise<unknown>) {
     if (!isSuccessfulResult(result)) {
       // The job's own reason (and its result, which carries counts and reason codes, never a credential) is what
       // deals.admin.jobRuns shows, so a failure can be diagnosed without server logs.
-      const reason = jobFailureReason(result);
-      detail = `${reason}\n${JSON.stringify(result).slice(0, 8_000)}`;
+      const reason = redactJobError(jobFailureReason(result));
+      detail = `${reason}\n${JSON.stringify(result, (_key, value: unknown) => (typeof value === "string" && looksLikeDbError(value) ? redactJobError(value) : value)).slice(0, 8_000)}`;
       throw new Error(reason);
     }
     await db.update(dealJobRuns).set({ status: "ok", detail: JSON.stringify(result).slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running")));
     return result;
   } catch (error) {
-    await db.update(dealJobRuns).set({ status: "failed", detail: (detail ?? (error instanceof Error ? `threw: ${error.message}` : "failed")).slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running")));
+    // A thrown error (a database error quotes the values it was given) is stored redacted: first line, no values.
+    await db.update(dealJobRuns).set({ status: "failed", detail: (detail ?? (error instanceof Error ? `threw: ${redactJobError(error.message)}` : "failed")).slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running")));
     throw error;
   }
 }
@@ -115,5 +117,8 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
     if (job === "weekly") return res.json({ ok: true, result: await whenDue(dueAt(7, 5, "Mon"), "builder-deals-weekly-report", sendBuilderDealsMondayReport) });
     if (job === "maintenance") return res.json({ ok: true, result: await whenDue(dueAt(7, 30, "Mon"), "builder-deals-maintenance", async () => ({ testRecords: await cleanupDealsTestRecords(), fubRetries: await runPendingDealsFubJobs(), cachedRenderCleanup: await pruneDealPhotoRenders() })) });
     return res.status(400).json({ error: "unknown_job" });
-  } catch (error) { return res.status(500).json({ error: error instanceof Error ? error.message : "deals-job-failed" }); }
+  } catch (error) {
+    // Never the raw error text: a database error quotes personal values. The redacted first line is enough for the cron log.
+    return res.status(500).json({ error: error instanceof Error ? redactJobError(error.message) || "deals-job-failed" : "deals-job-failed" });
+  }
 }

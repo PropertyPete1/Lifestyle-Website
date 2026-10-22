@@ -18,7 +18,14 @@ import { makeMatchingLeadsTeam, revokeOrphanedTeamPreviewLinks } from "./dealsEl
 import { resendConfiguration, sendBuilderDealsEmail } from "./dealsEmail";
 import { cleanupBuilderDealsFubRecord, formatChicagoDateTime, stripBuilderDealsTestTag } from "./dealsFub";
 import { pruneDealPhotoRenders, type DealPhotoRenderPruneResult } from "./dealsPhotos";
-import { photoDrainStall, readDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
+import { lastPhotoDrain, photoDrainStall, readDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
+
+/** "last drain processed N (M min ago)" for the health payload's readers. */
+export function photoDrainLine(lastDrain: { at: string; processed: number; hidden: number; partial: boolean; coalesced: boolean } | null, now: Date): string {
+  if (!lastDrain) return "no photo drain recorded yet";
+  const minutes = Math.max(0, Math.round((now.getTime() - Date.parse(lastDrain.at)) / 60_000));
+  return `last drain processed ${lastDrain.processed}${lastDrain.hidden ? ` (+${lastDrain.hidden} hidden)` : ""}${lastDrain.partial ? ", answered early" : ""}${lastDrain.coalesced ? ", another drain was running" : ""} ${minutes} min ago`;
+}
 import { PRIVACY_RESIDUE_EVENT_KIND, getDealSettings, privacyResidueCommunityId, privacyResidueSinceStart } from "./dealsService";
 import { hasBuilderReader } from "./dealsAdapters";
 import { heldReasonsOf } from "../shared/dealsHeldIncentive";
@@ -413,6 +420,8 @@ export const BUILDER_DEALS_HEALTH_THRESHOLDS = {
   communityUpdateHours: 48,
   /** No photo may wait in the processing queue for over an hour. */
   pendingPhotoMinutes: 60,
+  /** More claims than this put back after their run vanished in the last hour: runs are being cut off or recycled. */
+  photoLeaseExpiredPerHour: 50,
   /** A FUB write still failing an hour after it was queued needs review. */
   fubFailureMinutes: 60,
   /** Alert emails that failed to send in the last day. */
@@ -488,7 +497,7 @@ type OperationalSnapshot = {
   funnel: { landed: number; consented: number; verificationSends: number; verified: number; listingViews: number; requests: number; newLeads: number };
   trecImport: { completedAt: Date | null; ageHours: number | null; state: HealthState };
   sourceUpdates: { activeCommunities: number; staleCommunities: number; heldCommunities: number; oldestAgeHours: number | null; lastSuccessfulSyncAt: Date | null; state: HealthState };
-  photos: { pending: number; processing: number; failed: number; awaitingRegion: number; oldestPendingAgeHours: number | null; oldestPendingMinutes: number | null; drainStalledMinutes: number | null; drainError: string | null; drainWarning?: string | null; state: HealthState };
+  photos: { pending: number; processing: number; failed: number; awaitingRegion: number; oldestPendingAgeHours: number | null; oldestPendingMinutes: number | null; drainStalledMinutes: number | null; drainError: string | null; drainWarning?: string | null; leaseExpiredLastHour: number; lastDrain: { at: string; processed: number; hidden: number; partial: boolean; coalesced: boolean } | null; state: HealthState };
   fubFailures: { jobs: number; leads: number; failingOverAnHour: number; state: HealthState };
   emailFailures: { failed: number; state: HealthState };
   jobFailures: { failed: number; jobs: string[]; state: HealthState };
@@ -503,7 +512,7 @@ const emptyOperationalSnapshot = (): OperationalSnapshot => ({
   funnel: { landed: 0, consented: 0, verificationSends: 0, verified: 0, listingViews: 0, requests: 0, newLeads: 0 },
   trecImport: { completedAt: null, ageHours: null, state: "unknown" },
   sourceUpdates: { activeCommunities: 0, staleCommunities: 0, heldCommunities: 0, oldestAgeHours: null, lastSuccessfulSyncAt: null, state: "unknown" },
-  photos: { pending: 0, processing: 0, failed: 0, awaitingRegion: 0, oldestPendingAgeHours: null, oldestPendingMinutes: null, drainStalledMinutes: null, drainError: null, state: "unknown" },
+  photos: { pending: 0, processing: 0, failed: 0, awaitingRegion: 0, oldestPendingAgeHours: null, oldestPendingMinutes: null, drainStalledMinutes: null, drainError: null, leaseExpiredLastHour: 0, lastDrain: null, state: "unknown" },
   fubFailures: { jobs: 0, leads: 0, failingOverAnHour: 0, state: "unknown" },
   emailFailures: { failed: 0, state: "unknown" },
   jobFailures: { failed: 0, jobs: [], state: "unknown" },
@@ -556,6 +565,8 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
         // updatedAt (not createdAt) so a requeued old photo does not trip the limit instantly.
         oldestPendingAt: sql<Date | null>`MIN(CASE WHEN ${dealPhotos.processingState} IN ('pending', 'processing') AND (${dealPhotos.lastProcessingError} IS NULL OR ${dealPhotos.lastProcessingError} <> 'awaiting_region') THEN ${dealPhotos.updatedAt} END)`,
         awaitingRegion: sql<number>`SUM(${dealPhotos.lastProcessingError} = 'awaiting_region' AND ${dealPhotos.processingState} = 'pending')`,
+        // Claims put back in the last hour because their run vanished (cut off by the host, or the instance recycled).
+        leaseExpiredLastHour: sql<number>`SUM(${dealPhotos.lastProcessingError} = 'processing_lease_expired' AND ${dealPhotos.updatedAt} >= ${new Date(now.getTime() - 60 * 60_000)})`,
       }).from(dealPhotos),
       db.select({ count: sql<number>`COUNT(*)` }).from(dealFubJobs).where(eq(dealFubJobs.status, "failed")),
       db.select({ count: sql<number>`COUNT(*)` }).from(dealFubJobs).where(and(eq(dealFubJobs.status, "failed"), lt(dealFubJobs.createdAt, fubFailureCutoff))),
@@ -583,7 +594,10 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
     const pending = number(photo?.pending), processing = number(photo?.processing), failed = number(photo?.failed), awaitingRegion = number(photo?.awaitingRegion);
     const oldestPendingAgeHours = ageHours(photo?.oldestPendingAt, now);
     const oldestPendingMinutes = ageMinutes(photo?.oldestPendingAt, now);
-    const drain = photoDrainStall(await readDealPhotoDrainStatus().catch(() => null), Math.max(0, pending - awaitingRegion), now);
+    const drainStatus = await readDealPhotoDrainStatus().catch(() => null);
+    const drain = photoDrainStall(drainStatus, Math.max(0, pending - awaitingRegion), now);
+    const lastDrain = lastPhotoDrain(drainStatus);
+    const leaseExpiredLastHour = number(photo?.leaseExpiredLastHour);
     const communityLabel = (communityId: number) => {
       const community = communities.find((row) => row.id === communityId);
       return community ? `${community.privateName} (${community.publicLabel})` : `community ${communityId}`;
@@ -613,7 +627,7 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
       trecImport: { completedAt: latestImport[0]?.completedAt ?? null, ageHours: importAgeHours, state: healthState(importAgeHours !== null && importAgeHours <= thresholds.trecImportHours) },
       // A held run does not count as on schedule; a dismissed hold is not a hold and does.
       sourceUpdates: { activeCommunities: managed.length, staleCommunities, heldCommunities, oldestAgeHours: finiteCommunityAges.length ? Math.max(...finiteCommunityAges) : null, lastSuccessfulSyncAt: lastSyncTimes.length ? new Date(Math.max(...lastSyncTimes)) : null, state: healthState(staleCommunities === 0 && heldCommunities === 0) },
-      photos: { pending, processing, failed, awaitingRegion, oldestPendingAgeHours, oldestPendingMinutes, drainStalledMinutes: drain.stalled ? drain.stalledMinutes : null, drainError: drain.lastError, drainWarning: drain.lastWarning, state: healthState(failed === 0 && awaitingRegion === 0 && !drain.stalled && !drain.lastError && (oldestPendingMinutes === null || oldestPendingMinutes <= thresholds.pendingPhotoMinutes)) },
+      photos: { pending, processing, failed, awaitingRegion, oldestPendingAgeHours, oldestPendingMinutes, drainStalledMinutes: drain.stalled ? drain.stalledMinutes : null, drainError: drain.lastError, drainWarning: drain.lastWarning, leaseExpiredLastHour, lastDrain, state: healthState(failed === 0 && awaitingRegion === 0 && !drain.stalled && !drain.lastError && leaseExpiredLastHour <= thresholds.photoLeaseExpiredPerHour && (oldestPendingMinutes === null || oldestPendingMinutes <= thresholds.pendingPhotoMinutes)) },
       fubFailures: { jobs: number(failedJobRows[0]?.count), leads: number(failedLeadRows[0]?.count), failingOverAnHour, state: healthState(failingOverAnHour === 0) },
       emailFailures: { failed: failedEmails, state: healthState(failedEmails === 0) },
       jobFailures: { failed: failedRunRows.length, jobs: failedRunNames, state: healthState(failedRunRows.length === 0) },
@@ -671,6 +685,7 @@ export async function builderDealsHealthCheck(now = new Date(), options: HealthC
     const drainError = operational.photos.drainError ? operational.photos.drainError.replaceAll("_", " ") : null;
     if (operational.photos.drainStalledMinutes !== null) attention.push(`Photo processing is stuck: no photo moved in ${operational.photos.drainStalledMinutes} minutes while ${operational.photos.pending - operational.photos.awaitingRegion} are queued${drainError ? ` (last run: ${drainError})` : ""}.`);
     else if (drainError) attention.push(`The last photo processing run failed: ${drainError}.`);
+    if (operational.photos.leaseExpiredLastHour > BUILDER_DEALS_HEALTH_THRESHOLDS.photoLeaseExpiredPerHour) attention.push(`Photo runs are being cut off: ${operational.photos.leaseExpiredLastHour} photos were put back in the last hour because their run vanished (limit ${BUILDER_DEALS_HEALTH_THRESHOLDS.photoLeaseExpiredPerHour}).`);
     if (operational.photos.drainWarning) attention.push(`Photo processing is running in plain order (oldest first): ${operational.photos.drainWarning}.`);
     if (operational.photos.state === "attention") attention.push(`Photo queue: ${operational.photos.failed} failed, ${operational.photos.awaitingRegion} awaiting a builder watermark region (Set watermark region in Admin, Builder Deals, Photos), oldest pending ${operational.photos.oldestPendingMinutes ?? 0} minutes (limit ${thresholds.pendingPhotoMinutes}).`);
     if (operational.fubFailures.state === "attention") attention.push(`${operational.fubFailures.failingOverAnHour} FUB write${operational.fubFailures.failingOverAnHour === 1 ? " has" : "s have"} been failing for over ${thresholds.fubFailureMinutes} minutes.`);
@@ -757,7 +772,7 @@ export async function builderDealsMondayReport(now = new Date()) {
     `Follow Up Boss: ${health.fub.availability} (${health.fub.apiKey}). Email transport: ${health.email.provider}.`,
     `Last 7 days: ${operational.funnel.verified} verifications, ${operational.funnel.newLeads} new leads, ${operational.funnel.verificationSends} code sends, ${operational.funnel.landed} landings, ${operational.funnel.listingViews} list views, ${operational.funnel.requests} tour or question requests.`,
     `TREC file: ${operational.trecImport.completedAt ? `${hoursLabel(operational.trecImport.ageHours)} old` : "no import yet"} (limit ${BUILDER_DEALS_HEALTH_THRESHOLDS.trecImportHours}h).`,
-    `Photo queue: pending ${operational.photos.pending}, processing ${operational.photos.processing}, failed ${operational.photos.failed}; oldest queued ${operational.photos.oldestPendingMinutes === null ? "none" : `${operational.photos.oldestPendingMinutes} min`}.`,
+    `Photo queue: pending ${operational.photos.pending}, processing ${operational.photos.processing}, failed ${operational.photos.failed}; oldest queued ${operational.photos.oldestPendingMinutes === null ? "none" : `${operational.photos.oldestPendingMinutes} min`}; ${photoDrainLine(operational.photos.lastDrain, now)}; ${operational.photos.leaseExpiredLastHour} cut-off runs put back in the last hour.`,
     `FUB writes failing over an hour: ${operational.fubFailures.failingOverAnHour} (failed jobs ${operational.fubFailures.jobs}, leads marked failed ${operational.fubFailures.leads}). Email send failures in 24h: ${operational.emailFailures.failed}. Scheduled job failures in 24h: ${operational.jobFailures.failed}${operational.jobFailures.jobs.length ? ` (${operational.jobFailures.jobs.join(", ")})` : ""}.`,
     "",
     ...holdLines(operational.holds.items),

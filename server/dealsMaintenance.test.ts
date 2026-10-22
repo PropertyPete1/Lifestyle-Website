@@ -32,6 +32,7 @@ import {
   BUILDER_DEALS_HEALTH_THRESHOLDS,
   builderDealsHealthCheck,
   builderDealsMondayReport,
+  photoDrainLine,
   holdLines,
   isActiveFubUser,
   normalizeFubPhone,
@@ -245,6 +246,23 @@ describe("Builder Deals daily health check", () => {
     expect(health.operational.photos).toMatchObject({ drainStalledMinutes: 45, drainError: "queue_read_failed", state: "attention" });
     expect(health.attention).toEqual(expect.arrayContaining([expect.stringContaining("Photo processing is stuck: no photo moved in 45 minutes while 400 are queued (last run: queue read failed)")]));
     expect(health.state).toBe("attention");
+  });
+
+  it("reports the last drain's count and flags a spike of cut-off photo runs (claims put back because their run vanished)", async () => {
+    mockServices({ balance: "250.00" });
+    vi.stubEnv("RESEND_FROM_EMAIL", "deals@lifestyledesignrealty.com");
+    const drainStatus = { lastRunAt: new Date(now.getTime() - 2 * 60_000).toISOString(), lastHealthyAt: new Date(now.getTime() - 2 * 60_000).toISOString(), lastError: null, last: { processed: 31, hidden: 1, partial: true } };
+    mocks.getDb.mockResolvedValue(snapshotDb(now, { healthy: true, photos: { pending: 900, processing: 2, failed: 0, awaitingRegion: 0, leaseExpiredLastHour: 12, oldestPendingAt: new Date(now.getTime() - 10 * 60_000) }, drainStatus }));
+    let health = await builderDealsHealthCheck(now);
+    expect(health.operational.photos).toMatchObject({ leaseExpiredLastHour: 12, lastDrain: { processed: 31, hidden: 1, partial: true, coalesced: false }, state: "ok" });
+    expect(health.attention.some((item) => /cut off/.test(item))).toBe(false);
+    expect(photoDrainLine(health.operational.photos.lastDrain, now)).toBe("last drain processed 31 (+1 hidden), answered early 2 min ago");
+
+    mocks.getDb.mockResolvedValue(snapshotDb(now, { healthy: true, photos: { pending: 900, processing: 2, failed: 0, awaitingRegion: 0, leaseExpiredLastHour: 374, oldestPendingAt: new Date(now.getTime() - 10 * 60_000) }, drainStatus }));
+    health = await builderDealsHealthCheck(now);
+    expect(health.operational.photos).toMatchObject({ leaseExpiredLastHour: 374, state: "attention" });
+    expect(health.attention).toEqual(expect.arrayContaining([expect.stringContaining("Photo runs are being cut off: 374 photos were put back in the last hour")]));
+    expect(photoDrainLine(null, now)).toBe("no photo drain recorded yet");
   });
 
   it("reads the hold columns, not the summary: an incentive-only hold is never a community hold and a dismissed catalog hold is not a hold", async () => {

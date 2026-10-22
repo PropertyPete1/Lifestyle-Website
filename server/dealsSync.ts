@@ -837,8 +837,13 @@ export function communityRefreshDue(lastSuccessfulSyncAt: Date | null, now = new
   return chicagoDayNumber(chicagoDay(now)) - chicagoDayNumber(chicagoDay(lastSuccessfulSyncAt)) >= days;
 }
 
-/** Each scheduled batch stops starting new communities after this long, so one cron call stays short. */
-export const CATALOG_BATCH_BUDGET_MS = 4 * 60_000;
+/**
+ * Each scheduled batch stops starting new communities after this long. The
+ * host's scheduler aborts every scheduled call at 30 s (the handler answers by
+ * SCHEDULED_RESPOND_MS), so the batch must stay well inside it; the job runs
+ * every 2 minutes instead of a long call every 10.
+ */
+export const CATALOG_BATCH_BUDGET_MS = 20_000;
 /** Builders checked side by side; one builder's communities are always checked one at a time. */
 export const CATALOG_BATCH_LANES = 2;
 /** A failed (or still running) community is not tried again sooner than this. */
@@ -953,7 +958,7 @@ export async function buildersInFlight(now = new Date()): Promise<string[]> {
 /**
  * "Refresh now" requests. The admin's click only records a request: a deal_job_runs row
  * ("deals-refresh-community-<id>", Chicago day) with status "running" and detail "queued". The next
- * catalog batch (every 10 minutes in catalog hours) reads queued communities first, whatever their
+ * catalog batch (every 2 minutes in catalog hours) reads queued communities first, whatever their
  * schedule, inside its own request: work left running after an HTTP response is unreliable on the
  * production host, so nothing runs in the background. The batch takes the request (detail
  * "started") before reading the community, so two overlapping batches never both read it, and
@@ -985,15 +990,6 @@ async function queuedRefreshRequests(now: Date): Promise<RefreshRequest[]> {
   });
 }
 
-/** Read-only: whether any "Refresh now" request is waiting for a batch (catalogBatchPending; it closes nothing). */
-async function hasQueuedRefreshRequest(): Promise<boolean> {
-  const db = await getDb();
-  if (!db) return false;
-  const rows = await db.select({ id: dealJobRuns.id }).from(dealJobRuns)
-    .where(and(like(dealJobRuns.jobName, `${REFRESH_JOB_PREFIX}%`), eq(dealJobRuns.status, "running"), eq(dealJobRuns.detail, REFRESH_QUEUED))).limit(1);
-  return rows.length > 0;
-}
-
 /** Takes a queued request for this batch; false when another batch already took it. */
 async function takeRefreshRequest(rowId: number, at: Date): Promise<boolean> {
   const db = await getDb();
@@ -1020,24 +1016,6 @@ function refreshRequestOutcome(result: RefreshResult): { status: "ok" | "failed"
   return { status: "ok", detail: `held: ${result.reason ?? "unknown"}` };
 }
 
-/**
- * True while the catalog cron still has work in this slot: a community is due
- * and checkable now, a "Refresh now" request is queued, or a builder is being
- * read under a live lease. The photo
- * cron yields the catalog's slot only then, so the two never run their heavy
- * work side by side.
- */
-export async function catalogBatchPending(now = new Date()): Promise<boolean> {
-  const db = await getDb();
-  if (!db) return false;
-  if ((await buildersInFlight(now)).length) return true;
-  // An admin's "Refresh now" waiting for this batch counts too: the photo job yields the slot to it.
-  if (await hasQueuedRefreshRequest()) return true;
-  const { catalogRefreshDays } = await getDealSettings();
-  const rows = await db.select().from(dealCommunities).where(and(or(eq(dealCommunities.active, true), eq(dealCommunities.awaitingFirstSync, true)), eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false)));
-  return dueCandidates(rows, now, catalogRefreshDays).length > 0;
-}
-
 /** What one community's check found, written as its own digest entry the moment it finishes, so a restart loses nothing. */
 async function recordDigestEntry(summaries: readonly CommunityChangeSummary[], holds: readonly HoldNotice[]) {
   if (!summaries.length && !holds.length) return;
@@ -1047,10 +1025,10 @@ async function recordDigestEntry(summaries: readonly CommunityChangeSummary[], h
 }
 
 /**
- * The scheduled builder check, run every 10 minutes from 4 AM Central. Each
+ * The scheduled builder check, run every 2 minutes from 4 AM Central. Each
  * call checks the communities that are due (daily by default, Admin's
  * "Check each builder page every (days)"), several builders side by side, and
- * stops starting new ones after a few minutes; the next call picks up the rest.
+ * stops starting new ones after CATALOG_BATCH_BUDGET_MS; the next call picks up the rest.
  * Changes and new holds are collected into one morning summary email instead
  * of an email per batch.
  */

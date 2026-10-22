@@ -5,7 +5,7 @@ vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }))
 
 import { dealSettings } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
-import { PHOTO_DRAIN_STATUS_KEY, drainWasHealthy, photoDrainStall, readDealPhotoDrainStatus, recordDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
+import { PHOTO_DRAIN_STATUS_KEY, drainWasHealthy, lastPhotoDrain, photoDrainStall, readDealPhotoDrainStatus, recordDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
 
 const zero = { processed: 0, hidden: 0, awaitingRegion: 0, retried: 0, failed: 0, skipped: 0 };
 const T = Date.parse("2026-10-21T15:00:00Z");
@@ -47,5 +47,21 @@ describe("photo drain status for the health check", () => {
     expect(photoDrainStall(status, 500, new Date(T + 50 * 60_000))).toMatchObject({ stalled: false, lastError: null });
     expect(db.rows(dealSettings).filter((row) => row.key === PHOTO_DRAIN_STATUS_KEY)).toHaveLength(1);
     expect(photoDrainStall(null, 500)).toEqual({ stalled: false, stalledMinutes: null, lastError: null, lastWarning: null });
+  });
+
+  it("never lets a coalesced call or an empty partial answer count as a healthy drain, and keeps the last call's counts for the health payload", async () => {
+    expect(drainWasHealthy({ ...zero, coalesced: true })).toBe(false);
+    expect(drainWasHealthy({ ...zero, partial: true })).toBe(false);
+    expect(drainWasHealthy({ ...zero, partial: true, processed: 4 })).toBe(true);
+    await recordDealPhotoDrainStatus({ ...zero, processed: 9 }, new Date(T));
+    await recordDealPhotoDrainStatus({ ...zero, coalesced: true }, new Date(T + 40 * 60_000));
+    const status = await readDealPhotoDrainStatus();
+    // The coalesced call is recorded (so the health check is never blind) but the clock did not move.
+    expect(status).toMatchObject({ lastRunAt: new Date(T + 40 * 60_000).toISOString(), lastHealthyAt: new Date(T).toISOString(), last: { coalesced: true } });
+    expect(photoDrainStall(status, 100, new Date(T + 41 * 60_000))).toMatchObject({ stalled: true, stalledMinutes: 41 });
+    expect(lastPhotoDrain(status)).toEqual({ at: new Date(T + 40 * 60_000).toISOString(), processed: 0, hidden: 0, partial: false, coalesced: true });
+    await recordDealPhotoDrainStatus({ ...zero, processed: 37, hidden: 2, partial: true, elapsedMs: 24_000 }, new Date(T + 42 * 60_000));
+    expect(lastPhotoDrain(await readDealPhotoDrainStatus())).toEqual({ at: new Date(T + 42 * 60_000).toISOString(), processed: 37, hidden: 2, partial: true, coalesced: false });
+    expect(lastPhotoDrain(null)).toBeNull();
   });
 });

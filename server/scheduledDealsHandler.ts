@@ -3,12 +3,12 @@ import { and, eq } from "drizzle-orm";
 import { dealJobRuns } from "../drizzle/schema";
 import { sdk } from "./_core/sdk";
 import { getDb } from "./db";
-import { catalogBatchPending, refreshDueCommunitiesBatch, revalidateDealIncentives } from "./dealsSync";
+import { refreshDueCommunitiesBatch, revalidateDealIncentives } from "./dealsSync";
 import { importTrecLicenses } from "./dealsTrec";
 import { cleanupDealsTestRecords, runBuilderDealsHealthJob, sendBuilderDealsMondayReport, syncKnownAgentsFromFub, syncTeamAllowlistFromFub } from "./dealsMaintenance";
 import { enqueueDailyActivityNote, runPendingDealsFubJobs } from "./dealsFubJobs";
 import { looksLikeDbError, maskPersonalData, redactJobError } from "./dealsJobRuns";
-import { PHOTO_DRAIN_BUDGET_MS, processPendingDealPhotos, pruneDealPhotoRenders } from "./dealsPhotos";
+import { pruneDealPhotoRenders, runScheduledDealPhotoDrain } from "./dealsPhotos";
 
 import { chicagoClock, chicagoDay } from "./dealsService";
 /** Pure Chicago wall-clock predicate used by the DST candidate cron callbacks. */
@@ -75,17 +75,39 @@ export function jobFailureReason(result: unknown): string {
 }
 const whenDue = (due: boolean, job: string, work: () => Promise<unknown>) => due ? once(job, work) : Promise.resolve({ skipped: "not_due_chicago" });
 
+/**
+ * The host's scheduler gives up on a scheduled call at 30 s (and the instance
+ * may then be throttled or recycled), so the photo and catalog calls answer by
+ * this time no matter what; their work keeps going behind the answer, and every
+ * write it makes is guarded (photo claims, builder leases) so a cut-off run
+ * can only lose work.
+ */
+export const SCHEDULED_RESPOND_MS = 26_000;
+async function answerWithin<T>(work: Promise<T>, partial: () => unknown): Promise<T | unknown> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<{ late: true }>((resolve) => { timer = setTimeout(() => resolve({ late: true }), SCHEDULED_RESPOND_MS); });
+  try {
+    const outcome = await Promise.race([work, late]);
+    if (outcome && typeof outcome === "object" && (outcome as { late?: unknown }).late === true) {
+      void work.catch((error) => console.warn(`[deals-cron] work after the answer failed: ${error instanceof Error ? error.message : "unknown"}`));
+      return partial();
+    }
+    return outcome;
+  } finally { if (timer) clearTimeout(timer); }
+}
+
 /** Cron-only endpoint; definitions register idempotently at production startup. */
 export async function scheduledDealsHandler(req: Request, res: Response) {
   try {
     const user = await sdk.authenticateRequest(req); if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
     const job = typeof req.body?.job === "string" ? req.body.job : "catalog";
     if (job === "incentive") return res.json({ ok: true, result: await whenDue(dueAt(18, 15), "builder-deals-incentive-revalidate", revalidateDealIncentives) });
-    // Every 10 minutes from 4 AM to 10 PM Central: a few minutes of builder checks per call (see refreshDueCommunitiesBatch).
+    // Every 2 minutes (odd minutes) from 4 AM to 10 PM Central: 20 s of builder checks per call (see
+    // refreshDueCommunitiesBatch), answered by SCHEDULED_RESPOND_MS; a community still being read finishes after the answer.
     if (job === "catalog") {
       const { hour } = chicagoClock();
       if (hour < CATALOG_FIRST_HOUR || hour >= CATALOG_LAST_HOUR) return res.json({ ok: true, result: { skipped: "outside_catalog_hours_chicago" } });
-      return res.json({ ok: true, result: await refreshDueCommunitiesBatch() });
+      return res.json({ ok: true, result: await answerWithin(refreshDueCommunitiesBatch(), () => ({ partial: true, detail: "answered before the batch finished; communities in flight finish after the answer" })) });
     }
     // Monday 5:00 AM Central: find communities the builders added (new ones stay hidden until their first clean update).
     // The run itself goes to the background (it can take an hour); the once-a-day row only records that it was started.
@@ -97,19 +119,12 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
     if (job === "team") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-team-sync", syncTeamAllowlistFromFub) });
     if (job === "agents") return res.json({ ok: true, result: await whenDue(dueAt(1, 45), "builder-deals-known-agent-sync", syncKnownAgentsFromFub) });
     if (job === "fub") return res.json({ ok: true, result: await runPendingDealsFubJobs() });
-    // Every 5 minutes: due pending photos and abandoned processing leases, in
-    // priority order, for up to PHOTO_DRAIN_BUDGET_MS (2.5 min, plus at most PHOTO_TIMEOUT_MS for the photos in flight) per call rather
-    // than a fixed count (40 per 10 minutes left a 30,000-photo backlog five days
-    // deep). Not a once-per-day job, so it is not recorded in deal_job_runs.
-    // The catalog runs at :00, :10, ... for up to 4 minutes: while it still has
-    // builders to read, the photo call in its slot (minute 0-4 of each ten) steps
-    // aside, so heavy image work and page reads never share the instance.
-    if (job === "photos") {
-      const { hour, minute } = chicagoClock();
-      const catalogSlot = hour >= CATALOG_FIRST_HOUR && hour < CATALOG_LAST_HOUR && minute % 10 < 5;
-      if (catalogSlot && await catalogBatchPending().catch(() => true)) return res.json({ ok: true, result: { skipped: "catalog_slot" } });
-      return res.json({ ok: true, result: await processPendingDealPhotos({ budgetMs: PHOTO_DRAIN_BUDGET_MS }) });
-    }
+    // Every 2 minutes (even minutes): due pending photos and abandoned claims, in priority order. The
+    // drain stops starting photos after 20 s and answers by 24 s with what it did (partial when photos
+    // are still in flight); answerWithin is a second guard. Not a once-per-day job, so it is not
+    // recorded in deal_job_runs; each call records the photo drain status the health check reads.
+    // The catalog runs on the odd minutes, so the two never share a call slot.
+    if (job === "photos") return res.json({ ok: true, result: await answerWithin(runScheduledDealPhotoDrain(), () => ({ partial: true, detail: "answered before the drain finished" })) });
     // 1:30 AM Chicago: one FUB activity note per lead for the previous day's views and tour requests.
     if (job === "activity") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-activity-note", () => enqueueDailyActivityNote()) });
     if (job === "alerts") {

@@ -18,19 +18,38 @@ const MIN_MASTER_EDGE = 16;
 const MIN_OCR_WORD_CONFIDENCE = 70;
 const MAX_PROCESSING_ATTEMPTS = 5;
 /**
- * One photo's hard limit inside a drain. Its steps have their own deadlines
- * (download 20 s, each storage call up to 30 s, each OCR call 30 s plus the
- * wait for the other lane's OCR), which could add up to several minutes; past
- * this the lane records a retryable timeout (which also revokes the claim, so
- * the abandoned work can never write) and stops starting photos.
+ * A processing_timeout is usually the photo's surroundings (a slow builder CDN,
+ * a throttled instance, the other lane's OCR) rather than the photo, so it gets
+ * more tries than other errors, spaced at least TIMEOUT_RETRY_MIN_MS apart, before
+ * the row is failed for good (an admin requeue still retries it).
  */
-export const PHOTO_TIMEOUT_MS = 90_000;
+const MAX_TIMEOUT_ATTEMPTS = 8;
+const TIMEOUT_RETRY_MIN_MS = 5 * 60_000;
 /**
- * A claimed row whose run died (instance recycled, request cut off) is put back
- * after this long. A live claim is resolved within PHOTO_TIMEOUT_MS, so ten
- * minutes never steals one; every write is fenced on the claim token anyway.
+ * A claim whose run vanished (the host cuts scheduled calls at 30 s and may
+ * then throttle or recycle the instance) costs the row an attempt. Only after
+ * this many is it treated as a photo that kills its run and failed for good.
  */
-export const PROCESSING_LEASE_MS = 10 * 60_000;
+const MAX_ABANDONED_ATTEMPTS = 8;
+/** Download deadline; must fit inside PHOTO_TIMEOUT_MS so a slow source fails as source_unavailable. */
+const DOWNLOAD_TIMEOUT_MS = 15_000;
+/**
+ * One photo's hard limit inside a drain: the host aborts every scheduled call
+ * at 30 s, so a photo must finish (or be given up) well inside one call. Its
+ * own steps have shorter deadlines (download 15 s, OCR 15 s). Past this the
+ * lane records a retryable processing_timeout (which also revokes the claim,
+ * so the abandoned work can never write) and stops starting photos.
+ */
+export const PHOTO_TIMEOUT_MS = 22_000;
+/**
+ * A claimed row whose run died (instance recycled or throttled after the
+ * response) is put back after this long. A live claim is resolved within
+ * PHOTO_TIMEOUT_MS; a throttled straggler that outlives this does no harm,
+ * because every write is fenced on the claim token.
+ */
+export const PROCESSING_LEASE_MS = 3 * 60_000;
+/** An expired claim becomes due again after this pause rather than straight away. */
+const LEASE_EXPIRED_RETRY_MS = 2 * 60_000;
 /** Spec step 5: only text inside the outer 20 percent of the height is ever cropped away. */
 const OUTER_BAND_FRACTION = 0.2;
 /** A region crop must leave this share of the height; otherwise the region is covered instead. */
@@ -44,11 +63,18 @@ export const PHOTO_PROCESSING_CONCURRENCY = 2;
 /** At most this many downloads from one builder image host at a time, whatever the lane count. */
 const HOST_DOWNLOAD_CONCURRENCY = 2;
 /**
- * Cron drains stop starting photos after this long. Photos in flight then
- * finish, normally in seconds and never past PHOTO_TIMEOUT_MS, so one call
- * ends within about four minutes even in the worst case.
+ * Cron drains stop starting photos after this long. The host's scheduler
+ * aborts every scheduled call at 30 s, so the handler answers by
+ * SCHEDULED_PHOTO_RESPOND_MS with whatever is done; photos still in flight
+ * (normally a second or two, never past PHOTO_TIMEOUT_MS) finish after it.
  */
-export const PHOTO_DRAIN_BUDGET_MS = 150_000;
+export const PHOTO_DRAIN_BUDGET_MS = 20_000;
+/** The scheduled photo call answers by this time, however far the drain got. */
+export const SCHEDULED_PHOTO_RESPOND_MS = 24_000;
+/** A drain running in this process for longer than this is presumed hung: a new cron call does not wait for it. */
+export const DRAIN_STALE_MS = 45_000;
+/** At most this many drains in one process (one may be a hung one a newer call stepped around). */
+const MAX_DRAINS_PER_PROCESS = 2;
 /** Candidates read per queue refill (priority order). */
 const PHOTO_DRAIN_BATCH = 40;
 /** Same-source rows queued right behind a candidate per refill, so their work is reused while it is still in memory. */
@@ -284,7 +310,7 @@ export function parseBuilderPhotoSettings(value: string): BuilderPhotoSettings {
 export async function downloadDealPhoto(raw: string, fetcher: typeof fetch = fetch): Promise<Buffer> {
   let url = safeDealImageUrl(raw);
   const initialHost = url.hostname;
-  const signal = AbortSignal.timeout(20_000);
+  const signal = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
   for (let redirects = 0; redirects <= 3; redirects++) {
     const response = await fetcher(url, { redirect: "manual", signal });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -476,7 +502,8 @@ type OcrWorker = {
 let ocrWorkerPromise: Promise<OcrWorker> | null = null;
 let ocrWork: Promise<void> = Promise.resolve();
 const ocrShutdownHookTargets = new WeakSet<object>();
-const OCR_TIMEOUT_MS = 30_000;
+/** OCR deadline (worker start or one recognition); fits inside PHOTO_TIMEOUT_MS. */
+const OCR_TIMEOUT_MS = 15_000;
 const OCR_SHUTDOWN_GRACE_MS = 3_000;
 
 /** Bundled English data ships in server/ocr; a packaged deploy can point elsewhere. */
@@ -885,11 +912,13 @@ export function dealPhotoLeaseWhere(photoId: number, attempts: number, token: st
 }
 
 async function recordPhotoFailure(db: PhotoDb, photoId: number, attempt: number, lease: ReturnType<typeof dealPhotoLeaseWhere>, code: PhotoProcessingErrorCode) {
-  const retry = attempt < MAX_PROCESSING_ATTEMPTS && code !== "unapproved_source" && code !== "invalid_crop";
+  const timeout = code === "processing_timeout";
+  const retry = attempt < (timeout ? MAX_TIMEOUT_ATTEMPTS : MAX_PROCESSING_ATTEMPTS) && code !== "unapproved_source" && code !== "invalid_crop";
+  const next = retryAt(attempt);
   await db.update(dealPhotos).set({
     automaticHidden: true,
     processingState: retry ? "pending" : "failed",
-    nextProcessingAttemptAt: retry ? retryAt(attempt) : null,
+    nextProcessingAttemptAt: retry ? (timeout ? new Date(Math.max(next.getTime(), Date.now() + TIMEOUT_RETRY_MIN_MS)) : next) : null,
     processingStartedAt: null,
     lastProcessingError: code,
     ocrMatches: JSON.stringify([{ kind: "processing_error", code }]),
@@ -1172,6 +1201,10 @@ export type DealPhotoDrainResult = {
   errorDetail?: string;
   /** The drain kept going in plain due order after a priority or sharing query failed. */
   warning?: string;
+  /** Answered before the drain finished (counts so far); photos in flight finish afterwards, fenced on their claims. */
+  partial?: boolean;
+  /** A drain in this process looked hung (older than DRAIN_STALE_MS), so this call ran its own beside it. */
+  steppedAroundStaleDrain?: boolean;
 };
 
 export type DealPhotoDrainOptions = {
@@ -1185,9 +1218,13 @@ export type DealPhotoDrainOptions = {
   clock?: () => number;
   /** Test seam: per-photo limit. Default PHOTO_TIMEOUT_MS. */
   photoTimeoutMs?: number;
+  /** Receives the counts as they happen, so a caller that must answer early can report them. */
+  progress?: DealPhotoDrainResult;
 };
 
-let drainInFlight: Promise<DealPhotoDrainResult> | null = null;
+type ActiveDrain = { startedAt: number; done: Promise<DealPhotoDrainResult> };
+/** Drains running in this process; a hung one never blocks a newer cron call for longer than DRAIN_STALE_MS. */
+const activeDrains = new Set<ActiveDrain>();
 let drainRerunRequested = false;
 let failedRowsRecovered = false;
 /** Failures that no code change can fix are left alone by the boot-time recovery. */
@@ -1357,9 +1394,9 @@ async function nextDrainBatch(db: PhotoDb, now: Date, limit: number, exclude: Re
   return order;
 }
 
-async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: number; clock: () => number; concurrency: number; photoTimeoutMs: number }): Promise<DealPhotoDrainResult> {
+async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: number; clock: () => number; concurrency: number; photoTimeoutMs: number; progress?: DealPhotoDrainResult }): Promise<DealPhotoDrainResult> {
   const startedAt = options.clock();
-  const result: DealPhotoDrainResult = { ...emptyDrainResult(), stoppedForTime: false };
+  const result: DealPhotoDrainResult = Object.assign(options.progress ?? {}, { ...emptyDrainResult(), stoppedForTime: false });
   const db = await getDb();
   if (!db) return result;
   const now = new Date();
@@ -1375,14 +1412,14 @@ async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: numbe
     processingStartedAt: null,
     lastProcessingError: "processing_abandoned",
     ocrMatches: JSON.stringify([{ kind: "processing_error", code: "processing_abandoned" }]),
-  }).where(and(abandoned, gte(dealPhotos.processingAttempts, MAX_PROCESSING_ATTEMPTS)));
+  }).where(and(abandoned, gte(dealPhotos.processingAttempts, MAX_ABANDONED_ATTEMPTS)));
   // Otherwise it goes back in the queue after a short pause, not straight to the front.
   await db.update(dealPhotos).set({
     processingState: "pending",
-    nextProcessingAttemptAt: new Date(now.getTime() + 5 * 60_000),
+    nextProcessingAttemptAt: new Date(now.getTime() + LEASE_EXPIRED_RETRY_MS),
     processingStartedAt: null,
     lastProcessingError: "processing_lease_expired",
-  }).where(and(abandoned, lt(dealPhotos.processingAttempts, MAX_PROCESSING_ATTEMPTS)));
+  }).where(and(abandoned, lt(dealPhotos.processingAttempts, MAX_ABANDONED_ATTEMPTS)));
   // Legacy pending rows without an attempt time are adopted; only awaiting_region stays parked.
   await db.update(dealPhotos).set({ nextProcessingAttemptAt: now })
     .where(and(eq(dealPhotos.processingState, "pending"), isNull(dealPhotos.nextProcessingAttemptAt), or(isNull(dealPhotos.lastProcessingError), ne(dealPhotos.lastProcessingError, AWAITING_REGION))));
@@ -1473,23 +1510,30 @@ async function waitAtMost(promise: Promise<unknown>, milliseconds: number) {
   } finally { if (timer) clearTimeout(timer); }
 }
 
+function logAndRecordDrain(total: DealPhotoDrainResult) {
+  // One line per cron call, so the host logs show the real throughput.
+  console.log(`[deals-photo] drain${total.partial ? " (answered before it finished)" : ""}${total.coalesced ? " (coalesced: another drain is running)" : ""}: ${total.processed} published, ${total.hidden} hidden, ${total.retried} retry, ${total.failed} failed, ${total.skipped} skipped, ${total.awaitingRegion} awaiting region in ${Math.round((total.elapsedMs ?? 0) / 1000)} s; reused originals ${total.reused?.originals ?? 0}, masters ${total.reused?.masters ?? 0}, OCR ${total.reused?.ocr ?? 0}${total.timedOut ? `; ${total.timedOut} timed out` : ""}${total.stoppedForTime ? "; budget spent, more due" : ""}${total.steppedAroundStaleDrain ? "; stepped around a hung drain" : ""}${total.error ? `; ERROR ${total.error}${total.errorDetail ? ` (${total.errorDetail})` : ""}` : ""}${total.warning ? `; WARNING ${total.warning}` : ""}`);
+  // For the health check: every cron call leaves a status, so a stuck or coalescing queue is never invisible.
+  return recordDealPhotoDrainStatus(total).catch((error) => { console.warn(`[deals-photo] drain status not recorded: ${error instanceof Error ? error.message : "unknown"}`); return null; });
+}
+
 /**
  * Drains due photos (new imports, due retries, expired leases) in priority
- * order with PHOTO_PROCESSING_CONCURRENCY photos in flight. One drain runs per
- * process.
+ * order with PHOTO_PROCESSING_CONCURRENCY photos in flight.
  *
  * - `processPendingDealPhotos(n)` (sync and admin kicks): at most n photos (50
- *   max). An overlapping kick returns at once and asks the running drain for
- *   one more pass, so rows inserted meanwhile are picked up promptly.
+ *   max). While any drain runs in this process the kick returns at once and
+ *   asks that drain for one more pass, so rows inserted meanwhile are picked up.
  * - `processPendingDealPhotos({ budgetMs })` (the cron): keeps starting photos
- *   until the budget is spent, then lets the ones in flight finish. If another
- *   drain is running in this process it waits for it first (two drains side by
- *   side would double the memory), within the same budget.
+ *   until the budget is spent, then lets the ones in flight finish. A drain
+ *   already running here that is younger than DRAIN_STALE_MS is waited for
+ *   (within the budget); an older one is presumed hung and this call runs its
+ *   own beside it, at most MAX_DRAINS_PER_PROCESS at a time. Every cron call
+ *   records the drain status, including a coalesced one.
  *
  * Across processes, every row is claimed atomically when its lane starts it
- * and every write is fenced on that claim, so overlapping drains on different
- * instances never process a row twice; a claim left by a dead instance is put
- * back after PROCESSING_LEASE_MS.
+ * and every write is fenced on that claim, so overlapping drains never process
+ * a row twice; a claim left by a dead instance is put back after PROCESSING_LEASE_MS.
  */
 export async function processPendingDealPhotos(input: number | DealPhotoDrainOptions = 20): Promise<DealPhotoDrainResult> {
   const budgeted = typeof input !== "number";
@@ -1502,35 +1546,78 @@ export async function processPendingDealPhotos(input: number | DealPhotoDrainOpt
     : Math.max(1, Math.min(50, Math.floor(options.maxPhotos ?? 20)));
   const concurrency = Math.max(1, Math.min(4, Math.floor(options.concurrency ?? PHOTO_PROCESSING_CONCURRENCY)));
   const photoTimeoutMs = Math.max(1, options.photoTimeoutMs ?? PHOTO_TIMEOUT_MS);
-  if (!budgeted && drainInFlight) {
+  if (!budgeted && activeDrains.size) {
     drainRerunRequested = true;
     return { ...emptyDrainResult(), coalesced: true };
   }
   let waitedMs: number | undefined;
-  while (drainInFlight) {
+  let steppedAround = false;
+  for (;;) {
+    if (!activeDrains.size) break;
+    const fresh = Array.from(activeDrains).filter((drain) => clock() - drain.startedAt < DRAIN_STALE_MS);
+    if (!fresh.length && activeDrains.size < MAX_DRAINS_PER_PROCESS) {
+      steppedAround = true;
+      console.warn(`[deals-photo] a drain in this process has run for over ${Math.round(DRAIN_STALE_MS / 1000)} s; starting another beside it`);
+      break;
+    }
     const remaining = deadline - clock();
-    if (remaining <= 0) return { ...emptyDrainResult(), coalesced: true, waitedMs: clock() - begin };
-    await waitAtMost(drainInFlight, remaining);
+    if (remaining <= 0) {
+      const coalesced: DealPhotoDrainResult = { ...emptyDrainResult(), coalesced: true, waitedMs: clock() - begin, elapsedMs: clock() - begin };
+      await logAndRecordDrain(coalesced);
+      return coalesced;
+    }
+    // Wait for a drain to end, or for the fresh one to go stale, within this call's budget.
+    const untilStale = fresh.length ? Math.min(...fresh.map((drain) => drain.startedAt + DRAIN_STALE_MS)) - clock() : remaining;
+    await waitAtMost(Promise.race(Array.from(activeDrains).map((drain) => drain.done)), Math.max(1, Math.min(remaining, untilStale)));
     waitedMs = clock() - begin;
   }
-  const run = (async () => {
-    let total = await drainDealPhotoQueue({ maxPhotos, deadline, clock, concurrency, photoTimeoutMs });
+  const drain: ActiveDrain = { startedAt: clock(), done: Promise.resolve(emptyDrainResult()) };
+  drain.done = (async () => {
+    let total = await drainDealPhotoQueue({ maxPhotos, deadline, clock, concurrency, photoTimeoutMs, progress: options.progress });
     // A budgeted drain refills until its budget is spent, so it already picks up rows a kick asked for.
     for (let reruns = 0; !budgeted && drainRerunRequested && reruns < 3; reruns++) {
       drainRerunRequested = false;
       total = mergeDrainResults(total, await drainDealPhotoQueue({ maxPhotos, deadline, clock, concurrency, photoTimeoutMs }));
     }
-    drainRerunRequested = false;
-    if (budgeted) {
-      // One line per cron drain, so the host logs show the real throughput.
-      console.log(`[deals-photo] drain: ${total.processed} published, ${total.hidden} hidden, ${total.retried} retry, ${total.failed} failed, ${total.skipped} skipped, ${total.awaitingRegion} awaiting region in ${Math.round((total.elapsedMs ?? 0) / 1000)} s; reused originals ${total.reused?.originals ?? 0}, masters ${total.reused?.masters ?? 0}, OCR ${total.reused?.ocr ?? 0}${total.timedOut ? `; ${total.timedOut} timed out` : ""}${total.stoppedForTime ? "; budget spent, more due" : ""}${total.error ? `; ERROR ${total.error}${total.errorDetail ? ` (${total.errorDetail})` : ""}` : ""}${total.warning ? `; WARNING ${total.warning}` : ""}`);
-      // For the health check: a drain that cannot read the queue or moves nothing while photos are due is flagged.
-      await recordDealPhotoDrainStatus(total).catch((error) => console.warn(`[deals-photo] drain status not recorded: ${error instanceof Error ? error.message : "unknown"}`));
-    }
-    return waitedMs === undefined ? total : { ...total, waitedMs };
-  })();
-  drainInFlight = run.finally(() => { drainInFlight = null; });
-  return drainInFlight;
+    if (!budgeted) drainRerunRequested = false;
+    if (steppedAround) total.steppedAroundStaleDrain = true;
+    if (waitedMs !== undefined) total.waitedMs = waitedMs;
+    if (budgeted) await logAndRecordDrain(total);
+    return total;
+  })().finally(() => { activeDrains.delete(drain); });
+  activeDrains.add(drain);
+  return drain.done;
+}
+
+/**
+ * The scheduled photo call. The host aborts scheduled calls at 30 s, so this
+ * answers by `respondWithinMs` (SCHEDULED_PHOTO_RESPOND_MS) whatever happens:
+ * with the finished drain, or with its counts so far (`partial`), recording a
+ * status either way. A drain still running continues after the answer; every
+ * write it makes is fenced on its claims, so a throttled or recycled instance
+ * can only lose work, never publish stale results.
+ */
+export async function runScheduledDealPhotoDrain(options: { budgetMs?: number; respondWithinMs?: number; clock?: () => number; photoTimeoutMs?: number; concurrency?: number } = {}): Promise<DealPhotoDrainResult> {
+  const clock = options.clock ?? Date.now;
+  const begin = clock();
+  const progress: DealPhotoDrainResult = emptyDrainResult();
+  const done = processPendingDealPhotos({ budgetMs: options.budgetMs ?? PHOTO_DRAIN_BUDGET_MS, clock, progress, photoTimeoutMs: options.photoTimeoutMs, concurrency: options.concurrency });
+  let timer: NodeJS.Timeout | undefined;
+  const answerBy = new Promise<"partial">((resolve) => { timer = setTimeout(() => resolve("partial"), Math.max(0, options.respondWithinMs ?? SCHEDULED_PHOTO_RESPOND_MS)); });
+  try {
+    const outcome = await Promise.race([done, answerBy]);
+    if (outcome !== "partial") return outcome;
+  } catch (error) {
+    const failed: DealPhotoDrainResult = { ...emptyDrainResult(), error: "queue_read_failed", errorDetail: photoQueryErrorDetail(error), elapsedMs: clock() - begin };
+    void logAndRecordDrain(failed);
+    return failed;
+  } finally { if (timer) clearTimeout(timer); }
+  void done.catch(() => undefined);
+  const partial: DealPhotoDrainResult = { ...progress, reused: progress.reused ? { ...progress.reused } : undefined, partial: true, elapsedMs: clock() - begin };
+  if (!partial.reused) delete partial.reused;
+  // Not awaited: the answer must not wait on the database either.
+  void logAndRecordDrain(partial);
+  return partial;
 }
 
 export function dealPhotoRenderCacheVersion(photoVersion: string, leadId: number, identity: string) {
@@ -1545,7 +1632,8 @@ const renderMemory = new LruCache<RenderedPhoto>(RENDER_MEMORY_ENTRIES);
 /** Test seam: clears in-process caches and the drain guard. Never called by product code. */
 export function resetDealPhotoRuntimeState() {
   renderMemory.clear();
-  drainInFlight = null;
+  activeDrains.clear();
+  hostLimiters.clear();
   drainRerunRequested = false;
   failedRowsRecovered = false;
 }

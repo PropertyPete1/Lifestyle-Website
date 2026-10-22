@@ -16,8 +16,7 @@ const mocks = vi.hoisted(() => ({
   syncTeamAllowlistFromFub: vi.fn(),
   runPendingDealsFubJobs: vi.fn(),
   enqueueDailyActivityNote: vi.fn(),
-  processPendingDealPhotos: vi.fn(),
-  catalogBatchPending: vi.fn(),
+  runScheduledDealPhotoDrain: vi.fn(),
 }));
 
 vi.mock("./_core/sdk", () => ({
@@ -38,8 +37,6 @@ vi.mock("./dealsSync", () => ({
     mocks.refreshDueCommunitiesBatch(...args),
   revalidateDealIncentives: (...args: unknown[]) =>
     mocks.revalidateDealIncentives(...args),
-  catalogBatchPending: (...args: unknown[]) =>
-    mocks.catalogBatchPending(...args),
 }));
 vi.mock("./dealsTrec", () => ({
   importTrecLicenses: (...args: unknown[]) => mocks.importTrecLicenses(...args),
@@ -63,15 +60,14 @@ vi.mock("./dealsFubJobs", () => ({
     mocks.enqueueDailyActivityNote(...args),
 }));
 vi.mock("./dealsPhotos", () => ({
-  processPendingDealPhotos: (...args: unknown[]) =>
-    mocks.processPendingDealPhotos(...args),
+  runScheduledDealPhotoDrain: (...args: unknown[]) =>
+    mocks.runScheduledDealPhotoDrain(...args),
   pruneDealPhotoRenders: () => Promise.resolve({ scanned: 0, expiredRows: 0, staleRows: 0, rowsDeleted: 0, objectsDeleted: 0, objectsFailed: 0 }),
-  PHOTO_DRAIN_BUDGET_MS: 150_000,
 }));
 
 import { dealJobRuns } from "../drizzle/schema";
 import { createFakeDealsDb } from "./dealsFubFakeDb.test-support";
-import { isDueAtChicago, scheduledDealsHandler } from "./scheduledDealsHandler";
+import { SCHEDULED_RESPOND_MS, isDueAtChicago, scheduledDealsHandler } from "./scheduledDealsHandler";
 
 function responseRecorder() {
   const json = vi.fn((body: unknown) => body);
@@ -133,38 +129,40 @@ describe("Builder Deals scheduled handler helpers", () => {
     ).toBe(true);
   });
 
-  it("drains the photo queue for a 2.5-minute budget per callback without a daily job record", async () => {
-    mocks.processPendingDealPhotos.mockResolvedValue({ processed: 2, retried: 1, skipped: 0 });
-    mocks.chicagoClock.mockReturnValue({ hour: 6, minute: 5, weekday: "Mon" });
-    const { response, json } = responseRecorder();
-
-    await scheduledDealsHandler({ body: { job: "photos" } } as Request, response);
-
-    expect(mocks.processPendingDealPhotos).toHaveBeenCalledWith({ budgetMs: 150_000 });
-    expect(json).toHaveBeenCalledWith({ ok: true, result: { processed: 2, retried: 1, skipped: 0 } });
-    expect(mocks.getDb).not.toHaveBeenCalled();
-    // Minute 5-9 of each ten is the photo job's own slot: the catalog is not even asked.
-    expect(mocks.catalogBatchPending).not.toHaveBeenCalled();
-  });
-
-  it("steps aside in the catalog's slot only while the catalog has work, and always runs outside catalog hours", async () => {
-    mocks.processPendingDealPhotos.mockResolvedValue({ processed: 1 });
-    for (const [hour, minute, pending, runs] of [
-      [6, 0, true, false], // catalog slot, builders still due: yield
-      [6, 3, "error", false], // the check failed: yield to be safe
-      [6, 0, false, true], // catalog slot, nothing due today: use it
-      [23, 0, true, true], // outside 4 AM-10 PM there is no catalog run
-      [13, 15, true, true], // the photo job's own slot
-    ] as const) {
-      mocks.processPendingDealPhotos.mockClear();
-      mocks.catalogBatchPending.mockReset();
-      if (pending === "error") mocks.catalogBatchPending.mockRejectedValue(new Error("db down"));
-      else mocks.catalogBatchPending.mockResolvedValue(pending);
-      mocks.chicagoClock.mockReturnValue({ hour, minute, weekday: "Tue" });
+  it("runs the scheduled photo drain on every callback, at any hour, without a daily job record", async () => {
+    mocks.runScheduledDealPhotoDrain.mockResolvedValue({ processed: 2, retried: 1, skipped: 0 });
+    for (const hour of [3, 6, 13, 23]) {
+      mocks.chicagoClock.mockReturnValue({ hour, minute: 0, weekday: "Mon" });
       const { response, json } = responseRecorder();
       await scheduledDealsHandler({ body: { job: "photos" } } as Request, response);
-      expect(mocks.processPendingDealPhotos).toHaveBeenCalledTimes(runs ? 1 : 0);
-      expect(json).toHaveBeenCalledWith({ ok: true, result: runs ? { processed: 1 } : { skipped: "catalog_slot" } });
+      expect(json).toHaveBeenCalledWith({ ok: true, result: { processed: 2, retried: 1, skipped: 0 } });
+    }
+    expect(mocks.runScheduledDealPhotoDrain).toHaveBeenCalledTimes(4);
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("answers the photo and catalog calls within 26 s (inside the host's 30 s limit) even when their work hangs", async () => {
+    expect(SCHEDULED_RESPOND_MS).toBeLessThanOrEqual(26_000);
+    vi.useFakeTimers();
+    try {
+      mocks.runScheduledDealPhotoDrain.mockReturnValue(new Promise(() => undefined));
+      const photos = responseRecorder();
+      const photoCall = scheduledDealsHandler({ body: { job: "photos" } } as Request, photos.response);
+      await vi.advanceTimersByTimeAsync(SCHEDULED_RESPOND_MS - 1);
+      expect(photos.json).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await photoCall;
+      expect(photos.json).toHaveBeenCalledWith({ ok: true, result: expect.objectContaining({ partial: true }) });
+
+      mocks.chicagoClock.mockReturnValue({ hour: 9, minute: 1, weekday: "Mon" });
+      mocks.refreshDueCommunitiesBatch.mockReturnValue(new Promise(() => undefined));
+      const catalog = responseRecorder();
+      const catalogCall = scheduledDealsHandler({ body: { job: "catalog" } } as Request, catalog.response);
+      await vi.advanceTimersByTimeAsync(SCHEDULED_RESPOND_MS);
+      await catalogCall;
+      expect(catalog.json).toHaveBeenCalledWith({ ok: true, result: expect.objectContaining({ partial: true }) });
+    } finally {
+      vi.useRealTimers();
     }
   });
 

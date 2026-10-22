@@ -85,6 +85,8 @@ function simulatedQueue(options: { communities: Community[]; homes: Home[]; phot
   const candidateSelects: FakeOp[] = [];
   const lookupSelects: FakeOp[] = [];
   let failNextCandidateRead = 0;
+  /** While set, candidate reads never answer (a hung database call). */
+  let hangCandidateReads = false;
 
   const photoTables = new Set<unknown>([dealPhotos]);
   const selectPhotos = (op: FakeOp) => {
@@ -95,6 +97,7 @@ function simulatedQueue(options: { communities: Community[]; homes: Home[]; phot
       return photo ? [{ photo: { ...photo }, home: homeOf(photo), community: communityOf(photo) }] : [];
     }
     candidateSelects.push(op);
+    if (hangCandidateReads) return new Promise<never>(() => undefined) as unknown as unknown[];
     if (failNextCandidateRead > 0) { failNextCandidateRead--; throw new Error("priority query failed", { cause: new Error("Unknown column 'served.home_id' in 'where clause'") }); }
     const excluded = new Set(cols.get("id not in") ?? []);
     return Array.from(rows.values())
@@ -178,7 +181,7 @@ function simulatedQueue(options: { communities: Community[]; homes: Home[]; phot
     return [{ affectedRows: 0 }];
   });
   vi.mocked(getDb).mockResolvedValue(fake.db as never);
-  return { fake, rows, processedWrites, candidateSelects, lookupSelects, attachSchema, failNextCandidateRead: (times = 1) => { failNextCandidateRead = times; } };
+  return { fake, rows, processedWrites, candidateSelects, lookupSelects, attachSchema, failNextCandidateRead: (times = 1) => { failNextCandidateRead = times; }, hangCandidateReads: (hang: boolean) => { hangCandidateReads = hang; } };
 }
 
 const community = (id: number, builder: string, privateName = `Community ${id}`): Community => ({ id, builder, privateName, scrubList: JSON.stringify([builder, privateName]), active: true, paused: false });
@@ -460,16 +463,16 @@ describe("priority order", () => {
 });
 
 describe("claims, leases and overlapping drains", () => {
-  it("recovers a claim left by a dead run after ten minutes and drops that run's late write", async () => {
-    expect(photos.PROCESSING_LEASE_MS).toBe(10 * 60_000);
+  it("recovers a claim left by a dead run after three minutes and drops that run's late write", async () => {
+    expect(photos.PROCESSING_LEASE_MS).toBe(3 * 60_000);
     const sim = simulatedQueue({
       communities: [community(1, "Perry Homes")],
       homes: [home(1, 1), home(2, 1)],
       photos: [
         // Claimed 11 minutes ago by an instance that was recycled.
-        { id: 1, homeId: 1, sourceUrl: "https://res.cloudinary.com/perryhomes/p/1.jpg", processingState: "processing", processingAttempts: 1, lastProcessingError: "claim:dead", processingStartedAt: new Date(Date.now() - 11 * 60_000), nextProcessingAttemptAt: null },
-        // Claimed 2 minutes ago by a live run: left alone.
-        { id: 2, homeId: 2, sourceUrl: "https://res.cloudinary.com/perryhomes/p/2.jpg", processingState: "processing", processingAttempts: 1, lastProcessingError: "claim:live", processingStartedAt: new Date(Date.now() - 2 * 60_000), nextProcessingAttemptAt: null },
+        { id: 1, homeId: 1, sourceUrl: "https://res.cloudinary.com/perryhomes/p/1.jpg", processingState: "processing", processingAttempts: 1, lastProcessingError: "claim:dead", processingStartedAt: new Date(Date.now() - 4 * 60_000), nextProcessingAttemptAt: null },
+        // Claimed a minute ago by a live run: left alone.
+        { id: 2, homeId: 2, sourceUrl: "https://res.cloudinary.com/perryhomes/p/2.jpg", processingState: "processing", processingAttempts: 1, lastProcessingError: "claim:live", processingStartedAt: new Date(Date.now() - 60_000), nextProcessingAttemptAt: null },
       ],
       settings: { "Perry Homes": off("Perry Homes") },
     });
@@ -478,7 +481,7 @@ describe("claims, leases and overlapping drains", () => {
     // Put back in the queue, after a five-minute pause rather than straight to the front.
     expect(await photos.processPendingDealPhotos({ budgetMs: 60_000 })).toMatchObject({ processed: 0 });
     expect(sim.rows.get(1)).toMatchObject({ processingState: "pending", processingAttempts: 1, lastProcessingError: "processing_lease_expired" });
-    expect((sim.rows.get(1)?.nextProcessingAttemptAt as Date).getTime()).toBeGreaterThan(Date.now() + 4 * 60_000);
+    expect((sim.rows.get(1)?.nextProcessingAttemptAt as Date).getTime()).toBeGreaterThan(Date.now() + 90_000);
     expect(sim.rows.get(2)).toMatchObject({ processingState: "processing", processingAttempts: 1, lastProcessingError: "claim:live" });
 
     (sim.rows.get(1) as SimPhoto).nextProcessingAttemptAt = new Date(Date.now() - 1_000);
@@ -494,9 +497,11 @@ describe("claims, leases and overlapping drains", () => {
   it("fails a claim abandoned on its last attempt for good (a photo that kills its instance is not retried forever), and the boot recovery leaves it alone", async () => {
     const sim = simulatedQueue({
       communities: [community(1, "Perry Homes")],
-      homes: [home(1, 1), home(2, 1)],
+      homes: [home(1, 1), home(2, 1), home(3, 1)],
       photos: [
-        { id: 1, homeId: 1, sourceUrl: "https://res.cloudinary.com/perryhomes/p/1.jpg", processingState: "processing", processingAttempts: 5, lastProcessingError: "claim:dead", processingStartedAt: new Date(Date.now() - 11 * 60_000), nextProcessingAttemptAt: null },
+        { id: 1, homeId: 1, sourceUrl: "https://res.cloudinary.com/perryhomes/p/1.jpg", processingState: "processing", processingAttempts: 8, lastProcessingError: "claim:dead", processingStartedAt: new Date(Date.now() - 4 * 60_000), nextProcessingAttemptAt: null },
+        // Cut off seven times so far (host aborts): still retried, not treated as a poison photo yet.
+        { id: 3, homeId: 3, sourceUrl: "https://res.cloudinary.com/perryhomes/p/3.jpg", processingState: "processing", processingAttempts: 7, lastProcessingError: "claim:dead", processingStartedAt: new Date(Date.now() - 4 * 60_000), nextProcessingAttemptAt: null },
         // Failed under earlier code for a fixable reason: the boot recovery retries it.
         { id: 2, homeId: 2, sourceUrl: "https://res.cloudinary.com/perryhomes/p/2.jpg", processingState: "failed", processingAttempts: 5, lastProcessingError: "storage_unavailable", nextProcessingAttemptAt: null },
       ],
@@ -507,6 +512,7 @@ describe("claims, leases and overlapping drains", () => {
     expect(await photos.processPendingDealPhotos({ budgetMs: 60_000 })).toMatchObject({ processed: 1 });
     expect(sim.rows.get(1)).toMatchObject({ processingState: "failed", lastProcessingError: "processing_abandoned", automaticHidden: true, nextProcessingAttemptAt: null });
     expect(sim.rows.get(2)).toMatchObject({ processingState: "processed" });
+    expect(sim.rows.get(3)).toMatchObject({ processingState: "pending", processingAttempts: 7, lastProcessingError: "processing_lease_expired" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     // A new process boots: the recovery runs again and still skips the poison row.
     photos.resetDealPhotoRuntimeState();
@@ -718,4 +724,114 @@ describe("claims, leases and overlapping drains", () => {
     expect(result.waitedMs).toBeGreaterThanOrEqual(0);
     expect(peak).toBe(2);
   }, 30_000);
+});
+
+describe("scheduled calls inside the host's 30 s limit", () => {
+  const statusWrites = (sim: ReturnType<typeof simulatedQueue>) => sim.fake.opsFor("insert", dealSettings)
+    .map((op) => op.values as { key: string; value: string })
+    .filter((values) => values.key === "photos.drain.status")
+    .map((values) => JSON.parse(values.value) as { lastHealthyAt: string | null; last: Record<string, unknown> });
+
+  it("a cron drain stops starting photos after 20 s on its own clock", async () => {
+    expect(photos.PHOTO_DRAIN_BUDGET_MS).toBe(20_000);
+    simulatedQueue({
+      communities: [community(1, "Perry Homes")],
+      homes: Array.from({ length: 30 }, (_, i) => home(i + 1, 1)),
+      photos: Array.from({ length: 30 }, (_, i) => ({ id: i + 1, homeId: i + 1, sourceUrl: `https://res.cloudinary.com/perryhomes/p/${i + 1}.jpg` })),
+      settings: { "Perry Homes": off("Perry Homes") },
+    });
+    let fakeNow = 5_000_000;
+    vi.stubGlobal("fetch", vi.fn(async () => { fakeNow += 2_000; return imageResponse(jpeg); }));
+    const result = await photos.runScheduledDealPhotoDrain({ clock: () => fakeNow, respondWithinMs: 60_000 });
+    // 20 s of budget at 2 s a photo: about ten photos, then stop (no partial: the drain finished first).
+    expect(result.processed).toBeGreaterThanOrEqual(10);
+    expect(result.processed).toBeLessThanOrEqual(12);
+    expect(result).toMatchObject({ stoppedForTime: true });
+    expect(result.partial).toBeUndefined();
+  });
+
+  it("answers by its deadline with the counts so far (partial) and records them; the photo in flight then finishes, fenced on its claim", async () => {
+    const sim = simulatedQueue({
+      communities: [community(1, "Perry Homes")],
+      homes: [home(1, 1), home(2, 1), home(3, 1)],
+      photos: [1, 2, 3].map((id) => ({ id, homeId: id, sourceUrl: `https://res.cloudinary.com/perryhomes/p/${id}.jpg` })),
+      settings: { "Perry Homes": off("Perry Homes") },
+    });
+    const gates: Array<() => void> = [];
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      if (++calls === 2) await new Promise<void>((resolve) => gates.push(resolve));
+      return imageResponse(jpeg);
+    }));
+    // One lane: photo 1 finishes, photo 2 hangs in its download past the answer.
+    const answer = await photos.runScheduledDealPhotoDrain({ respondWithinMs: 400, concurrency: 1 });
+    expect(answer).toMatchObject({ partial: true, processed: 1 });
+    await waitFor(() => statusWrites(sim).some((status) => status.last.partial === true));
+    const partialStatus = statusWrites(sim).find((status) => status.last.partial === true);
+    expect(partialStatus?.last).toMatchObject({ processed: 1, partial: true });
+    // Claim taken back meanwhile (an admin requeue): the straggler's result is dropped.
+    Object.assign(sim.rows.get(2) as SimPhoto, { processingState: "pending", processingAttempts: 0, lastProcessingError: null, nextProcessingAttemptAt: new Date(Date.now() + 60_000) });
+    await waitFor(() => gates.length === 1);
+    (gates.shift() as () => void)();
+    await waitFor(() => statusWrites(sim).length === 2);
+    // Photo 3 was started after the answer and published normally; photo 2's late result was dropped.
+    expect(sim.processedWrites).toEqual([1, 3]);
+    expect(sim.rows.get(2)).toMatchObject({ processingState: "pending", processedStorageKey: null });
+  });
+
+  it("a timed-out photo is retried at least five minutes later and gets eight tries before it fails for good", async () => {
+    expect(photos.PHOTO_TIMEOUT_MS).toBeLessThanOrEqual(22_000);
+    const sim = simulatedQueue({
+      communities: [community(1, "Perry Homes")],
+      homes: [home(1, 1), home(2, 1)],
+      photos: [
+        { id: 1, homeId: 1, sourceUrl: "https://res.cloudinary.com/perryhomes/p/1.jpg", processingAttempts: 4 },
+        { id: 2, homeId: 2, sourceUrl: "https://res.cloudinary.com/perryhomes/p/2.jpg", processingAttempts: 7 },
+      ],
+      settings: { "Perry Homes": off("Perry Homes") },
+    });
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+    // Attempt 5: past the usual five-attempt cap, a timeout still retries.
+    expect(await photos.processDealPhoto(1, undefined, { timeoutMs: 50 })).toMatchObject({ timedOut: true, retryScheduled: true });
+    expect(sim.rows.get(1)).toMatchObject({ processingState: "pending", processingAttempts: 5, lastProcessingError: "processing_timeout" });
+    expect((sim.rows.get(1)?.nextProcessingAttemptAt as Date).getTime()).toBeGreaterThanOrEqual(Date.now() + 5 * 60_000 - 1_000);
+    // Attempt 8: failed for good.
+    expect(await photos.processDealPhoto(2, undefined, { timeoutMs: 50 })).toMatchObject({ timedOut: true, retryScheduled: false });
+    expect(sim.rows.get(2)).toMatchObject({ processingState: "failed", lastProcessingError: "processing_timeout" });
+  });
+
+  it("a hung drain never blocks: past 45 s a cron call runs its own beside it, at most two per process, and every call records a status", async () => {
+    const sim = simulatedQueue({
+      communities: [community(1, "Perry Homes")],
+      homes: [home(1, 1), home(2, 1)],
+      photos: [1, 2].map((id) => ({ id, homeId: id, sourceUrl: `https://res.cloudinary.com/perryhomes/p/${id}.jpg` })),
+      settings: { "Perry Homes": off("Perry Homes") },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => imageResponse(jpeg)));
+    const t0 = 9_000_000;
+    // Drain A hangs on its queue read.
+    sim.hangCandidateReads(true);
+    void photos.processPendingDealPhotos({ budgetMs: 20_000, clock: () => t0 });
+    await waitFor(() => sim.candidateSelects.length === 1);
+    // 10 s later: A is fresh, so a cron call waits for it (within its tiny budget) and records a coalesced call.
+    const waiting = await photos.processPendingDealPhotos({ budgetMs: 20, clock: (() => { let n = t0 + 10_000; return () => (n += 10); })() });
+    expect(waiting).toMatchObject({ coalesced: true, processed: 0 });
+    await waitFor(() => statusWrites(sim).length === 1);
+    expect(statusWrites(sim)[0].last).toMatchObject({ coalesced: true });
+
+    // 46 s later: A is presumed hung, B runs beside it and drains the queue.
+    sim.hangCandidateReads(false);
+    const b = await photos.processPendingDealPhotos({ budgetMs: 20_000, clock: () => t0 + 46_000 });
+    expect(b).toMatchObject({ processed: 2, steppedAroundStaleDrain: true });
+    expect(statusWrites(sim).at(-1)?.last).toMatchObject({ processed: 2 });
+
+    // Two hung drains (A and a second one): the third call does not start a third.
+    sim.hangCandidateReads(true);
+    void photos.processPendingDealPhotos({ budgetMs: 20_000, clock: () => t0 + 50_000 });
+    await waitFor(() => sim.candidateSelects.length === 4);
+    const selectsBefore = sim.candidateSelects.length;
+    const third = await photos.processPendingDealPhotos({ budgetMs: 20, clock: (() => { let n = t0 + 200_000; return () => (n += 10); })() });
+    expect(third).toMatchObject({ coalesced: true });
+    expect(sim.candidateSelects.length).toBe(selectsBefore);
+  });
 });

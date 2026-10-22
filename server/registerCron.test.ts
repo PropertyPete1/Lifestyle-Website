@@ -137,18 +137,19 @@ describe("Builder Deals cron registration", () => {
     expect(createMock.mock.calls.map(([job]) => job.name)).not.toContain(catalog.name);
   });
 
-  it("defines the photo queue every 5 minutes and the 1:30 AM Chicago activity-note candidates", () => {
+  it("runs the photo queue every 2 minutes on even minutes and the catalog on odd minutes, and moves earlier registrations over", () => {
+    const odd = Array.from({ length: 30 }, (_, i) => 2 * i + 1).join(",");
     expect(DEALS_JOB_DEFINITIONS).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "builder-deals-photo-queue", cron: "0 */5 * * * *", payload: { job: "photos" } }),
+      expect.objectContaining({ name: "builder-deals-photo-queue", cron: "0 */2 * * * *", payload: { job: "photos" } }),
+      expect.objectContaining({ name: "builder-deals-catalog-refresh", cron: `0 ${odd} * * * *`, payload: { job: "catalog" } }),
       expect.objectContaining({ name: "builder-deals-activity-note", cron: "0 30 6,7 * * *", payload: { job: "activity" } }),
     ]));
     const catalog = DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "catalog")!;
-    // The builder check runs every 10 minutes now; an existing 6 AM registration is moved over on the next boot.
-    expect(catalog.cron).toBe("0 */10 * * * *");
-    expect(dealsJobNeedsReconcile({ cronExpression: " 0 */10 * * * * ", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"catalog"}' }, catalog)).toBe(false);
-    expect(dealsJobNeedsReconcile({ cronExpression: "0 0 11,12 * * *", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"catalog"}' }, catalog)).toBe(true);
-    // The photo job registered by the earlier build (every 10 minutes) is moved to every 5 on the next boot.
     const photoJob = DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "photos")!;
-    expect(dealsJobNeedsReconcile({ cronExpression: "0 */10 * * * *", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"photos"}' }, photoJob)).toBe(true);
+    // Earlier builds registered the catalog every 10 minutes and photos every 10 or 5: reconciled in place on the next boot.
+    expect(dealsJobNeedsReconcile({ cronExpression: "0 */10 * * * *", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"catalog"}' }, catalog)).toBe(true);
+    expect(dealsJobNeedsReconcile({ cronExpression: "0 */5 * * * *", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"photos"}' }, photoJob)).toBe(true);
+    expect(dealsJobNeedsReconcile({ cronExpression: " 0 */2 * * * * ", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"photos"}' }, photoJob)).toBe(false);
   });
+
 });

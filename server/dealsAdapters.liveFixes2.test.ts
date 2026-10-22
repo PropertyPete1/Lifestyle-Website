@@ -123,16 +123,17 @@ describe("Toll Brothers: every San Antonio community (October 20, 2026 captures)
     // Sunset Ridge 13 of 12) or attributes one to another collection (Regency at Esperanza 5/5/4 on the plan, 5/4/5 listed). Where
     // every plan entry states its count and the counts add up to the listing, the listing is complete: Toll's own page showed
     // "2 Quick Move-In Homes Available" for Caliza Reserve and none for Shavano Highlands (its extra lot is the decorated model) on
-    // Oct 22. Sunset Ridge's entries carry no counts: still held.
+    // Oct 22. Sunset Ridge's entries carry no counts, but its own page's heading says "12 Quick Move-In Homes Available"
+    // (Oct 20 and Oct 22 alike), which the 12 listed answer: read.
     ["toll-shavano-highlands", "Shavano-Highlands", ["ambiguous_rate"], 0, 6],
     ["toll-caliza-reserve", "Toll-Brothers-at-Caliza-Reserve", CALIZA_HOLDS, 2, 6],
     ["toll-nolte-farms", "Toll-Brothers-at-Nolte-Farms", NOLTE_HOLDS, 2, 6],
-    ["toll-sunset-ridge", "Toll-Brothers-at-Sunset-Ridge", ["expected_community_container_not_found"], 0, 0],
+    ["toll-sunset-ridge", "Toll-Brothers-at-Sunset-Ridge", [], 12, 0],
     ["toll-regency-at-esperanza", "Regency-at-Esperanza", REGENCY_HOLDS, 14, 12],
   ];
   const read = (name: string, url: string, page = live(name)) => loadOfficialDeals({ builder: "Toll Brothers", sourceUrl: url, privateCommunityName: name, scrubList: [] }, { fetcher: siteFetcher({ [url]: page }).fetcher, now: () => NOW });
 
-  it("reads 12 of the 13 and holds Sunset Ridge, whose site plan counts a home the data does not list and whose plans state no counts", async () => {
+  it("reads all 13, Sunset Ridge on its page's own heading count where the site plan counts a home the data does not list", async () => {
     for (const [name, path, holds, homes, plans] of ROWS) {
       const result = await read(name, `${T}${path}`);
       expect([name, result.holdReasons, result.catalogOk, result.private.homes.length, result.private.plans.length]).toEqual([name, holds, holds.every((hold) => hold === "ambiguous_rate"), homes, plans]);

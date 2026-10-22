@@ -248,6 +248,12 @@ export function parseHighlandSectionPage(html: string, communityUrl: string, now
   return homes;
 }
 
+/** The overview's heading when it announces a community or phase not yet selling ("Coming Soon", "New Phase Coming Spring 2027"); null otherwise. */
+export function highlandComingSoonHeading(html: string): string | null {
+  const heading = /class="[^"]*\boverview-text-area\b[^"]*"[^>]*>\s*<h3>([^<]{1,80})<\/h3>/i.exec(html)?.[1]?.trim() ?? null;
+  return heading && /^(?:new\s+phase\s+)?coming\b/i.test(heading) ? heading : null;
+}
+
 export class HighlandAdapter implements DealAdapter {
   readonly builder = "Highland Homes" as const;
 
@@ -266,6 +272,8 @@ export class HighlandAdapter implements DealAdapter {
     if (sections) return this.loadSections(config, fetchedAt, privateSnapshot, community, page.text, sections, fetcher, now());
     const homes = parseHighlandCards(page.text, community.toString(), now());
     const count = highlandHomeCount(page.text);
+    // No home on the page and the overview's heading announces what is coming ("New Phase Coming Spring 2027": VIDA, Oct 22): coming soon, not a changed page.
+    if (!homes?.length && highlandComingSoonHeading(page.text)) return failedResult(config, fetchedAt, privateSnapshot, ["community_coming_soon"]);
     // Without the home section or the office address this is not a community page; fewer cards than the page counts means the card markup changed.
     if (!homes || !highlandCommunityFacts(page.text).street) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (count !== null && homes.length < count) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

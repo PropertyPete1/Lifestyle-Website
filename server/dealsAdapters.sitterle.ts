@@ -86,6 +86,11 @@ export function sitterleRecord(html: string): SitterleCommunityRecord | null {
   };
 }
 
+/** A text block of the page opens "Coming soon" (the community's introduction). */
+export function sitterleComingSoon(html: string): boolean {
+  return /class="elementor-widget-container">\s*Coming\s+soon\b/i.test(html);
+}
+
 export type SitterlePage = { record: SitterleCommunityRecord | null; homes: PrivatePlanOrHome[]; plans: PrivatePlanOrHome[]; cardCount: number; foreignHome: boolean };
 
 function stat(statsText: string, label: RegExp): number | null {
@@ -201,6 +206,8 @@ export class SitterleAdapter implements DealAdapter {
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseSitterleCommunity(page.text, community.toString(), now());
+    // An empty listing block under an introduction that opens "Coming soon" (Oak Bend Estates, Oct 22: "Coming soon to Fair Oaks Ranch … Join our interest list"): coming soon, not a changed page.
+    if (parsed && parsed.cardCount === 0 && parsed.homes.length === 0 && sitterleComingSoon(page.text)) return failedResult(config, fetchedAt, privateSnapshot, ["community_coming_soon"]);
     // Without the listing block, the community's name or its sales address this is not a community page.
     if (!parsed || !parsed.record?.street) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (parsed.homes.length < parsed.cardCount) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

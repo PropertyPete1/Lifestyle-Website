@@ -227,6 +227,8 @@ export type LennarPage = {
   homesAvailable: number | null;
   /** The masterplan's price reads "Coming soon" (Spring Grove, Oct 22). */
   comingSoon: boolean;
+  /** Every selling collection's price reads "Coming soon" too (Sunshine Trails, Oct 22: plans shown, nothing released). */
+  collectionsComingSoon: boolean;
   plans: PrivatePlanOrHome[];
   foreignPlan: boolean;
 };
@@ -249,6 +251,8 @@ function standaloneCommunity(cache: Cache, community: URL): Json | null {
 }
 
 /** The masterplan on the page (a standalone community counts as one of a single collection); null when the page's data carries neither. */
+const COMING_SOON = /^\s*coming\s+soon\s*$/i;
+
 export function parseLennarCommunity(html: string, pageUrl: string): LennarPage | null {
   const community = asUrl(pageUrl);
   const pageProps = parseLennarNextData(html);
@@ -322,7 +326,7 @@ export function parseLennarCommunity(html: string, pageUrl: string): LennarPage 
     seenHomes.add(pagePath(link));
     homes.push(homeOf(cache, home, link, city, record.zip, null));
   }
-  return { record, foreignPage, collections: collections.length, homes, foreignHome, homesAvailable: lennarHomesAvailable(html), comingSoon: /^\s*coming\s+soon\s*$/i.test(str(mpc.customPrice) ?? ""), plans, foreignPlan };
+  return { record, foreignPage, collections: collections.length, homes, foreignHome, homesAvailable: lennarHomesAvailable(html), comingSoon: COMING_SOON.test(str(mpc.customPrice) ?? ""), collectionsComingSoon: collections.length > 0 && collections.every((row) => COMING_SOON.test(str(row.customPrice) ?? "")), plans, foreignPlan };
 }
 
 /** The community's record from its page, for discovery; null when the page is not a community page. */
@@ -364,7 +368,8 @@ export class LennarAdapter implements DealAdapter {
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseLennarCommunity(page.text, community.toString());
     // No collection selling yet and the masterplan's price reads "Coming soon": coming soon, not a changed page.
-    if (parsed && parsed.collections === 0 && parsed.comingSoon && !parsed.foreignPage) return failedResult(config, fetchedAt, privateSnapshot, ["community_coming_soon"]);
+    // So is a masterplan whose every collection's price also reads "Coming soon" and that lists no home for sale.
+    if (parsed && parsed.comingSoon && !parsed.foreignPage && (parsed.collections === 0 || (parsed.collectionsComingSoon && parsed.homes.length === 0 && !parsed.foreignHome))) return failedResult(config, fetchedAt, privateSnapshot, ["community_coming_soon"]);
     // Without the masterplan and a collection with a sales office this is not a selling community's page.
     if (!parsed || parsed.collections === 0) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The page must be this community's (a same-host redirect to another one is not), and so must its homes and plans.

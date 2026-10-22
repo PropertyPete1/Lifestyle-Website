@@ -118,6 +118,12 @@ export type TollPage = {
   planCountsAgree: boolean;
   /** A plan entry lists fewer homes than its own count: the listing was cut short. */
   planShortfall: boolean;
+  /**
+   * The page's own "12 Quick Move-In Homes Available" heading equals the homes listed (none cut short). Since October 22,
+   * 2026 some pages list every home under one quick move-in entry with no per-plan counts (Sunset Ridge: 12 listed, the
+   * heading 12, the site plan 13), so the heading is the count the listing answers to there.
+   */
+  headingCountAgrees: boolean;
   /** On a master's page: true when a collection's site plan counts more homes than the lists give it. */
   collectionShortfall: boolean;
   facts: { schoolDistrict: string | null; amenities: string[] };
@@ -279,6 +285,8 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
   // Collections' site plans can attribute a lot differently than the listing (Regency at Esperanza on Oct 22: 5/5/4 on
   // the plans, 5/4/5 listed) or count a lot it does not list (Oct 20: 15 on the plans, 14 listed and 14 by the plans'
   // own counts), exactly as a single community's can: when the plan counts agree, nothing is missing.
+  const heading = /<[^>]*>\s*(\d{1,3})\s+Quick\s+Move-In\s+Homes?(?:<!--\s*-->)?\s+Available\s*</i.exec(html);
+  const headingCountAgrees = !planShortfall && heading !== null && Number(heading[1]) === homes.length;
   const amenities = arr(obj(component.amenities)?.amenityGroups).flatMap((group) => arr(obj(group)?.amenities).map((item) => str(obj(item)?.name) ?? str(item)).filter((item): item is string => Boolean(item)));
   return {
     record,
@@ -291,6 +299,7 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
     sitePlanHomes: num(component.qmiSitePlanLots),
     planCountsAgree,
     planShortfall,
+    headingCountAgrees,
     collectionShortfall: collections ? Array.from(collections).some(([id, count]) => count !== null && (listedByCollection.get(id) ?? 0) < count) && !planCountsAgree : false,
     facts: { schoolDistrict: str(obj(component.schoolInfo)?.schoolDistrict), amenities },
     offer: tollOfferText(component.events, now),
@@ -347,7 +356,7 @@ export class TollBrothersAdapter implements DealAdapter {
     if (ownPage && (ownPage.origin.toLowerCase() !== community.origin.toLowerCase() || comparablePath(ownPage.pathname.replace(/\/+$/, "")) !== comparablePath(community.pathname.replace(/\/+$/, "")))) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     if (!parsed.shapeIntact) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The site plan counts the homes for sale; fewer homes in the data than that means the home list changed shape, not that homes sold.
-    if (parsed.planShortfall || (parsed.sitePlanHomes !== null && parsed.homes.length < parsed.sitePlanHomes && !parsed.planCountsAgree) || parsed.collectionShortfall) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    if (parsed.planShortfall || (parsed.sitePlanHomes !== null && parsed.homes.length < parsed.sitePlanHomes && !parsed.planCountsAgree && !parsed.headingCountAgrees) || parsed.collectionShortfall) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // A home listed under another community's path is never this community's inventory.
     if (parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     if (parsed.homes.length > TOLL_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);

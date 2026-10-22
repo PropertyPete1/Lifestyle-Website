@@ -309,6 +309,8 @@ export class DreesAdapter implements DealAdapter {
     // row names no address of its own, and its sub-neighborhoods need not be listed (Haby Hill on October 20, 2026:
     // the parent row only, its homes under haby-hill-50s/ and -60s/): a parent row is accepted on its id, its URL and
     // the page's own word that it is a parent, and its home count still corroborates the homes read below.
+    // The market list's own row for this page says "Coming Soon!" with no plan and no home for sale (Shavano Summit, Oct 22: its address reads "Coming Soon" too): coming soon, not a changed page.
+    if (row && !row.parent && row.qmiCount === 0 && row.planCount === 0 && /^coming\s+soon\b/i.test(row.caption ?? "") && comparablePath(new URL(row.url).pathname.replace(/\/+$/, "")) === comparablePath(community.pathname.replace(/\/+$/, ""))) return failedResult(config, fetchedAt, privateSnapshot, ["community_coming_soon"]);
     if (!row || (!row.record.street && !(row.parent && own.parent))) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (comparablePath(new URL(row.url).pathname.replace(/\/+$/, "")) !== comparablePath(community.pathname.replace(/\/+$/, ""))) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     const communityPage = `${community.origin}${community.pathname.replace(/\/+$/, "")}/`;

@@ -609,6 +609,39 @@ export function browseOrder<T extends { id: number; reelCode: string; reelUrl: s
     || a.id - b.id);
 }
 
+/** The catalog hold a reader gives a community its builder lists as coming soon with nothing for sale. */
+export const COMING_SOON_HOLD = "community_coming_soon";
+export type ComingSoonEntry = { key: string; area: string; fromPriceLabel: string | null };
+
+/**
+ * The Coming Soon section, for every visitor (landing and unlocked list alike): communities a builder lists as
+ * coming soon that are not live yet, by area and price band only, never a builder, community name or address.
+ * When a read finds homes or plans the hold clears, the first clean sync turns the community on, and it leaves
+ * this list for the main one. A paused, manual or admin-switched-off community is never listed.
+ */
+export async function comingSoonCommunities(): Promise<ComingSoonEntry[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select().from(dealCommunities).where(and(
+    eq(dealCommunities.catalogHoldReason, COMING_SOON_HOLD), eq(dealCommunities.active, false), eq(dealCommunities.awaitingFirstSync, true),
+    eq(dealCommunities.paused, false), eq(dealCommunities.manualMode, false),
+  )).orderBy(asc(dealCommunities.areaLabel), asc(dealCommunities.id));
+  const result: ComingSoonEntry[] = [];
+  for (const community of rows) {
+    const scrubNames = communityScrubConfig(community);
+    const entry: ComingSoonEntry = {
+      key: dealsHandle(`deals-coming-soon:${community.id}`, 16),
+      area: scrubPrivateNames(community.areaLabel, scrubNames).trim(),
+      fromPriceLabel: community.fromPrice ? `From the ${priceBandLabel(community.fromPrice)}` : null,
+    };
+    // An area that needed scrubbing named the community: a placeholder area tells a buyer nothing, so the row is left out.
+    if (!entry.area || entry.area !== community.areaLabel.trim()) continue;
+    if (await dropPrivateResidue(community.id, entry, scrubNames, "public")) continue;
+    result.push(entry);
+  }
+  return result;
+}
+
 export async function publicDealsCatalog(src?: string | null) {
   const db = await getDb();
   if (!db) return [];

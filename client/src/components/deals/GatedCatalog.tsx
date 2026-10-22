@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ComingSoonSection, type ComingSoonItem } from "./ComingSoon";
 import { Link } from "wouter";
 import { ChevronDown, Clock3, ExternalLink, Heart, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -154,6 +155,8 @@ export type GatedCatalogProps = {
   agent?: GatedAgent;
   /** Rendered between the heading and the communities: the team's agent tools. */
   tools?: ReactNode;
+  /** The Coming Soon section under the list: area and price band only, the same for every visitor. */
+  comingSoon?: readonly ComingSoonItem[];
   onRequest?: (request: HomeRequest) => void;
   onSaveProfile?: (input: ProfileInput) => void;
   savingProfile?: boolean;
@@ -212,7 +215,7 @@ function CommunitySection({ community, homes, open, onToggle, autoLoadReel, team
   </section>;
 }
 
-export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire, featured, onViewCommunity }: GatedCatalogProps) {
+export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire, featured, onViewCommunity, comingSoon }: GatedCatalogProps) {
   const [promptDismissed, setPromptDismissed] = useState(false);
   const updatedAt = communities.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
   const savedSet = new Set(saved ?? []);
@@ -273,6 +276,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
       {(many || savedOnList.size > 0) && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{filters.savedOnly && savedOnList.size > 0 ? BROWSE_COPY.noneSaved : BROWSE_COPY.none}</p>}
       <div className="mt-10 space-y-12">{visible.map(({ community, key }, position) => <CommunitySection key={key} id={`deals-community-${position}`} community={community} homes={homeFilters ? homesMatching(community, filters, savedOnList) : community.homes} open={!many || opened.has(key)} onToggle={many ? () => setOpened((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; }) : undefined} autoLoadReel={!many || position === 0} teamPreview={lead.teamPreview} savedSet={savedSet} savingCard={savingCard} onRequest={onRequest} onSave={onSave} />)}</div>
       {many && <ShowMore remaining={matching.length - visible.length} onClick={() => setPages((value) => value + 1)} />}
+      <ComingSoonSection items={comingSoon} action={{ kind: "text", phone: !lead.teamPreview ? agent?.phone ?? null : null, name: !lead.teamPreview ? agent?.firstName ?? agent?.name ?? null : null }} />
     </div></section>
     <DealsFooter />
   </main>;

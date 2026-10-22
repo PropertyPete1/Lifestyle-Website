@@ -267,6 +267,11 @@ export const dealsRouter = router({
     dealsPublicHeaders(ctx.res);
     return publicDealsCatalog(input?.src);
   }),
+  /** The Coming Soon section: area and price band only, for the landing page and the unlocked list alike. */
+  comingSoon: publicProcedure.query(async ({ ctx }) => {
+    dealsPublicHeaders(ctx.res);
+    return (await import("./dealsService")).comingSoonCommunities();
+  }),
   /** Best Deals on the landing page: public labels, prices and payments only, no card handles or names. */
   featured: publicProcedure.query(async ({ ctx }) => {
     dealsPublicHeaders(ctx.res);

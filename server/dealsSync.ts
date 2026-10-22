@@ -271,6 +271,9 @@ async function recordCatalogHold(community: CommunityRow, reason: string, now: D
   // The same parse result, held or dismissed, never produces a second email.
   if (storedReason === reason) return;
   await db.update(dealCommunities).set({ catalogHoldReason: reason, catalogHoldSeenAt: now, holdReason: summarizeHolds(reason, community.incentiveHoldReason) }).where(eq(dealCommunities.id, community.id));
+  // A community not yet live that its builder lists as coming soon is not a fault: it goes to the Coming Soon
+  // section, no e-mail. A live community that turns coming soon is still e-mailed (its homes are gone).
+  if (reason === "community_coming_soon" && !community.active) return;
   const detail = catalogHoldDetail(reason);
   holds.push({ communityId: community.id, privateName: community.privateName, builder: community.builder, kind: "catalog", reason, ...(detail ? { detail } : {}) });
 }

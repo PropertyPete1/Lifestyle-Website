@@ -181,6 +181,23 @@ describe("official refresh: holds", () => {
     expect(JSON.parse(String(db.rows(dealIncentives).find((row) => row.held)!.holdReason))).toContain("private_text_remaining");
   });
 
+  it("lists a not-yet-live coming-soon community quietly, takes it live once homes appear, and still e-mails a live one that turns coming soon", async () => {
+    const waiting = seedCommunity({ reelCode: "cs1", privateName: "Fixture Soon", sourceUrl: `${COMMUNITY_URL}-soon`, active: false, awaitingFirstSync: true });
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ catalogOk: false, holdReasons: ["community_coming_soon"] }));
+    await refreshOfficialDeals({ communityId: waiting, now: T0 });
+    const row = () => db.rows(dealCommunities).find((community) => community.id === waiting)!;
+    expect(row()).toMatchObject({ catalogHoldReason: "community_coming_soon", active: false, awaitingFirstSync: true });
+    expect(emails()).toEqual([]);
+    // The builder posts homes: the hold clears and the community goes live.
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: `${COMMUNITY_URL}-soon/fixture-a-plan/8301-a` }] }));
+    await refreshOfficialDeals({ communityId: waiting, now: new Date(T0.getTime() + DAY) });
+    expect(row()).toMatchObject({ catalogHoldReason: null, active: true, awaitingFirstSync: false });
+    // A live community whose page turns coming soon is a change the team hears about.
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ catalogOk: false, holdReasons: ["community_coming_soon"] }));
+    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 2 * DAY) });
+    expect(emails().map((email) => email.category)).toContain("deals_sync_hold");
+  });
+
   it("records a catalog hold once, keeps the last good data, and stays quiet after Dismiss until the parse result changes", async () => {
     mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));
     await refreshOfficialDeals({ communityId, now: T0 });

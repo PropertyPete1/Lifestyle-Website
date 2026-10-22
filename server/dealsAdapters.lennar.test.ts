@@ -216,6 +216,27 @@ describe("Lennar reader: adapter", () => {
     expect(JSON.stringify(result.public)).not.toMatch(/Fixture|40477523124|555-0142|555-0199|lennar\.com|Texas natives/);
   });
 
+  it("reads a standalone community (no masterplan: its own CommunityType row is the page), and still holds a page whose row is another's", async () => {
+    const standalone = (rowUrl: string) => {
+      const homes = HOMES.slice(0, 2);
+      const plans = [{ ...PLANS[0]!, collection: "x", url: `${PATH}/rio` }, { ...PLANS[1]!, collection: "x", url: `${PATH}/aruba`, homes: [] }];
+      const cache = cacheOf({ homes: homes.map((home) => ({ ...home, url: `${PATH}/rio/${home.lot}` })), plans, collections: [COLLECTIONS[0]!] });
+      delete cache["MpcType:m_5000"];
+      cache.ROOT_QUERY = { __typename: "Query" };
+      cache["CommunityType:c_1"] = { ...(cache["CommunityType:c_1"] as object), name: "Fixture Oasis", url: rowUrl, mpc: null, city: { __ref: "CityType:ct_64_san antonio" }, latitude: 29.46, longitude: -98.76, address: "Fixture Cross & Deer Pt" };
+      const data = { props: { pageProps: { pageType: "COMMUNITY", divisionNumber: "SANLEN", variables: { comnum: "74106", mpcid: 0, id: "553b931b" }, initialApolloState: cache } } };
+      return `<!DOCTYPE html><html><body><div class="HomesitesTableV3_root"><h3 class="h3">${homes.length}<!-- --> homes available</h3></div><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script></body></html>`;
+    };
+    const result = await loadOfficialDeals(config, { fetcher: html(standalone(PATH)), now: () => NOW });
+    expect(result.catalogOk).toBe(true);
+    expect(result.holdReasons).toEqual([]);
+    expect(result.private.homes.map((home) => [home.privateName, home.price])).toEqual([["8707 Fixture Crest", 267_499], ["8711 Fixture Crest", 271_999]]);
+    expect(result.private.plans.map((plan) => plan.privatePlanName)).toEqual(["Rio", "Aruba"]);
+    expect(parseLennarCommunity(standalone(PATH), COMMUNITY)?.record).toMatchObject({ name: "Fixture Oasis", city: "San Antonio", zip: "78252" });
+    // Another community's standalone row on this page is not this page.
+    expect((await loadOfficialDeals(config, { fetcher: html(standalone(`${PATH}-two`)), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+  });
+
   it("publishes nothing for a community with no homes for sale and a 'No homes available' heading", async () => {
     const result = await loadOfficialDeals(config, { fetcher: html(communityPage({ homes: [], heading: "<h3>No homes available</h3>", plans: [PLANS[0]!] })), now: () => NOW });
     expect(result.catalogOk).toBe(true);

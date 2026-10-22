@@ -227,7 +227,24 @@ export type LennarPage = {
   foreignPlan: boolean;
 };
 
-/** The masterplan on the page; null when the page's data carries no masterplan. */
+/**
+ * A community that belongs to no masterplan (Hidden Oasis, Landon Ridge, Red Hawk Landing on Oct 22) has a
+ * page of its own: no MpcType row, and its CommunityType row (`mpc: null`) is the page. It is read as a
+ * masterplan of one collection, itself; only the row whose URL is this page counts.
+ */
+function standaloneCommunity(cache: Cache, community: URL): Json | null {
+  const entry = Object.entries(cache).find(([key, value]) => {
+    if (!key.startsWith("CommunityType:")) return false;
+    const row = obj(value);
+    const url = row ? linkOf(row.url, community) : null;
+    return row !== null && row.mpc == null && url !== null && pagePath(url) === pagePath(community);
+  });
+  if (!entry) return null;
+  const row = obj(entry[1])!;
+  return { name: row.name, city: row.city, url: row.url, communities: [{ __ref: entry[0] }], consultants: row.consultants, customPrice: row.customPrice, latitude: row.latitude, longitude: row.longitude };
+}
+
+/** The masterplan on the page (a standalone community counts as one of a single collection); null when the page's data carries neither. */
 export function parseLennarCommunity(html: string, pageUrl: string): LennarPage | null {
   const community = asUrl(pageUrl);
   const pageProps = parseLennarNextData(html);
@@ -237,7 +254,7 @@ export function parseLennarCommunity(html: string, pageUrl: string): LennarPage 
   // The page's own masterplan (`variables.mpcid`), else the one whose URL is the page, else the first.
   const mpcid = num(obj(pageProps?.variables)?.mpcid);
   const rows = lennarRows(cache, "MpcType");
-  const mpc = (mpcid !== null ? obj(cache[`MpcType:m_${mpcid}`]) : null) ?? rows.find((row) => { const url = linkOf(row.url, community); return url !== null && pagePath(url) === pagePath(community); }) ?? rows[0] ?? null;
+  const mpc = (mpcid !== null ? obj(cache[`MpcType:m_${mpcid}`]) : null) ?? rows.find((row) => { const url = linkOf(row.url, community); return url !== null && pagePath(url) === pagePath(community); }) ?? rows[0] ?? standaloneCommunity(cache, community);
   const record = mpc ? recordOf(cache, mpc) : null;
   if (!mpc || !record) return null;
   const own = linkOf(mpc.url, community);

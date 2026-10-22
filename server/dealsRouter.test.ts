@@ -729,7 +729,8 @@ describe("admin.unblock", () => {
     await admin().unblock({ id });
     expect(mocks.findBuilderDealsFubPersonId).not.toHaveBeenCalled();
     expect(db.rows(dealKnownAgents)).toHaveLength(0);
-  });
+    // Takes milliseconds alone; the first unblock call lazy-loads modules, which under a loaded full-suite run on the host exceeded 5 s once.
+  }, 20_000);
 
   it("re-normalises a blocked Canadian number under the system's allowCanada setting instead of refusing the unblock", async () => {
     const toronto = "+14165550123";

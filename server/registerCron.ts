@@ -17,7 +17,7 @@ export const DEALS_CRON_PATH = "/api/scheduled/refreshDeals";
 export const DEALS_JOB_DEFINITIONS = [
   { name: "builder-deals-health", cron: "0 0 12,13 * * *", path: DEALS_CRON_PATH, payload: { job: "health" }, description: "7:00 AM Central health-check candidates; handler enforces America/Chicago time" },
   { name: "builder-deals-incentive-revalidate", cron: "0 15 23,0 * * *", path: DEALS_CRON_PATH, payload: { job: "incentive" }, description: "6:15 PM Central incentive lapse-only candidates for DST" },
-  { name: "builder-deals-catalog-refresh", cron: "0 1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31,33,35,37,39,41,43,45,47,49,51,53,55,57,59 * * * *", path: DEALS_CRON_PATH, payload: { job: "catalog" }, description: "Every 2 minutes (odd minutes): 20 s of due builder page checks per call, answered within 26 s, 4 AM to 10 PM Central (handler enforces the hours)" },
+  { name: "builder-deals-catalog-refresh", cron: "0 1-59/2 * * * *", path: DEALS_CRON_PATH, payload: { job: "catalog" }, description: "Every 2 minutes (odd minutes): 20 s of due builder page checks per call, answered within 26 s, 4 AM to 10 PM Central (handler enforces the hours)" },
   { name: "builder-deals-discovery", cron: "0 0 10,11 * * 1", path: DEALS_CRON_PATH, payload: { job: "discovery" }, description: "Monday 5:00 AM Central candidates for DST: find new communities on every builder's site" },
   { name: "builder-deals-trec-import", cron: "0 15 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "trec" }, description: "1:15 AM Central TREC import candidates for DST" },
   { name: "builder-deals-team-sync", cron: "0 30 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "team" }, description: "1:30 AM Central FUB team mirror candidates for DST" },
@@ -79,6 +79,8 @@ export async function ensureDealsCron(): Promise<void> {
   try {
     const { jobs } = await listHeartbeatJobs("");
     for (const candidate of DEALS_JOB_DEFINITIONS) {
+      // One rejected job must not stop the others from being created or updated.
+      try {
       const existing = jobs.find((j) => j.name === candidate.name);
       if (existing) {
         // A job registered by an earlier build may carry an old cron expression,
@@ -98,6 +100,9 @@ export async function ensureDealsCron(): Promise<void> {
         payload: candidate.payload,
         description: candidate.description,
       }, "");
+      } catch (err) {
+        console.error(`[cron] could not register ${candidate.name}:`, err instanceof Error ? err.message : err);
+      }
     }
   } catch (err) {
     console.error("[cron] could not register Builder Deals jobs:", err instanceof Error ? err.message : err);

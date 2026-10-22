@@ -138,10 +138,9 @@ describe("Builder Deals cron registration", () => {
   });
 
   it("runs the photo queue every 2 minutes on even minutes and the catalog on odd minutes, and moves earlier registrations over", () => {
-    const odd = Array.from({ length: 30 }, (_, i) => 2 * i + 1).join(",");
     expect(DEALS_JOB_DEFINITIONS).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "builder-deals-photo-queue", cron: "0 */2 * * * *", payload: { job: "photos" } }),
-      expect.objectContaining({ name: "builder-deals-catalog-refresh", cron: `0 ${odd} * * * *`, payload: { job: "catalog" } }),
+      expect.objectContaining({ name: "builder-deals-catalog-refresh", cron: "0 1-59/2 * * * *", payload: { job: "catalog" } }),
       expect.objectContaining({ name: "builder-deals-activity-note", cron: "0 30 6,7 * * *", payload: { job: "activity" } }),
     ]));
     const catalog = DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "catalog")!;
@@ -152,4 +151,27 @@ describe("Builder Deals cron registration", () => {
     expect(dealsJobNeedsReconcile({ cronExpression: " 0 */2 * * * * ", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"photos"}' }, photoJob)).toBe(false);
   });
 
+});
+
+describe("ensureDealsCron error isolation", () => {
+  it("keeps creating the remaining jobs when one is rejected", async () => {
+    listMock.mockResolvedValue({ total: 0, actorUserId: "owner", jobs: [] });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const rejected = DEALS_JOB_DEFINITIONS[2].name;
+    createMock.mockImplementation(async (job: { name: string }) => {
+      if (job.name === rejected) throw new Error("scheduler rejected the expression");
+      return { taskUid: `task-${job.name}` };
+    });
+
+    await ensureDealsCron();
+
+    expect(createMock).toHaveBeenCalledTimes(DEALS_JOB_DEFINITIONS.length);
+    expect(spy).toHaveBeenCalledWith(`[cron] could not register ${rejected}:`, "scheduler rejected the expression");
+    spy.mockRestore();
+  });
+
+  it("registers the catalog job on odd minutes with a compact expression", () => {
+    const catalog = DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "catalog");
+    expect(catalog?.cron).toBe("0 1-59/2 * * * *");
+  });
 });

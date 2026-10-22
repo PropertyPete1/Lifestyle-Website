@@ -237,6 +237,15 @@ describe("Lennar reader: adapter", () => {
     expect((await loadOfficialDeals(config, { fetcher: html(standalone(`${PATH}-two`)), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
   });
 
+  it("reads a home whose street carries a short tag (the Welcome Home Center, \"(WHC)\") at its street", async () => {
+    const tagged = HOMES.map((home, index) => index === 0 ? { ...home, street: "8707 Fixture Crest (WHC)" } : home);
+    const result = await loadOfficialDeals(config, { fetcher: html(communityPage({ homes: tagged })), now: () => NOW });
+    expect(result.catalogOk).toBe(true);
+    const home = result.private.homes.find((row) => row.privateName === "8707 Fixture Crest");
+    expect(home?.status).toBe("Quick Move-In (Move-In Ready)");
+    expect(home?.privateAddress).toBe("8707 Fixture Crest, San Antonio, TX 78252");
+  });
+
   it("publishes nothing for a community with no homes for sale and a 'No homes available' heading", async () => {
     const result = await loadOfficialDeals(config, { fetcher: html(communityPage({ homes: [], heading: "<h3>No homes available</h3>", plans: [PLANS[0]!] })), now: () => NOW });
     expect(result.catalogOk).toBe(true);

@@ -182,7 +182,9 @@ export function lennarHomesAvailable(html: string): number | null {
 
 /** A homesite row as a home for sale: its street, status, price (and the previous one of a cut), figures, lot, pin and elevation photo. */
 function homeOf(cache: Cache, home: Json, link: URL, city: string | null, zip: string | null, planName: string | null): PrivatePlanOrHome {
-  const street = str(home.address);
+  // A short tag after the street is Lennar's label, not part of the address: "20902 Blackberry Grove (WHC)" is the
+  // Welcome Home Center (the sales model) for sale at 20902 Blackberry Grove (Lonesome Dove, Oct 22).
+  const street = str(home.address)?.replace(/\s*\([A-Za-z]{2,6}\)\s*$/, "") ?? null;
   const readable = looksLikeStreetAddress(street);
   const status = lennarStatus(str(home.status));
   const price = positive(home.price);

@@ -701,7 +701,8 @@ describe("admin.saveCommunityState", () => {
   });
 });
 
-describe("admin.unblock", () => {
+// Each test takes milliseconds alone; unblock lazy-loads modules on first use, which on a loaded host has run past 5 s for whichever test came first.
+describe("admin.unblock", { timeout: 20_000 }, () => {
   const phone = "+12105550177";
 
   it("falls back to a FUB person lookup by the unblocked value when no local lead or known-agent row carries a person id", async () => {

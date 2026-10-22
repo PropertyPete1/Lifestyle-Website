@@ -225,6 +225,8 @@ export type LennarPage = {
   foreignHome: boolean;
   /** The homesite table heading's count; null when the page has no table heading. */
   homesAvailable: number | null;
+  /** The masterplan's price reads "Coming soon" (Spring Grove, Oct 22). */
+  comingSoon: boolean;
   plans: PrivatePlanOrHome[];
   foreignPlan: boolean;
 };
@@ -320,7 +322,7 @@ export function parseLennarCommunity(html: string, pageUrl: string): LennarPage 
     seenHomes.add(pagePath(link));
     homes.push(homeOf(cache, home, link, city, record.zip, null));
   }
-  return { record, foreignPage, collections: collections.length, homes, foreignHome, homesAvailable: lennarHomesAvailable(html), plans, foreignPlan };
+  return { record, foreignPage, collections: collections.length, homes, foreignHome, homesAvailable: lennarHomesAvailable(html), comingSoon: /^\s*coming\s+soon\s*$/i.test(str(mpc.customPrice) ?? ""), plans, foreignPlan };
 }
 
 /** The community's record from its page, for discovery; null when the page is not a community page. */
@@ -361,6 +363,8 @@ export class LennarAdapter implements DealAdapter {
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseLennarCommunity(page.text, community.toString());
+    // No collection selling yet and the masterplan's price reads "Coming soon": coming soon, not a changed page.
+    if (parsed && parsed.collections === 0 && parsed.comingSoon && !parsed.foreignPage) return failedResult(config, fetchedAt, privateSnapshot, ["community_coming_soon"]);
     // Without the masterplan and a collection with a sales office this is not a selling community's page.
     if (!parsed || parsed.collections === 0) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The page must be this community's (a same-host redirect to another one is not), and so must its homes and plans.

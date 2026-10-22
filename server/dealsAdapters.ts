@@ -82,6 +82,11 @@ export type DealHoldReason =
   | "invalid_inventory_response"
   | "incomplete_inventory"
   | "expected_community_container_not_found"
+  /**
+   * The builder's own page says the community is coming soon and lists no home or plan for sale yet. Not a fault:
+   * the community is listed in the Coming Soon section (area and price only) until a read finds homes or plans.
+   */
+  | "community_coming_soon"
   | "expected_detail_container_not_found"
   | "expected_incentive_container_not_found"
   /** A home card whose status could not be read: a layout change holds the catalog instead of marking homes sold. */
@@ -2131,6 +2136,8 @@ class ChesmarAdapter implements DealAdapter {
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     if (!containsExpectedChesmarCommunityContainer(page.text)) {
+      // No floor plans yet and the facts list's price says "Coming soon" (Purlsong, Westridge Oaks, Viana 65s and 80s, Oct 22).
+      if (/<b>\s*Starting From\s*<\/b>\s*:\s*Coming soon/i.test(page.text)) return failedResult(config, fetchedAt, privateSnapshot, ["community_coming_soon"]);
       return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     }
 

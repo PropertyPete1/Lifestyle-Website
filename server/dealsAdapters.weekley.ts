@@ -397,8 +397,11 @@ export class DavidWeekleyAdapter implements DealAdapter {
       }
     } else pages.push({ url: community.toString(), text: page.text, expectedHomes: null });
     const read: WeekleyPage[] = [];
+    let comingSoonPages = 0;
     for (const entry of pages) {
       const parsed = parseWeekleyCommunity(entry.text, entry.url, now());
+      // A series the page itself calls "Coming Soon" with no home and no plan has nothing to read yet (often no sales office either).
+      if (parsed && /^coming\s+soon$/i.test(parsed.availability ?? "") && !parsed.homes.length && !parsed.plans.length && !parsed.foreignPage) { comingSoonPages += 1; continue; }
       // Without the page data, its arrays or the sales office this is not a community page.
       if (!parsed || !parsed.record?.street) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
       // The page says how the community is selling; wording the reader does not know is not read as a sold-out community.
@@ -415,6 +418,7 @@ export class DavidWeekleyAdapter implements DealAdapter {
       if (showcase === "unavailable" ? parsed.homes.length === 0 : showcase !== null && parsed.homes.length < showcase) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
       read.push(parsed);
     }
+    if (!read.length && comingSoonPages) return failedResult(config, fetchedAt, privateSnapshot, ["community_coming_soon"]);
     if (read.reduce((total, parsed) => total + parsed.homes.length, 0) > WEEKLEY_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     const prices = read.map((parsed) => parsed.record!.priceFrom).filter((price): price is number => price !== null && price >= 50_000);
     privateSnapshot.communityFacts = { fromPrice: prices.length ? Math.min(...prices) : null, schoolDistrict: read.find((parsed) => parsed.facts.schoolDistrict)?.facts.schoolDistrict ?? null, lotSizes: null, amenities: Array.from(new Set(read.flatMap((parsed) => parsed.facts.amenities))) };

@@ -77,6 +77,15 @@ export function drhCommunityAddress(html: string): { street: string | null; city
  * Null when the page has no homes block at all (a layout change holds the run
  * rather than marking every home sold).
  */
+/**
+ * The community's own status badge in its page header ("Coming Soon", "New Phase Coming Soon", "Now Selling"),
+ * not a badge on a nearby community's card; null when the header carries none.
+ */
+export function drhCommunityStatus(html: string): string | null {
+  const match = /class="community-main-info"[\s\S]{0,800}?class="home-info__community-status"[\s\S]{0,400}?<span>([^<]{1,60})<\/span>/i.exec(html);
+  return match ? decodeHtmlEntities(match[1]!).replace(/\s+/g, " ").trim() : null;
+}
+
 export function parseDrhCommunityCards(html: string, communityUrl: string): DrhCard[] | null {
   const community = asUrl(communityUrl);
   const root = parseHtmlElements(html);
@@ -207,6 +216,8 @@ export class DrHortonAdapter implements DealAdapter {
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const cards = parseDrhCommunityCards(page.text, community.toString());
+    // No home block and the header says coming soon (Blue Wing Trails, McQueeney Oaks, Winding Creek's new phase, Oct 22).
+    if (!cards && /coming\s+soon/i.test(drhCommunityStatus(page.text) ?? "")) return failedResult(config, fetchedAt, privateSnapshot, ["community_coming_soon"]);
     if (!cards) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The page says how many items each block holds; anything not rendered sits behind an API this reader does not call.
     const counts = drhListingCounts(page.text);

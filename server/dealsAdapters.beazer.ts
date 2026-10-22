@@ -417,6 +417,8 @@ export class BeazerAdapter implements DealAdapter {
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseBeazerCommunity(page.text, community.toString(), now());
+    // A VIP-list community with nothing for sale is coming soon (Sunday Creek at Kinder Ranch, Oct 22).
+    if (parsed && parsed.comingSoon && !parsed.foreignPage && !parsed.homes.length && !parsed.plans.length) return failedResult(config, fetchedAt, privateSnapshot, ["community_coming_soon"]);
     // Without the community row and its sales office this is not a selling community's page (a VIP-list community has no office
     // yet). The office may be a cross street or another community's ("Selling from: ..."): still an office, never a VIP list.
     if (!parsed || !(parsed.record.street || (parsed.record.officeListed && !parsed.comingSoon))) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

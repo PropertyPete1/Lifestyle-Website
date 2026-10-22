@@ -82,6 +82,7 @@ export const CATALOG_HOLD_REASON_HELP: Partial<Record<DealHoldReason, string>> =
   invalid_inventory_response: "The builder's inventory feed returned an unexpected payload.",
   incomplete_inventory: "The inventory is larger than the safety cap, so it was not truncated.",
   expected_community_container_not_found: "The community page layout changed (expected container missing).",
+  community_coming_soon: "The builder lists this community as coming soon with nothing for sale yet; it shows in the Coming Soon section until homes or plans appear.",
   expected_detail_container_not_found: "A plan or home page layout changed (stat block or gallery missing).",
   unlabelled_home_status: "A home card's status could not be read, so nothing was published or marked sold this run.",
   refresh_failed: "The reader hit an unexpected error on this community's pages; nothing was published or marked sold.",

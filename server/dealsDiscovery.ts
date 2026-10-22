@@ -101,7 +101,9 @@ export function pulteListingEntries(body: string, host: string, brand?: string):
 }
 
 export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
-  { builder: "Chesmar", host: "www.chesmar.com", index: { kind: "sitemap", url: "https://www.chesmar.com/sitemap.xml" }, communityPath: /^\/texas\/san-antonio-new-homes\/[a-z0-9-]+\/[^/]+\/?$/i },
+  // Chesmar files New Braunfels and Seguin under "central-texas-new-homes" (with Austin, Kyle and Marble Falls); the
+  // distance check keeps only the San Antonio area's (Meyer Ranch 45's and 60's were never found before).
+  { builder: "Chesmar", host: "www.chesmar.com", index: { kind: "sitemap", url: "https://www.chesmar.com/sitemap.xml" }, communityPath: /^\/texas\/(?:san-antonio|central-texas)-new-homes\/[a-z0-9-]+\/[^/]+\/?$/i },
   {
     builder: "M/I Homes", host: "www.mihomes.com", index: { kind: "sitemap", url: "https://www.mihomes.com/Sitemap/sitemap.xml" },
     communityPath: /^\/new-homes\/texas\/greater-san-antonio\/(?!communities\/|plans-ready-to-build\/|quick-move-in-homes\/|model-homes-to-tour\/)[a-z0-9-]+\/[a-z0-9-]+\/?$/i,

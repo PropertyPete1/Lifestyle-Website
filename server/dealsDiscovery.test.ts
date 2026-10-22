@@ -288,6 +288,20 @@ describe("reading a builder's own records", () => {
 });
 
 describe("discovery", () => {
+  it("finds Chesmar's New Braunfels communities, filed under central Texas, and leaves central Texas's far ones out by distance", async () => {
+    const pages: Record<string, string> = {
+      [`${CH}/sitemap.xml`]: urlset([`${CH}/texas/central-texas-new-homes/new-braunfels/meyer-ranch-45's/`, `${CH}/texas/central-texas-new-homes/austin/sweetwater/`, `${CH}/texas/central-texas-new-homes/new-braunfels/`]),
+      [`${CH}/texas/central-texas-new-homes/new-braunfels/meyer-ranch-45's/`]: page([chesmarRecord("Meyer Ranch 45&#39;s", "1711 Seekat Drive", "New Braunfels", "78132", { latitude: "29.75", longitude: "-98.20" })]),
+      [`${CH}/texas/central-texas-new-homes/austin/sweetwater/`]: page([chesmarRecord("Sweetwater", "1 Fixture Way", "Austin", "78738", { latitude: "30.33", longitude: "-97.97" })]),
+    };
+    const fetched: string[] = [];
+    const local = (async (input: string | URL | Request) => { const url = String(input); fetched.push(url); return pages[url] ? new Response(pages[url], { status: 200, headers: { "content-type": url.endsWith(".xml") ? "application/xml" : "text/html" } }) : new Response("missing", { status: 404 }); }) as typeof fetch;
+    const found = await discoverBuilderCommunities(reader("Chesmar"), local);
+    expect(found.communities.map((community) => [community.name, community.city])).toEqual([["Meyer Ranch 45's", "New Braunfels"]]);
+    expect(found.skipped).toEqual([{ url: `${CH}/texas/central-texas-new-homes/austin/sweetwater/`, reason: "outside_area" }]);
+    expect(fetched).not.toContain(`${CH}/texas/central-texas-new-homes/new-braunfels/`);
+  });
+
   it("finds a builder's San Antonio communities from its sitemap, one page at a time, and skips what is not one", async () => {
     const chesmar = await discoverBuilderCommunities(reader("Chesmar"), fetcher);
     expect(chesmar.ok).toBe(true);

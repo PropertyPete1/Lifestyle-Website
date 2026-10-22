@@ -164,13 +164,6 @@ describe("agent tools on /deals/team", () => {
     expect(smsHref(message)).toBe(`sms:?&body=${encodeURIComponent(message)}`);
   });
 
-  it("starts with the signed-agreement box unchecked and Create client link disabled", () => {
-    const html = renderTools();
-    expect(html).toContain("This client has signed our buyer representation agreement.");
-    expect(html).toMatch(/<input id="deals-client-agreement" type="checkbox"(?![^>]*checked)[^>]*>/);
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>(?:(?!<\/button>)[\s\S])*Create client link<\/button>/);
-  });
-
   it("derives one status per link for agents and admin alike", () => {
     expect(clientStatus(workspace.clients[1]!, NOW)).toEqual({ label: "Not opened yet", tone: "muted" });
     expect(clientStatus({ ...workspace.clients[1]!, openedAt: new Date(NOW - 60_000).toISOString() }, NOW).label).toMatch(/^Opened .* not verified yet$/);

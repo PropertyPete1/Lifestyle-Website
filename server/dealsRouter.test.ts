@@ -436,11 +436,10 @@ describe("agent client links through the router", () => {
     const workspace = await visitor().team.workspace();
     expect(workspace.agent).toEqual({ name: "Tiffany Agent", email: "tiffany@example.com", fubLinked: true });
     expect(workspace.clients.map((client) => client.clientName)).toEqual(["Maria Lopez"]);
-    await expect(visitor().team.createClientLink({ clientName: "Sam Reyes", clientPhone: "(210) 555-0303" })).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Confirm the client signed the buyer representation agreement before sending the full list." });
-    const created = await visitor().team.createClientLink({ agreementSigned: true, clientName: "Sam Reyes", clientPhone: "(210) 555-0303" });
+    const created = await visitor().team.createClientLink({ clientName: "Sam Reyes", clientPhone: "(210) 555-0303" });
     expect(created.path).toMatch(/^\/deals\?c=[A-Za-z0-9_-]{20,64}$/);
     expect((await visitor().team.workspace()).clients.map((client) => client.clientName)).toEqual(["Sam Reyes", "Maria Lopez"]);
-    await expect(visitor().team.createClientLink({ agreementSigned: true, clientName: "Bad Phone", clientPhone: "12" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(visitor().team.createClientLink({ clientName: "Bad Phone", clientPhone: "12" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(visitor().team.revokeClientLink({ id: created.id })).resolves.toEqual({ ok: true });
     await expect(visitor().team.revokeClientLink({ id: 999 })).rejects.toMatchObject({ code: "NOT_FOUND" });
     // The team member's own list is the full one with builder pages.
@@ -452,7 +451,7 @@ describe("agent client links through the router", () => {
     db.seed(dealLeads, buyer);
     mocks.isLiveDealSession.mockResolvedValue({ leadId: 42, lead: buyer, deviceHash: buyer.deviceHash });
     await expect(visitor().team.workspace()).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(visitor().team.createClientLink({ agreementSigned: true, clientName: "Nope" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(visitor().team.createClientLink({ clientName: "Nope" })).rejects.toMatchObject({ code: "FORBIDDEN" });
     mocks.isLiveDealSession.mockResolvedValue(null);
     await expect(visitor().team.workspace()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });

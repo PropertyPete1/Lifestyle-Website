@@ -68,7 +68,7 @@ const card = (id: number) => dealsCardHandle(`${db.rows(dealHomes).find((row) =>
 describe("client link lifecycle", () => {
   it("creates a link for a team session, resolves it, and refuses buyers and bad phones", async () => {
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "  Maria   Lopez ", clientPhone: "(210) 555-0202", note: "Pre-approved" });
+    const created = await createClientLink({ agentLead: agent, clientName: "  Maria   Lopez ", clientPhone: "(210) 555-0202", note: "Pre-approved" });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
     expect(created.link.token).toMatch(/^[A-Za-z0-9_-]{20,64}$/);
@@ -83,14 +83,9 @@ describe("client link lifecycle", () => {
     expect(await resolveClientLink("short")).toBeNull();
     expect(await resolveClientLink("x".repeat(32))).toBeNull();
 
-    expect(await createClientLink({ agreementSigned: true, agentLead: lead({ phoneE164: CLIENT_PHONE }), clientName: "Someone" })).toEqual({ ok: false, kind: "not_team" });
-    expect(await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria", clientPhone: "12" })).toEqual({ ok: false, kind: "invalid_phone" });
-    expect(await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "M" })).toEqual({ ok: false, kind: "invalid_name" });
-    // No signed buyer representation agreement, no link: nothing is created and nothing is logged.
-    const linksBefore = db.rows(dealClientLinks).length;
-    expect(await createClientLink({ agreementSigned: false, agentLead: agent, clientName: "Maria Lopez" })).toEqual({ ok: false, kind: "agreement_required" });
-    expect(await createClientLink({ agentLead: agent, clientName: "Maria Lopez" } as never)).toEqual({ ok: false, kind: "agreement_required" });
-    expect(db.rows(dealClientLinks).length).toBe(linksBefore);
+    expect(await createClientLink({ agentLead: lead({ phoneE164: CLIENT_PHONE }), clientName: "Someone" })).toEqual({ ok: false, kind: "not_team" });
+    expect(await createClientLink({ agentLead: agent, clientName: "Maria", clientPhone: "12" })).toEqual({ ok: false, kind: "invalid_phone" });
+    expect(await createClientLink({ agentLead: agent, clientName: "M" })).toEqual({ ok: false, kind: "invalid_name" });
     // A team session whose number is not on the allowlist (a test-team number) has no agent identity.
     expect(await agentForLead({ phoneE164: "+12105550999", email: null })).toBeNull();
   });
@@ -99,19 +94,19 @@ describe("client link lifecycle", () => {
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
     const other = lead({ phoneE164: "+12105550303", status: "team" });
     db.seed(dealTeamAllowlist, { name: "Other Agent", phoneE164: "+12105550303", source: "manual", active: true });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
     expect(await revokeClientLink(other, created.link.id)).toBe(false);
     expect(await resolveClientLink(created.link.token)).not.toBeNull();
     expect(await revokeClientLink(agent, created.link.id)).toBe(true);
     expect(await resolveClientLink(created.link.token)).toBeNull();
 
-    const expired = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Old Link" });
+    const expired = await createClientLink({ agentLead: agent, clientName: "Old Link" });
     if (!expired.ok) throw new Error("link not created");
     db.rows(dealClientLinks).find((row) => row.id === expired.link.id)!.expiresAt = new Date(Date.now() - 1);
     expect(await resolveClientLink(expired.link.token)).toBeNull();
 
-    const orphan = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Orphan" });
+    const orphan = await createClientLink({ agentLead: agent, clientName: "Orphan" });
     if (!orphan.ok) throw new Error("link not created");
     db.rows(dealTeamAllowlist).find((row) => row.id === teamId)!.active = false;
     expect(await resolveClientLink(orphan.link.token)).toBeNull();
@@ -169,7 +164,7 @@ describe("verification through a client link", () => {
     vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
     testSettings();
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
     const { pending, done } = await verifyThrough(created.link.token, "(210) 555-0202");
     expect(pending).toMatchObject({ ok: true, sourceCode: AGENT_CLIENT_SOURCE, clientLink: true });
@@ -189,7 +184,7 @@ describe("verification through a client link", () => {
     vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
     testSettings();
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
     await verifyThrough(created.link.token, CLIENT_PHONE);
     const stranger = await verifyThrough(created.link.token, OTHER_PHONE);
@@ -198,7 +193,7 @@ describe("verification through a client link", () => {
     // The bound client can come back through the same link.
     expect((await verifyThrough(created.link.token, CLIENT_PHONE)).done?.ok).toBe(true);
     // A link made for a typed number only ever opens for that number, even before anyone used it.
-    const typed = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Sam Reyes", clientPhone: "(210) 555-0404" });
+    const typed = await createClientLink({ agentLead: agent, clientName: "Sam Reyes", clientPhone: "(210) 555-0404" });
     if (!typed.ok) throw new Error("link not created");
     expect((await verifyThrough(typed.link.token, OTHER_PHONE)).pending).toMatchObject({ ok: false, kind: "link_other_phone" });
     expect((await verifyThrough(typed.link.token, "+12105550404")).done?.ok).toBe(true);
@@ -210,7 +205,7 @@ describe("verification through a client link", () => {
     vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
     testSettings();
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
     await revokeClientLink(agent, created.link.id);
     expect((await verifyThrough(created.link.token, CLIENT_PHONE)).pending).toEqual({ ok: false, kind: "link_dead", agentName: "Tiffany Agent" });
@@ -223,7 +218,7 @@ describe("verification through a client link", () => {
     vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
     testSettings();
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
     const device = "dev-race";
     const start = responseRecorder();
@@ -242,7 +237,7 @@ describe("verification through a client link", () => {
     testSettings();
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
     await verifyThrough(null, CLIENT_PHONE);
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez", clientPhone: CLIENT_PHONE });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez", clientPhone: CLIENT_PHONE });
     if (!created.ok) throw new Error("link not created");
     const { done } = await verifyThrough(created.link.token, CLIENT_PHONE);
     expect(done).toMatchObject({ ok: true, firstUnlock: false, clientLinkAttached: created.link.id });
@@ -252,7 +247,7 @@ describe("verification through a client link", () => {
 
   it("keeps the expired page on the agent's link for a client whose list lapsed", async () => {
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
     const client = lead({ phoneE164: CLIENT_PHONE, agentTeamId: teamId, clientLinkId: created.link.id, expiresAt: new Date(Date.now() - HOUR) });
     db.rows(dealClientLinks)[0].leadId = client.id;
@@ -270,7 +265,7 @@ describe("the full list versus the scrubbed list", () => {
     for (const field of DEALS_PRIVATE_FIELDS) expect(gated).not.toContain(`"${field}"`);
 
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Client" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Client" });
     if (!created.ok) throw new Error("link not created");
     const client = lead({ phoneE164: "+12105550404", agentTeamId: teamId, clientLinkId: created.link.id, sourceCode: AGENT_CLIENT_SOURCE });
     db.rows(dealClientLinks)[0].leadId = client.id;
@@ -293,7 +288,7 @@ describe("the full list versus the scrubbed list", () => {
 
   it("drops a client back to the scrubbed list when the link is turned off, the agent leaves, or the link belongs to someone else", async () => {
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Client" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Client" });
     if (!created.ok) throw new Error("link not created");
     const client = lead({ phoneE164: CLIENT_PHONE, agentTeamId: teamId, clientLinkId: created.link.id });
     const linkRow = db.rows(dealClientLinks)[0];
@@ -314,7 +309,7 @@ describe("the full list versus the scrubbed list", () => {
 
   it("keeps an agent's links alive when FUB changes their phone (old mirror row inactive, new row active)", async () => {
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Client" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Client" });
     if (!created.ok) throw new Error("link not created");
     db.rows(dealTeamAllowlist).find((row) => row.id === teamId)!.active = false;
     db.seed(dealTeamAllowlist, { name: "Tiffany Agent", phoneE164: "+12105550707", email: "tiffany@example.com", fubUserId: "77", fubIdentityKey: "fub:77:+12105550707", source: "fub", active: true });
@@ -358,7 +353,7 @@ describe("saving a home", () => {
 describe("the agent's workspace", () => {
   it("lists only the agent's own clients with their verification, saves and requests", async () => {
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez", clientPhone: CLIENT_PHONE, note: "Wants 4 beds" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez", clientPhone: CLIENT_PHONE, note: "Wants 4 beds" });
     if (!created.ok) throw new Error("link not created");
     const otherTeam = db.seed(dealTeamAllowlist, { name: "Other Agent", phoneE164: "+12105550303", source: "manual", active: true });
     db.seed(dealClientLinks, { token: "o".repeat(32), agentTeamId: otherTeam, agentLeadId: 999, clientName: "Not Mine", expiresAt: new Date(Date.now() + HOUR) });
@@ -392,7 +387,7 @@ describe("attaching a live session to a client link", () => {
   it("attributes an already-verified buyer without a code, extends their window, records the link and the event", async () => {
     db.seed(dealSettings, { key: "builder_deals", value: JSON.stringify({ clientLinkExpiryHours: 72 }) });
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
     const buyer = lead({ phoneE164: CLIENT_PHONE, expiresAt: new Date(Date.now() + 2 * HOUR) });
     const result = await attachLiveSessionToClientLink({ lead: buyer, token: created.link.token, expiryHours: 72 });
@@ -412,7 +407,7 @@ describe("attaching a live session to a client link", () => {
 
   it("never attaches a team session and refuses a dead link", async () => {
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
     expect(await attachLiveSessionToClientLink({ lead: agent, token: created.link.token, expiryHours: 72 })).toEqual({ ok: true, attached: false, reason: "team" });
     await revokeClientLink(agent, created.link.id);
@@ -436,7 +431,7 @@ describe("round 3: what a returning client, the nightly screening and team chang
     vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
     testSettings();
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
     const { done } = await verifyThrough(created.link.token, CLIENT_PHONE);
     if (!done?.ok) throw new Error("not verified");
@@ -457,7 +452,7 @@ describe("round 3: what a returning client, the nightly screening and team chang
 
   it("leaves a vouched-for client alone when the nightly realtor import matches them, until the link is turned off", async () => {
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
     const client = lead({ phoneE164: CLIENT_PHONE, agentTeamId: teamId, clientLinkId: created.link.id });
     db.rows(dealClientLinks)[0].leadId = client.id;
@@ -480,8 +475,8 @@ describe("round 3: what a returning client, the nightly screening and team chang
 
   it("asks a buyer with a live list to connect only to a new link that is theirs", async () => {
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const open = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez" });
-    const typed = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Sam Reyes", clientPhone: OTHER_PHONE });
+    const open = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    const typed = await createClientLink({ agentLead: agent, clientName: "Sam Reyes", clientPhone: OTHER_PHONE });
     if (!open.ok || !typed.ok) throw new Error("links not created");
     const buyer = lead({ phoneE164: CLIENT_PHONE });
     expect(await connectOfferFor(buyer, open.link.token)).toBe("ask");
@@ -496,7 +491,7 @@ describe("round 3: what a returning client, the nightly screening and team chang
 
   it("shows clients the agent's current number after FUB changes it", async () => {
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Client" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Client" });
     if (!created.ok) throw new Error("link not created");
     db.rows(dealTeamAllowlist).find((row) => row.id === teamId)!.active = false;
     db.seed(dealTeamAllowlist, { name: "Tiffany Agent", phoneE164: "+12105550707", email: "tiffany@example.com", fubUserId: "77", fubIdentityKey: "fub:77:+12105550707", source: "fub", active: true });
@@ -507,7 +502,7 @@ describe("round 3: what a returning client, the nightly screening and team chang
     const NEW_AGENT = "+12105550808";
     const manualId = db.seed(dealTeamAllowlist, { name: "New Agent", phoneE164: NEW_AGENT, source: "manual", active: true });
     const session = lead({ phoneE164: NEW_AGENT, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: session, clientName: "Early Client" });
+    const created = await createClientLink({ agentLead: session, clientName: "Early Client" });
     if (!created.ok) throw new Error("link not created");
     expect(created.link.agentTeamId).toBe(manualId);
     expect((await agentForTeamId(manualId))?.fubUserId).toBeNull();
@@ -527,7 +522,7 @@ describe("round 3: what a returning client, the nightly screening and team chang
     db.seed(dealTeamAllowlist, { name: "Tiffany Agent", phoneE164: OFFICE, fubUserId: "77", fubIdentityKey: "fub:77:office", source: "fub", active: true });
     db.seed(dealTeamAllowlist, { name: "New Agent", phoneE164: OFFICE, fubUserId: "88", fubIdentityKey: "fub:88:office", source: "fub", active: true });
     const tiffany = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const hers = await createClientLink({ agreementSigned: true, agentLead: tiffany, clientName: "Tiffany's Client" });
+    const hers = await createClientLink({ agentLead: tiffany, clientName: "Tiffany's Client" });
     if (!hers.ok) throw new Error("link not created");
     expect((await agentWorkspace(session))?.clients.map((row) => row.clientName)).toEqual(["Early Client"]);
     expect((await agentWorkspace(tiffany))?.clients.map((row) => row.clientName)).toEqual(["Tiffany's Client"]);
@@ -539,7 +534,7 @@ describe("round 3: what a returning client, the nightly screening and team chang
     expect(await agentRowsForLead(office)).toEqual({ kind: "shared" });
     expect(await agentForLead(office)).toBeNull();
     expect(await agentWorkspace(office)).toBeNull();
-    expect(await createClientLink({ agreementSigned: true, agentLead: office, clientName: "Walk-in" })).toEqual({ ok: false, kind: "shared_number" });
+    expect(await createClientLink({ agentLead: office, clientName: "Walk-in" })).toEqual({ ok: false, kind: "shared_number" });
     expect(await revokeClientLink(office, hers.link.id)).toBe(false);
     expect(db.rows(dealClientLinks).find((row) => row.id === hers.link.id)?.revokedAt).toBeNull();
     // Two hand-added rows with different names on one number are just as ambiguous.
@@ -553,7 +548,7 @@ describe("round 3: what a returning client, the nightly screening and team chang
     vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
     testSettings();
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
-    const created = await createClientLink({ agreementSigned: true, agentLead: agent, clientName: "Maria Lopez" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
     if (!created.ok) throw new Error("link not created");
     const sessionCookieDays = async (token: string | null, phone: string) => {
       const device = `device-${phone}`;

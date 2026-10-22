@@ -7,7 +7,7 @@ import { catalogBatchPending, refreshDueCommunitiesBatch, revalidateDealIncentiv
 import { importTrecLicenses } from "./dealsTrec";
 import { cleanupDealsTestRecords, runBuilderDealsHealthJob, sendBuilderDealsMondayReport, syncKnownAgentsFromFub, syncTeamAllowlistFromFub } from "./dealsMaintenance";
 import { enqueueDailyActivityNote, runPendingDealsFubJobs } from "./dealsFubJobs";
-import { looksLikeDbError, redactJobError } from "./dealsJobRuns";
+import { looksLikeDbError, maskPersonalData, redactJobError } from "./dealsJobRuns";
 import { PHOTO_DRAIN_BUDGET_MS, processPendingDealPhotos, pruneDealPhotoRenders } from "./dealsPhotos";
 
 import { chicagoClock, chicagoDay } from "./dealsService";
@@ -42,16 +42,21 @@ async function once(jobName: string, work: () => Promise<unknown>) {
       // The job's own reason (and its result, which carries counts and reason codes, never a credential) is what
       // deals.admin.jobRuns shows, so a failure can be diagnosed without server logs.
       const reason = redactJobError(jobFailureReason(result));
-      detail = `${reason}\n${JSON.stringify(result, (_key, value: unknown) => (typeof value === "string" && looksLikeDbError(value) ? redactJobError(value) : value)).slice(0, 8_000)}`;
+      detail = `${reason}\n${storedResult(result).slice(0, 8_000)}`;
       throw new Error(reason);
     }
-    await db.update(dealJobRuns).set({ status: "ok", detail: JSON.stringify(result).slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running")));
+    await db.update(dealJobRuns).set({ status: "ok", detail: storedResult(result).slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running")));
     return result;
   } catch (error) {
     // A thrown error (a database error quotes the values it was given) is stored redacted: first line, no values.
     await db.update(dealJobRuns).set({ status: "failed", detail: (detail ?? (error instanceof Error ? `threw: ${redactJobError(error.message)}` : "failed")).slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running")));
     throw error;
   }
+}
+
+/** A job result as stored in deal_job_runs.detail: every string redacted (a database error) or masked (e-mail, phone, long number). */
+function storedResult(result: unknown): string {
+  return JSON.stringify(result, (_key, value: unknown) => (typeof value === "string" ? (looksLikeDbError(value) ? redactJobError(value) : maskPersonalData(value)) : value)) ?? "null";
 }
 
 /** One line naming why a job reported failure: its own reason code and detail, an email error, or the per-community reasons. */

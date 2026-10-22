@@ -9,15 +9,37 @@ export const JOB_RUN_DETAIL_MAX = 2_000;
 /** How much of an error message is kept: its first line, without values, at most this long. */
 export const JOB_ERROR_MAX = 300;
 
+/** An e-mail address; the local part may hold an apostrophe (o'neil@…), so a quote cannot hide one. */
+const EMAIL_SHAPE = /[^\s@"<>(),;:]+@[^\s@'"<>(),;:]+\.[A-Za-z]{2,}/g;
+/** North American phone shapes ("2105550123", "(210) 555-0123", "+1 210.555.0123"), as the note extractor reads them. */
+const PHONE_SHAPE = /(?<!\d)(?:\+?1[\s.-]*)?\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}(?!\d)/g;
+const LONG_DIGITS = /\d{7,}/g;
+
+/**
+ * Masks anything shaped like personal data, wherever it appears in a stored or shown detail: e-mail addresses,
+ * phone numbers and long digit runs (account numbers). Counts, dates and ids under seven digits stay readable.
+ */
+export function maskPersonalData(text: string): string {
+  return text.replace(EMAIL_SHAPE, "[email]").replace(PHONE_SHAPE, "[phone]").replace(LONG_DIGITS, "[number]");
+}
+
 /**
  * An error message safe to store and show: a database error ("Failed query: … params: …", "Duplicate entry
- * '+1210…' for key …") carries the values it was given, which can be phone numbers or e-mails. Only the first line is
- * kept, without "params:" and what follows, with every quoted value ('…' or "…") replaced by '?' (backquoted SQL
- * identifiers are names, not values, and stay), cut to 300 characters.
+ * 'O'Brien-+1210…' for key …") carries the values it was given, which can be names, phone numbers or e-mails. Only
+ * the first line is kept, without "params:" and what follows. The value of MySQL's value-bearing messages is replaced
+ * as a whole, greedily, so a value with its own apostrophe cannot end the match early ("Duplicate entry '…' for key",
+ * "… '…' for column … at row"); every other quoted value ('…' or "…") becomes '?' (backquoted SQL identifiers are
+ * names, not values, and stay); anything still shaped like an e-mail, phone or long number is masked. Cut to 300.
  */
 export function redactJobError(message: string): string {
   const first = (message.split(/\r?\n/)[0] ?? "").replace(/\bparams:.*$/i, "");
-  const unquoted = first.replace(/'(?:[^'\\]|\\.)*'?/g, "'?'").replace(/"(?:[^"\\]|\\.)*"?/g, '"?"').replace(/\s+/g, " ").trim();
+  // The value-bearing messages first (greedy, on the raw text), then personal shapes are masked before the generic
+  // quote rule too, so an apostrophe inside a value cannot split an e-mail or a phone number.
+  const valued = maskPersonalData(first
+    .replace(/Duplicate entry '.*' for key '.*'/gi, "Duplicate entry '?' for key '?'")
+    .replace(/Duplicate entry '.*' for key/gi, "Duplicate entry '?' for key")
+    .replace(/'.*' for column '([^']*)'/gi, "'?' for column '$1'"));
+  const unquoted = maskPersonalData(valued.replace(/'(?:[^'\\]|\\.)*'?/g, "'?'").replace(/"(?:[^"\\]|\\.)*"?/g, '"?"')).replace(/\s+/g, " ").trim();
   return unquoted.length <= JOB_ERROR_MAX ? unquoted : `${unquoted.slice(0, JOB_ERROR_MAX - 1)}…`;
 }
 
@@ -32,7 +54,9 @@ function viewDetail(row: { chicagoDay: string; status: string; detail: string | 
   if (row.detail === null) return null;
   if (CLAIM_TOKEN.test(row.detail.trim())) return row.status === "running" ? "run in progress (claim token hidden)" : "claim token hidden";
   if (looksLikeDbError(row.detail)) return redactJobError(row.detail);
-  return row.detail.length > JOB_RUN_DETAIL_MAX ? `${row.detail.slice(0, JOB_RUN_DETAIL_MAX - 1)}…` : row.detail;
+  // Every detail is masked as shown, whatever wrote it (older rows included).
+  const masked = maskPersonalData(row.detail);
+  return masked.length > JOB_RUN_DETAIL_MAX ? `${masked.slice(0, JOB_RUN_DETAIL_MAX - 1)}…` : masked;
 }
 
 export type DealJobRunView = { jobName: string; chicagoDay: string; status: "running" | "ok" | "failed" | "skipped"; detail: string | null; startedAt: Date; completedAt: Date | null };

@@ -269,4 +269,28 @@ describe("Builder Deals once-per-day job records", () => {
     expect((runRows(duplicate)[1]!.set as { detail: string }).detail).toBe("threw: Duplicate entry '?' for key '?'");
     expect(JSON.stringify(second.json.mock.calls)).not.toMatch(/2105550123|jane@/);
   });
+
+  it("redacts a value that holds its own apostrophe, and masks phone, e-mail and long numbers in every stored result", async () => {
+    const { redactJobError, maskPersonalData } = await import("./dealsJobRuns");
+    expect(redactJobError("Duplicate entry 'O'Brien-+12105551234' for key 'idx_deal_known_agent'")).toBe("Duplicate entry '?' for key '?'");
+    expect(redactJobError("Incorrect string value: 'O'Neil \\xF0\\x9F' for column 'name' at row 1")).toBe("Incorrect string value: '?' for column '?' at row 1");
+    expect(redactJobError("Data too long for column 'email' at row 3 (jane.o'neil@example.com)")).not.toMatch(/jane|example/);
+    expect(redactJobError("lookup failed for (210) 555-0123 and 12105550123 and account 9876543210")).toBe("lookup failed for [phone] and [phone] and account [phone]");
+    expect(maskPersonalData("call +1 210.555.0123, write jane@example.com, card 4111111111111111; 3,200 people, 2026-10-21")).toBe("call [phone], write [email], card [number]; 3,200 people, 2026-10-21");
+    mocks.chicagoClock.mockReturnValue({ hour: 1, minute: 46, weekday: "Wed" });
+    // A successful run's stored result is masked too.
+    mocks.syncKnownAgentsFromFub.mockResolvedValue({ ok: true, peopleFetched: 3, note: "parked number 210-555-0199 for jo@agents.test", ref: "acct 123456789" });
+    const db = freshDb();
+    mocks.getDb.mockResolvedValue(db);
+    await scheduledDealsHandler({ body: { job: "agents" } } as Request, responseRecorder().response);
+    const stored = (runRows(db)[1]!.set as { status: string; detail: string });
+    expect(stored.status).toBe("ok");
+    expect(JSON.parse(stored.detail)).toEqual({ ok: true, peopleFetched: 3, note: "parked number [phone] for [email]", ref: "acct [number]" });
+    // And a failed one's reason line and result.
+    mocks.syncKnownAgentsFromFub.mockResolvedValue({ ok: false, reason: "fub_unavailable", detail: "person jo@agents.test (210) 555-0199", peopleFetched: 0 });
+    const failed = freshDb();
+    mocks.getDb.mockResolvedValue(failed);
+    await scheduledDealsHandler({ body: { job: "agents" } } as Request, responseRecorder().response);
+    expect((runRows(failed)[1]!.set as { detail: string }).detail).not.toMatch(/jo@agents|555-0199/);
+  });
 });

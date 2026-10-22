@@ -460,19 +460,36 @@ async function mirroredPersonIds(db: Db): Promise<Set<string>> {
   return new Set(rows.map((row) => row.fubPersonId).filter((value): value is string => Boolean(value)));
 }
 
-async function readNotesCursor(db: Db): Promise<{ value: string | null; exists: boolean }> {
+/** At most this many "read once, still no rows" person ids are remembered beside the cursor. */
+const NOTES_SEEN_MAX = 2_000;
+/**
+ * The notes pass's state, in the cursor row's detail: where the rotating pass resumes ("after"), and the recruits
+ * that were read as new but still have no rows ("seen": every number skipped, no contact data). Those count as new
+ * only until their notes are read once; after that they rotate with everyone else. A plain id is the older format.
+ */
+type NotesState = { after: string | null; seen: string[]; exists: boolean; raw: string | null };
+
+async function readNotesCursor(db: Db): Promise<NotesState> {
   try {
     const row = (await db.select({ detail: dealJobRuns.detail }).from(dealJobRuns).where(and(eq(dealJobRuns.jobName, NOTES_CURSOR_JOB), eq(dealJobRuns.chicagoDay, NOTES_CURSOR_DAY))).limit(1))[0];
-    return { value: row?.detail?.trim() || null, exists: Boolean(row) };
+    const raw = row?.detail?.trim() || null;
+    if (raw?.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(raw) as { after?: unknown; seen?: unknown };
+        return { after: typeof parsed.after === "string" && parsed.after ? parsed.after : null, seen: Array.isArray(parsed.seen) ? parsed.seen.filter((value): value is string => typeof value === "string") : [], exists: true, raw };
+      } catch { return { after: null, seen: [], exists: true, raw }; }
+    }
+    return { after: raw, seen: [], exists: Boolean(row), raw };
   } catch {
-    return { value: null, exists: false };
+    return { after: null, seen: [], exists: false, raw: null };
   }
 }
 
-/** Saves (or clears) the resume point; a failed write only means the next pass starts from the beginning. */
-async function writeNotesCursor(db: Db, value: string | null, exists: boolean) {
+/** Saves (or clears) the resume point and the seen list; a failed write only means the next pass starts from the beginning. */
+async function writeNotesCursor(db: Db, state: { after: string | null; seen: readonly string[] }, exists: boolean) {
   try {
-    const values = { status: "ok" as const, detail: value, startedAt: new Date(), completedAt: new Date() };
+    const detail = state.seen.length ? JSON.stringify({ after: state.after, seen: state.seen.slice(0, NOTES_SEEN_MAX) }) : state.after;
+    const values = { status: "ok" as const, detail, startedAt: new Date(), completedAt: new Date() };
     if (exists) await db.update(dealJobRuns).set(values).where(and(eq(dealJobRuns.jobName, NOTES_CURSOR_JOB), eq(dealJobRuns.chicagoDay, NOTES_CURSOR_DAY)));
     else await db.insert(dealJobRuns).values({ jobName: NOTES_CURSOR_JOB, chicagoDay: NOTES_CURSOR_DAY, ...values });
   } catch (error) {
@@ -594,12 +611,17 @@ export async function syncKnownAgentsFromFub(options: KnownAgentSyncOptions = {}
     // resumes where the last one stopped; a recruit it does not reach keeps its rows exactly as a notes failure does.
     const cursor = await readNotesCursor(db);
     // When the pass may not reach everyone tonight (more recruits than about one notes read a second fits, or a pass
-    // already rotating), recruits with no rows yet go first: they are not screened at all until they are read.
+    // already rotating), recruits never read before (no rows, not in the seen list) go first: they are not screened at
+    // all until they are read. They take at most half of the night's room, so the rotation always moves.
     const capacity = Math.floor(((client.end - client.clock() - WRITE_RESERVE_MS) / 1_000) * NOTES_PER_SECOND);
-    const known = cursor.value || selected.length > capacity ? await mirroredPersonIds(db) : null;
-    const fresh = known ? notesOrder(selected.filter((person) => !known.has(fubId(person.id) ?? "")), null) : [];
+    const mirrored = cursor.after || cursor.seen.length || selected.length > capacity ? await mirroredPersonIds(db) : null;
+    const seenBefore = new Set(cursor.seen);
+    const fresh = mirrored
+      ? notesOrder(selected.filter((person) => { const id = fubId(person.id) ?? ""; return !mirrored.has(id) && !seenBefore.has(id); }), null).slice(0, Math.max(1, Math.floor(capacity / 2)))
+      : [];
     const freshIds = new Set(fresh.map((person) => fubId(person.id)));
-    const rotating = notesOrder(known ? selected.filter((person) => !freshIds.has(fubId(person.id))) : selected, cursor.value);
+    const rotating = notesOrder(selected.filter((person) => !freshIds.has(fubId(person.id))), cursor.after);
+    const freshRead = new Set<string>();
     for (const person of [...fresh, ...rotating]) {
       const id = fubId(person.id);
       if (!id) { skipped += 1; continue; }
@@ -607,8 +629,9 @@ export async function syncKnownAgentsFromFub(options: KnownAgentSyncOptions = {}
       const noteResult = await fullNotePhones(person, systemNoteIds, client);
       skippedBy.systemNotes += noteResult.systemNotesSkipped;
       if (noteResult.fetchFailed && noteResult.failure === "time_budget_exceeded") { notesDeferred += 1; retainPersonIds.add(id); continue; }
-      // The cursor marks the rotating pass only; new recruits are read ahead of it.
+      // The cursor marks the rotating pass only; new recruits are read ahead of it, and once read they rotate.
       if (!freshIds.has(id)) lastRead = id;
+      else if (!noteResult.fetchFailed) freshRead.add(id);
       if (noteResult.fetchFailed) {
         // Notes are part of the privacy exclusion check. If they cannot be
         // read, importing would be less safe than waiting for the next pass,
@@ -642,7 +665,14 @@ export async function syncKnownAgentsFromFub(options: KnownAgentSyncOptions = {}
       }
     }
     const deactivated = await deactivateStaleFubRecruits(db, activeIdentityKeys, retainPersonIds);
-    if (notesDeferred || cursor.value) await writeNotesCursor(db, notesDeferred ? lastRead ?? cursor.value : null, cursor.exists);
+    // Seen: read as new and still without rows; a recruit who got rows, or is no longer a recruit, leaves the list.
+    const selectedIds = new Set(selected.map((person) => fubId(person.id)));
+    const withRows = new Set(Array.from(activeIdentityKeys, (key) => key.split(":")[1]));
+    const gotRows = (id: string) => withRows.has(id) || Boolean(mirrored?.has(id));
+    const seen = Array.from(new Set(cursor.seen.concat(Array.from(freshRead)))).filter((id) => selectedIds.has(id) && !gotRows(id));
+    const after = notesDeferred ? lastRead ?? cursor.after : null;
+    const seenChanged = seen.length !== cursor.seen.length || seen.some((id) => !seenBefore.has(id));
+    if (notesDeferred || cursor.after || seenChanged) await writeNotesCursor(db, { after, seen }, cursor.exists);
     return {
       ok: true,
       peopleFetched: peopleResult.values.length,

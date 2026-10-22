@@ -575,12 +575,16 @@ describe("admin: job runs (read-only diagnosis)", () => {
     db.seed(dealJobRuns, { jobName: "builder-deals-team-sync", chicagoDay: "2026-10-20", status: "failed", detail: "Failed query: update `deal_team_allowlist` set `email` = ? where `id` = ?\nparams: agent@example.com,7", startedAt: at(20) });
     db.seed(dealJobRuns, { jobName: "builder-deals-trec-import", chicagoDay: "2026-10-20", status: "failed", detail: "Duplicate entry '+12105550123' for key 'idx_phone'", startedAt: at(21) });
     db.seed(dealJobRuns, { jobName: "builder-deals-discovery", chicagoDay: "run", status: "running", detail: "run:0f8fad5b-d9cb-469f-a165-70867728950e", startedAt: at(22) });
+    db.seed(dealJobRuns, { jobName: "builder-deals-activity-note", chicagoDay: "2026-10-20", status: "ok", detail: "{\"note\":\"lead (210) 555-0123 jane@example.com\"}", startedAt: at(23) });
+    db.seed(dealJobRuns, { jobName: "builder-deals-fub-old", chicagoDay: "2026-10-20", status: "failed", detail: "threw: Duplicate entry 'O'Brien-+12105551234' for key 'idx'", startedAt: at(24) });
     const redacted = await admin().jobRuns();
     const detailOf = (name: string) => redacted.runs.find((run) => run.jobName === name)!.detail;
     expect(detailOf("builder-deals-team-sync")).toBe("Failed query: update `deal_team_allowlist` set `email` = ? where `id` = ?");
     expect(detailOf("builder-deals-trec-import")).toBe("Duplicate entry '?' for key '?'");
     expect(detailOf("builder-deals-discovery")).toBe("run in progress (claim token hidden)");
-    expect(JSON.stringify(redacted)).not.toMatch(/agent@example|2105550123|0f8fad5b/);
+    expect(detailOf("builder-deals-activity-note")).toBe("{\"note\":\"lead [phone] [email]\"}");
+    expect(detailOf("builder-deals-fub-old")).toBe("threw: Duplicate entry '?' for key '?'");
+    expect(JSON.stringify(redacted)).not.toMatch(/agent@example|2105550123|0f8fad5b|O.Brien|2105551234|jane@/);
     await expect(dealsRouter.createCaller(makeCtx("user")).admin.jobRuns()).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(visitor().admin.jobRuns()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });

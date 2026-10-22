@@ -5,7 +5,7 @@ vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }))
 vi.mock("./dealsService", async (importOriginal) => ({ ...(await importOriginal<typeof import("./dealsService")>()), getDealSettings: (...args: unknown[]) => mocks.getDealSettings(...args) }));
 vi.mock("./dealsEligibility", () => ({ revokeNonTeamMatchingDealLinks: (...args: unknown[]) => mocks.revokeNonTeamMatchingDealLinks(...args) }));
 
-import { dealJobRuns, dealKnownAgents } from "../drizzle/schema";
+import { dealDoNotAutoImport, dealJobRuns, dealKnownAgents } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 import { jsonResponse } from "./dealsFubFakeDb.test-support";
 import { KNOWN_AGENT_SYNC_BUDGET_MS, retryAfterMs, syncKnownAgentsFromFub } from "./dealsKnownAgents";
@@ -172,6 +172,34 @@ describe("known-agent sync against FUB rate limits and the cron time limit", () 
     expect(result).toMatchObject({ ok: true, newRecruits: 2, notesDeferred: 4 });
     expect(db.rows(dealKnownAgents).filter((row) => row.fubPersonId === "111" || row.fubPersonId === "112")).toHaveLength(2);
     expect(db.rows(dealJobRuns).find((row) => row.jobName === "builder-deals-known-agent-cursor")).toMatchObject({ detail: "109" });
+  });
+
+  it("does not let recruits that never get rows starve the rotation: new ones take at most half the night, and count as new only until read once", async () => {
+    const existing = Array.from({ length: 10 }, (_, index) => recruit(101 + index));
+    // Ten recruits whose only number is on the do-not-import list: they are read, and never get a row.
+    const neverRowed = Array.from({ length: 10 }, (_, index) => recruit(201 + index));
+    for (const person of neverRowed) db.seed(dealDoNotAutoImport, { value: `+1210555${String(1000 + person.id).slice(-4)}`, kind: "phone" });
+    for (const person of existing) db.seed(dealKnownAgents, { name: person.name, phoneE164: `+1210555${String(1000 + person.id).slice(-4)}`, source: "fub_recruit", fubPersonId: String(person.id), fubIdentityKey: `fub:${person.id}:+1210555${String(1000 + person.id).slice(-4)}`, active: true });
+    const notesFor: string[] = [];
+    mockFub({ people: jsonResponse({ people: [...existing, ...neverRowed] }), notes: (url) => { notesFor.push(url.searchParams.get("personId")!); return jsonResponse({ notes: [] }); } });
+    // Room for about ten notes reads a night: 32 s cap, 2 s scan, 20 s kept for writes.
+    const night = async () => { notesFor.length = 0; const result = await syncKnownAgentsFromFub({ clock, sleep, budgetMs: 32_000 }); return { result, read: [...notesFor] }; };
+    const first = await night();
+    expect(first.read).toEqual(["201", "202", "203", "204", "205", "101", "102", "103", "104", "105"]);
+    expect(first.result).toMatchObject({ ok: true, newRecruits: 5, notesDeferred: 10 });
+    const second = await night();
+    expect(second.read).toEqual(["206", "207", "208", "209", "210", "106", "107", "108", "109", "110"]);
+    // Every existing recruit was re-read within two nights; the never-rowed ones are no longer new and rotate.
+    expect(new Set([...first.read, ...second.read].filter((id) => id.startsWith("1")))).toEqual(new Set(existing.map((person) => String(person.id))));
+    const state = JSON.parse(db.rows(dealJobRuns).find((row) => row.jobName === "builder-deals-known-agent-cursor")!.detail as string) as { after: string; seen: string[] };
+    expect(state).toEqual({ after: "110", seen: neverRowed.map((person) => String(person.id)) });
+    const third = await night();
+    expect(third.result).toMatchObject({ newRecruits: 0 });
+    expect(third.read).toEqual(["201", "202", "203", "204", "205", "206", "207", "208", "209", "210"]);
+    const fourth = await night();
+    expect(fourth.read).toEqual(existing.map((person) => String(person.id)));
+    expect(db.rows(dealKnownAgents).filter((row) => Number(row.fubPersonId) >= 200)).toEqual([]);
+    expect(db.rows(dealKnownAgents).every((row) => row.active)).toBe(true);
   });
 
   it("keeps the default budget under the catalog batch's few minutes per cron call", () => {

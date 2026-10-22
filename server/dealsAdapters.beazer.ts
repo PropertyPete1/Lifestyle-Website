@@ -164,7 +164,9 @@ export function beazerStatus(availability: string | null, isModel: boolean, now:
   return { status: `Quick Move-In (${name})`, readyNow: false, moveInDate: name };
 }
 
-export type BeazerCommunityRecord = { name: string; street: string | null; city: string | null; zip: string | null; phone: string | null; priceFrom: number | null; geo: { lat: number; lng: number } | null };
+export type BeazerCommunityRecord = { name: string; street: string | null; city: string | null; zip: string | null; phone: string | null; priceFrom: number | null; geo: { lat: number; lng: number } | null;
+  /** The product line names a sales office in some form: a street, a cross street ("Johnson Way & Clover Pass") or another community's office ("Selling from: 324 Safari Ridge Cibolo, TX 78108"). */
+  officeListed: boolean };
 
 const geoOf = (latitude: unknown, longitude: unknown): { lat: number; lng: number } | null => {
   const lat = Number(latitude);
@@ -186,6 +188,7 @@ function recordOf(community: Json): BeazerCommunityRecord | null {
     phone: (str(office?.PhoneNumber) ?? "").replace(/[^\d]/g, "").replace(/^1(?=\d{10}$)/, "") || null,
     priceFrom: positive(community.MinimumPrice),
     geo: geoOf(community.Latitude, community.Longitude),
+    officeListed: Boolean(street),
   };
 }
 
@@ -414,8 +417,9 @@ export class BeazerAdapter implements DealAdapter {
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseBeazerCommunity(page.text, community.toString(), now());
-    // Without the community row and its sales office this is not a selling community's page (a VIP-list community has no office yet).
-    if (!parsed || !parsed.record.street) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // Without the community row and its sales office this is not a selling community's page (a VIP-list community has no office
+    // yet). The office may be a cross street or another community's ("Selling from: ..."): still an office, never a VIP list.
+    if (!parsed || !(parsed.record.street || (parsed.record.officeListed && !parsed.comingSoon))) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The page must be this community's (a same-host redirect to another one is not), and so must its homes and plans.
     if (parsed.foreignPage || parsed.foreignHome || parsed.foreignPlan) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     // A plan that says it has homes needs the quick move-in grid; a grid is never truncated.

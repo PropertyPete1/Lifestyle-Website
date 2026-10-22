@@ -141,7 +141,7 @@ describe("Beazer reader: the payload (bytes)", () => {
 describe("Beazer reader: page data", () => {
   it("reads the community row (office, pin, minimum price), the quick move-in cards (status, price, specs, plan, homesite, photos on the DAM hosts), the plans for sale (hidden and inactive left out, price from the elevations) and the current rate offer with its disclaimer", () => {
     const page = parseBeazerCommunity(communityPage(), COMMUNITY, NOW)!;
-    expect(page.record).toEqual({ name: "Fixture Meadows", street: "6614 Fixture Glen", city: "San Antonio", zip: "78253", phone: "2105550142", priceFrom: 358_990, geo: { lat: 29.4997036, lng: -98.7811012 } });
+    expect(page.record).toEqual({ name: "Fixture Meadows", street: "6614 Fixture Glen", city: "San Antonio", zip: "78253", phone: "2105550142", priceFrom: 358_990, geo: { lat: 29.4997036, lng: -98.7811012 }, officeListed: true });
     expect(page).toMatchObject({ foreignPage: false, comingSoon: false, foreignHome: false, hasHomesGrid: true, plansSayHomes: true, foreignPlan: false });
     expect(page.homes.map((home) => [home.sourceUrl, home.privateAddress, home.privatePlanName, home.status, home.readyNow, home.moveInDate, home.price, home.previousPrice, home.bedrooms, home.bathrooms, home.squareFeet, home.homesite, home.gallery?.map((image) => image.sourceUrl)])).toEqual([
       [`${COMMUNITY}/berkshire/8378`, "6410 Fixture Trace, San Antonio, TX 78253", "Berkshire", "Quick Move-In (Move-In Ready)", true, null, 379_999, undefined, 4, 2.5, 2_249, "Lot 8378", ["https://cmp.beazer.com/images/8378-front.jpg", "https://cmp.beazer.com/images/8378-elevation.jpg", "https://cms.beazer.com/contentassets/8378/kitchen.jpg"]],
@@ -229,10 +229,20 @@ describe("Beazer reader: adapter", () => {
     expect(result.private.plans).toHaveLength(1);
   });
 
+  it("reads a community sold from another community's office or from a cross street (Confluence, Johnson Ranch on Oct 22)", async () => {
+    for (const street of ["Selling from: 324 Safari Ridge Cibolo, TX 78108", "Johnson Way & Clover Pass"]) {
+      const result = await loadOfficialDeals(config, { fetcher: html(communityPage({ street })), now: () => NOW });
+      expect(result.catalogOk, street).toBe(true);
+      expect(result.private.homes.length, street).toBeGreaterThan(0);
+    }
+  });
+
   it("holds when the page is not a community page, when the office is missing (a VIP-list community), when the row or its links are another community's, when the plans say homes the grid does not show, when a home's date is unreadable, and when the site or the read fails", async () => {
     const load = (page: string) => loadOfficialDeals(config, { fetcher: html(page), now: () => NOW });
     expect((await load("<html><body>new layout</body></html>")).holdReasons).toEqual(["expected_community_container_not_found"]);
     expect((await load(communityPage({ vip: true, street: null, homes: null, plans: [] }))).holdReasons).toEqual(["expected_community_container_not_found"]);
+    // A VIP list with an office line is still a VIP list.
+    expect((await load(communityPage({ vip: true, street: "Selling from: 324 Safari Ridge Cibolo, TX 78108", homes: null, plans: [] }))).holdReasons).toEqual(["expected_community_container_not_found"]);
     expect((await load(communityPage({ url: `${HOST}/san-antonio-TX/san-antonio/fixture-creek` }))).holdReasons).toEqual(["invalid_inventory_response"]);
     expect((await load(communityPage({ homes: [{ ...HOMES[0]!, url: `${HOST}/san-antonio-TX/san-antonio/fixture-creek/berkshire/1` }] }))).holdReasons).toEqual(["invalid_inventory_response"]);
     expect((await load(communityPage({ plans: [{ name: "Zinnia", price: 1, url: `${HOST}/san-antonio-TX/san-antonio/fixture-creek/zinnia` }] }))).holdReasons).toEqual(["invalid_inventory_response"]);

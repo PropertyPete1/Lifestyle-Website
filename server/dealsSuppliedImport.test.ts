@@ -468,6 +468,10 @@ describe("supplied import: review regressions (foreign homes, empty imports, sta
     expect(read({ status: "under_construction", moveIn: "August 2026" })).toMatchObject({ reasons: [], homes: [expect.objectContaining({ status: "Quick Move-In", readyNow: false, moveInDate: null })] });
     expect(read({ status: "under_construction", moveIn: "October 2026" }).homes[0]).toMatchObject({ status: "Quick Move-In (October 2026)", moveInDate: "October 2026" });
     expect(read({ status: "under_construction", moveIn: "January 2027" }).homes[0]).toMatchObject({ status: "Quick Move-In (January 2027)", readyNow: false, moveInDate: "January 2027" });
+    // Abbreviated months read as the full month (Legend's Oct 22 import sent them); two letters stay unreadable.
+    for (const moveIn of ["Jan 2027", "jan. 2027", "Janu 2027"]) expect(read({ status: "under_construction", moveIn }).homes[0], moveIn).toMatchObject({ status: "Quick Move-In (January 2027)", moveInDate: "January 2027" });
+    expect(read({ status: "under_construction", moveIn: "Sept 2027" }).homes[0]).toMatchObject({ moveInDate: "September 2027" });
+    expect(read({ status: "under_construction", moveIn: "Ja 2027" }).reasons).toEqual(["supplied_import_invalid_home"]);
     expect(read({ status: "available", moveIn: "August 2026" }).homes[0]).toMatchObject({ status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null });
   });
 

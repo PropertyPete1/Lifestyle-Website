@@ -103,8 +103,11 @@ function readMoveIn(value: string | null | undefined, now: Date): MoveIn {
   const raw = (value ?? "").trim().replace(/\s+/g, " ");
   if (!raw) return { kind: "none" };
   if (/^ready now$/i.test(raw)) return { kind: "ready" };
-  const match = /^([A-Za-z]+) (\d{4})$/.exec(raw);
-  const month = match ? MONTHS.indexOf(match[1]!.toLowerCase()) + 1 : 0;
+  // A month may be abbreviated ("Dec 2026", "Sept. 2026"): Legend's import on Oct 22 was held for it. At least three
+  // letters, so the month is never ambiguous ("Ju 2026" stays invalid).
+  const match = /^([A-Za-z]+)\.? (\d{4})$/.exec(raw);
+  const name = match ? match[1]!.toLowerCase() : "";
+  const month = name.length >= 3 ? MONTHS.findIndex((full) => full.startsWith(name)) + 1 : 0;
   const year = match ? Number(match[2]) : 0;
   const thisYear = now.getUTCFullYear();
   if (!month || year < thisYear - 1 || year > thisYear + 3) return { kind: "invalid" };

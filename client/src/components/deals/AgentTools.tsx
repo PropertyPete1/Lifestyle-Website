@@ -29,11 +29,13 @@ export type AgentClient = {
 };
 export type AgentWorkspaceData = { agent: { name: string; email: string | null; fubLinked: boolean }; clients: AgentClient[] };
 export type NewClientLink = { id: number; path: string; expiresAt: string; clientName?: string; clientPhoneDigits?: string | null };
-export type CreateClientInput = { clientName: string; clientPhone?: string; note?: string };
+/** `agreementSigned`: the agent confirms the client signed the buyer representation agreement; the full list (names, addresses) is never shared without it. */
+export type CreateClientInput = { clientName: string; clientPhone?: string; note?: string; agreementSigned: true };
 
 export const AGENT_COPY = {
   heading: "Send the list to a client",
-  intro: "Your client gets this week's full list: every address, photo and current incentive. They verify their own mobile number once, and you hear about it when they save a home or ask for a tour. Each link works for one client; add their mobile so nobody else can use it.",
+  intro: "Your client gets this week's full list: every builder, community, address, photo and current incentive. They verify their own mobile number once, and you hear about it when they save a home or ask for a tour. Each link works for one client; add their mobile so nobody else can use it.",
+  agreement: "This client has signed our buyer representation agreement. The full list (builders, communities and addresses) is only shared after it is signed.",
   created: "Link ready. Text it or copy it.",
   copied: "Link copied.",
   noClients: "No client links yet. Send your first one above.",
@@ -109,14 +111,15 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
   const [note, setNote] = useState("");
+  const [agreementSigned, setAgreementSigned] = useState(false);
   const agentName = workspace?.agent.name ?? "Lifestyle Design Realty";
   const createdUrl = created ? absoluteLink(created.path, origin) : null;
   // The form clears only once the server accepted the link, so a rejected phone keeps what the agent typed.
-  useEffect(() => { if (created?.id) { setClientName(""); setClientPhone(""); setNote(""); } }, [created?.id]);
+  useEffect(() => { if (created?.id) { setClientName(""); setClientPhone(""); setNote(""); setAgreementSigned(false); } }, [created?.id]);
   const submit = () => {
     const name = clientName.trim();
-    if (name.length < 2) return;
-    onCreate({ clientName: name, clientPhone: clientPhone.trim() || undefined, note: note.trim() || undefined });
+    if (name.length < 2 || !agreementSigned) return;
+    onCreate({ clientName: name, clientPhone: clientPhone.trim() || undefined, note: note.trim() || undefined, agreementSigned: true });
   };
   const revoke = (client: AgentClient) => { confirmAndRevoke(client, confirm ?? ((message: string) => window.confirm(message)), onRevoke); };
   const createdMessage = createdUrl && created ? clientMessage({ clientName: created.clientName ?? "", agentName, url: createdUrl }) : null;
@@ -131,7 +134,8 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
         <div className="min-w-0"><Label htmlFor="deals-client-phone" className="text-xs uppercase tracking-widest">Client mobile</Label><Input id="deals-client-phone" type="tel" inputMode="tel" value={clientPhone} onChange={(event) => setClientPhone(formatPhoneInput(event.target.value))} placeholder="(210) 555-0123" className="mt-2 min-h-11" /></div>
         <div className="min-w-0"><Label htmlFor="deals-client-note" className="text-xs uppercase tracking-widest">Private note (optional)</Label><Input id="deals-client-note" value={note} maxLength={500} onChange={(event) => setNote(event.target.value)} placeholder="Pre-approved, wants 4 beds" className="mt-2 min-h-11" /></div>
       </div>
-      <Button type="button" disabled={creating || clientName.trim().length < 2} onClick={submit} className="mt-4 min-h-11 w-full bg-gold text-primary-foreground sm:w-auto"><Link2 className="mr-2 h-4 w-4" />{creating ? "Creating link…" : "Create client link"}</Button>
+      <label htmlFor="deals-client-agreement" className="mt-4 flex min-h-11 cursor-pointer items-start gap-3 text-sm" data-deals-agreement="true"><input id="deals-client-agreement" type="checkbox" checked={agreementSigned} onChange={(event) => setAgreementSigned(event.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--gold)]" /><span>{AGENT_COPY.agreement}</span></label>
+      <Button type="button" disabled={creating || clientName.trim().length < 2 || !agreementSigned} onClick={submit} className="mt-4 min-h-11 w-full bg-gold text-primary-foreground sm:w-auto"><Link2 className="mr-2 h-4 w-4" />{creating ? "Creating link…" : "Create client link"}</Button>
       {createError && <p role="alert" className="mt-3 text-sm text-destructive">{createError}</p>}
       {createdUrl && createdMessage && created && <div className="mt-5 min-w-0 border border-gold/40 bg-background/60 p-4" data-deals-created-link="true">
         <p role="status" className="text-sm text-gold">{AGENT_COPY.created}</p>

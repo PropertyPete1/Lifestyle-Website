@@ -476,15 +476,15 @@ export const dealsRouter = router({
       }
       return { lead: leadPresentation(session.lead), agent: { name: workspace.agent.name, email: workspace.agent.email, fubLinked: Boolean(workspace.agent.fubUserId) }, clients: workspace.clients };
     }),
-    createClientLink: publicProcedure.input(z.object({ clientName: z.string().trim().min(2).max(190), clientPhone: z.string().trim().max(60).optional(), note: z.string().trim().max(500).optional() })).mutation(async ({ input, ctx }) => {
+    createClientLink: publicProcedure.input(z.object({ clientName: z.string().trim().min(2).max(190), clientPhone: z.string().trim().max(60).optional(), note: z.string().trim().max(500).optional(), agreementSigned: z.boolean().optional() })).mutation(async ({ input, ctx }) => {
       dealsPublicHeaders(ctx.res);
       const session = await isLiveDealSession(ctx.req);
       if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
       if (session.lead.status !== "team") throw new TRPCError({ code: "FORBIDDEN" });
-      const result = await createClientLink({ agentLead: session.lead, clientName: input.clientName, clientPhone: input.clientPhone, note: input.note });
+      const result = await createClientLink({ agentLead: session.lead, clientName: input.clientName, clientPhone: input.clientPhone, note: input.note, agreementSigned: input.agreementSigned === true });
       if (!result.ok) {
         const { SHARED_TEAM_NUMBER_MESSAGE } = await import("./dealsClientLinks");
-        const messages = { shared_number: SHARED_TEAM_NUMBER_MESSAGE, not_team: "Your number is not on the team list yet. Ask Peter to add it in Admin, Builder Deals.", invalid_phone: "Enter a valid US mobile number, or leave the phone blank.", invalid_name: "Enter the client's name.", unavailable: "Links are unavailable right now. Try again in a moment." } as const;
+        const messages = { shared_number: SHARED_TEAM_NUMBER_MESSAGE, not_team: "Your number is not on the team list yet. Ask Peter to add it in Admin, Builder Deals.", invalid_phone: "Enter a valid US mobile number, or leave the phone blank.", invalid_name: "Enter the client's name.", agreement_required: "Confirm the client signed the buyer representation agreement before sending the full list.", unavailable: "Links are unavailable right now. Try again in a moment." } as const;
         throw new TRPCError({ code: result.kind === "unavailable" ? "INTERNAL_SERVER_ERROR" : result.kind === "not_team" || result.kind === "shared_number" ? "FORBIDDEN" : "BAD_REQUEST", message: messages[result.kind] });
       }
       const { nationalDigits } = await import("./dealsClientLinks");

@@ -188,10 +188,10 @@ export async function reassignTeamRowBeforeRemoval(teamId: number): Promise<numb
   return target.id;
 }
 
-export type CreateClientLinkInput = { agentLead: LeadRow; clientName: string; clientPhone?: string | null; note?: string | null };
+export type CreateClientLinkInput = { agentLead: LeadRow; clientName: string; clientPhone?: string | null; note?: string | null; agreementSigned: boolean };
 export type CreateClientLinkResult =
   | { ok: true; link: ClientLinkRow; path: string }
-  | { ok: false; kind: "not_team" | "shared_number" | "invalid_phone" | "invalid_name" | "unavailable" };
+  | { ok: false; kind: "not_team" | "shared_number" | "invalid_phone" | "invalid_name" | "agreement_required" | "unavailable" };
 
 /** The relative URL the agent sends; the client lands on the gate with the agent's name on it. */
 export function clientLinkPath(token: string) {
@@ -207,6 +207,8 @@ export async function createClientLink(input: CreateClientLinkInput): Promise<Cr
   const db = await getDb();
   if (!db) return { ok: false, kind: "unavailable" };
   if (input.agentLead.status !== "team") return { ok: false, kind: "not_team" };
+  // No signed buyer representation agreement, no full list (builders, communities, addresses): Peter's rule.
+  if (input.agreementSigned !== true) return { ok: false, kind: "agreement_required" };
   if ((await agentRowsForLead(input.agentLead)).kind === "shared") return { ok: false, kind: "shared_number" };
   const agent = await agentForLead(input.agentLead);
   if (!agent) return { ok: false, kind: "not_team" };
@@ -226,7 +228,7 @@ export async function createClientLink(input: CreateClientLinkInput): Promise<Cr
   const id = Number((inserted as unknown as [{ insertId?: number }])[0]?.insertId ?? 0);
   const link = (await db.select().from(dealClientLinks).where(eq(dealClientLinks.id, id)).limit(1))[0]
     ?? { id, leadId: null, verifiedAt: null, openedAt: null, openCount: 0, revokedAt: null, createdAt: new Date(), updatedAt: new Date(), ...values };
-  await logDealEvent({ leadId: input.agentLead.id, kind: "client_link_created", sourceCode: "agent", deviceHash: input.agentLead.deviceHash, detail: `link:${id};team:${agent.teamId}` });
+  await logDealEvent({ leadId: input.agentLead.id, kind: "client_link_created", sourceCode: "agent", deviceHash: input.agentLead.deviceHash, detail: `link:${id};team:${agent.teamId};agreement:signed` });
   return { ok: true, link, path: clientLinkPath(token) };
 }
 

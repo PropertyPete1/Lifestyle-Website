@@ -240,9 +240,11 @@ describe("Beazer reader: adapter", () => {
   it("holds when the page is not a community page, when the office is missing (a VIP-list community), when the row or its links are another community's, when the plans say homes the grid does not show, when a home's date is unreadable, and when the site or the read fails", async () => {
     const load = (page: string) => loadOfficialDeals(config, { fetcher: html(page), now: () => NOW });
     expect((await load("<html><body>new layout</body></html>")).holdReasons).toEqual(["expected_community_container_not_found"]);
-    expect((await load(communityPage({ vip: true, street: null, homes: null, plans: [] }))).holdReasons).toEqual(["expected_community_container_not_found"]);
-    // A VIP list with an office line is still a VIP list.
-    expect((await load(communityPage({ vip: true, street: "Selling from: 324 Safari Ridge Cibolo, TX 78108", homes: null, plans: [] }))).holdReasons).toEqual(["expected_community_container_not_found"]);
+    // A VIP-list community with nothing for sale is coming soon (it is listed in the Coming Soon section); one without the office and not a VIP list is a changed page.
+    expect((await load(communityPage({ vip: true, street: null, homes: null, plans: [] }))).holdReasons).toEqual(["community_coming_soon"]);
+    expect((await load(communityPage({ street: null, homes: null, plans: [] }))).holdReasons).toEqual(["expected_community_container_not_found"]);
+    // A VIP list with an office line is still a VIP list: coming soon.
+    expect((await load(communityPage({ vip: true, street: "Selling from: 324 Safari Ridge Cibolo, TX 78108", homes: null, plans: [] }))).holdReasons).toEqual(["community_coming_soon"]);
     expect((await load(communityPage({ url: `${HOST}/san-antonio-TX/san-antonio/fixture-creek` }))).holdReasons).toEqual(["invalid_inventory_response"]);
     expect((await load(communityPage({ homes: [{ ...HOMES[0]!, url: `${HOST}/san-antonio-TX/san-antonio/fixture-creek/berkshire/1` }] }))).holdReasons).toEqual(["invalid_inventory_response"]);
     expect((await load(communityPage({ plans: [{ name: "Zinnia", price: 1, url: `${HOST}/san-antonio-TX/san-antonio/fixture-creek/zinnia` }] }))).holdReasons).toEqual(["invalid_inventory_response"]);

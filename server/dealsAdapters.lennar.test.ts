@@ -259,7 +259,9 @@ describe("Lennar reader: adapter", () => {
   it("holds when the page is not a community page, when no collection sells yet, when the row or its links are another community's, when the heading's count and the data disagree or the heading is missing, and when the site or the read fails; a home with an unknown status has none (the sync holds it)", async () => {
     const load = (page: string) => loadOfficialDeals(config, { fetcher: html(page), now: () => NOW });
     expect((await load("<html><body>new layout</body></html>")).holdReasons).toEqual(["expected_community_container_not_found"]);
-    expect((await load(communityPage({ collections: [], customPrice: "Coming soon" }))).holdReasons).toEqual(["expected_community_container_not_found"]);
+    // No collection selling and a "Coming soon" price is a coming-soon community; with any other price it is a changed page.
+    expect((await load(communityPage({ collections: [], customPrice: "Coming soon" }))).holdReasons).toEqual(["community_coming_soon"]);
+    expect((await load(communityPage({ collections: [], customPrice: "$254,999 - $313,499" }))).holdReasons).toEqual(["expected_community_container_not_found"]);
     expect((await load(communityPage({ mpcUrl: "/new-homes/texas/san-antonio/san-antonio/fixture-creek" }))).holdReasons).toEqual(["invalid_inventory_response"]);
     expect((await load(communityPage({ homes: [{ ...HOMES[0]!, url: "/new-homes/texas/san-antonio/san-antonio/fixture-creek/eventide-collection/rio/1" }] }))).holdReasons).toEqual(["invalid_inventory_response"]);
     expect((await load(communityPage({ plans: [{ ...PLANS[0]!, url: "/new-homes/texas/san-antonio/san-antonio/fixture-creek/eventide-collection/rio" }] }))).holdReasons).toEqual(["invalid_inventory_response"]);

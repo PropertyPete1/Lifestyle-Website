@@ -38,6 +38,7 @@ vi.mock("@/lib/trpc", () => ({
       state: { useQuery: () => mocks.state() },
       publicCatalog: { useQuery: () => mocks.publicCatalog() },
       featured: { useQuery: () => ({ data: undefined, isLoading: true }) },
+      comingSoon: { useQuery: () => ({ data: undefined, isLoading: true }) },
       updateProfile: { useMutation: (options: Record<string, unknown>) => { mocks.updateProfile.options = options; return mocks.updateProfileResult; } },
       requestHome: { useMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }) },
       saveHome: { useMutation: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }) },

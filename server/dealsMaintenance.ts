@@ -18,13 +18,15 @@ import { makeMatchingLeadsTeam, revokeOrphanedTeamPreviewLinks } from "./dealsEl
 import { resendConfiguration, sendBuilderDealsEmail } from "./dealsEmail";
 import { cleanupBuilderDealsFubRecord, formatChicagoDateTime, stripBuilderDealsTestTag } from "./dealsFub";
 import { pruneDealPhotoRenders, type DealPhotoRenderPruneResult } from "./dealsPhotos";
-import { lastPhotoDrain, photoDrainStall, readDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
+import { lastPhotoDrain, photoDrainStall, readDealPhotoDrainStatus, type LastPhotoDrain } from "./dealsPhotoDrainStatus";
 
 /** "last drain processed N (M min ago)" for the health payload's readers. */
-export function photoDrainLine(lastDrain: { at: string; processed: number; hidden: number; partial: boolean; coalesced: boolean } | null, now: Date): string {
+export function photoDrainLine(lastDrain: Pick<LastPhotoDrain, "at" | "processed" | "hidden" | "partial" | "coalesced"> & Partial<Pick<LastPhotoDrain, "msPerPhoto" | "stageMsPerPhoto">> | null, now: Date): string {
   if (!lastDrain) return "no photo drain recorded yet";
   const minutes = Math.max(0, Math.round((now.getTime() - Date.parse(lastDrain.at)) / 60_000));
-  return `last drain processed ${lastDrain.processed}${lastDrain.hidden ? ` (+${lastDrain.hidden} hidden)` : ""}${lastDrain.partial ? ", answered early" : ""}${lastDrain.coalesced ? ", another drain was running" : ""} ${minutes} min ago`;
+  const stages = lastDrain.stageMsPerPhoto ? Object.entries(lastDrain.stageMsPerPhoto).map(([stage, ms]) => `${stage} ${ms}`).join(", ") : "";
+  const cost = lastDrain.msPerPhoto ? `; about ${lastDrain.msPerPhoto} ms per photo${stages ? ` (busy ms per photo: ${stages})` : ""}` : "";
+  return `last drain processed ${lastDrain.processed}${lastDrain.hidden ? ` (+${lastDrain.hidden} hidden)` : ""}${lastDrain.partial ? ", answered early" : ""}${lastDrain.coalesced ? ", another drain was running" : ""} ${minutes} min ago${cost}`;
 }
 import { PRIVACY_RESIDUE_EVENT_KIND, getDealSettings, privacyResidueCommunityId, privacyResidueSinceStart } from "./dealsService";
 import { hasBuilderReader } from "./dealsAdapters";
@@ -497,7 +499,7 @@ type OperationalSnapshot = {
   funnel: { landed: number; consented: number; verificationSends: number; verified: number; listingViews: number; requests: number; newLeads: number };
   trecImport: { completedAt: Date | null; ageHours: number | null; state: HealthState };
   sourceUpdates: { activeCommunities: number; staleCommunities: number; heldCommunities: number; oldestAgeHours: number | null; lastSuccessfulSyncAt: Date | null; state: HealthState };
-  photos: { pending: number; processing: number; failed: number; awaitingRegion: number; oldestPendingAgeHours: number | null; oldestPendingMinutes: number | null; drainStalledMinutes: number | null; drainError: string | null; drainWarning?: string | null; leaseExpiredLastHour: number; lastDrain: { at: string; processed: number; hidden: number; partial: boolean; coalesced: boolean } | null; state: HealthState };
+  photos: { pending: number; processing: number; failed: number; awaitingRegion: number; oldestPendingAgeHours: number | null; oldestPendingMinutes: number | null; drainStalledMinutes: number | null; drainError: string | null; drainWarning?: string | null; leaseExpiredLastHour: number; lastDrain: LastPhotoDrain | null; state: HealthState };
   fubFailures: { jobs: number; leads: number; failingOverAnHour: number; state: HealthState };
   emailFailures: { failed: number; state: HealthState };
   jobFailures: { failed: number; jobs: string[]; state: HealthState };

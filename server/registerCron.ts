@@ -22,7 +22,12 @@ export const DEALS_JOB_DEFINITIONS = [
   { name: "builder-deals-trec-import", cron: "0 15 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "trec" }, description: "1:15 AM Central TREC import candidates for DST" },
   { name: "builder-deals-team-sync", cron: "0 30 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "team" }, description: "1:30 AM Central FUB team mirror candidates for DST" },
   { name: "builder-deals-known-agent-sync", cron: "0 45 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "agents" }, description: "1:45 AM Central FUB recruiter mirror candidates for DST" },
-  { name: "builder-deals-photo-queue", cron: "0 */2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (even minutes): 20 s of due Builder Deals photo processing and expired claims per call, answered within 24 s" },
+  { name: "builder-deals-photo-queue", cron: "0 */2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (even minutes, :00): 20 s of due Builder Deals photo processing and expired claims per call, answered within 24 s" },
+  // Two more photo jobs at the half minutes: with the main job and the catalog call (which spends its idle budget
+  // on photos), a call starts nominally every 30 s. Separate names so each is created, reconciled and fails alone.
+  // None starts at :00 of an odd minute, where the catalog call reads builder pages.
+  { name: "builder-deals-photo-queue-b", cron: "30 */2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (even minutes, :30): 20 s of due Builder Deals photo processing per call, answered within 24 s" },
+  { name: "builder-deals-photo-queue-c", cron: "30 1-59/2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (odd minutes, :30, after the catalog call has answered): 20 s of due Builder Deals photo processing per call, answered within 24 s" },
   { name: "builder-deals-activity-note", cron: "0 30 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "activity" }, description: "1:30 AM Central candidates for the one-per-day FUB activity note; handler enforces America/Chicago time" },
   { name: "builder-deals-fub-retry", cron: "0 0 * * * *", path: DEALS_CRON_PATH, payload: { job: "fub" }, description: "Hourly Builder Deals CRM retry" },
   { name: "builder-deals-alert-digest", cron: "0 5 * * * *", path: DEALS_CRON_PATH, payload: { job: "alerts" }, description: "Hourly Builder Deals durable alert delivery and digest" },

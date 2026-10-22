@@ -3,12 +3,12 @@ import { and, eq } from "drizzle-orm";
 import { dealJobRuns } from "../drizzle/schema";
 import { sdk } from "./_core/sdk";
 import { getDb } from "./db";
-import { refreshDueCommunitiesBatch, revalidateDealIncentives } from "./dealsSync";
+import { CATALOG_BATCH_BUDGET_MS, refreshDueCommunitiesBatch, revalidateDealIncentives } from "./dealsSync";
 import { importTrecLicenses } from "./dealsTrec";
 import { cleanupDealsTestRecords, runBuilderDealsHealthJob, sendBuilderDealsMondayReport, syncKnownAgentsFromFub, syncTeamAllowlistFromFub } from "./dealsMaintenance";
 import { enqueueDailyActivityNote, runPendingDealsFubJobs } from "./dealsFubJobs";
 import { looksLikeDbError, maskPersonalData, redactJobError } from "./dealsJobRuns";
-import { pruneDealPhotoRenders, runScheduledDealPhotoDrain } from "./dealsPhotos";
+import { SCHEDULED_PHOTO_RESPOND_MS, pruneDealPhotoRenders, runScheduledDealPhotoDrain } from "./dealsPhotos";
 
 import { chicagoClock, chicagoDay } from "./dealsService";
 /** Pure Chicago wall-clock predicate used by the DST candidate cron callbacks. */
@@ -83,6 +83,26 @@ const whenDue = (due: boolean, job: string, work: () => Promise<unknown>) => due
  * can only lose work.
  */
 export const SCHEDULED_RESPOND_MS = 26_000;
+/** A catalog call with at least this much of its budget left spends it on photos. */
+export const CATALOG_PHOTO_TOPUP_MIN_MS = 3_000;
+
+/**
+ * One catalog call: the builder checks first (4 AM to 10 PM Central); when
+ * they are done with budget left (nothing due, or every due builder read),
+ * the rest of the call's CATALOG_BATCH_BUDGET_MS drains photos. The batch has
+ * returned by then, so page reads and image work never run side by side in
+ * this call. Outside catalog hours the whole budget goes to photos.
+ */
+export async function catalogCall(clock: () => number = Date.now): Promise<unknown> {
+  const started = clock();
+  const { hour } = chicagoClock();
+  const inHours = hour >= CATALOG_FIRST_HOUR && hour < CATALOG_LAST_HOUR;
+  const catalog = inHours ? await refreshDueCommunitiesBatch() : { skipped: "outside_catalog_hours_chicago" };
+  const left = CATALOG_BATCH_BUDGET_MS - (clock() - started);
+  if ((inHours && (catalog as { stoppedForTime?: boolean }).stoppedForTime) || left < CATALOG_PHOTO_TOPUP_MIN_MS) return catalog;
+  const photos = await runScheduledDealPhotoDrain({ budgetMs: left, respondWithinMs: Math.max(0, SCHEDULED_PHOTO_RESPOND_MS - (clock() - started)) });
+  return { ...catalog, photos };
+}
 async function answerWithin<T>(work: Promise<T>, partial: () => unknown): Promise<T | unknown> {
   let timer: NodeJS.Timeout | undefined;
   const late = new Promise<{ late: true }>((resolve) => { timer = setTimeout(() => resolve({ late: true }), SCHEDULED_RESPOND_MS); });
@@ -102,13 +122,10 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
     const user = await sdk.authenticateRequest(req); if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
     const job = typeof req.body?.job === "string" ? req.body.job : "catalog";
     if (job === "incentive") return res.json({ ok: true, result: await whenDue(dueAt(18, 15), "builder-deals-incentive-revalidate", revalidateDealIncentives) });
-    // Every 2 minutes (odd minutes) from 4 AM to 10 PM Central: 20 s of builder checks per call (see
-    // refreshDueCommunitiesBatch), answered by SCHEDULED_RESPOND_MS; a community still being read finishes after the answer.
-    if (job === "catalog") {
-      const { hour } = chicagoClock();
-      if (hour < CATALOG_FIRST_HOUR || hour >= CATALOG_LAST_HOUR) return res.json({ ok: true, result: { skipped: "outside_catalog_hours_chicago" } });
-      return res.json({ ok: true, result: await answerWithin(refreshDueCommunitiesBatch(), () => ({ partial: true, detail: "answered before the batch finished; communities in flight finish after the answer" })) });
-    }
+    // Every 2 minutes (odd minutes, :00): 20 s of builder checks per call from 4 AM to 10 PM Central (see
+    // refreshDueCommunitiesBatch), then photos with whatever budget is left (catalogCall), answered by
+    // SCHEDULED_RESPOND_MS; a community still being read finishes after the answer.
+    if (job === "catalog") return res.json({ ok: true, result: await answerWithin(catalogCall(), () => ({ partial: true, detail: "answered before the batch finished; communities in flight finish after the answer" })) });
     // Monday 5:00 AM Central: find communities the builders added (new ones stay hidden until their first clean update).
     // The run itself goes to the background (it can take an hour); the once-a-day row only records that it was started.
     if (job === "discovery") {

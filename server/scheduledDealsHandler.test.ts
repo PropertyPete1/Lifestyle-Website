@@ -37,6 +37,7 @@ vi.mock("./dealsSync", () => ({
     mocks.refreshDueCommunitiesBatch(...args),
   revalidateDealIncentives: (...args: unknown[]) =>
     mocks.revalidateDealIncentives(...args),
+  CATALOG_BATCH_BUDGET_MS: 20_000,
 }));
 vi.mock("./dealsTrec", () => ({
   importTrecLicenses: (...args: unknown[]) => mocks.importTrecLicenses(...args),
@@ -62,12 +63,13 @@ vi.mock("./dealsFubJobs", () => ({
 vi.mock("./dealsPhotos", () => ({
   runScheduledDealPhotoDrain: (...args: unknown[]) =>
     mocks.runScheduledDealPhotoDrain(...args),
+  SCHEDULED_PHOTO_RESPOND_MS: 24_000,
   pruneDealPhotoRenders: () => Promise.resolve({ scanned: 0, expiredRows: 0, staleRows: 0, rowsDeleted: 0, objectsDeleted: 0, objectsFailed: 0 }),
 }));
 
 import { dealJobRuns } from "../drizzle/schema";
 import { createFakeDealsDb } from "./dealsFubFakeDb.test-support";
-import { SCHEDULED_RESPOND_MS, isDueAtChicago, scheduledDealsHandler } from "./scheduledDealsHandler";
+import { SCHEDULED_RESPOND_MS, catalogCall, isDueAtChicago, scheduledDealsHandler } from "./scheduledDealsHandler";
 
 function responseRecorder() {
   const json = vi.fn((body: unknown) => body);
@@ -181,16 +183,39 @@ describe("Builder Deals scheduled handler helpers", () => {
     expect(due.json).toHaveBeenCalledWith({ ok: true, result: { skipped: "already_running" } });
   });
 
-  it("runs a time-boxed catalog batch on every callback from 4 AM to 10 PM Chicago, without a daily job record", async () => {
+  it("runs a time-boxed catalog batch on every callback from 4 AM to 10 PM Chicago, and drains photos outside those hours, without a daily job record", async () => {
+    mocks.runScheduledDealPhotoDrain.mockResolvedValue({ processed: 7 });
     for (const [hour, runs] of [[3, false], [4, true], [13, true], [21, true], [22, false]] as const) {
       mocks.refreshDueCommunitiesBatch.mockClear();
       mocks.chicagoClock.mockReturnValue({ hour, minute: 10, weekday: "Mon" });
       const { response, json } = responseRecorder();
       await scheduledDealsHandler({ body: { job: "catalog" } } as Request, response);
       expect(mocks.refreshDueCommunitiesBatch).toHaveBeenCalledTimes(runs ? 1 : 0);
-      expect(json).toHaveBeenCalledWith({ ok: true, result: runs ? expect.objectContaining({ checked: 0 }) : { skipped: "outside_catalog_hours_chicago" } });
+      // The mocked batch finishes at once with nothing to do, so the rest of the call drains photos.
+      expect(json).toHaveBeenCalledWith({ ok: true, result: runs ? expect.objectContaining({ checked: 0, photos: { processed: 7 } }) : { skipped: "outside_catalog_hours_chicago", photos: { processed: 7 } } });
     }
     expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("a catalog call spends only its leftover budget on photos, after the builder checks, and none when the batch ran out of time", async () => {
+    mocks.chicagoClock.mockReturnValue({ hour: 9, minute: 1, weekday: "Tue" });
+    mocks.runScheduledDealPhotoDrain.mockResolvedValue({ processed: 3 });
+    let now = 1_000_000;
+    const order: string[] = [];
+    mocks.refreshDueCommunitiesBatch.mockImplementation(async () => { order.push("catalog"); now += 6_000; return { checked: 2, stoppedForTime: false }; });
+    mocks.runScheduledDealPhotoDrain.mockImplementation(async () => { order.push("photos"); return { processed: 3 }; });
+    expect(await catalogCall(() => now)).toEqual({ checked: 2, stoppedForTime: false, photos: { processed: 3 } });
+    expect(order).toEqual(["catalog", "photos"]);
+    // 6 s of the 20 s budget went to builder pages: 14 s for photos, answered within 24 s of the call's start.
+    expect(mocks.runScheduledDealPhotoDrain).toHaveBeenLastCalledWith({ budgetMs: 14_000, respondWithinMs: 18_000 });
+
+    mocks.runScheduledDealPhotoDrain.mockClear();
+    mocks.refreshDueCommunitiesBatch.mockImplementation(async () => { now += 20_000; return { checked: 5, stoppedForTime: true }; });
+    expect(await catalogCall(() => now)).toEqual({ checked: 5, stoppedForTime: true });
+    // Finished in time but under 3 s left: not worth a drain.
+    mocks.refreshDueCommunitiesBatch.mockImplementation(async () => { now += 18_000; return { checked: 4, stoppedForTime: false }; });
+    expect(await catalogCall(() => now)).toEqual({ checked: 4, stoppedForTime: false });
+    expect(mocks.runScheduledDealPhotoDrain).not.toHaveBeenCalled();
   });
 });
 

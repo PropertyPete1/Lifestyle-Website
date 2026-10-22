@@ -835,3 +835,60 @@ describe("scheduled calls inside the host's 30 s limit", () => {
     expect(sim.candidateSelects.length).toBe(selectsBefore);
   });
 });
+
+describe("per-photo cost and the overlapped original upload", () => {
+  const scenario1 = () => simulatedQueue({
+    communities: [community(1, "Perry Homes")],
+    homes: [home(1, 1), home(2, 1)],
+    photos: [1, 2].map((id) => ({ id, homeId: id, sourceUrl: `https://res.cloudinary.com/perryhomes/p/${id}.jpg` })),
+    settings: { "Perry Homes": off("Perry Homes") },
+  });
+
+  it("reports busy time per stage for the drain (download, normalize, master, OCR, store)", async () => {
+    scenario1();
+    vi.stubGlobal("fetch", vi.fn(async () => { await new Promise((resolve) => setTimeout(resolve, 15)); return imageResponse(jpeg); }));
+    const result = await photos.processPendingDealPhotos({ budgetMs: 60_000 });
+    expect(result.processed).toBe(2);
+    expect(Object.keys(result.stageMs ?? {}).sort()).toEqual(["download", "master", "normalize", "ocr", "store"]);
+    expect(result.stageMs?.download).toBeGreaterThanOrEqual(25);
+    for (const stage of photos.DEAL_PHOTO_STAGES) expect(result.stageMs?.[stage]).toBeGreaterThan(0);
+  });
+
+  it("makes the master and runs OCR while the original uploads, and publishes only once the upload has finished", async () => {
+    const sim = scenario1();
+    vi.stubGlobal("fetch", vi.fn(async () => imageResponse(jpeg)));
+    let releaseOriginal: () => void = () => undefined;
+    vi.mocked(storagePut).mockImplementation(async (key, data) => {
+      if (key.includes("/originals/")) await new Promise<void>((resolve) => { releaseOriginal = resolve; });
+      objects.set(key, Buffer.from(data as Buffer));
+      return { key, url: `/manus-storage/${key}` };
+    });
+    const run = photos.processDealPhoto(1);
+    await waitFor(() => ocr.calls === 1);
+    // OCR has run while the original upload is still open; nothing is published yet.
+    expect(sim.rows.get(1)?.processingState).toBe("processing");
+    expect(sim.processedWrites).toEqual([]);
+    releaseOriginal();
+    expect(await run).toMatchObject({ processed: true, hidden: false });
+    expect(sim.rows.get(1)).toMatchObject({ processingState: "processed", originalStorageKey: "builder-deals-private/originals/1.webp" });
+  });
+
+  it("does not publish when the original upload fails, and keeps a finished upload on any other failure so the retry does not download again", async () => {
+    const sim = scenario1();
+    vi.stubGlobal("fetch", vi.fn(async () => imageResponse(jpeg)));
+    vi.mocked(storagePut).mockImplementation(async (key, data) => {
+      if (key.includes("/originals/1.")) throw new Error("store down");
+      objects.set(key, Buffer.from(data as Buffer));
+      return { key, url: `/manus-storage/${key}` };
+    });
+    expect(await photos.processDealPhoto(1)).toMatchObject({ ok: false, retryScheduled: true });
+    expect(sim.rows.get(1)).toMatchObject({ processingState: "pending", lastProcessingError: "storage_unavailable", originalStorageKey: null, processedStorageKey: null });
+
+    // Photo 2: the original stores fine, then OCR fails.
+    ocr.recognize = async () => { throw new Error("worker crashed"); };
+    expect(await photos.processDealPhoto(2)).toMatchObject({ ok: false, retryScheduled: true });
+    const row = sim.rows.get(2) as SimPhoto;
+    expect(row).toMatchObject({ processingState: "pending", lastProcessingError: "ocr_unavailable", originalStorageKey: "builder-deals-private/originals/2.webp", processedStorageKey: null });
+    expect(row.originalVersion).toBe(sha256(objects.get("builder-deals-private/originals/2.webp") as Buffer));
+  });
+});

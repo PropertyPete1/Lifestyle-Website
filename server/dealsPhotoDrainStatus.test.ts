@@ -5,7 +5,7 @@ vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }))
 
 import { dealSettings } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
-import { PHOTO_DRAIN_STATUS_KEY, drainWasHealthy, lastPhotoDrain, photoDrainStall, readDealPhotoDrainStatus, recordDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
+import { PHOTO_DRAIN_STATUS_KEY, drainWasHealthy, lastPhotoDrain, nextPhotoCost, photoDrainStall, readDealPhotoDrainStatus, recordDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
 
 const zero = { processed: 0, hidden: 0, awaitingRegion: 0, retried: 0, failed: 0, skipped: 0 };
 const T = Date.parse("2026-10-21T15:00:00Z");
@@ -59,9 +59,26 @@ describe("photo drain status for the health check", () => {
     // The coalesced call is recorded (so the health check is never blind) but the clock did not move.
     expect(status).toMatchObject({ lastRunAt: new Date(T + 40 * 60_000).toISOString(), lastHealthyAt: new Date(T).toISOString(), last: { coalesced: true } });
     expect(photoDrainStall(status, 100, new Date(T + 41 * 60_000))).toMatchObject({ stalled: true, stalledMinutes: 41 });
-    expect(lastPhotoDrain(status)).toEqual({ at: new Date(T + 40 * 60_000).toISOString(), processed: 0, hidden: 0, partial: false, coalesced: true });
+    expect(lastPhotoDrain(status)).toMatchObject({ at: new Date(T + 40 * 60_000).toISOString(), processed: 0, hidden: 0, partial: false, coalesced: true });
     await recordDealPhotoDrainStatus({ ...zero, processed: 37, hidden: 2, partial: true, elapsedMs: 24_000 }, new Date(T + 42 * 60_000));
-    expect(lastPhotoDrain(await readDealPhotoDrainStatus())).toEqual({ at: new Date(T + 42 * 60_000).toISOString(), processed: 37, hidden: 2, partial: true, coalesced: false });
+    expect(lastPhotoDrain(await readDealPhotoDrainStatus())).toMatchObject({ at: new Date(T + 42 * 60_000).toISOString(), processed: 37, hidden: 2, partial: true, coalesced: false });
     expect(lastPhotoDrain(null)).toBeNull();
+  });
+
+  it("keeps a moving average of ms per finished photo and busy ms per stage, unchanged by drains that finished nothing", async () => {
+    const stageMs = { download: 4_000, normalize: 2_000, master: 1_500, ocr: 3_000, store: 2_500 };
+    await recordDealPhotoDrainStatus({ ...zero, processed: 9, hidden: 1, elapsedMs: 20_000, stageMs }, new Date(T));
+    let drain = lastPhotoDrain(await readDealPhotoDrainStatus());
+    expect(drain).toMatchObject({ msPerPhoto: 2_000, stageMsPerPhoto: { download: 400, normalize: 200, master: 150, ocr: 300, store: 250 } });
+    // A slower drain moves the average 30 percent of the way.
+    await recordDealPhotoDrainStatus({ ...zero, processed: 5, elapsedMs: 20_000, stageMs: { ...stageMs, download: 12_000 } }, new Date(T + 30_000));
+    drain = lastPhotoDrain(await readDealPhotoDrainStatus());
+    expect(drain).toMatchObject({ msPerPhoto: 2_600, stageMsPerPhoto: { download: 1_000 } });
+    expect((await readDealPhotoDrainStatus())?.cost).toMatchObject({ lastMsPerPhoto: 4_000, samples: 2 });
+    // Coalesced or empty calls leave it alone.
+    await recordDealPhotoDrainStatus({ ...zero, coalesced: true, elapsedMs: 20 }, new Date(T + 60_000));
+    await recordDealPhotoDrainStatus({ ...zero, elapsedMs: 3_000 }, new Date(T + 90_000));
+    expect(lastPhotoDrain(await readDealPhotoDrainStatus())).toMatchObject({ msPerPhoto: 2_600 });
+    expect(nextPhotoCost(null, { ...zero, processed: 0 })).toBeNull();
   });
 });

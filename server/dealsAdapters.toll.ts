@@ -109,6 +109,15 @@ export type TollPage = {
   plans: PrivatePlanOrHome[];
   /** The site plan's count of homes for sale, when the page says. */
   sitePlanHomes: number | null;
+  /**
+   * Every plan entry states its own quick move-in count (`qmiCount`; a page without them proves nothing), none lists fewer homes than
+   * it says, and the counts add up to the homes listed. The site plan can count a lot the listing does not (a
+   * sold or reserved one: Caliza Reserve's says 3, its plans and Toll's own page say 2), so when the plans agree
+   * the listing is complete.
+   */
+  planCountsAgree: boolean;
+  /** A plan entry lists fewer homes than its own count: the listing was cut short. */
+  planShortfall: boolean;
   /** On a master's page: true when a collection's site plan counts more homes than the lists give it. */
   collectionShortfall: boolean;
   facts: { schoolDistrict: string | null; amenities: string[] };
@@ -264,6 +273,12 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
       });
     }
   }
+  const planCounts = models.map(obj).filter((model): model is Json => model !== null).map((model) => ({ count: num(model.qmiCount), listed: arr(model.qmis).length }));
+  const planShortfall = planCounts.some((plan) => plan.count !== null && plan.listed < plan.count);
+  const planCountsAgree = !planShortfall && planCounts.length > 0 && planCounts.every((plan) => plan.count !== null) && planCounts.reduce((sum, plan) => sum + (plan.count ?? 0), 0) === homes.length;
+  // Collections can attribute a lot differently on the site plan than in the listing (Regency at Esperanza: 5/5/4
+  // on the plan, 5/4/5 listed); with the same total and plan counts that agree, nothing is missing.
+  const collectionTotal = collections ? Array.from(collections.values()).reduce((sum: number, count) => sum + (count ?? 0), 0) : 0;
   const amenities = arr(obj(component.amenities)?.amenityGroups).flatMap((group) => arr(obj(group)?.amenities).map((item) => str(obj(item)?.name) ?? str(item)).filter((item): item is string => Boolean(item)));
   return {
     record,
@@ -274,7 +289,9 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
     homes,
     plans,
     sitePlanHomes: num(component.qmiSitePlanLots),
-    collectionShortfall: collections ? Array.from(collections).some(([id, count]) => count !== null && (listedByCollection.get(id) ?? 0) < count) : false,
+    planCountsAgree,
+    planShortfall,
+    collectionShortfall: collections ? Array.from(collections).some(([id, count]) => count !== null && (listedByCollection.get(id) ?? 0) < count) && !(planCountsAgree && homes.length >= collectionTotal) : false,
     facts: { schoolDistrict: str(obj(component.schoolInfo)?.schoolDistrict), amenities },
     offer: tollOfferText(component.events, now),
   };
@@ -330,7 +347,7 @@ export class TollBrothersAdapter implements DealAdapter {
     if (ownPage && (ownPage.origin.toLowerCase() !== community.origin.toLowerCase() || comparablePath(ownPage.pathname.replace(/\/+$/, "")) !== comparablePath(community.pathname.replace(/\/+$/, "")))) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     if (!parsed.shapeIntact) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The site plan counts the homes for sale; fewer homes in the data than that means the home list changed shape, not that homes sold.
-    if ((parsed.sitePlanHomes !== null && parsed.homes.length < parsed.sitePlanHomes) || parsed.collectionShortfall) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    if (parsed.planShortfall || (parsed.sitePlanHomes !== null && parsed.homes.length < parsed.sitePlanHomes && !parsed.planCountsAgree) || parsed.collectionShortfall) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // A home listed under another community's path is never this community's inventory.
     if (parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     if (parsed.homes.length > TOLL_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);

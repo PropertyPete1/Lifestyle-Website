@@ -37,6 +37,9 @@ const EVENTS = [
   { headline: { link: "/nse", text: "Up to $45,000 to Use Your Way on Build to Order Homes" }, cta: { text: "Get Started" }, paragraphs: [{ text: "Extended Through October 25" }], disclaimer: "Offer, if any, is valid for new buyers who purchase a home in a participating community and deposit between 10/03/2026 and 10/25/2026, sign an agreement of sale, and close on the home. Toll Brothers reserves the right to change or withdraw any offer at any time.", eventType: "nationalEvent", startDate: "2026-06-27", endDate: "2026-10-26" },
   { eventType: "bannerEventNational", headline: { link: "/5.49-fha", text: "5.49% (6.27% APR)*\nFHA 30-Year Fixed ", disclaimer: "Offers, incentives, and seller contributions, if any, vary by community. Valid for new buyers only that sign an Agreement of Sale on select quick delivery homes on or after 10/8/26 and close by 12/18/26. Based on $509,224 sales price, $491,401 base loan amount, and minimum 660 qualifying credit score. Rate/program available through Toll Brothers Mortgage Company NMLS #18154 (www.nmlsconsumeraccess.org). See www.TollBrothersMortgage.com for state licensing information. Call 877-500-0508. 10/2026." }, paragraphs: [{ text: "Choose a beautiful new Toll Brothers quick move-in home now and qualify for a special 5.49% (6.27% APR)* FHA 30-year fixed-rate mortgage with as little as 3.5% down through Toll Brothers Mortgage Company. This offer is limited to select quick move-in homes eligible to close by December 18, 2026." }] },
 ];
+/** Homes per plan entry in the default page (Aberforth, then Bellwether), and their total. */
+const PLAN_QMI_COUNTS = ["Aberforth", "Bellwether"].map((name) => HOMES.filter((home) => home.modelName === name).length);
+const HOME_COUNT = PLAN_QMI_COUNTS.reduce((sum, count) => sum + count, 0);
 function communityPage(input: { homes?: ReturnType<typeof qmi>[]; sitePlanHomes?: number | null; office?: boolean; models?: boolean; events?: unknown[] } = {}) {
   const homes = input.homes ?? HOMES;
   const models = [model({ name: "Aberforth", price: 414_995, beds: 3, baths: 2, half: 0, sqft: 1_912, qmis: homes.filter((home) => home.modelName === "Aberforth") }), model({ name: "Bellwether", price: null, beds: 4, baths: 3, half: 1, sqft: 2_610, qmis: homes.filter((home) => home.modelName === "Bellwether") })];
@@ -156,6 +159,14 @@ describe("Toll Brothers reader: a community", () => {
     const held = await loadOfficialDeals(config, { fetcher: fewer, now: () => NOW });
     expect(held.holdReasons).toEqual(["expected_community_container_not_found"]);
     expect(held.public.homes).toEqual([]);
+    // Plan counts that agree with the listing outweigh a site plan counting one more lot (Caliza Reserve on Oct 22: 3 on the plan, 2 listed and
+    // 2 by the plans' own counts); a plan listing fewer homes than its own count is a cut-short listing.
+    const counted = (homes: number, counts: number[]) => communityPage({ sitePlanHomes: homes + 1 }).replace(/"qmis":/g, () => `"qmiCount":${counts.shift() ?? 0},"qmis":`);
+    const agree = await loadOfficialDeals(config, { fetcher: vi.fn(async () => new Response(counted(HOME_COUNT, [...PLAN_QMI_COUNTS]), { status: 200, headers: { "content-type": "text/html" } })), now: () => NOW });
+    expect(agree.holdReasons).not.toContain("expected_community_container_not_found");
+    expect(agree.private.homes).toHaveLength(HOME_COUNT);
+    const short = await loadOfficialDeals(config, { fetcher: vi.fn(async () => new Response(counted(HOME_COUNT, PLAN_QMI_COUNTS.map((count) => count + 1)), { status: 200, headers: { "content-type": "text/html" } })), now: () => NOW });
+    expect(short.holdReasons).toEqual(["expected_community_container_not_found"]);
     // The home lists gone from every model while the site plan says nothing: a changed shape, never a sale; so is a home listed as a top-level model.
     const noLists = vi.fn(async () => new Response(communityPage({ homes: [], sitePlanHomes: null }).replace(/"qmis":\[\]/g, "\"homesForSale\":[]"), { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: noLists, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);

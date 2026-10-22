@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { sampleProcessMemory } from "./dealsProcessTelemetry";
 import fs from "node:fs";
 import path from "node:path";
 import sharp, { type Metadata } from "sharp";
@@ -500,6 +501,10 @@ type OcrWorker = {
 };
 
 let ocrWorkerPromise: Promise<OcrWorker> | null = null;
+/** Recognitions on the current worker. Tesseract's WASM memory only grows, so the worker is replaced every OCR_RECYCLE_AFTER. */
+let ocrWorkerUses = 0;
+/** About a second to start a new worker, once every this many photos (under 1% of OCR time at ~3-4 s per photo). */
+export const OCR_RECYCLE_AFTER = 150;
 let ocrWork: Promise<void> = Promise.resolve();
 const ocrShutdownHookTargets = new WeakSet<object>();
 /** OCR deadline (worker start or one recognition); fits inside PHOTO_TIMEOUT_MS. */
@@ -523,6 +528,7 @@ async function withDeadline<T>(promise: Promise<T>, milliseconds: number): Promi
 async function resetOcrWorker() {
   const previous = ocrWorkerPromise;
   ocrWorkerPromise = null;
+  ocrWorkerUses = 0;
   if (previous) void previous.then((worker) => withDeadline(worker.terminate(), 2_000)).catch(() => undefined);
 }
 
@@ -583,6 +589,10 @@ export async function recognizeDealPhotoWords(bytes: Buffer): Promise<OcrWord[]>
       // explicitly and flatten their line words, preserving spatial adjacency.
       const worker = await withDeadline(ocrWorkerPromise, OCR_TIMEOUT_MS);
       const result = await withDeadline(worker.recognize(bytes, {}, { blocks: true }), OCR_TIMEOUT_MS);
+      sampleProcessMemory();
+      // Still inside the exclusive section: nothing else is using the worker being replaced.
+      ocrWorkerUses += 1;
+      if (ocrWorkerUses >= OCR_RECYCLE_AFTER) await resetOcrWorker();
       if (!result.data || !(result.data.blocks === null || Array.isArray(result.data.blocks))) throw new Error("missing OCR blocks");
       return (result.data.blocks ?? []).flatMap((block, b) => block.paragraphs.flatMap((paragraph, p) => paragraph.lines.flatMap((line, l) => line.words
         .filter((word) => typeof word.text === "string" && Number.isFinite(word.confidence))

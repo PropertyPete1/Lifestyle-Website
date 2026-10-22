@@ -89,6 +89,8 @@ async function startServer() {
     if (process.env.NODE_ENV === "production") {
       void ensureStatsSyncCron().catch(console.error);
       void ensureDealsCron().catch(console.error);
+      // Each start is kept so the health check can tell restarts (and their memory) apart from a busy server.
+      void import("../dealsProcessTelemetry").then(({ recordServerBoot }) => recordServerBoot()).catch(console.error);
     }
   });
 }

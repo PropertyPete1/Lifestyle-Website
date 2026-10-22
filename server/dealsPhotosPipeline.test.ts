@@ -422,6 +422,25 @@ describe("OCR worker lifecycle", () => {
   });
 });
 
+describe("OCR worker recycling", () => {
+  it("replaces the worker after OCR_RECYCLE_AFTER recognitions, so its memory cannot grow without end", async () => {
+    // Start from no worker (and a zero use count), whatever earlier tests left behind.
+    await photos.closeDealPhotoOcrWorker();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    ocr.terminated = 0;
+    const created = ocr.createOptions.length;
+    ocr.recognize = async () => [];
+    const image = await sharp({ create: { width: 16, height: 16, channels: 3, background: "#fff" } }).png().toBuffer();
+    for (let n = 0; n < photos.OCR_RECYCLE_AFTER; n++) await photos.recognizeDealPhotoWords(image);
+    await waitFor(() => ocr.terminated === 1);
+    expect(ocr.createOptions.length - created).toBe(1);
+    // The next photo starts a fresh worker.
+    await photos.recognizeDealPhotoWords(image);
+    expect(ocr.createOptions.length - created).toBe(2);
+    expect(ocr.terminated).toBe(1);
+  });
+});
+
 describe("renderDealPhotoForLead", () => {
   const future = new Date(Date.now() + 6 * 60 * 60_000);
   async function master(width = 96, height = 64) {

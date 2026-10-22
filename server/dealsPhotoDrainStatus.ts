@@ -8,6 +8,7 @@
 import { eq } from "drizzle-orm";
 import { dealSettings } from "../drizzle/schema";
 import { getDb } from "./db";
+import { processSnapshot, type ProcessSnapshot } from "./dealsProcessTelemetry";
 
 export const PHOTO_DRAIN_STATUS_KEY = "photos.drain.status";
 /** Due photos and no drain has moved one for this long: the queue is stuck, not just long. */
@@ -65,6 +66,8 @@ export type DealPhotoDrainStatus = {
   last: DealPhotoDrainOutcome;
   /** Moving average of the per-photo cost, so production shows where a photo's time goes. */
   cost?: DealPhotoCost | null;
+  /** Memory and uptime of the process that recorded this drain (restarts and memory growth show here). */
+  process?: ProcessSnapshot | null;
 };
 
 /**
@@ -115,6 +118,7 @@ export async function recordDealPhotoDrainStatus(outcome: DealPhotoDrainOutcome,
       ...(outcome.stageMs ? { stageMs: Object.fromEntries(Object.entries(outcome.stageMs).map(([stage, ms]) => [stage, Math.round(ms)])) } : {}),
     },
     cost: nextPhotoCost(previous?.cost, outcome),
+    process: processSnapshot(now),
   };
   const value = JSON.stringify(status);
   await db.insert(dealSettings).values({ key: PHOTO_DRAIN_STATUS_KEY, value }).onDuplicateKeyUpdate({ set: { value } });
@@ -130,11 +134,12 @@ export function photoDrainStall(status: DealPhotoDrainStatus | null, duePhotos: 
 }
 
 /** Health view of the last cron call: when it ran and what it moved. */
-export type LastPhotoDrain = { at: string; processed: number; hidden: number; partial: boolean; coalesced: boolean; msPerPhoto: number | null; stageMsPerPhoto: Record<string, number> | null };
+export type LastPhotoDrain = { at: string; processed: number; hidden: number; partial: boolean; coalesced: boolean; msPerPhoto: number | null; stageMsPerPhoto: Record<string, number> | null; process?: ProcessSnapshot | null };
 export function lastPhotoDrain(status: DealPhotoDrainStatus | null): LastPhotoDrain | null {
   if (!status) return null;
   return {
     at: status.lastRunAt, processed: Number(status.last?.processed ?? 0), hidden: Number(status.last?.hidden ?? 0), partial: Boolean(status.last?.partial), coalesced: Boolean(status.last?.coalesced),
     msPerPhoto: status.cost?.msPerPhoto ?? null, stageMsPerPhoto: status.cost?.stageMsPerPhoto ?? null,
+    process: status.process ?? null,
   };
 }

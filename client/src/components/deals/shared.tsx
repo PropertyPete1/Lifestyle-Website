@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { Play, Send } from "lucide-react";
 import { SITE } from "@shared/site";
+import { youtubeEmbedUrl, youtubeVideoId } from "@/lib/dealsVideo";
 
 export const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
@@ -40,16 +41,19 @@ export function useInstagramEmbeds() {
 }
 
 /**
- * The community's Instagram reel. On a long list only the first reel loads on
- * its own (`autoLoad`); the rest show a "Watch the video tour" cover and load
- * when tapped, so a page of every community never opens dozens of embeds.
+ * The community's video: an Instagram reel, or a YouTube Short (youtubeVideoId).
+ * On a long list only the first video loads on its own (`autoLoad`); the rest
+ * show a "Watch the video tour" cover and load when tapped, so a page of every
+ * community never opens dozens of embeds.
  */
 export function ReelCard({ reelUrl, label, autoLoad = true }: { reelUrl: string | null; label: string; autoLoad?: boolean }) {
+  const youtubeId = youtubeVideoId(reelUrl);
   const [fallback, setFallback] = useState(!reelUrl);
   const [started, setStarted] = useState(autoLoad);
+  const [tapped, setTapped] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!reelUrl || !started) return;
+    if (!reelUrl || !started || youtubeId) return;
     const process = () => (window as any).instgrm?.Embeds?.process?.();
     process();
     const timer = window.setTimeout(() => {
@@ -61,9 +65,12 @@ export function ReelCard({ reelUrl, label, autoLoad = true }: { reelUrl: string 
     }, 5_000);
     return () => window.clearTimeout(timer);
   }, [reelUrl, started]);
+  if (youtubeId && started) {
+    return <div data-deals-youtube="true" className="relative mx-auto aspect-[9/16] w-full max-w-[420px] overflow-hidden bg-black"><iframe src={youtubeEmbedUrl(youtubeId, tapped)} title={`Video tour of ${label}`} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen loading="lazy" referrerPolicy="strict-origin-when-cross-origin" className="absolute inset-0 h-full w-full border-0" /></div>;
+  }
   if (reelUrl && !started && !fallback) {
     return (
-      <button type="button" onClick={() => setStarted(true)} data-deals-reel-cover="true" aria-label={`Watch the video tour of ${label}`} className="deals-chrome mx-auto flex aspect-[4/5] w-full max-w-[540px] flex-col items-center justify-center bg-[radial-gradient(ellipse_at_50%_0%,oklch(0.75_0.09_85_/_0.22),transparent_60%),linear-gradient(150deg,oklch(0.2_0.01_285),oklch(0.09_0.005_285))] px-6 text-center">
+      <button type="button" onClick={() => { setTapped(true); setStarted(true); }} data-deals-reel-cover="true" aria-label={`Watch the video tour of ${label}`} className="deals-chrome mx-auto flex aspect-[4/5] w-full max-w-[540px] flex-col items-center justify-center bg-[radial-gradient(ellipse_at_50%_0%,oklch(0.75_0.09_85_/_0.22),transparent_60%),linear-gradient(150deg,oklch(0.2_0.01_285),oklch(0.09_0.005_285))] px-6 text-center">
         <span className="mb-4 rounded-full border border-gold/50 bg-black/30 p-5 text-gold"><Play className="h-6 w-6 fill-current" /></span>
         <span className="eyebrow text-gold">Watch the video tour</span>
         <span className="mt-3 max-w-[16rem] font-serif text-2xl leading-tight">{label}</span>

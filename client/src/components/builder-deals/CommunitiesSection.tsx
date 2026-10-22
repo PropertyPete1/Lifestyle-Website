@@ -113,8 +113,8 @@ function CommunityForm({ id, initial, builders, onDone }: { id?: number; initial
         <Field id={`${prefix}-reel-code`} label="Reel code (src)" hint="Lowercase, for example sl1. Add it to the active reel codes in Settings so the funnel counts it.">
           <Input id={`${prefix}-reel-code`} className={inputClass} value={draft.reelCode} onChange={(event) => set({ reelCode: event.target.value.toLowerCase() })} placeholder="sl1" />
         </Field>
-        <Field id={`${prefix}-reel-url`} label="Instagram reel URL" hint="Blank shows the Video coming soon card.">
-          <Input id={`${prefix}-reel-url`} className={inputClass} type="url" inputMode="url" value={draft.reelUrl} onChange={(event) => set({ reelUrl: event.target.value })} placeholder="https://www.instagram.com/reel/..." />
+        <Field id={`${prefix}-reel-url`} label="Video link (Instagram reel or YouTube Short)" hint="Blank shows the Video coming soon card. YouTube links play in a no-cookie player.">
+          <Input id={`${prefix}-reel-url`} className={inputClass} type="url" inputMode="url" value={draft.reelUrl} onChange={(event) => set({ reelUrl: event.target.value })} placeholder="https://www.instagram.com/reel/... or https://youtube.com/shorts/..." />
         </Field>
       </div>
       <div>

@@ -14,25 +14,31 @@ export const STATS_CRON_EXPRESSION = "0 0 9 * * *";
 export const STATS_CRON_PATH = "/api/scheduled/syncStats";
 export const DEALS_CRON_PATH = "/api/scheduled/refreshDeals";
 
+/**
+ * Daily jobs: the UTC hours cover the Chicago target in both CDT and CST, then keep firing hourly. The
+ * scheduler sometimes drops a fire (Oct 22: no 1 AM fires at all), so every later fire is a retry; the
+ * handler runs a job at most once per Chicago day and only at or after its target, so the extra fires
+ * answer already_run_today (or not_due_chicago before the target in CST) at the cost of one row read.
+ */
 export const DEALS_JOB_DEFINITIONS = [
-  { name: "builder-deals-health", cron: "0 0 12,13 * * *", path: DEALS_CRON_PATH, payload: { job: "health" }, description: "7:00 AM Central health-check candidates; handler enforces America/Chicago time" },
-  { name: "builder-deals-incentive-revalidate", cron: "0 15 23,0 * * *", path: DEALS_CRON_PATH, payload: { job: "incentive" }, description: "6:15 PM Central incentive lapse-only candidates for DST" },
+  { name: "builder-deals-health", cron: "0 0 12-15 * * *", path: DEALS_CRON_PATH, payload: { job: "health" }, description: "7:00 AM Central health check, with hourly retry fires until it has run (handler enforces America/Chicago time and once a day)" },
+  { name: "builder-deals-incentive-revalidate", cron: "0 15 23,0,1,2 * * *", path: DEALS_CRON_PATH, payload: { job: "incentive" }, description: "6:15 PM Central incentive lapse check, with hourly retry fires until it has run" },
   { name: "builder-deals-catalog-refresh", cron: "0 1-59/2 * * * *", path: DEALS_CRON_PATH, payload: { job: "catalog" }, description: "Every 2 minutes (odd minutes): 20 s of due builder page checks per call, answered within 26 s, 4 AM to 10 PM Central (handler enforces the hours)" },
-  { name: "builder-deals-discovery", cron: "0 0 10,11 * * 1", path: DEALS_CRON_PATH, payload: { job: "discovery" }, description: "Monday 5:00 AM Central candidates for DST: find new communities on every builder's site" },
-  { name: "builder-deals-trec-import", cron: "0 15 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "trec" }, description: "1:15 AM Central TREC import candidates for DST" },
-  { name: "builder-deals-team-sync", cron: "0 30 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "team" }, description: "1:30 AM Central FUB team mirror candidates for DST" },
-  { name: "builder-deals-known-agent-sync", cron: "0 45 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "agents" }, description: "1:45 AM Central FUB recruiter mirror candidates for DST" },
+  { name: "builder-deals-discovery", cron: "0 0 10-13 * * 1", path: DEALS_CRON_PATH, payload: { job: "discovery" }, description: "Monday 5:00 AM Central, with hourly retry fires: find new communities on every builder's site" },
+  { name: "builder-deals-trec-import", cron: "0 15 6-12 * * *", path: DEALS_CRON_PATH, payload: { job: "trec" }, description: "1:15 AM Central TREC import, with hourly retry fires until it has run" },
+  { name: "builder-deals-team-sync", cron: "0 30 6-12 * * *", path: DEALS_CRON_PATH, payload: { job: "team" }, description: "1:30 AM Central FUB team mirror, with hourly retry fires until it has run" },
+  { name: "builder-deals-known-agent-sync", cron: "0 45 6-12 * * *", path: DEALS_CRON_PATH, payload: { job: "agents" }, description: "1:45 AM Central FUB recruiter mirror, with hourly retry fires until it has run" },
   { name: "builder-deals-photo-queue", cron: "0 */2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (even minutes, :00): 20 s of due Builder Deals photo processing and expired claims per call, answered within 24 s" },
   // Two more photo jobs at the half minutes: with the main job and the catalog call (which spends its idle budget
   // on photos), a call starts nominally every 30 s. Separate names so each is created, reconciled and fails alone.
   // None starts at :00 of an odd minute, where the catalog call reads builder pages.
   { name: "builder-deals-photo-queue-b", cron: "30 */2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (even minutes, :30): 20 s of due Builder Deals photo processing per call, answered within 24 s" },
   { name: "builder-deals-photo-queue-c", cron: "30 1-59/2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (odd minutes, :30, after the catalog call has answered): 20 s of due Builder Deals photo processing per call, answered within 24 s" },
-  { name: "builder-deals-activity-note", cron: "0 30 6,7 * * *", path: DEALS_CRON_PATH, payload: { job: "activity" }, description: "1:30 AM Central candidates for the one-per-day FUB activity note; handler enforces America/Chicago time" },
+  { name: "builder-deals-activity-note", cron: "0 30 6-12 * * *", path: DEALS_CRON_PATH, payload: { job: "activity" }, description: "1:30 AM Central one-per-day FUB activity note, with hourly retry fires until it has run" },
   { name: "builder-deals-fub-retry", cron: "0 0 * * * *", path: DEALS_CRON_PATH, payload: { job: "fub" }, description: "Hourly Builder Deals CRM retry" },
   { name: "builder-deals-alert-digest", cron: "0 5 * * * *", path: DEALS_CRON_PATH, payload: { job: "alerts" }, description: "Hourly Builder Deals durable alert delivery and digest" },
-  { name: "builder-deals-weekly-system-ok", cron: "0 5 12,13 * * 1", path: DEALS_CRON_PATH, payload: { job: "weekly" }, description: "Monday 7:05 AM Central System OK candidates for DST" },
-  { name: "builder-deals-maintenance", cron: "0 30 12,13 * * 1", path: DEALS_CRON_PATH, payload: { job: "maintenance" }, description: "Monday 7:30 AM Central candidate: test record and cached render maintenance" },
+  { name: "builder-deals-weekly-system-ok", cron: "0 5 12-15 * * 1", path: DEALS_CRON_PATH, payload: { job: "weekly" }, description: "Monday 7:05 AM Central System OK report, with hourly retry fires until it has run" },
+  { name: "builder-deals-maintenance", cron: "0 30 12-15 * * 1", path: DEALS_CRON_PATH, payload: { job: "maintenance" }, description: "Monday 7:30 AM Central test record and cached render maintenance, with hourly retry fires" },
 ] as const;
 
 /**

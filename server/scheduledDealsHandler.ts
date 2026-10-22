@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
-import { and, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, eq, lt, or } from "drizzle-orm";
 import { dealJobRuns } from "../drizzle/schema";
 import { sdk } from "./_core/sdk";
 import { getDb } from "./db";
@@ -11,10 +12,22 @@ import { looksLikeDbError, maskPersonalData, redactJobError } from "./dealsJobRu
 import { SCHEDULED_PHOTO_RESPOND_MS, pruneDealPhotoRenders, runScheduledDealPhotoDrain } from "./dealsPhotos";
 
 import { chicagoClock, chicagoDay } from "./dealsService";
-/** Pure Chicago wall-clock predicate used by the DST candidate cron callbacks. */
+/**
+ * The host's scheduler fires a little early (up to ~30 s), often late (12 minutes on Oct 22), and sometimes
+ * not at all: on Oct 22 the 1 AM fires of every nightly job never came, and with one chance a night they
+ * all skipped the day. So a daily job is due from a few minutes before its target until the end of that
+ * Chicago day, each job is registered with hourly retry fires after its target (registerCron), and once()
+ * lets it run at most once per Chicago day: the first fire that lands runs it, the rest answer
+ * already_run_today, and a failed run is retried by the next fire.
+ */
+export const DUE_EARLY_MINUTES = 5;
+/** Pure Chicago wall-clock predicate used by the cron callbacks: at or past the target (less the early allowance), same weekday. */
 export function isDueAtChicago(now: { hour: number; minute: number; weekday: string }, hour: number, minute: number, weekday?: string) {
-  return now.hour === hour && now.minute >= minute && (!weekday || now.weekday === weekday);
+  const reached = now.hour * 60 + now.minute >= hour * 60 + minute - DUE_EARLY_MINUTES;
+  return reached && (!weekday || now.weekday === weekday);
 }
+/** A run still "running" this long after it started was cut off (the host recycled the instance mid-run): the next fire takes it over. The longest nightly job, the TREC import, takes about 90 s. */
+export const STALE_RUN_MINUTES = 30;
 import { CATALOG_FIRST_HOUR, CATALOG_LAST_HOUR } from "./dealsSchedule";
 export { CATALOG_FIRST_HOUR, CATALOG_LAST_HOUR };
 function dueAt(hour: number, minute: number, weekday?: string) { return isDueAtChicago(chicagoClock(), hour, minute, weekday); }
@@ -25,16 +38,24 @@ function isSuccessfulResult(result: unknown) {
 async function once(jobName: string, work: () => Promise<unknown>) {
   const db = await getDb(); if (!db) throw new Error("Database unavailable");
   const day = chicagoDay();
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - STALE_RUN_MINUTES * 60_000);
+  // Each claim carries its own token, so a cut-off run that finishes after a later fire took the row over
+  // can only write to its own claim, never record over the run that replaced it.
+  const token = `run:${randomUUID()}`;
   const existing = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day))).limit(1))[0];
   if (existing?.status === "ok") return { skipped: "already_run_today" };
-  if (existing?.status === "running") return { skipped: "already_running" };
-  if (existing?.status === "failed") {
-    const retry = await db.update(dealJobRuns).set({ status: "running", startedAt: new Date(), completedAt: null }).where(and(eq(dealJobRuns.id, existing.id), eq(dealJobRuns.status, "failed")));
+  const stale = existing?.status === "running" && new Date(existing.startedAt).getTime() < staleBefore.getTime();
+  if (existing?.status === "running" && !stale) return { skipped: "already_running" };
+  if (existing?.status === "failed" || stale) {
+    const retry = await db.update(dealJobRuns).set({ status: "running", startedAt: now, completedAt: null, detail: token })
+      .where(and(eq(dealJobRuns.id, existing!.id), or(eq(dealJobRuns.status, "failed"), and(eq(dealJobRuns.status, "running"), lt(dealJobRuns.startedAt, staleBefore)))));
     if (!Number((retry as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0)) return { skipped: "already_running" };
   } else {
-    try { await db.insert(dealJobRuns).values({ jobName, chicagoDay: day, status: "running" }); }
+    try { await db.insert(dealJobRuns).values({ jobName, chicagoDay: day, status: "running", startedAt: now, detail: token }); }
     catch { return { skipped: "already_running" }; }
   }
+  const mine = and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running"), eq(dealJobRuns.detail, token));
   let detail: string | null = null;
   try {
     const result = await work();
@@ -45,11 +66,11 @@ async function once(jobName: string, work: () => Promise<unknown>) {
       detail = `${reason}\n${storedResult(result).slice(0, 8_000)}`;
       throw new Error(reason);
     }
-    await db.update(dealJobRuns).set({ status: "ok", detail: storedResult(result).slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running")));
+    await db.update(dealJobRuns).set({ status: "ok", detail: storedResult(result).slice(0, 10_000), completedAt: new Date() }).where(mine);
     return result;
   } catch (error) {
     // A thrown error (a database error quotes the values it was given) is stored redacted: first line, no values.
-    await db.update(dealJobRuns).set({ status: "failed", detail: (detail ?? (error instanceof Error ? `threw: ${redactJobError(error.message)}` : "failed")).slice(0, 10_000), completedAt: new Date() }).where(and(eq(dealJobRuns.jobName, jobName), eq(dealJobRuns.chicagoDay, day), eq(dealJobRuns.status, "running")));
+    await db.update(dealJobRuns).set({ status: "failed", detail: (detail ?? (error instanceof Error ? `threw: ${redactJobError(error.message)}` : "failed")).slice(0, 10_000), completedAt: new Date() }).where(mine);
     throw error;
   }
 }

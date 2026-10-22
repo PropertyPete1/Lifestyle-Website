@@ -82,8 +82,8 @@ function responseRecorder() {
 }
 
 function runningJobDb() {
-  const query = Object.assign([{ id: 42, status: "running" }], {
-    limit: vi.fn(async () => [{ id: 42, status: "running" }]),
+  const query = Object.assign([{ id: 42, status: "running", startedAt: new Date() }], {
+    limit: vi.fn(async () => [{ id: 42, status: "running", startedAt: new Date() }]),
   });
   return {
     select: vi.fn(() => ({
@@ -110,25 +110,40 @@ afterEach(() => {
 });
 
 describe("Builder Deals scheduled handler helpers", () => {
-  it("accepts only the intended America/Chicago hourly window and weekday", () => {
-    expect(
-      isDueAtChicago({ hour: 18, minute: 14, weekday: "Mon" }, 18, 15)
-    ).toBe(false);
-    expect(
-      isDueAtChicago({ hour: 18, minute: 15, weekday: "Mon" }, 18, 15)
-    ).toBe(true);
-    expect(
-      isDueAtChicago({ hour: 18, minute: 59, weekday: "Mon" }, 18, 15)
-    ).toBe(true);
-    expect(
-      isDueAtChicago({ hour: 19, minute: 0, weekday: "Mon" }, 18, 15)
-    ).toBe(false);
-    expect(
-      isDueAtChicago({ hour: 7, minute: 5, weekday: "Tue" }, 7, 5, "Mon")
-    ).toBe(false);
-    expect(
-      isDueAtChicago({ hour: 7, minute: 5, weekday: "Mon" }, 7, 5, "Mon")
-    ).toBe(true);
+  it("is due from a few minutes before the target to the end of the Chicago day, on the right weekday", () => {
+    // The scheduler can fire a little early: 1:14 for a 1:15 job is due.
+    expect(isDueAtChicago({ hour: 1, minute: 14, weekday: "Thu" }, 1, 15)).toBe(true);
+    expect(isDueAtChicago({ hour: 1, minute: 10, weekday: "Thu" }, 1, 15)).toBe(true);
+    expect(isDueAtChicago({ hour: 1, minute: 9, weekday: "Thu" }, 1, 15)).toBe(false);
+    expect(isDueAtChicago({ hour: 0, minute: 15, weekday: "Thu" }, 1, 15)).toBe(false);
+    // On Oct 22 the 1 AM fires never came: every later fire that day is a retry (once() keeps it to one run).
+    expect(isDueAtChicago({ hour: 2, minute: 15, weekday: "Thu" }, 1, 15)).toBe(true);
+    expect(isDueAtChicago({ hour: 7, minute: 45, weekday: "Thu" }, 1, 45)).toBe(true);
+    expect(isDueAtChicago({ hour: 23, minute: 59, weekday: "Thu" }, 1, 15)).toBe(true);
+    expect(isDueAtChicago({ hour: 18, minute: 9, weekday: "Mon" }, 18, 15)).toBe(false);
+    expect(isDueAtChicago({ hour: 18, minute: 15, weekday: "Mon" }, 18, 15)).toBe(true);
+    expect(isDueAtChicago({ hour: 21, minute: 15, weekday: "Mon" }, 18, 15)).toBe(true);
+    expect(isDueAtChicago({ hour: 7, minute: 5, weekday: "Tue" }, 7, 5, "Mon")).toBe(false);
+    expect(isDueAtChicago({ hour: 10, minute: 5, weekday: "Mon" }, 7, 5, "Mon")).toBe(true);
+  });
+
+  it("every daily job's UTC fires reach its Chicago target in both CDT and CST, and keep firing after it", async () => {
+    const { DEALS_JOB_DEFINITIONS } = await import("./registerCron");
+    const targets: Record<string, [number, number, string?]> = { trec: [1, 15], team: [1, 30], agents: [1, 45], activity: [1, 30], health: [7, 0], incentive: [18, 15], discovery: [5, 0, "Mon"], weekly: [7, 5, "Mon"], maintenance: [7, 30, "Mon"] };
+    const hoursOf = (field: string) => field.split(",").flatMap((part) => { const [a, b] = part.split("-").map(Number); return b === undefined ? [a!] : Array.from({ length: b - a! + 1 }, (_, i) => a! + i); });
+    for (const [job, [hour, minute, weekday]] of Object.entries(targets)) {
+      const definition = DEALS_JOB_DEFINITIONS.find((entry) => entry.payload.job === job)!;
+      const [, cronMinute, cronHours] = definition.cron.split(" ");
+      expect(Number(cronMinute)).toBe(minute);
+      for (const offset of [5, 6]) {
+        // Chicago hour of each UTC fire (same weekday: none of these windows crosses Chicago midnight).
+        const chicagoHours = hoursOf(cronHours!).map((utc) => (utc - offset + 24) % 24);
+        const due = chicagoHours.filter((h) => isDueAtChicago({ hour: h, minute, weekday: weekday ?? "Thu" }, hour, minute, weekday));
+        // At least the target hour and two retries after it.
+        expect(due[0], `${job} UTC-${offset}`).toBe(hour);
+        expect(due.length, `${job} UTC-${offset}`).toBeGreaterThanOrEqual(3);
+      }
+    }
   });
 
   it("runs the scheduled photo drain on every callback, at any hour, without a daily job record", async () => {
@@ -168,8 +183,8 @@ describe("Builder Deals scheduled handler helpers", () => {
     }
   });
 
-  it("enqueues the daily activity note only inside the 1:30 AM Chicago window", async () => {
-    mocks.chicagoClock.mockReturnValue({ hour: 6, minute: 0, weekday: "Mon" });
+  it("enqueues the daily activity note only from the 1:30 AM Chicago target on", async () => {
+    mocks.chicagoClock.mockReturnValue({ hour: 1, minute: 20, weekday: "Mon" });
     const early = responseRecorder();
     await scheduledDealsHandler({ body: { job: "activity" } } as Request, early.response);
     expect(early.json).toHaveBeenCalledWith({ ok: true, result: { skipped: "not_due_chicago" } });
@@ -315,5 +330,56 @@ describe("Builder Deals once-per-day job records", () => {
     mocks.getDb.mockResolvedValue(failed);
     await scheduledDealsHandler({ body: { job: "agents" } } as Request, responseRecorder().response);
     expect((runRows(failed)[1]!.set as { detail: string }).detail).not.toMatch(/jo@agents|555-0199/);
+  });
+
+  it("answers already_run_today for a job that ran, and leaves a run that started minutes ago alone", async () => {
+    mocks.chicagoClock.mockReturnValue({ hour: 3, minute: 15, weekday: "Thu" });
+    const done = createFakeDealsDb([[dealJobRuns, [{ id: 7, jobName: "builder-deals-trec-import", chicagoDay: "2026-10-18", status: "ok", startedAt: new Date() }]]]);
+    mocks.getDb.mockResolvedValue(done);
+    const first = responseRecorder();
+    await scheduledDealsHandler({ body: { job: "trec" } } as Request, first.response);
+    expect(first.json).toHaveBeenCalledWith({ ok: true, result: { skipped: "already_run_today" } });
+    const fresh = createFakeDealsDb([[dealJobRuns, [{ id: 7, status: "running", startedAt: new Date(Date.now() - 5 * 60_000) }]]]);
+    mocks.getDb.mockResolvedValue(fresh);
+    const second = responseRecorder();
+    await scheduledDealsHandler({ body: { job: "trec" } } as Request, second.response);
+    expect(second.json).toHaveBeenCalledWith({ ok: true, result: { skipped: "already_running" } });
+    expect(runRows(done)).toEqual([]);
+    expect(runRows(fresh)).toEqual([]);
+    expect(mocks.importTrecLicenses).not.toHaveBeenCalled();
+  });
+
+  it("takes over a run cut off over 30 minutes ago, and records the outcome only on its own claim", async () => {
+    const { STALE_RUN_MINUTES } = await import("./scheduledDealsHandler");
+    expect(STALE_RUN_MINUTES).toBe(30);
+    mocks.chicagoClock.mockReturnValue({ hour: 2, minute: 15, weekday: "Thu" });
+    mocks.importTrecLicenses.mockResolvedValue({ ok: true, rows: 10 });
+    const db = createFakeDealsDb([[dealJobRuns, [{ id: 7, status: "running", startedAt: new Date(Date.now() - 31 * 60_000) }]]]);
+    mocks.getDb.mockResolvedValue(db);
+    const recorder = responseRecorder();
+    await scheduledDealsHandler({ body: { job: "trec" } } as Request, recorder.response);
+    expect(recorder.json).toHaveBeenCalledWith({ ok: true, result: { ok: true, rows: 10 } });
+    const [claim, outcome] = runRows(db);
+    const token = (claim!.set as { detail: string }).detail;
+    expect(claim).toMatchObject({ op: "update", set: { status: "running", completedAt: null } });
+    expect(token).toMatch(/^run:[0-9a-f-]{36}$/);
+    expect(outcome).toMatchObject({ op: "update", set: { status: "ok" } });
+    // Both conditional writes are fenced in SQL: the takeover on failed-or-stale, the outcome on this claim's token.
+    const { QueryBuilder } = await import("drizzle-orm/mysql-core");
+    const sqlOf = (where: unknown) => new QueryBuilder().select().from(dealJobRuns).where(where as never).toSQL();
+    const takeover = sqlOf(claim!.where);
+    expect(takeover.sql).toMatch(/`status` = \? or \(`deal_job_runs`.`status` = \? and `deal_job_runs`.`started_at` < \?\)/);
+    expect(takeover.params).toEqual(expect.arrayContaining([7, "failed", "running"]));
+    expect(sqlOf(outcome!.where).params).toContain(token);
+  });
+
+  it("retries a failed run on a later fire the same day", async () => {
+    mocks.chicagoClock.mockReturnValue({ hour: 4, minute: 30, weekday: "Thu" });
+    mocks.syncTeamAllowlistFromFub.mockResolvedValue({ ok: true, upserted: 11 });
+    const db = createFakeDealsDb([[dealJobRuns, [{ id: 9, status: "failed", startedAt: new Date(Date.now() - 3 * 3600_000) }]]]);
+    mocks.getDb.mockResolvedValue(db);
+    await scheduledDealsHandler({ body: { job: "team" } } as Request, responseRecorder().response);
+    expect(mocks.syncTeamAllowlistFromFub).toHaveBeenCalledTimes(1);
+    expect(runRows(db).map((write) => (write.set as { status: string }).status)).toEqual(["running", "ok"]);
   });
 });

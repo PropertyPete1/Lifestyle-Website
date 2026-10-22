@@ -141,7 +141,7 @@ describe("Builder Deals cron registration", () => {
     expect(DEALS_JOB_DEFINITIONS).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "builder-deals-photo-queue", cron: "0 */2 * * * *", payload: { job: "photos" } }),
       expect.objectContaining({ name: "builder-deals-catalog-refresh", cron: "0 1-59/2 * * * *", payload: { job: "catalog" } }),
-      expect.objectContaining({ name: "builder-deals-activity-note", cron: "0 30 6,7 * * *", payload: { job: "activity" } }),
+      expect.objectContaining({ name: "builder-deals-activity-note", cron: "0 30 6-12 * * *", payload: { job: "activity" } }),
     ]));
     const catalog = DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "catalog")!;
     const photoJob = DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "photos")!;

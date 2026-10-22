@@ -68,8 +68,8 @@ describe("Builder Deals cron registration", () => {
       expect(job.payload).toEqual({ job: expect.any(String) });
     }
     expect(DEALS_JOB_DEFINITIONS).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "builder-deals-fub-retry", cron: "0 0 * * * *", payload: { job: "fub" } }),
-      expect.objectContaining({ name: "builder-deals-alert-digest", cron: "0 5 * * * *", payload: { job: "alerts" } }),
+      expect.objectContaining({ name: "builder-deals-fub-retry", cron: "17 0 * * * *", payload: { job: "fub" } }),
+      expect.objectContaining({ name: "builder-deals-alert-digest", cron: "41 5 * * * *", payload: { job: "alerts" } }),
     ]));
   });
 
@@ -139,30 +139,30 @@ describe("Builder Deals cron registration", () => {
 
   it("runs the photo queue every 2 minutes on even minutes and the catalog on odd minutes, and moves earlier registrations over", () => {
     expect(DEALS_JOB_DEFINITIONS).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "builder-deals-photo-queue", cron: "0 */2 * * * *", payload: { job: "photos" } }),
-      expect.objectContaining({ name: "builder-deals-catalog-refresh", cron: "0 1-59/2 * * * *", payload: { job: "catalog" } }),
-      expect.objectContaining({ name: "builder-deals-activity-note", cron: "0 30 6-12 * * *", payload: { job: "activity" } }),
+      expect.objectContaining({ name: "builder-deals-photo-queue", cron: "13 */2 * * * *", payload: { job: "photos" } }),
+      expect.objectContaining({ name: "builder-deals-catalog-refresh", cron: "13 1-59/2 * * * *", payload: { job: "catalog" } }),
+      expect.objectContaining({ name: "builder-deals-activity-note", cron: "47 30 6-12 * * *", payload: { job: "activity" } }),
     ]));
     const catalog = DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "catalog")!;
     const photoJob = DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "photos")!;
     // Earlier builds registered the catalog every 10 minutes and photos every 10 or 5: reconciled in place on the next boot.
     expect(dealsJobNeedsReconcile({ cronExpression: "0 */10 * * * *", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"catalog"}' }, catalog)).toBe(true);
     expect(dealsJobNeedsReconcile({ cronExpression: "0 */5 * * * *", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"photos"}' }, photoJob)).toBe(true);
-    expect(dealsJobNeedsReconcile({ cronExpression: " 0 */2 * * * * ", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"photos"}' }, photoJob)).toBe(false);
+    expect(dealsJobNeedsReconcile({ cronExpression: " 13 */2 * * * * ", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"photos"}' }, photoJob)).toBe(false);
   });
 
-  it("adds two photo jobs at the half minutes, so a call starts every 30 s and none lands on the catalog's :00", () => {
+  it("adds two photo jobs half a minute apart, so a call starts every 30 s and none lands on the catalog's start", () => {
     const photoJobs = DEALS_JOB_DEFINITIONS.filter((job) => job.payload.job === "photos");
     expect(photoJobs.map((job) => [job.name, job.cron])).toEqual([
-      ["builder-deals-photo-queue", "0 */2 * * * *"],
-      ["builder-deals-photo-queue-b", "30 */2 * * * *"],
-      ["builder-deals-photo-queue-c", "30 1-59/2 * * * *"],
+      ["builder-deals-photo-queue", "13 */2 * * * *"],
+      ["builder-deals-photo-queue-b", "43 */2 * * * *"],
+      ["builder-deals-photo-queue-c", "43 1-59/2 * * * *"],
     ]);
     expect(new Set(DEALS_JOB_DEFINITIONS.map((job) => job.name)).size).toBe(DEALS_JOB_DEFINITIONS.length);
     // Second-of-the-2-minute-cycle each call starts at: photo jobs and the catalog call never share a start.
     const startsInCycle = (cron: string) => { const [sec, min] = cron.split(" "); return min === "*/2" ? [Number(sec)] : [60 + Number(sec)]; };
     const starts = [...photoJobs.flatMap((job) => startsInCycle(job.cron)), ...startsInCycle(DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "catalog")!.cron)].sort((a, b) => a - b);
-    expect(starts).toEqual([0, 30, 60, 90]);
+    expect(starts).toEqual([13, 43, 73, 103]);
   });
 
 });
@@ -184,8 +184,14 @@ describe("ensureDealsCron error isolation", () => {
     spy.mockRestore();
   });
 
+  it("never starts a job on second :00, where the shared scheduler drops most fires, and no two jobs share a start", () => {
+    for (const job of DEALS_JOB_DEFINITIONS) expect(job.cron.split(" ")[0], job.name).not.toBe("0");
+    const starts = DEALS_JOB_DEFINITIONS.map((job) => job.cron);
+    expect(new Set(starts).size).toBe(starts.length);
+  });
+
   it("registers the catalog job on odd minutes with a compact expression", () => {
     const catalog = DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "catalog");
-    expect(catalog?.cron).toBe("0 1-59/2 * * * *");
+    expect(catalog?.cron).toBe("13 1-59/2 * * * *");
   });
 });

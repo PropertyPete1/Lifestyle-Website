@@ -68,6 +68,10 @@ const config: CommunitySourceConfig = { builder: "Highland Homes", sourceUrl: CO
 beforeEach(() => { vi.clearAllMocks(); requested.length = 0; });
 
 describe("Highland Homes reader: cards", () => {
+  it("reads a Coming Soon tag as coming soon (not an unreadable status that holds the community)", () => {
+    expect(highlandStatus("Coming Soon", new Date("2026-10-22T20:00:00Z"))).toEqual({ status: "Coming Soon", readyNow: false, moveInDate: null });
+  });
+
   it("reads every card: price, street with the office's city and ZIP, plan, beds, baths from full/half, square feet, garage, status tag, photo", () => {
     const homes = parseHighlandCards(communityPage(), COMMUNITY)!;
     expect(homes.map((home) => [home.privateAddress, home.privatePlanName, home.status, home.price, home.bedrooms, home.bathrooms, home.squareFeet, home.garage, home.readyNow, home.moveInDate])).toEqual([

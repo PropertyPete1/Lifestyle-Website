@@ -45,6 +45,8 @@ export function highlandStatus(tag: string | null, now: Date = new Date()): { st
   if (!text) return { status: null, readyNow: false, moveInDate: null };
   if (/sold|under\s+contract|pending/i.test(text)) return { status: "Sold", readyNow: false, moveInDate: null };
   if (/move[- ]?in\s+ready|complete\b/i.test(text)) return { status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null };
+  // A home on the lot that is not yet started or priced for sale (Sunflower Ridge's 2711 Alster, Oct 22); never published as for sale.
+  if (/^coming\s+soon\b/i.test(text)) return { status: "Coming Soon", readyNow: false, moveInDate: null };
   const completion = /est\.?\s*completion\s*[-–:]?\s*([A-Za-z]{3,9})\.?\s*'?(\d{2,4})/i.exec(text);
   if (completion) {
     const month = MONTHS[completion[1]!.toLowerCase().slice(0, 3)];

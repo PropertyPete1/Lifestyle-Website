@@ -276,9 +276,9 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
   const planCounts = models.map(obj).filter((model): model is Json => model !== null).map((model) => ({ count: num(model.qmiCount), listed: arr(model.qmis).length }));
   const planShortfall = planCounts.some((plan) => plan.count !== null && plan.listed < plan.count);
   const planCountsAgree = !planShortfall && planCounts.length > 0 && planCounts.every((plan) => plan.count !== null) && planCounts.reduce((sum, plan) => sum + (plan.count ?? 0), 0) === homes.length;
-  // Collections can attribute a lot differently on the site plan than in the listing (Regency at Esperanza: 5/5/4
-  // on the plan, 5/4/5 listed); with the same total and plan counts that agree, nothing is missing.
-  const collectionTotal = collections ? Array.from(collections.values()).reduce((sum: number, count) => sum + (count ?? 0), 0) : 0;
+  // Collections' site plans can attribute a lot differently than the listing (Regency at Esperanza on Oct 22: 5/5/4 on
+  // the plans, 5/4/5 listed) or count a lot it does not list (Oct 20: 15 on the plans, 14 listed and 14 by the plans'
+  // own counts), exactly as a single community's can: when the plan counts agree, nothing is missing.
   const amenities = arr(obj(component.amenities)?.amenityGroups).flatMap((group) => arr(obj(group)?.amenities).map((item) => str(obj(item)?.name) ?? str(item)).filter((item): item is string => Boolean(item)));
   return {
     record,
@@ -291,7 +291,7 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
     sitePlanHomes: num(component.qmiSitePlanLots),
     planCountsAgree,
     planShortfall,
-    collectionShortfall: collections ? Array.from(collections).some(([id, count]) => count !== null && (listedByCollection.get(id) ?? 0) < count) && !(planCountsAgree && homes.length >= collectionTotal) : false,
+    collectionShortfall: collections ? Array.from(collections).some(([id, count]) => count !== null && (listedByCollection.get(id) ?? 0) < count) && !planCountsAgree : false,
     facts: { schoolDistrict: str(obj(component.schoolInfo)?.schoolDistrict), amenities },
     offer: tollOfferText(component.events, now),
   };

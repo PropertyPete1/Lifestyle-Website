@@ -83,7 +83,7 @@ describe("Toll Brothers: a model with no homes now leaves its qmis list out (Oct
     for (const secret of ["Briggs", "Hawthorn", "Boxwood", "Blue Cedar", "Kissing Tree", "Toll", "Aberforth", "78245"]) expect(publicJson(result)).not.toContain(secret);
   });
 
-  it("still holds a model without its list that does not count zero, and Shavano Highlands, whose site plan counts a home the data does not list", async () => {
+  it("still holds a model without its list that does not count zero, and reads Shavano Highlands, whose site plan counts its decorated model", async () => {
     // Amaury without its list but counting a home: the list moved, never a sold home.
     const counted = siteFetcher({ [BRIGGS]: live("toll-briggs-ranch").replace('"qmiCount":0', '"qmiCount":1') });
     const held = await loadOfficialDeals(config, { fetcher: counted.fetcher, now: () => NOW });
@@ -92,14 +92,15 @@ describe("Toll Brothers: a model with no homes now leaves its qmis list out (Oct
     // No count at all beside a missing list: held too.
     const uncounted = siteFetcher({ [BRIGGS]: live("toll-briggs-ranch").replace('"qmiCount":0', '"qmiTotal":0') });
     expect((await loadOfficialDeals(config, { fetcher: uncounted.fetcher, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
-    // Shavano Highlands: six models, none with homes (qmiCount 0 each), while the site plan counts one quick move-in lot. That
-    // disagreement is held, never read as "nothing for sale" (the community API says the same and lists no lots; see below).
+    // Shavano Highlands: six models, none with homes (qmiCount 0 each), while the site plan counts one quick move-in lot: the
+    // decorated model (Toll's page lists no quick move-in home, Oct 22). Every plan counting zero agrees with the empty listing.
     const shavanoPage = live("toll-shavano-highlands");
     const shavano = parseTollCommunity(shavanoPage, SHAVANO, NOW)!;
     expect([shavano.shapeIntact, shavano.homes.length, shavano.plans.length, shavano.sitePlanHomes]).toEqual([true, 0, 6, 1]);
     const { fetcher } = siteFetcher({ [SHAVANO]: shavanoPage });
     const result = await loadOfficialDeals({ builder: "Toll Brothers", sourceUrl: SHAVANO, privateCommunityName: "Shavano Highlands", scrubList: ["Shavano Highlands"] }, { fetcher, now: () => NOW });
-    expect(result.holdReasons).toEqual(["expected_community_container_not_found"]);
+    expect(result.holdReasons).not.toContain("expected_community_container_not_found");
+    expect(result.private.homes).toEqual([]);
   });
 });
 
@@ -107,6 +108,8 @@ describe("Toll Brothers: every San Antonio community (October 20, 2026 captures)
   const T = "https://www.tollbrothers.com/luxury-homes-for-sale/Texas/";
   type Row = [fixture: string, path: string, holds: string[], homes: number, plans: number];
   // The catalog outcome per community; an `ambiguous_rate` hold is the offer's alone (the catalog publishes).
+  // Filled in from the captures' own offers below (the catalog outcome is what this table checks).
+  const CALIZA_HOLDS = ["ambiguous_rate"], NOLTE_HOLDS: string[] = [], REGENCY_HOLDS = ["ambiguous_rate"];
   const ROWS: Row[] = [
     ["toll-briggs-ranch", "Toll-Brothers-at-Briggs-Ranch", [], 7, 7],
     ["toll-enchanted-bluff", "Toll-Brothers-at-Enchanted-Bluff", ["ambiguous_rate"], 3, 5],
@@ -116,17 +119,20 @@ describe("Toll Brothers: every San Antonio community (October 20, 2026 captures)
     ["toll-mayfair", "Toll-Brothers-at-Mayfair", ["ambiguous_rate"], 3, 0],
     ["toll-thornebrook", "Toll-Brothers-at-Thornebrook", ["ambiguous_rate"], 2, 6],
     ["toll-windborne", "Toll-Brothers-at-Windborne", ["ambiguous_rate"], 2, 6],
-    // The site plan counts one quick move-in home more than the data lists (Shavano 1 of 0, Caliza Reserve 3 of 2, Nolte
-    // Farms 3 of 2, Sunset Ridge 13 of 12, Regency at Esperanza's Sardana Collection 5 of 4): held, never a sold home.
-    ["toll-shavano-highlands", "Shavano-Highlands", ["expected_community_container_not_found"], 0, 0],
-    ["toll-caliza-reserve", "Toll-Brothers-at-Caliza-Reserve", ["expected_community_container_not_found"], 0, 0],
-    ["toll-nolte-farms", "Toll-Brothers-at-Nolte-Farms", ["expected_community_container_not_found"], 0, 0],
+    // The site plan counts one quick move-in lot more than the data lists (Shavano 1 of 0, Caliza Reserve 3 of 2, Nolte Farms 3 of 2,
+    // Sunset Ridge 13 of 12) or attributes one to another collection (Regency at Esperanza 5/5/4 on the plan, 5/4/5 listed). Where
+    // every plan entry states its count and the counts add up to the listing, the listing is complete: Toll's own page showed
+    // "2 Quick Move-In Homes Available" for Caliza Reserve and none for Shavano Highlands (its extra lot is the decorated model) on
+    // Oct 22. Sunset Ridge's entries carry no counts: still held.
+    ["toll-shavano-highlands", "Shavano-Highlands", ["ambiguous_rate"], 0, 6],
+    ["toll-caliza-reserve", "Toll-Brothers-at-Caliza-Reserve", CALIZA_HOLDS, 2, 6],
+    ["toll-nolte-farms", "Toll-Brothers-at-Nolte-Farms", NOLTE_HOLDS, 2, 6],
     ["toll-sunset-ridge", "Toll-Brothers-at-Sunset-Ridge", ["expected_community_container_not_found"], 0, 0],
-    ["toll-regency-at-esperanza", "Regency-at-Esperanza", ["expected_community_container_not_found"], 0, 0],
+    ["toll-regency-at-esperanza", "Regency-at-Esperanza", REGENCY_HOLDS, 14, 12],
   ];
   const read = (name: string, url: string, page = live(name)) => loadOfficialDeals({ builder: "Toll Brothers", sourceUrl: url, privateCommunityName: name, scrubList: [] }, { fetcher: siteFetcher({ [url]: page }).fetcher, now: () => NOW });
 
-  it("reads 8 of the 13 and holds the 5 whose site plan counts a home the data does not list", async () => {
+  it("reads 12 of the 13 and holds Sunset Ridge, whose site plan counts a home the data does not list and whose plans state no counts", async () => {
     for (const [name, path, holds, homes, plans] of ROWS) {
       const result = await read(name, `${T}${path}`);
       expect([name, result.holdReasons, result.catalogOk, result.private.homes.length, result.private.plans.length]).toEqual([name, holds, holds.every((hold) => hold === "ambiguous_rate"), homes, plans]);

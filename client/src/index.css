@@ -87,6 +87,53 @@
   --sidebar-ring: oklch(0.75 0.09 85);
 }
 
+/*
+ * Builder Deals (/deals, /deals/mine, /deals/team): a light shopping surface inside the dark brand.
+ * The listings, filters, home details and sheets read on warm white (photos and prices scan more
+ * easily); the header and footer keep the dark luxury chrome (.deals-chrome) so the page still reads
+ * as the same site. Gold is deepened on white so gold text keeps at least 4.5:1 contrast.
+ */
+.deals-light {
+  --background: oklch(0.985 0.004 90);
+  --foreground: oklch(0.2 0.006 285);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.006 285);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.006 285);
+  --primary: oklch(0.52 0.1 75);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.955 0.005 90);
+  --secondary-foreground: oklch(0.2 0.006 285);
+  --muted: oklch(0.955 0.005 90);
+  --muted-foreground: oklch(0.45 0.01 285);
+  --accent: oklch(0.52 0.1 75);
+  --accent-foreground: oklch(1 0 0);
+  --border: oklch(0.89 0.006 90);
+  --input: oklch(0.84 0.006 90);
+  --ring: oklch(0.52 0.1 75);
+  --gold: oklch(0.52 0.1 75);
+  --gold-dim: oklch(0.6 0.08 80);
+  color-scheme: light;
+  color: var(--foreground);
+}
+.deals-chrome {
+  --background: oklch(0.145 0.005 285);
+  --foreground: oklch(0.97 0.005 90);
+  --card: oklch(0.185 0.006 285);
+  --card-foreground: oklch(0.97 0.005 90);
+  --primary: oklch(0.75 0.09 85);
+  --primary-foreground: oklch(0.145 0.005 285);
+  --muted: oklch(0.24 0.006 285);
+  --muted-foreground: oklch(0.72 0.01 90);
+  --border: oklch(0.32 0.008 285);
+  --input: oklch(0.32 0.008 285);
+  --gold: oklch(0.75 0.09 85);
+  --gold-dim: oklch(0.62 0.08 85);
+  color-scheme: dark;
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

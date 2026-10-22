@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
  * The gated page background repeats the lead's own identity as a faint CSS
  * pattern, the same text the server burns into every photo. It is built in the
  * browser from the display identity the session already returned, as an inline
- * SVG data URI, so no request carries the identity anywhere.
+ * SVG data URI, so no request carries the identity anywhere. Dark ink: the gated page is light.
  */
 export const IDENTITY_PATTERN_OPACITY = 0.04;
 const MAX_DISPLAY_LENGTH = 60;
@@ -30,7 +30,7 @@ export function identityPatternSvg(display: string): string {
     `<text x="${half}" y="118">${text}</text>`,
     `<text x="${half - width}" y="118">${text}</text>`,
   ].join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><g fill="#f3e5c4" fill-opacity="${IDENTITY_PATTERN_OPACITY}" font-family="Georgia, 'Times New Roman', serif" font-size="${FONT_SIZE}" font-style="italic">${rows}</g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><g fill="#3a3020" fill-opacity="${IDENTITY_PATTERN_OPACITY}" font-family="Georgia, 'Times New Roman', serif" font-size="${FONT_SIZE}" font-style="italic">${rows}</g></svg>`;
 }
 
 export function identityPatternDataUri(display: string): string {

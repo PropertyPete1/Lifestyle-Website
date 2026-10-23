@@ -383,3 +383,14 @@ describe("Builder Deals once-per-day job records", () => {
     expect(runRows(db).map((write) => (write.set as { status: string }).status)).toEqual(["running", "ok"]);
   });
 });
+
+describe("the scheduler's calls as the server saw them", () => {
+  it("names each call's outcome: ran, skipped and why, partial, failed or an error", async () => {
+    const { cronCallOutcome } = await import("./scheduledDealsHandler");
+    expect(cronCallOutcome({ ok: true, result: { skipped: "not_due_chicago" } })).toBe("skipped: not_due_chicago");
+    expect(cronCallOutcome({ ok: true, result: { partial: true } })).toBe("partial: carries on after the answer");
+    expect(cronCallOutcome({ ok: true, result: { ok: false } })).toBe("ran: failed");
+    expect(cronCallOutcome({ error: "cron-only" })).toBe("error: cron-only");
+    expect(cronCallOutcome({ ok: true, result: { ok: true, rows: 3 } })).toBe("ran");
+  });
+});

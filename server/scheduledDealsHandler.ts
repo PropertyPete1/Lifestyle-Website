@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { randomUUID } from "node:crypto";
 import { and, eq, lt, or } from "drizzle-orm";
-import { dealJobRuns } from "../drizzle/schema";
+import { dealJobRuns, dealSettings } from "../drizzle/schema";
 import { sdk } from "./_core/sdk";
 import { getDb } from "./db";
 import { CATALOG_BATCH_BUDGET_MS, refreshDueCommunitiesBatch, revalidateDealIncentives } from "./dealsSync";
@@ -144,11 +144,65 @@ async function answerWithin<T>(work: Promise<T>, partial: () => unknown): Promis
   } finally { if (timer) clearTimeout(timer); }
 }
 
+/**
+ * The scheduler's calls as the server saw them, newest first: job, time, status, milliseconds and the outcome
+ * (ran, skipped and why, partial). On October 22-23, 2026 the daily jobs' next runs advanced in the scheduler
+ * while nothing ran; this shows whether their calls arrive. The two-minute and five-minute jobs are left out
+ * when they succeed, so the daily ones stay in view.
+ */
+export const CRON_CALLS_KEY = "cron.calls";
+export const CRON_CALL_HISTORY = 150;
+const QUIET_JOBS = new Set(["photos", "catalog", "discovery-resume"]);
+export type CronCall = { job: string; at: string; status: number; ms: number; outcome: string };
+
+export function cronCallOutcome(body: unknown): string {
+  const result = (body as { result?: unknown; error?: unknown } | null)?.result;
+  const error = (body as { error?: unknown } | null)?.error;
+  if (typeof error === "string") return `error: ${error.slice(0, 80)}`;
+  if (result && typeof result === "object") {
+    const r = result as Record<string, unknown>;
+    if (typeof r.skipped === "string") return `skipped: ${r.skipped}`;
+    if (r.partial === true) return "partial: carries on after the answer";
+    if (r.ok === false) return "ran: failed";
+  }
+  return "ran";
+}
+
+async function recordCronCall(call: CronCall): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const row = (await db.select().from(dealSettings).where(eq(dealSettings.key, CRON_CALLS_KEY)).limit(1))[0];
+  let previous: CronCall[] = [];
+  try { const parsed = JSON.parse(row?.value ?? "[]") as unknown; previous = Array.isArray(parsed) ? parsed as CronCall[] : []; } catch { previous = []; }
+  const value = JSON.stringify([call, ...previous].slice(0, CRON_CALL_HISTORY));
+  await db.insert(dealSettings).values({ key: CRON_CALLS_KEY, value }).onDuplicateKeyUpdate({ set: { value } });
+}
+
+export async function readCronCalls(): Promise<CronCall[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const row = (await db.select().from(dealSettings).where(eq(dealSettings.key, CRON_CALLS_KEY)).limit(1))[0];
+  try { const parsed = JSON.parse(row?.value ?? "[]") as unknown; return Array.isArray(parsed) ? parsed as CronCall[] : []; } catch { return []; }
+}
+
 /** Cron-only endpoint; definitions register idempotently at production startup. */
 export async function scheduledDealsHandler(req: Request, res: Response) {
+  const started = Date.now();
+  const job = typeof req.body?.job === "string" ? req.body.job : "catalog";
+  let sent: unknown = null;
+  const json = res.json.bind(res);
+  res.json = ((body: unknown) => { sent = body; return json(body); }) as typeof res.json;
+  // (A bare response stand-in, as in tests, has no events: the call is simply not recorded.)
+  if (typeof res.once === "function") res.once("finish", () => {
+    if (QUIET_JOBS.has(job) && res.statusCode === 200) return;
+    void recordCronCall({ job, at: new Date(started).toISOString(), status: res.statusCode, ms: Date.now() - started, outcome: cronCallOutcome(sent) }).catch(() => undefined);
+  });
+  return handleScheduledDealsCall(req, res, job);
+}
+
+async function handleScheduledDealsCall(req: Request, res: Response, job: string) {
   try {
     const user = await sdk.authenticateRequest(req); if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
-    const job = typeof req.body?.job === "string" ? req.body.job : "catalog";
     if (job === "incentive") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(18, 15), "builder-deals-incentive-revalidate", revalidateDealIncentives)) });
     // Every 2 minutes (odd minutes, :00): 20 s of builder checks per call from 4 AM to 10 PM Central (see
     // refreshDueCommunitiesBatch), then photos with whatever budget is left (catalogCall), answered by

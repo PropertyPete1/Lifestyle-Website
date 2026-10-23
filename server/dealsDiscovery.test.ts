@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { dealCommunities, dealJobRuns } from "../drizzle/schema";
+import { dealCommunities, dealJobRuns, dealSettings } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 
 /**
@@ -22,7 +22,7 @@ vi.mock("./dealsOnboarding", async (importOriginal) => {
 });
 import { leaseBuilder } from "./dealsSync";
 
-import { DISCOVERY_READERS, communityRecordFromHtml, discoverBuilderCommunities, drhListingEntries, priceFromRange, pulteListingEntries, runCommunityDiscovery } from "./dealsDiscovery";
+import { DISCOVERY_PROGRESS_KEY, DISCOVERY_READERS, DISCOVERY_STALE_MS, communityRecordFromHtml, discoverBuilderCommunities, drhListingEntries, priceFromRange, pulteListingEntries, resumeStaleCommunityDiscovery, runCommunityDiscovery } from "./dealsDiscovery";
 import { resetDreesCaches } from "./dealsAdapters.drees";
 
 const CH = "https://www.chesmar.com";
@@ -597,6 +597,53 @@ describe("discovery", () => {
     release!();
     await stale;
     expect(db.rows(dealJobRuns).find((entry) => entry.jobName === "builder-deals-discovery-run")).toMatchObject({ status: "ok", detail: takerToken });
+  });
+
+  it("saves each builder as it finishes, and a takeover of a dead run carries on with the builders left", async () => {
+    // A full run leaves its progress under its own token.
+    const first = await runCommunityDiscovery(fetcher);
+    expect(first).toMatchObject({ created: 32 });
+    const row = db.rows(dealJobRuns).find((entry) => entry.jobName === "builder-deals-discovery-run")!;
+    const saved = JSON.parse(db.rows(dealSettings).find((entry) => entry.key === DISCOVERY_PROGRESS_KEY)!.value) as { token: string; builders: Array<{ builder: string }>; createdIds: number[] };
+    // The finished row's detail is the summary; the progress keeps the run's claim token.
+    expect(saved.token).toMatch(/^run:[0-9a-f-]{36}$/);
+    expect(saved.builders).toHaveLength(28);
+    expect(saved.createdIds).toHaveLength(32);
+
+    // A run whose process was retired after its first three builders: its row stopped beating eleven minutes ago.
+    const done = saved.builders.slice(0, 3);
+    row.status = "running"; row.detail = "run:retired"; row.completedAt = null; row.startedAt = new Date(Date.now() - DISCOVERY_STALE_MS - 60_000);
+    db.rows(dealSettings).find((entry) => entry.key === DISCOVERY_PROGRESS_KEY)!.value = JSON.stringify({ token: "run:retired", startedAt: new Date(Date.now() - 60 * 60_000).toISOString(), builders: done, createdIds: saved.createdIds.slice(0, 3) });
+    requested.length = 0;
+    mocks.sendBuilderDealsEmail.mockClear();
+    const resumed = await runCommunityDiscovery(fetcher);
+    expect("builders" in resumed && resumed.builders.slice(0, 3)).toEqual(done);
+    expect("builders" in resumed && resumed.builders).toHaveLength(28);
+    // The three finished builders' sites are not read again; the rest are.
+    expect(requested.some((url) => url.startsWith(CH) || url.includes("mihomes.com") || url.includes("drhorton.com"))).toBe(false);
+    expect(requested.some((url) => url.includes("coventryhomes.com"))).toBe(true);
+    // The email names the communities the dead run added too (they are its three created ids).
+    const email = mocks.sendBuilderDealsEmail.mock.calls[0]![0] as { subject: string };
+    expect(email.subject).toBe("Builder Deals: 3 new communities found");
+    expect(db.rows(dealJobRuns).find((entry) => entry.jobName === "builder-deals-discovery-run")).toMatchObject({ status: "ok" });
+  });
+
+  it("starts over when the dead run's progress is not its own or is more than a day old", async () => {
+    db.seed(dealJobRuns, { jobName: "builder-deals-discovery-run", chicagoDay: "run", status: "running", startedAt: new Date(Date.now() - DISCOVERY_STALE_MS - 60_000), detail: "run:old", completedAt: null });
+    db.seed(dealSettings, { key: DISCOVERY_PROGRESS_KEY, value: JSON.stringify({ token: "run:old", startedAt: new Date(Date.now() - 25 * 60 * 60_000).toISOString(), builders: [{ builder: "Chesmar", ok: true, found: 2, skipped: 0, created: 0, existing: 2 }], createdIds: [] }) });
+    const run = await runCommunityDiscovery(fetcher);
+    expect(requested.some((url) => url.startsWith(CH))).toBe(true);
+    expect(run).toMatchObject({ created: 32 });
+  });
+
+  it("leaves a run that is still beating alone, and takes over one silent for ten minutes", async () => {
+    expect(await resumeStaleCommunityDiscovery()).toEqual({ resumed: false });
+    const row = db.seed(dealJobRuns, { jobName: "builder-deals-discovery-run", chicagoDay: "run", status: "running", startedAt: new Date(Date.now() - 5 * 60_000), detail: "run:live", completedAt: null });
+    expect(await resumeStaleCommunityDiscovery()).toEqual({ resumed: false });
+    expect(await runCommunityDiscovery(fetcher)).toEqual({ skipped: "already_running" });
+    expect(row).toBeDefined();
+    db.rows(dealJobRuns).find((entry) => entry.jobName === "builder-deals-discovery-run")!.status = "ok";
+    expect(await resumeStaleCommunityDiscovery()).toEqual({ resumed: false });
   });
 
   it("never follows a sitemap or page to another host", async () => {

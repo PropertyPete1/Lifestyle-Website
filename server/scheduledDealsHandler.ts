@@ -153,6 +153,11 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
       const { startCommunityDiscovery } = await import("./dealsDiscovery");
       return res.json({ ok: true, result: await whenDue(dueAt(5, 0, "Mon"), "builder-deals-discovery", async () => startCommunityDiscovery()) });
     }
+    // Every five minutes: a discovery run whose server process was retired carries on where it stopped.
+    if (job === "discovery-resume") {
+      const { resumeStaleCommunityDiscovery } = await import("./dealsDiscovery");
+      return res.json({ ok: true, result: await resumeStaleCommunityDiscovery() });
+    }
     if (job === "trec") return res.json({ ok: true, result: await whenDue(dueAt(1, 15), "builder-deals-trec-import", importTrecLicenses) });
     if (job === "team") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-team-sync", syncTeamAllowlistFromFub) });
     if (job === "agents") return res.json({ ok: true, result: await whenDue(dueAt(1, 45), "builder-deals-known-agent-sync", syncKnownAgentsFromFub) });

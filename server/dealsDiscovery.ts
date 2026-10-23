@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
-import { dealCommunities, dealJobRuns } from "../drizzle/schema";
+import { dealCommunities, dealJobRuns, dealSettings } from "../drizzle/schema";
 import { DOWNTOWN_SAN_ANTONIO, milesBetween } from "../shared/dealsArea";
 import { normalizedDealSourceKey } from "../shared/deals";
 import { getDb } from "./db";
@@ -453,16 +453,27 @@ const LEASE_POLL_MS = 15_000;
  * cannot be read, whose lease stays busy, or whose onboarding throws is
  * reported and adds nothing; the others carry on.
  */
-export async function discoverAndOnboardAll(fetcher: HtmlFetcher = fetch, readers: readonly DiscoveryReader[] = DISCOVERY_READERS, createdIds: number[] = [], options: { sleep?: (ms: number) => Promise<void>; now?: () => number } = {}): Promise<DiscoveryRun> {
-  const run: DiscoveryRun = { builders: [], created: 0 };
+export type DiscoveryOptions = {
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  /** Builders a dead run already finished: kept as they were and not read again. */
+  done?: DiscoveryRun["builders"];
+  /** After each builder (read and onboarded, or failed), with the run so far: where progress is saved. */
+  onBuilder?: (run: DiscoveryRun, createdIds: readonly number[]) => Promise<void>;
+};
+
+export async function discoverAndOnboardAll(fetcher: HtmlFetcher = fetch, readers: readonly DiscoveryReader[] = DISCOVERY_READERS, createdIds: number[] = [], options: DiscoveryOptions = {}): Promise<DiscoveryRun> {
+  const run: DiscoveryRun = { builders: [...(options.done ?? [])], created: (options.done ?? []).reduce((sum, builder) => sum + builder.created, 0) };
+  const finished = new Set((options.done ?? []).map((builder) => builder.builder));
+  const saved = async () => { await options.onBuilder?.(run, createdIds).catch(() => undefined); };
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const now = options.now ?? (() => Date.now());
   for (const reader of readers) {
-    if (!hasBuilderReader(reader.builder)) continue;
-    const failed = (reason: string) => { run.builders.push({ builder: reader.builder, ok: false, reason, found: 0, skipped: 0, created: 0, existing: 0 }); };
+    if (!hasBuilderReader(reader.builder) || finished.has(reader.builder)) continue;
+    const failed = (reason: string) => { run.builders.push({ builder: reader.builder, ok: false, reason, found: 0, skipped: 0, created: 0, existing: 0 }); return saved(); };
     let lease = await leaseBuilder(reader.builder, new Date(now()));
     for (const started = now(); !lease && now() - started < LEASE_WAIT_MS;) { await sleep(LEASE_POLL_MS); lease = await leaseBuilder(reader.builder, new Date(now())); }
-    if (!lease) { failed("builder_busy"); continue; }
+    if (!lease) { await failed("builder_busy"); continue; }
     let found: BuilderDiscovery;
     try {
       // The lease is renewed as pages are read (one slow builder can take an hour); the passed fetcher is wrapped, not replaced.
@@ -474,7 +485,7 @@ export async function discoverAndOnboardAll(fetcher: HtmlFetcher = fetch, reader
       });
     } catch (error) {
       console.error(`[deals-discovery] ${reader.builder} failed`, error instanceof Error ? error.message : error);
-      failed("discovery_failed");
+      await failed("discovery_failed");
       continue;
     } finally {
       await lease.release();
@@ -484,19 +495,40 @@ export async function discoverAndOnboardAll(fetcher: HtmlFetcher = fetch, reader
       if (found.ok && found.communities.length) onboarded = await onboardDiscoveredCommunities(found.communities);
     } catch (error) {
       console.error(`[deals-discovery] onboarding ${reader.builder} failed`, error instanceof Error ? error.message : error);
-      failed("onboarding_failed");
+      await failed("onboarding_failed");
       continue;
     }
     run.builders.push({ builder: reader.builder, ok: found.ok, reason: found.reason, found: found.communities.length, skipped: found.skipped.length + onboarded.skipped.length, created: onboarded.created.length, existing: onboarded.existing });
     run.created += onboarded.created.length;
     createdIds.push(...onboarded.created);
+    await saved();
   }
   return run;
 }
 
 const DISCOVERY_JOB = "builder-deals-discovery-run";
-/** A discovery run with no finish for this long is treated as dead and may be started again. */
-const DISCOVERY_STALE_MS = 3 * 60 * 60_000;
+/**
+ * A running discovery stamps its row every DISCOVERY_HEARTBEAT_MS; one silent for DISCOVERY_STALE_MS is dead and
+ * may be taken over. The host retires a server process every few minutes to twenty (October 23, 2026), so a run
+ * reading 28 builders one after another (one can take most of an hour) seldom finishes in one process: each
+ * builder's result is saved as it finishes, and a takeover within DISCOVERY_RESUME_MS of the run's start carries
+ * on with the builders left. The discovery-resume job takes over a dead run every five minutes.
+ */
+export const DISCOVERY_HEARTBEAT_MS = 60_000;
+export const DISCOVERY_STALE_MS = 10 * 60_000;
+export const DISCOVERY_RESUME_MS = 24 * 60 * 60_000;
+export const DISCOVERY_PROGRESS_KEY = "deals.discovery.progress";
+type DiscoveryProgress = { token: string; startedAt: string; builders: DiscoveryRun["builders"]; createdIds: number[] };
+
+function parseProgress(value: string | null | undefined): DiscoveryProgress | null {
+  try {
+    const parsed = JSON.parse(value ?? "null") as Partial<DiscoveryProgress> | null;
+    if (!parsed || typeof parsed.token !== "string" || typeof parsed.startedAt !== "string" || !Array.isArray(parsed.builders) || !Array.isArray(parsed.createdIds)) return null;
+    return { token: parsed.token, startedAt: parsed.startedAt, builders: parsed.builders.filter((item) => item && typeof item.builder === "string"), createdIds: parsed.createdIds.filter((id): id is number => Number.isInteger(id)) };
+  } catch {
+    return null;
+  }
+}
 
 /** Tells the sync recipients what was found; only when something new was added. Never fails the run. */
 export async function emailDiscoveryRun(run: DiscoveryRun, createdIds: readonly number[]): Promise<void> {
@@ -525,17 +557,23 @@ export async function emailDiscoveryRun(run: DiscoveryRun, createdIds: readonly 
  * time across every server: a deal_job_runs row ("running") is the claim, and
  * a run that never finished is taken over after three hours.
  */
-export async function runCommunityDiscovery(fetcher: HtmlFetcher = fetch, options: Parameters<typeof discoverAndOnboardAll>[3] = {}): Promise<DiscoveryRun | { skipped: "already_running" }> {
+export async function runCommunityDiscovery(fetcher: HtmlFetcher = fetch, options: Pick<DiscoveryOptions, "sleep" | "now"> = {}): Promise<DiscoveryRun | { skipped: "already_running" }> {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const now = new Date(options.now?.() ?? Date.now());
   // The claim carries a token: a run that was taken over after three hours cannot later close the taker's row.
   const token = `run:${randomUUID()}`;
   const existing = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, DISCOVERY_JOB), eq(dealJobRuns.chicagoDay, "run"))).limit(1))[0];
+  // A dead run's saved builders are carried on with when it is taken over soon enough.
+  let resumed: DiscoveryProgress | null = null;
   if (existing) {
     if (existing.status === "running" && existing.startedAt.getTime() > now.getTime() - DISCOVERY_STALE_MS) return { skipped: "already_running" };
     const taken = await db.update(dealJobRuns).set({ status: "running", startedAt: now, completedAt: null, detail: token }).where(and(eq(dealJobRuns.id, existing.id), eq(dealJobRuns.status, existing.status), eq(dealJobRuns.startedAt, existing.startedAt)));
     if (Number((taken as unknown as [{ affectedRows?: number }])[0]?.affectedRows ?? 0) !== 1) return { skipped: "already_running" };
+    if (existing.status === "running" && existing.detail) {
+      const progress = parseProgress((await db.select().from(dealSettings).where(eq(dealSettings.key, DISCOVERY_PROGRESS_KEY)).limit(1))[0]?.value);
+      if (progress && progress.token === existing.detail && Date.parse(progress.startedAt) > now.getTime() - DISCOVERY_RESUME_MS) resumed = progress;
+    }
   } else {
     try { await db.insert(dealJobRuns).values({ jobName: DISCOVERY_JOB, chicagoDay: "run", status: "running", startedAt: now, detail: token }); } catch { return { skipped: "already_running" }; }
   }
@@ -545,16 +583,38 @@ export async function runCommunityDiscovery(fetcher: HtmlFetcher = fetch, option
     if (!connection) return;
     await connection.update(dealJobRuns).set({ status, detail: detail.slice(0, 10_000), completedAt: new Date() }).where(mine).catch(() => undefined);
   };
+  const startedAt = resumed?.startedAt ?? now.toISOString();
+  const saveProgress = async (run: DiscoveryRun, createdIds: readonly number[]) => {
+    const value = JSON.stringify({ token, startedAt, builders: run.builders, createdIds: [...createdIds] } satisfies DiscoveryProgress);
+    const connection = await getDb();
+    await connection?.insert(dealSettings).values({ key: DISCOVERY_PROGRESS_KEY, value }).onDuplicateKeyUpdate({ set: { value } });
+  };
+  // The row's startedAt is the heartbeat: a live run is never taken over; one whose process was retired is, ten minutes on.
+  const heartbeat = setInterval(() => { void getDb().then((connection) => connection?.update(dealJobRuns).set({ startedAt: new Date() }).where(mine)).catch(() => undefined); }, DISCOVERY_HEARTBEAT_MS);
+  heartbeat.unref?.();
   try {
-    const createdIds: number[] = [];
-    const run = await discoverAndOnboardAll(fetcher, DISCOVERY_READERS, createdIds, options);
+    const createdIds: number[] = [...(resumed?.createdIds ?? [])];
+    if (resumed) await saveProgress({ builders: resumed.builders, created: createdIds.length }, createdIds).catch(() => undefined);
+    const run = await discoverAndOnboardAll(fetcher, DISCOVERY_READERS, createdIds, { ...options, done: resumed?.builders, onBuilder: saveProgress });
     await emailDiscoveryRun(run, createdIds);
     await finish(run.builders.every((builder) => builder.ok) ? "ok" : "failed", JSON.stringify({ created: run.created, builders: run.builders.map((builder) => [builder.builder, builder.ok, builder.reason ?? null]), day: chicagoDay(now) }));
     return run;
   } catch (error) {
     await finish("failed", error instanceof Error ? error.message : "discovery failed");
     throw error;
+  } finally {
+    clearInterval(heartbeat);
   }
+}
+
+/** Every five minutes: a run whose process stopped stamping its row is taken over, carrying on with the builders left. */
+export async function resumeStaleCommunityDiscovery(now = new Date()): Promise<{ resumed: boolean }> {
+  const db = await getDb();
+  if (!db) return { resumed: false };
+  const row = (await db.select().from(dealJobRuns).where(and(eq(dealJobRuns.jobName, DISCOVERY_JOB), eq(dealJobRuns.chicagoDay, "run"))).limit(1))[0];
+  if (!row || row.status !== "running" || row.startedAt.getTime() > now.getTime() - DISCOVERY_STALE_MS) return { resumed: false };
+  startCommunityDiscovery();
+  return { resumed: true };
 }
 
 /** Starts a run in the background (the weekly job and the Admin button); the result arrives by email. */

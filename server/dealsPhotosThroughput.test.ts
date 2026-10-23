@@ -224,13 +224,13 @@ describe("memory guards (the host stops a process at about 500-550 MB)", () => {
     settings: { "Perry Homes": off("Perry Homes") },
   });
 
-  it("starts no photo once the process is past PHOTO_RSS_STOP_MB, and leaves every row unclaimed", async () => {
+  it("does one photo and starts no other once the process is past PHOTO_RSS_STOP_MB, leaving the rest unclaimed", async () => {
     const sim = queue();
     vi.stubGlobal("fetch", vi.fn(async () => imageResponse(jpeg)));
     photos.setDealPhotoRssReader(() => (photos.PHOTO_RSS_STOP_MB + 10) * 1024 * 1024);
-    const result = await photos.processPendingDealPhotos({ budgetMs: 60_000 });
-    expect(result).toMatchObject({ processed: 0, stoppedForMemory: true });
-    expect(Array.from(sim.rows.values()).every((row) => row.processingState === "pending" && row.processingAttempts === 0)).toBe(true);
+    const result = await photos.processPendingDealPhotos({ budgetMs: 60_000, concurrency: 1 });
+    expect(result).toMatchObject({ processed: 1, stoppedForMemory: true });
+    expect(Array.from(sim.rows.values()).filter((row) => row.processingState === "pending" && row.processingAttempts === 0)).toHaveLength(2);
   });
 
   it("closes the OCR worker after a drain that ends above PHOTO_RSS_RELEASE_MB, and the next drain starts a new one", async () => {

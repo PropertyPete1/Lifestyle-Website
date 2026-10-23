@@ -1528,7 +1528,8 @@ async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: numbe
   const next = async (): Promise<number | null> => {
     for (;;) {
       if (started >= options.maxPhotos) return null;
-      if (overMb(PHOTO_RSS_STOP_MB)) {
+      // Each drain still does one photo, so a process whose memory does not come back keeps the queue moving.
+      if (started > 0 && overMb(PHOTO_RSS_STOP_MB)) {
         result.stoppedForMemory = true;
         return null;
       }

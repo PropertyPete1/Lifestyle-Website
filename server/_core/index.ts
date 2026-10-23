@@ -1,4 +1,6 @@
 import "dotenv/config";
+// First: a production process without MALLOC_ARENA_MAX replaces itself with it set (see the module).
+import "./mallocArena";
 import express from "express";
 import { createServer } from "http";
 import net from "net";

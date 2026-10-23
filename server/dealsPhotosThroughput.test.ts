@@ -215,6 +215,40 @@ afterEach(() => {
   vi.mocked(storageDelete).mockReset();
 });
 
+describe("memory guards (the host stops a process at about 500-550 MB)", () => {
+  afterEach(() => photos.setDealPhotoRssReader(null));
+  const queue = () => simulatedQueue({
+    communities: [community(1, "Perry Homes")],
+    homes: [home(1, 1), home(2, 1), home(3, 1)],
+    photos: [1, 2, 3].map((id) => ({ id, homeId: id, sourceUrl: `https://res.cloudinary.com/perryhomes/p/${id}.jpg` })),
+    settings: { "Perry Homes": off("Perry Homes") },
+  });
+
+  it("starts no photo once the process is past PHOTO_RSS_STOP_MB, and leaves every row unclaimed", async () => {
+    const sim = queue();
+    vi.stubGlobal("fetch", vi.fn(async () => imageResponse(jpeg)));
+    photos.setDealPhotoRssReader(() => (photos.PHOTO_RSS_STOP_MB + 10) * 1024 * 1024);
+    const result = await photos.processPendingDealPhotos({ budgetMs: 60_000 });
+    expect(result).toMatchObject({ processed: 0, stoppedForMemory: true });
+    expect(Array.from(sim.rows.values()).every((row) => row.processingState === "pending" && row.processingAttempts === 0)).toBe(true);
+  });
+
+  it("closes the OCR worker after a drain that ends above PHOTO_RSS_RELEASE_MB, and the next drain starts a new one", async () => {
+    queue();
+    vi.stubGlobal("fetch", vi.fn(async () => imageResponse(jpeg)));
+    const { createWorker } = await import("tesseract.js");
+    photos.setDealPhotoRssReader(() => (photos.PHOTO_RSS_RELEASE_MB + 10) * 1024 * 1024);
+    const first = await photos.processPendingDealPhotos({ budgetMs: 60_000, maxPhotos: 1 });
+    expect(first).toMatchObject({ processed: 1, ocrReleased: true });
+    const workersBefore = vi.mocked(createWorker).mock.calls.length;
+    photos.setDealPhotoRssReader(() => 200 * 1024 * 1024);
+    const second = await photos.processPendingDealPhotos({ budgetMs: 60_000, maxPhotos: 1 });
+    expect(second.processed).toBe(1);
+    expect(second.ocrReleased).toBeUndefined();
+    expect(vi.mocked(createWorker).mock.calls.length).toBe(workersBefore + 1);
+  });
+});
+
 describe("time-budgeted drain", () => {
   it("keeps starting photos past the old fixed count until the budget is spent, then stops claiming and lets in-flight work finish", async () => {
     const sim = simulatedQueue({

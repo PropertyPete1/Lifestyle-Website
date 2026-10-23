@@ -500,7 +500,7 @@ type OperationalSnapshot = {
   funnel: { landed: number; consented: number; verificationSends: number; verified: number; listingViews: number; requests: number; newLeads: number };
   trecImport: { completedAt: Date | null; ageHours: number | null; state: HealthState };
   sourceUpdates: { activeCommunities: number; staleCommunities: number; heldCommunities: number; oldestAgeHours: number | null; lastSuccessfulSyncAt: Date | null; state: HealthState };
-  photos: { pending: number; processing: number; failed: number; awaitingRegion: number; oldestPendingAgeHours: number | null; oldestPendingMinutes: number | null; drainStalledMinutes: number | null; drainError: string | null; drainWarning?: string | null; leaseExpiredLastHour: number; lastDrain: LastPhotoDrain | null; serverBootsLast24h?: number | null; serverLife?: { answeringProcess: ProcessSnapshot; bootsLastHour: number | null; recent: ReturnType<typeof serverLives> }; state: HealthState };
+  photos: { pending: number; processing: number; failed: number; awaitingRegion: number; oldestPendingAgeHours: number | null; oldestPendingMinutes: number | null; drainStalledMinutes: number | null; drainError: string | null; drainWarning?: string | null; leaseExpiredLastHour: number; lastDrain: LastPhotoDrain | null; serverBootsLast24h?: number | null; serverLife?: { mallocArenaMax: string | null; answeringProcess: ProcessSnapshot; bootsLastHour: number | null; recent: ReturnType<typeof serverLives> }; state: HealthState };
   fubFailures: { jobs: number; leads: number; failingOverAnHour: number; state: HealthState };
   emailFailures: { failed: number; state: HealthState };
   jobFailures: { failed: number; jobs: string[]; state: HealthState };
@@ -603,7 +603,7 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
     const serverBoots = await readServerBoots().catch(() => null);
     const serverBootsLast24h = serverBoots ? serverBootsSince(serverBoots, new Date(now.getTime() - 24 * 3_600_000)) : null;
     const [beats, exits] = await Promise.all([readServerBeats().catch(() => []), readServerExits().catch(() => [])]);
-    const serverLife = { answeringProcess: processSnapshot(now), bootsLastHour: serverBoots ? serverBootsSince(serverBoots, new Date(now.getTime() - 3_600_000)) : null, recent: serverLives(beats, exits, now) };
+    const serverLife = { mallocArenaMax: process.env.MALLOC_ARENA_MAX ?? null, answeringProcess: processSnapshot(now), bootsLastHour: serverBoots ? serverBootsSince(serverBoots, new Date(now.getTime() - 3_600_000)) : null, recent: serverLives(beats, exits, now) };
     const leaseExpiredLastHour = number(photo?.leaseExpiredLastHour);
     const communityLabel = (communityId: number) => {
       const community = communities.find((row) => row.id === communityId);

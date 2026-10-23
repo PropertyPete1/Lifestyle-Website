@@ -18,6 +18,20 @@ import { recordDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
  * peak (518-577 MB down to 477-482 MB) at the same speed: the pipeline never reuses an operation, and the two
  * lanes already keep the CPU busy. Set once for the process (renders and city imagery use the same settings).
  */
+/**
+ * The host stops a server process at about 500-550 MB (October 23, 2026: every process stopped or killed was at
+ * 470-557 MB; the photo-draining one reached that within minutes, so drains and the TREC import died with it). A
+ * drain starts no further photo once the process passes PHOTO_RSS_STOP_MB, and closes the OCR worker after a drain
+ * that ends above PHOTO_RSS_RELEASE_MB (its thread and WASM memory go back; with MALLOC_ARENA_MAX=2 the process
+ * returns to about its idle size). The next recognition starts a new worker in a second or two.
+ */
+export const PHOTO_RSS_STOP_MB = 450;
+export const PHOTO_RSS_RELEASE_MB = 380;
+let readRssBytes = () => process.memoryUsage.rss();
+/** Test seam: the process memory the guards read. */
+export function setDealPhotoRssReader(reader: (() => number) | null) { readRssBytes = reader ?? (() => process.memoryUsage.rss()); }
+const overMb = (mb: number) => readRssBytes() > mb * 1024 * 1024;
+
 export const SHARP_CACHE_ENABLED = false;
 export const SHARP_THREADS = 1;
 sharp.cache(SHARP_CACHE_ENABLED);
@@ -1232,6 +1246,10 @@ export async function reprocessBuilderPhotos(builder: string): Promise<number> {
 }
 
 export type DealPhotoDrainResult = {
+  /** The process passed PHOTO_RSS_STOP_MB, so no further photo was started this drain. */
+  stoppedForMemory?: boolean;
+  /** The OCR worker was closed after the drain to give its memory back (the process was over PHOTO_RSS_RELEASE_MB). */
+  ocrReleased?: boolean;
   processed: number;
   hidden: number;
   awaitingRegion: number;
@@ -1510,6 +1528,10 @@ async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: numbe
   const next = async (): Promise<number | null> => {
     for (;;) {
       if (started >= options.maxPhotos) return null;
+      if (overMb(PHOTO_RSS_STOP_MB)) {
+        result.stoppedForMemory = true;
+        return null;
+      }
       if (options.clock() >= options.deadline) {
         if (queue.length || !exhausted) result.stoppedForTime = true;
         return null;
@@ -1640,6 +1662,10 @@ export async function processPendingDealPhotos(input: number | DealPhotoDrainOpt
     if (!budgeted) drainRerunRequested = false;
     if (steppedAround) total.steppedAroundStaleDrain = true;
     if (waitedMs !== undefined) total.waitedMs = waitedMs;
+    if (overMb(PHOTO_RSS_RELEASE_MB)) {
+      await closeDealPhotoOcrWorker().catch(() => undefined);
+      total.ocrReleased = true;
+    }
     if (budgeted) await logAndRecordDrain(total);
     return total;
   })().finally(() => { activeDrains.delete(drain); });

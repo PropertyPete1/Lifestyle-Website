@@ -349,6 +349,17 @@ describe("Builder Deals daily health check", () => {
     expect(email.content).not.toContain("Community update hold, Private Grove");
   });
 
+  it("sends nothing when the only items are ones handled in Admin (here a photo queue past its age limit), and lists them there", async () => {
+    vi.stubEnv("RESEND_FROM_EMAIL", "deals@lifestyledesignrealty.com");
+    mockServices({ balance: "250.00" });
+    mocks.getDb.mockResolvedValue(snapshotDb(now, { healthy: true, photos: { pending: 500, processing: 0, failed: 0, oldestPendingAt: new Date(now.getTime() - 48 * 60 * 60_000) } }));
+    const result = await runBuilderDealsHealthJob(now);
+    expect(result.attention.length).toBeGreaterThan(0);
+    expect(result.health.urgent).toEqual([]);
+    expect(result).toMatchObject({ ok: true, state: "attention", emailed: false });
+    expect(mocks.sendBuilderDealsEmail).not.toHaveBeenCalled();
+  });
+
   it("flags missing Twilio credentials instead of silently skipping the check", async () => {
     vi.stubEnv("TWILIO_AUTH_TOKEN", "");
     mockServices();

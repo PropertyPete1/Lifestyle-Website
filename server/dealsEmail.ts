@@ -13,7 +13,7 @@ export type BuilderDealsEmailInput = {
 
 export type BuilderDealsEmailResult = {
   ok: boolean;
-  status: "sent" | "failed" | "owner_only_fallback";
+  status: "sent" | "failed" | "owner_only_fallback" | "not_sent_routine";
   deliveryLog: string;
   error?: string;
 };
@@ -40,7 +40,10 @@ export function resendConfiguration() {
   return { apiKey, from, ready: Boolean(apiKey && from), fromMissing: Boolean(apiKey && !from) };
 }
 
-async function persistEmailLog(input: BuilderDealsEmailInput, result: BuilderDealsEmailResult, provider: "resend" | "owner_notification") {
+/** A routine report is never sent, so never logged: the log records only real delivery attempts. */
+type AttemptedEmailResult = BuilderDealsEmailResult & { status: Exclude<BuilderDealsEmailResult["status"], "not_sent_routine"> };
+
+async function persistEmailLog(input: BuilderDealsEmailInput, result: AttemptedEmailResult, provider: "resend" | "owner_notification") {
   const db = await getDb();
   if (!db) return;
   try {
@@ -107,7 +110,18 @@ async function ownerOnlyFallback(normalized: BuilderDealsEmailInput, recipients:
  * key without RESEND_FROM_EMAIL is a misconfiguration: it is logged loudly,
  * recorded on the audit row, and the owner notification still goes out.
  */
+/**
+ * Routine reports Peter does not want in his inbox (October 23, 2026: "tired of being spammed by emails"): the
+ * update summaries and per-refresh update emails, the new-communities report and the Monday System OK report.
+ * They are not sent; the caller sees ok, so their entries are spent rather than retried, and everything they would
+ * have said stays in Admin, Builder Deals. Lead alerts, verification-limit, team-sync and FUB-failure emails and the
+ * urgent health checks still go out.
+ */
+export const ROUTINE_EMAIL_CATEGORIES: ReadonlySet<string> = new Set(["deals_sync_summary", "deals_sync_hold", "deals_discovery", "weekly"]);
+export const NOT_SENT_ROUTINE_LOG = "not sent: routine report (kept in Admin)";
+
 export async function sendBuilderDealsEmail(input: BuilderDealsEmailInput): Promise<BuilderDealsEmailResult> {
+  if (ROUTINE_EMAIL_CATEGORIES.has(input.category)) return { ok: true, status: "not_sent_routine", deliveryLog: NOT_SENT_ROUTINE_LOG };
   const recipients = normalizedRecipients(input.recipients);
   // Every path (digest, holds, health, Monday report, alerts) gets the same subject cap; a body too big for the owner
   // notification is split by the fallback below.
@@ -121,7 +135,7 @@ export async function sendBuilderDealsEmail(input: BuilderDealsEmailInput): Prom
   }
 
   if (!recipients.length) {
-    const result: BuilderDealsEmailResult = {
+    const result: AttemptedEmailResult = {
       ok: false,
       status: "failed",
       deliveryLog: "resend failed",
@@ -148,7 +162,7 @@ export async function sendBuilderDealsEmail(input: BuilderDealsEmailInput): Prom
     });
     if (!response.ok) {
       const detail = (await response.text().catch(() => "")).slice(0, 1_000);
-      const result: BuilderDealsEmailResult = {
+      const result: AttemptedEmailResult = {
         ok: false,
         status: "failed",
         deliveryLog: "resend failed",
@@ -157,11 +171,11 @@ export async function sendBuilderDealsEmail(input: BuilderDealsEmailInput): Prom
       await persistEmailLog(normalized, result, "resend");
       return result;
     }
-    const result: BuilderDealsEmailResult = { ok: true, status: "sent", deliveryLog: "resend sent" };
+    const result: AttemptedEmailResult = { ok: true, status: "sent", deliveryLog: "resend sent" };
     await persistEmailLog(normalized, result, "resend");
     return result;
   } catch (error) {
-    const result: BuilderDealsEmailResult = {
+    const result: AttemptedEmailResult = {
       ok: false,
       status: "failed",
       deliveryLog: "resend failed",

@@ -34,7 +34,7 @@ describe("Builder Deals email size limits (owner-notification fallback)", () => 
     const lines = Array.from({ length: 900 }, (_, index) => `- Community ${index} (Lennar): 3 new: 12345 Blue Sage Trail, 23456 Cypress Bend Way, +1 more`);
     const content = lines.join("\n");
     expect(content.length).toBeGreaterThan(60_000);
-    const result = await sendBuilderDealsEmail({ category: "weekly", recipients, subject: "Builder Deals System OK: all checks passed", content });
+    const result = await sendBuilderDealsEmail({ category: "health", recipients, subject: "Builder Deals System OK: all checks passed", content });
     expect(result).toEqual({ ok: true, status: "owner_only_fallback", deliveryLog: OWNER_ONLY_DELIVERY_LOG });
     const calls = mocks.notifyOwner.mock.calls.map(([payload]) => payload as { title: string; content: string });
     expect(calls.length).toBeGreaterThanOrEqual(4);
@@ -53,7 +53,7 @@ describe("Builder Deals email size limits (owner-notification fallback)", () => 
     mocks.getDb.mockResolvedValue(db);
     const subject = `Builder Deals hold: ${Array.from({ length: 120 }, (_, index) => `Saddle Creek Ranch ${index}`).join(", ")}`;
     expect(subject.length).toBeGreaterThan(OWNER_NOTIFICATION_TITLE_MAX);
-    expect((await sendBuilderDealsEmail({ category: "deals_sync_hold", recipients, subject, content: "x" })).ok).toBe(true);
+    expect((await sendBuilderDealsEmail({ category: "team_sync", recipients, subject, content: "x" })).ok).toBe(true);
     const title = (mocks.notifyOwner.mock.calls[0]![0] as { title: string }).title;
     expect(title.length).toBeLessThanOrEqual(200);
     expect(title.startsWith("Builder Deals hold: Saddle Creek Ranch 0, ")).toBe(true);
@@ -64,7 +64,7 @@ describe("Builder Deals email size limits (owner-notification fallback)", () => 
     const db = createFakeDealsDb();
     mocks.getDb.mockResolvedValue(db);
     mocks.notifyOwner.mockResolvedValue(false);
-    const result = await sendBuilderDealsEmail({ category: "deals_sync_summary", recipients, subject: "Builder Deals morning summary: 3 changes", content: "x" });
+    const result = await sendBuilderDealsEmail({ category: "fub_failure", recipients, subject: "Builder Deals morning summary: 3 changes", content: "x" });
     expect(result).toMatchObject({ ok: false, status: "owner_only_fallback", error: "Owner notification was not accepted" });
     // builderDealsOperationalSnapshot counts deal_email_logs rows with delivery_status "failed" in the last 24 hours.
     expect(logs(db)).toEqual([expect.objectContaining({ provider: "owner_notification", deliveryStatus: "failed", deliveryLog: OWNER_ONLY_REJECTED_LOG, deliveredAt: null, lastError: "Owner notification was not accepted" })]);
@@ -78,5 +78,16 @@ describe("Builder Deals email size limits (owner-notification fallback)", () => 
     const partial = await sendBuilderDealsEmail({ category: "health", recipients, subject: "Builder Deals health check: 2 items need attention", content: long });
     expect(partial).toMatchObject({ ok: false, error: expect.stringMatching(/not accepted for part 2 of \d/) });
     expect(logs(parts).map((row) => row.deliveryStatus)).toEqual(["owner_only_fallback", "failed", ...logs(parts).slice(2).map(() => "owner_only_fallback")]);
+  });
+});
+
+describe("routine reports are not emailed", () => {
+  it("sends no update summary, new-communities report or Monday report, and says ok so nothing is retried; lead and failure emails still go", async () => {
+    const { ROUTINE_EMAIL_CATEGORIES, NOT_SENT_ROUTINE_LOG } = await import("./dealsEmail");
+    for (const category of ["deals_sync_summary", "deals_sync_hold", "deals_discovery", "weekly"]) {
+      expect(ROUTINE_EMAIL_CATEGORIES.has(category)).toBe(true);
+      expect(await sendBuilderDealsEmail({ category, recipients: ["peter@lifestyledesignrealty.com"], subject: "x", content: "y" })).toEqual({ ok: true, status: "not_sent_routine", deliveryLog: NOT_SENT_ROUTINE_LOG });
+    }
+    for (const category of ["hourly_digest", "health", "fub_failure", "team_sync", "deals_verify_threshold"]) expect(ROUTINE_EMAIL_CATEGORIES.has(category)).toBe(false);
   });
 });

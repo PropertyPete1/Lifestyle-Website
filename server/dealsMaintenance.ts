@@ -674,17 +674,20 @@ export async function builderDealsHealthCheck(now = new Date(), options: HealthC
   ]);
   const resend = resendConfiguration();
   const attention: string[] = [];
-  if (!twilioConfigured) attention.push("Twilio Verify credentials are missing (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN or TWILIO_VERIFY_SERVICE_SID), so no code can be sent.");
+  /** The items that stop leads (texting codes, Follow Up Boss, the database) or expose private details: only these are emailed. */
+  const urgent: string[] = [];
+  const urgentPush = (item: string) => { attention.push(item); urgent.push(item); };
+  if (!twilioConfigured) urgentPush("Twilio Verify credentials are missing (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN or TWILIO_VERIFY_SERVICE_SID), so no code can be sent.");
   else {
-    if (twilio.account === "unavailable") attention.push("Twilio credentials did not work: the account lookup failed.");
-    else if (twilio.account === "inactive") attention.push(`Twilio account status is ${twilio.accountStatus ?? "unknown"}, not active.`);
-    if (twilio.balance === "low") attention.push(`Twilio balance is ${money(twilio.balanceUsd, twilio.currency)}, under the $${thresholds.twilioMinimumBalanceUsd} minimum.`);
-    else if (twilio.balance === "unavailable") attention.push("Twilio balance could not be read.");
+    if (twilio.account === "unavailable") urgentPush("Twilio credentials did not work: the account lookup failed.");
+    else if (twilio.account === "inactive") urgentPush(`Twilio account status is ${twilio.accountStatus ?? "unknown"}, not active.`);
+    if (twilio.balance === "low") urgentPush(`Twilio balance is ${money(twilio.balanceUsd, twilio.currency)}, under the $${thresholds.twilioMinimumBalanceUsd} minimum.`);
+    else if (twilio.balance === "unavailable") urgentPush("Twilio balance could not be read.");
   }
-  if (fubAvailability === "not_checked") attention.push("FUB_API_KEY is missing, so no lead reaches Follow Up Boss.");
-  else if (fubAvailability === "unavailable") attention.push("Follow Up Boss credentials did not work (the identity request failed).");
+  if (fubAvailability === "not_checked") urgentPush("FUB_API_KEY is missing, so no lead reaches Follow Up Boss.");
+  else if (fubAvailability === "unavailable") urgentPush("Follow Up Boss credentials did not work (the identity request failed).");
   if (resend.fromMissing) attention.push("RESEND_API_KEY is set but RESEND_FROM_EMAIL is not, so alert emails fall back to the project-owner notification and never reach steven@.");
-  if (!operational.available) attention.push("The database snapshot was unavailable, so the local checks could not run.");
+  if (!operational.available) urgentPush("The database snapshot was unavailable, so the local checks could not run.");
   else {
     if (operational.trecImport.state === "attention") attention.push(operational.trecImport.completedAt ? `TREC file is ${hoursLabel(operational.trecImport.ageHours)} old (limit ${thresholds.trecImportHours}h).` : "No TREC import has completed yet.");
     if (operational.sourceUpdates.staleCommunities > 0) attention.push(`Last builder update is over ${thresholds.communityUpdateHours / 24} days old for ${operational.sourceUpdates.staleCommunities} of ${operational.sourceUpdates.activeCommunities} active communities (oldest ${hoursLabel(operational.sourceUpdates.oldestAgeHours)}).`);
@@ -695,14 +698,14 @@ export async function builderDealsHealthCheck(now = new Date(), options: HealthC
     if (operational.photos.leaseExpiredLastHour > BUILDER_DEALS_HEALTH_THRESHOLDS.photoLeaseExpiredPerHour) attention.push(`Photo runs are being cut off: ${operational.photos.leaseExpiredLastHour} photos were put back in the last hour because their run vanished (limit ${BUILDER_DEALS_HEALTH_THRESHOLDS.photoLeaseExpiredPerHour}).`);
     if (operational.photos.drainWarning) attention.push(`Photo processing is running in plain order (oldest first): ${operational.photos.drainWarning}.`);
     if (operational.photos.state === "attention") attention.push(`Photo queue: ${operational.photos.failed} failed, ${operational.photos.awaitingRegion} awaiting a builder watermark region (Set watermark region in Admin, Builder Deals, Photos), oldest pending ${operational.photos.oldestPendingMinutes ?? 0} minutes (limit ${thresholds.pendingPhotoMinutes}).`);
-    if (operational.fubFailures.state === "attention") attention.push(`${operational.fubFailures.failingOverAnHour} FUB write${operational.fubFailures.failingOverAnHour === 1 ? " has" : "s have"} been failing for over ${thresholds.fubFailureMinutes} minutes.`);
+    if (operational.fubFailures.state === "attention") urgentPush(`${operational.fubFailures.failingOverAnHour} FUB write${operational.fubFailures.failingOverAnHour === 1 ? " has" : "s have"} been failing for over ${thresholds.fubFailureMinutes} minutes.`);
     if (operational.emailFailures.state === "attention") attention.push(`${operational.emailFailures.failed} alert email${operational.emailFailures.failed === 1 ? "" : "s"} failed to send in the last ${thresholds.emailFailureHours} hours.`);
     if (operational.jobFailures.state === "attention") attention.push(`${operational.jobFailures.failed} scheduled job run${operational.jobFailures.failed === 1 ? "" : "s"} failed in the last ${thresholds.jobFailureHours} hours: ${operational.jobFailures.jobs.join(", ")}.`);
     if (operational.holds.incentives > 0) {
       const { incentives, incentivesShowingLine: showing } = operational.holds;
       attention.push(`${incentives} incentive hold${incentives === 1 ? "" : "s"}${showing ? `: ${showing} show${showing === 1 ? "s" : ""} "Builder incentive available" until reviewed` : ""}${incentives - showing ? `${showing ? "," : ":"} ${incentives - showing} behind a manual override or no longer re-read` : ""} (Accept is optional).`);
     }
-    if (operational.privacyResidue.state === "attention") attention.push(`${operational.privacyResidue.dropped} buyer-facing community entr${operational.privacyResidue.dropped === 1 ? "y was" : "ies were"} dropped for private residue in the last ${thresholds.jobFailureHours} hours (community id${operational.privacyResidue.communityIds.length === 1 ? "" : "s"} ${operational.privacyResidue.communityIds.join(", ") || "unknown"}). Review the names to hide and excluded terms in Admin, Builder Deals, Communities.`);
+    if (operational.privacyResidue.state === "attention") urgentPush(`${operational.privacyResidue.dropped} buyer-facing community entr${operational.privacyResidue.dropped === 1 ? "y was" : "ies were"} dropped for private residue in the last ${thresholds.jobFailureHours} hours (community id${operational.privacyResidue.communityIds.length === 1 ? "" : "s"} ${operational.privacyResidue.communityIds.join(", ") || "unknown"}). Review the names to hide and excluded terms in Admin, Builder Deals, Communities.`);
   }
   return {
     checkedAt: now,
@@ -712,6 +715,7 @@ export async function builderDealsHealthCheck(now = new Date(), options: HealthC
     operational,
     renderPrune,
     attention,
+    urgent,
     state: healthState(attention.length === 0),
   };
 }
@@ -733,15 +737,16 @@ export function holdLines(items: HoldItem[]) {
 export async function runBuilderDealsHealthJob(now = new Date()) {
   // The scheduled run owns the render prune; admin previews of the same check never change state.
   const health = await builderDealsHealthCheck(now, { prune: true });
-  if (!health.attention.length) return { ok: true as const, state: health.state, attention: health.attention, emailed: false, health };
+  // Only what stops leads or exposes private details is emailed (no routine email, October 23, 2026); the rest stays in Admin.
+  if (!health.urgent.length) return { ok: true as const, state: health.state, attention: health.attention, emailed: false, health };
   const settings = await getDealSettings();
   const sent = await sendBuilderDealsEmail({
     category: "health",
     recipients: settings.alertRecipients,
-    subject: `Builder Deals health check: ${health.attention.length} item${health.attention.length === 1 ? "" : "s"} need attention`,
+    subject: `Builder Deals health check: ${health.urgent.length} item${health.urgent.length === 1 ? "" : "s"} need attention`,
     content: [
-      `Builder Deals daily health check at ${formatChicagoDateTime(now)} found ${health.attention.length} item${health.attention.length === 1 ? "" : "s"} that need attention:`,
-      ...health.attention.map((item) => `- ${item}`),
+      `Builder Deals daily health check at ${formatChicagoDateTime(now)} found ${health.urgent.length} item${health.urgent.length === 1 ? "" : "s"} that need attention:`,
+      ...health.urgent.map((item) => `- ${item}`),
       "",
       ...holdLines(health.operational.holds.items),
       "",

@@ -6,7 +6,7 @@
  * registration the endpoint exists but never fires, so the stats strip would
  * only ever reflect the last manually-seeded values.
  */
-import { createHeartbeatJob, listHeartbeatJobs, updateHeartbeatJob } from "./_core/heartbeat";
+import { createHeartbeatJob, listHeartbeatJobs, updateHeartbeatJob, type HeartbeatJobInfo } from "./_core/heartbeat";
 
 export const STATS_CRON_JOB_NAME = "daily-stats-sync";
 /** Daily at 09:00 UTC (early morning US) — 6-field cron: sec min hour dom mon dow. */
@@ -48,6 +48,24 @@ export const DEALS_JOB_DEFINITIONS = [
 ] as const;
 
 /**
+ * Every registered job, page by page. The service pages its list; reading only the first page would miss
+ * jobs past it, so they would be created again or never reconciled to a new schedule.
+ */
+export async function listAllHeartbeatJobs(userSession = ""): Promise<{ total: number; jobs: HeartbeatJobInfo[] }> {
+  const PAGE_SIZE = 100;
+  const jobs: HeartbeatJobInfo[] = [];
+  let total = 0;
+  for (let page = 1; page <= 20; page++) {
+    const result = await listHeartbeatJobs(userSession, { page, pageSize: PAGE_SIZE });
+    total = Number(result.total ?? 0);
+    const fresh = (result.jobs ?? []).filter((job) => !jobs.some((seen) => seen.taskUid === job.taskUid));
+    jobs.push(...fresh);
+    if (!fresh.length || (result.jobs ?? []).length < PAGE_SIZE || (total > 0 && jobs.length >= total)) break;
+  }
+  return { total: Math.max(total, jobs.length), jobs };
+}
+
+/**
  * Idempotently ensure the daily stats-sync cron exists. Safe to call on every
  * boot: if a job with our name is already registered it is left untouched.
  * Never throws — if the heartbeat service is unavailable (e.g. Forge env not
@@ -56,7 +74,7 @@ export const DEALS_JOB_DEFINITIONS = [
  */
 export async function ensureStatsSyncCron(): Promise<void> {
   try {
-    const { jobs } = await listHeartbeatJobs("");
+    const { jobs } = await listAllHeartbeatJobs("");
     if (jobs.some((j) => j.name === STATS_CRON_JOB_NAME)) {
       console.log(`[cron] "${STATS_CRON_JOB_NAME}" already registered — leaving as is`);
       return;
@@ -94,7 +112,7 @@ export function dealsJobNeedsReconcile(existing: { cronExpression?: string | nul
 /** Register all Builder Deals jobs idempotently on production startup. */
 export async function ensureDealsCron(): Promise<void> {
   try {
-    const { jobs } = await listHeartbeatJobs("");
+    const { jobs } = await listAllHeartbeatJobs("");
     for (const candidate of DEALS_JOB_DEFINITIONS) {
       // One rejected job must not stop the others from being created or updated.
       try {

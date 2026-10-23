@@ -195,3 +195,20 @@ describe("ensureDealsCron error isolation", () => {
     expect(catalog?.cron).toBe("13 1-59/2 * * * *");
   });
 });
+
+describe("reading the scheduler's job list", () => {
+  it("reads every page, so a job past the first page is reconciled, not created again", async () => {
+    const { listAllHeartbeatJobs } = await import("./registerCron");
+    const job = (n: number) => ({ taskUid: `t${n}`, name: `job-${n}`, userId: "u", description: "", cronExpression: "1 * * * * *", callbackPath: "/x", callbackMethod: "POST", callbackPayload: "{}", isEnable: true });
+    listMock.mockReset();
+    listMock.mockImplementation(async (_session, pagination) => {
+      const page = pagination?.page ?? 1;
+      const size = pagination?.pageSize ?? 10;
+      const all = Array.from({ length: 130 }, (_, i) => job(i));
+      return { total: 130, actorUserId: "u", jobs: all.slice((page - 1) * size, page * size) };
+    });
+    const { total, jobs } = await listAllHeartbeatJobs("");
+    expect([total, jobs.length, jobs.at(-1)?.name]).toEqual([130, 130, "job-129"]);
+    expect(listMock).toHaveBeenCalledTimes(2);
+  });
+});

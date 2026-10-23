@@ -770,6 +770,12 @@ export const dealsRouter = router({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error instanceof Error && /ENOENT/.test(error.message) ? "The research list (research/sa-communities.csv) is not on this server." : "The research list could not be imported." });
       }
     }),
+    /** The scheduler's own record of every job: schedule, on/off, and when it last ran and runs next (UTC). */
+    cronJobs: adminProcedure.query(async () => {
+      const { listAllHeartbeatJobs } = await import("./registerCron");
+      const { total, jobs } = await listAllHeartbeatJobs("");
+      return { total, jobs: jobs.map((job) => ({ name: job.name, cron: job.cronExpression, enabled: job.isEnable, lastExecutedAt: job.lastExecutedAt ?? null, nextExecutionAt: job.nextExecutionAt ?? null, path: job.callbackPath, payload: job.callbackPayload })).sort((a, b) => a.name.localeCompare(b.name)) };
+    }),
     /** "Find new communities now": the weekly discovery, started in the background; the result arrives by email. */
     discoverCommunities: adminProcedure.mutation(async () => {
       const { startCommunityDiscovery } = await import("./dealsDiscovery");

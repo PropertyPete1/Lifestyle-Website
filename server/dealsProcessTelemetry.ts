@@ -12,8 +12,8 @@ import { dealSettings } from "../drizzle/schema";
 import { getDb } from "./db";
 
 export const SERVER_BOOTS_KEY = "server.boots";
-/** Starts kept, newest last. */
-export const SERVER_BOOT_HISTORY = 50;
+/** Starts kept, newest last: a day's worth even at a start every three minutes (50 was reached on October 22, 2026, which hid the real count). */
+export const SERVER_BOOT_HISTORY = 600;
 const MB = 1024 * 1024;
 
 const bootedAt = new Date();

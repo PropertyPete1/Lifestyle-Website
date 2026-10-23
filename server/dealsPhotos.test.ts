@@ -328,3 +328,13 @@ describe("offline OCR with the bundled English data", () => {
     }
   }, 60_000);
 });
+
+describe("libvips settings for the web instance", () => {
+  it("turns the operation cache off and runs one libvips thread per image", async () => {
+    const sharp = (await import("sharp")).default;
+    await import("./dealsPhotos");
+    const cache = sharp.cache() as unknown as { memory: { max: number }; items: { max: number }; files: { max: number } };
+    expect([cache.memory.max, cache.items.max, cache.files.max]).toEqual([0, 0, 0]);
+    expect(sharp.concurrency()).toBe(1);
+  });
+});

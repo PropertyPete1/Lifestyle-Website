@@ -11,6 +11,18 @@ import { dealScrubTerms, displayForLead } from "../shared/deals";
 import { effectiveScrubConfig } from "./dealsScrub";
 import { recordDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
 
+/**
+ * libvips memory on the web instance. On October 22, 2026 the instance restarted about every three minutes with
+ * the process at 505-540 MB (its limit is about 512 MB) while photos were drained. Measured locally on 40
+ * 2400x1600 photos at two lanes, libvips' operation cache and per-image thread pool account for 40-100 MB of the
+ * peak (518-577 MB down to 477-482 MB) at the same speed: the pipeline never reuses an operation, and the two
+ * lanes already keep the CPU busy. Set once for the process (renders and city imagery use the same settings).
+ */
+export const SHARP_CACHE_ENABLED = false;
+export const SHARP_THREADS = 1;
+sharp.cache(SHARP_CACHE_ENABLED);
+sharp.concurrency(SHARP_THREADS);
+
 const PRIVATE_PREFIX = "builder-deals-private/";
 const MAX_DOWNLOAD_BYTES = 18 * 1024 * 1024;
 const MAX_INPUT_PIXELS = 50_000_000;

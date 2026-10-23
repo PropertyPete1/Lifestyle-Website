@@ -718,6 +718,8 @@ export const dealsRouter = router({
       if (!preview) throw new TRPCError({ code: "NOT_FOUND", message: "No stored preview is available yet." });
       return preview;
     }),
+    /** Homes buyers can see and how many still show no photo: when the site looks complete. */
+    photoCoverage: adminProcedure.query(async () => (await import("./dealsPhotos")).shownHomePhotoCoverage()),
     reprocessPhoto: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
       const { requeueDealPhoto } = await import("./dealsPhotos"); await requeueDealPhoto(input.id); kickPhotoQueue(5); return { ok: true as const, queued: true as const };
     }),

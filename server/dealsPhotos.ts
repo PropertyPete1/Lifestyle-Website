@@ -1340,6 +1340,27 @@ function servedHomes(qb: SelectBuilder) {
 }
 
 /**
+ * Homes buyers can see, and how many of them show no photo yet (no processed, unhidden photo): the number that
+ * says when the site looks complete, which the raw queue size does not (most of the queue is later gallery photos).
+ */
+export async function shownHomePhotoCoverage(): Promise<{ shownHomes: number; withoutPhoto: number; pendingPhotosForShownHomes: number } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const served = servedHomes(db);
+  const homes = (await db.select({ total: sql<number>`count(*)`, without: sql<number>`sum(case when ${served.homeId} is null then 1 else 0 end)` })
+    .from(dealHomes)
+    .innerJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
+    .leftJoin(served, eq(served.homeId, dealHomes.id))
+    .where(homeIsShown))[0];
+  const pending = (await db.select({ count: sql<number>`count(*)` })
+    .from(dealPhotos)
+    .innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
+    .innerJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
+    .where(and(homeIsShown, inArray(dealPhotos.processingState, ["pending", "processing"]))))[0];
+  return { shownHomes: Number(homes?.total ?? 0), withoutPhoto: Number(homes?.without ?? 0), pendingPhotosForShownHomes: Number(pending?.count ?? 0) };
+}
+
+/**
  * Queue order: photos of homes buyers can see first; among those, homes that
  * show no photo yet; then gallery position (every home's cover before any
  * home's second photo); then the cheapest homes (the ones the featured and

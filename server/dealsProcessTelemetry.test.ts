@@ -5,7 +5,8 @@ vi.mock("./db", () => ({ getDb: vi.fn() }));
 import { dealSettings } from "../drizzle/schema";
 import { getDb } from "./db";
 import { createFakeDealsDb } from "./dealsFubFakeDb.test-support";
-import { SERVER_BOOTS_KEY, SERVER_BOOT_HISTORY, parseServerBoots, processLine, processSnapshot, recordServerBoot, sampleProcessMemory, serverBootsSince } from "./dealsProcessTelemetry";
+import { EventEmitter } from "node:events";
+import { SERVER_BEATS_KEY, SERVER_BEAT_MS, SERVER_BOOTS_KEY, SERVER_BOOT_HISTORY, SERVER_EXITS_KEY, installServerExitRecorder, parseServerBeats, parseServerBoots, parseServerExits, processLine, processSnapshot, recordServerBoot, recordServerExit, sampleProcessMemory, serverBootsSince, serverLives, writeServerBeat, type ServerBeat, type ServerExit } from "./dealsProcessTelemetry";
 
 afterEach(() => vi.mocked(getDb).mockReset());
 
@@ -43,5 +44,46 @@ describe("server start and memory telemetry", () => {
     expect(processLine({ bootedAt: "x", uptimeMinutes: 42, rssMb: 700, heapUsedMb: 100, externalMb: 350, peakRssMb: 1_900 }, 3)).toBe("memory 700 MB (peak 1900 MB, outside the JS heap 350 MB), up 42 min; 3 server starts in 24 h (deploys included)");
     expect(processLine(null, 1)).toBe("1 server start in 24 h (deploys included)");
     expect(processLine(null, null)).toBe("no process memory recorded yet");
+  });
+
+  it("keeps one beat per process, newest first, and records exits with their memory", async () => {
+    const other: ServerBeat = { instance: "other", beatAt: "2026-10-23T03:00:00.000Z", bootedAt: "2026-10-23T02:59:00.000Z", uptimeMinutes: 1, rssMb: 530, heapUsedMb: 40, externalMb: 10, peakRssMb: 545 };
+    const db = createFakeDealsDb([[dealSettings, [{ key: SERVER_BEATS_KEY, value: JSON.stringify([other]) }]]]);
+    vi.mocked(getDb).mockResolvedValue(db as never);
+    await writeServerBeat(new Date("2026-10-23T03:01:00Z"));
+    const beats = parseServerBeats((db.writes.filter((entry) => entry.table === dealSettings).at(-1)!.values as { value: string }).value);
+    expect(beats.map((beat) => beat.instance)).toEqual([expect.not.stringMatching(/^other$/), "other"]);
+    await recordServerExit("uncaughtException", "TypeError: boom", new Date("2026-10-23T03:02:00Z"));
+    const exits = parseServerExits((db.writes.filter((entry) => entry.table === dealSettings).at(-1)!.values as { value: string }).value);
+    expect(exits[0]).toMatchObject({ reason: "uncaughtException", detail: "TypeError: boom", instance: beats[0]!.instance });
+    expect(SERVER_EXITS_KEY).not.toBe(SERVER_BEATS_KEY);
+  });
+
+  it("calls a process that stopped beating without an exit killed, and shows its last memory", () => {
+    const now = new Date("2026-10-23T03:10:00Z");
+    const beat = (instance: string, beatAt: string, rssMb: number): ServerBeat => ({ instance, beatAt, bootedAt: "2026-10-23T03:00:00.000Z", uptimeMinutes: 2, rssMb, heapUsedMb: 40, externalMb: 10, peakRssMb: rssMb + 5 });
+    const exits: ServerExit[] = [{ instance: "b", at: "2026-10-23T03:05:00.000Z", reason: "SIGTERM", detail: null, rssMb: 300, peakRssMb: 320, uptimeMinutes: 5 }, { instance: "c", at: "2026-10-23T03:04:00.000Z", reason: "uncaughtException", detail: "Error: x", rssMb: 200, peakRssMb: 210, uptimeMinutes: 4 }];
+    const lives = serverLives([beat("a", "2026-10-23T03:09:50.000Z", 400), beat("b", "2026-10-23T03:04:50.000Z", 290), beat("c", "2026-10-23T03:03:50.000Z", 190), beat("d", new Date(now.getTime() - 2 * SERVER_BEAT_MS - 20_000).toISOString(), 540)], exits, now);
+    expect(lives.map((life) => [life.ended, life.rssMb])).toEqual([["running", 400], ["stopped", 300], ["crashed", 200], ["killed", 540]]);
+    expect(lives[2]!.detail).toBe("Error: x");
+  });
+
+  it("records SIGTERM and then lets the stop happen; records an uncaught exception and exits 1", async () => {
+    const target = Object.assign(new EventEmitter(), { pid: 42, kill: vi.fn(), exit: vi.fn() });
+    const record = vi.fn().mockResolvedValue(undefined);
+    expect(installServerExitRecorder(target as never, record, 50)).toBe(true);
+    target.emit("SIGTERM");
+    await vi.waitFor(() => expect(target.kill).toHaveBeenCalledWith(42, "SIGTERM"));
+    expect(record).toHaveBeenCalledWith("SIGTERM", null);
+    target.emit("uncaughtException", new TypeError("boom"));
+    await vi.waitFor(() => expect(target.exit).toHaveBeenCalledWith(1));
+    expect(record).toHaveBeenLastCalledWith("uncaughtException", expect.stringContaining("TypeError: boom"));
+  });
+
+  it("still stops when recording hangs", async () => {
+    const target = Object.assign(new EventEmitter(), { pid: 7, kill: vi.fn(), exit: vi.fn() });
+    installServerExitRecorder(target as never, () => new Promise<void>(() => undefined), 30);
+    target.emit("SIGTERM");
+    await vi.waitFor(() => expect(target.kill).toHaveBeenCalledWith(7, "SIGTERM"));
   });
 });

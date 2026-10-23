@@ -90,7 +90,12 @@ async function startServer() {
       void ensureStatsSyncCron().catch(console.error);
       void ensureDealsCron().catch(console.error);
       // Each start is kept so the health check can tell restarts (and their memory) apart from a busy server.
-      void import("../dealsProcessTelemetry").then(({ recordServerBoot }) => recordServerBoot()).catch(console.error);
+      void import("../dealsProcessTelemetry").then(({ recordServerBoot, installServerExitRecorder, startServerBeats }) => {
+        // How each process ends (stopped, crashed, or killed with its last memory) is kept for the health check.
+        installServerExitRecorder();
+        startServerBeats();
+        return recordServerBoot();
+      }).catch(console.error);
     }
   });
 }

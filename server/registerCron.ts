@@ -101,6 +101,36 @@ export async function ensureStatsSyncCron(): Promise<void> {
   }
 }
 
+/**
+ * A job the scheduler stopped advancing: its next run is more than STUCK_JOB_MINUTES in the past. On October 22-23,
+ * 2026 the TREC import, alert digest, incentive check and both stats syncs sat with a past next run (one a day old)
+ * and never fired again, while the frequent jobs kept running. Re-saving the job with its own schedule re-arms it.
+ */
+export const STUCK_JOB_MINUTES = 10;
+export function heartbeatJobIsStuck(job: Pick<HeartbeatJobInfo, "isEnable" | "nextExecutionAt">, now = new Date()): boolean {
+  if (!job.isEnable || !job.nextExecutionAt) return false;
+  const next = Date.parse(job.nextExecutionAt);
+  return Number.isFinite(next) && next < now.getTime() - STUCK_JOB_MINUTES * 60_000;
+}
+
+/** Re-saves every stuck job, Builder Deals or not, with its own schedule, path, payload and description, enabled. */
+export async function rearmStuckHeartbeatJobs(jobs: HeartbeatJobInfo[], now = new Date(), skip: ReadonlySet<string> = new Set()): Promise<string[]> {
+  const rearmed: string[] = [];
+  for (const job of jobs) {
+    if (skip.has(job.name) || !heartbeatJobIsStuck(job, now)) continue;
+    try {
+      let payload: unknown = undefined;
+      try { payload = job.callbackPayload ? JSON.parse(job.callbackPayload) : undefined; } catch { payload = job.callbackPayload || undefined; }
+      await updateHeartbeatJob(job.taskUid, { cron: job.cronExpression, path: job.callbackPath, method: job.callbackMethod === "PUT" ? "PUT" : "POST", payload, description: job.description, enable: true }, "");
+      rearmed.push(job.name);
+    } catch (err) {
+      console.error(`[cron] could not re-arm ${job.name}:`, err instanceof Error ? err.message : err);
+    }
+  }
+  if (rearmed.length) console.log(`[cron] re-armed stuck jobs: ${rearmed.join(", ")}`);
+  return rearmed;
+}
+
 /** True when a registered job's schedule, callback path or payload no longer matches its definition. */
 export function dealsJobNeedsReconcile(existing: { cronExpression?: string | null; callbackPath?: string | null; callbackPayload?: string | null }, candidate: (typeof DEALS_JOB_DEFINITIONS)[number]): boolean {
   const samePayload = (() => {
@@ -122,8 +152,10 @@ export async function ensureDealsCron(): Promise<void> {
         // callback path or payload (the catalog job moved from 23:45/00:45 UTC to
         // 11:00/12:00 UTC). Reconcile it in place so the handler's Chicago window
         // can ever be reached; identical definitions are left untouched.
-        if (dealsJobNeedsReconcile(existing, candidate)) {
-          await updateHeartbeatJob(existing.taskUid, { cron: candidate.cron, path: candidate.path, method: "POST", payload: candidate.payload, description: candidate.description }, "");
+        const stuck = heartbeatJobIsStuck(existing);
+        if (dealsJobNeedsReconcile(existing, candidate) || stuck) {
+          await updateHeartbeatJob(existing.taskUid, { cron: candidate.cron, path: candidate.path, method: "POST", payload: candidate.payload, description: candidate.description, ...(stuck ? { enable: true } : {}) }, "");
+          if (stuck) console.log(`[cron] re-armed stuck job ${candidate.name} (next run was ${existing.nextExecutionAt})`);
         }
         continue;
       }
@@ -139,6 +171,8 @@ export async function ensureDealsCron(): Promise<void> {
         console.error(`[cron] could not register ${candidate.name}:`, err instanceof Error ? err.message : err);
       }
     }
+    // Jobs registered elsewhere (the stats syncs) are re-armed the same way, with their own definitions.
+    await rearmStuckHeartbeatJobs(jobs, new Date(), new Set(DEALS_JOB_DEFINITIONS.map((job) => job.name)));
   } catch (err) {
     console.error("[cron] could not register Builder Deals jobs:", err instanceof Error ? err.message : err);
   }

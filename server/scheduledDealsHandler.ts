@@ -124,6 +124,13 @@ export async function catalogCall(clock: () => number = Date.now): Promise<unkno
   const photos = await runScheduledDealPhotoDrain({ budgetMs: left, respondWithinMs: Math.max(0, SCHEDULED_PHOTO_RESPOND_MS - (clock() - started)) });
   return { ...catalog, photos };
 }
+/**
+ * Every scheduled call answers within SCHEDULED_RESPOND_MS; a longer job (the TREC import takes about 90 s) carries on
+ * after the answer under its own once-a-day claim. The scheduler aborts calls at 30 s and, on October 22-23, 2026,
+ * left several jobs that had overrun or failed with a next run in the past, never firing them again.
+ */
+const answerLate = <T>(work: Promise<T>) => answerWithin(work, () => ({ partial: true, detail: "answered before the job finished; it carries on and records its result in deal_job_runs" }));
+
 async function answerWithin<T>(work: Promise<T>, partial: () => unknown): Promise<T | unknown> {
   let timer: NodeJS.Timeout | undefined;
   const late = new Promise<{ late: true }>((resolve) => { timer = setTimeout(() => resolve({ late: true }), SCHEDULED_RESPOND_MS); });
@@ -142,7 +149,7 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
   try {
     const user = await sdk.authenticateRequest(req); if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
     const job = typeof req.body?.job === "string" ? req.body.job : "catalog";
-    if (job === "incentive") return res.json({ ok: true, result: await whenDue(dueAt(18, 15), "builder-deals-incentive-revalidate", revalidateDealIncentives) });
+    if (job === "incentive") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(18, 15), "builder-deals-incentive-revalidate", revalidateDealIncentives)) });
     // Every 2 minutes (odd minutes, :00): 20 s of builder checks per call from 4 AM to 10 PM Central (see
     // refreshDueCommunitiesBatch), then photos with whatever budget is left (catalogCall), answered by
     // SCHEDULED_RESPOND_MS; a community still being read finishes after the answer.
@@ -158,10 +165,10 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
       const { resumeStaleCommunityDiscovery } = await import("./dealsDiscovery");
       return res.json({ ok: true, result: await resumeStaleCommunityDiscovery() });
     }
-    if (job === "trec") return res.json({ ok: true, result: await whenDue(dueAt(1, 15), "builder-deals-trec-import", importTrecLicenses) });
-    if (job === "team") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-team-sync", syncTeamAllowlistFromFub) });
-    if (job === "agents") return res.json({ ok: true, result: await whenDue(dueAt(1, 45), "builder-deals-known-agent-sync", syncKnownAgentsFromFub) });
-    if (job === "fub") return res.json({ ok: true, result: await runPendingDealsFubJobs() });
+    if (job === "trec") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(1, 15), "builder-deals-trec-import", importTrecLicenses)) });
+    if (job === "team") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(1, 30), "builder-deals-team-sync", syncTeamAllowlistFromFub)) });
+    if (job === "agents") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(1, 45), "builder-deals-known-agent-sync", syncKnownAgentsFromFub)) });
+    if (job === "fub") return res.json({ ok: true, result: await answerLate(runPendingDealsFubJobs()) });
     // Every 2 minutes (even minutes): due pending photos and abandoned claims, in priority order. The
     // drain stops starting photos after 20 s and answers by 24 s with what it did (partial when photos
     // are still in flight); answerWithin is a second guard. Not a once-per-day job, so it is not
@@ -169,16 +176,16 @@ export async function scheduledDealsHandler(req: Request, res: Response) {
     // The catalog runs on the odd minutes, so the two never share a call slot.
     if (job === "photos") return res.json({ ok: true, result: await answerWithin(runScheduledDealPhotoDrain(), () => ({ partial: true, detail: "answered before the drain finished" })) });
     // 1:30 AM Chicago: one FUB activity note per lead for the previous day's views and tour requests.
-    if (job === "activity") return res.json({ ok: true, result: await whenDue(dueAt(1, 30), "builder-deals-activity-note", () => enqueueDailyActivityNote()) });
+    if (job === "activity") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(1, 30), "builder-deals-activity-note", () => enqueueDailyActivityNote())) });
     if (job === "alerts") {
       const { dispatchPendingDealAlerts } = await import("./dealsAlerts");
-      return res.json({ ok: true, result: await dispatchPendingDealAlerts() });
+      return res.json({ ok: true, result: await answerLate(dispatchPendingDealAlerts()) });
     }
     // 7:00 AM Chicago: the health check emails the alert recipients only when a check needs attention;
     // 7:05 AM Monday: the System OK report is sent unconditionally (its absence is the alarm).
-    if (job === "health") return res.json({ ok: true, result: await whenDue(dueAt(7, 0), "builder-deals-health", runBuilderDealsHealthJob) });
-    if (job === "weekly") return res.json({ ok: true, result: await whenDue(dueAt(7, 5, "Mon"), "builder-deals-weekly-report", sendBuilderDealsMondayReport) });
-    if (job === "maintenance") return res.json({ ok: true, result: await whenDue(dueAt(7, 30, "Mon"), "builder-deals-maintenance", async () => ({ testRecords: await cleanupDealsTestRecords(), fubRetries: await runPendingDealsFubJobs(), cachedRenderCleanup: await pruneDealPhotoRenders() })) });
+    if (job === "health") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(7, 0), "builder-deals-health", runBuilderDealsHealthJob)) });
+    if (job === "weekly") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(7, 5, "Mon"), "builder-deals-weekly-report", sendBuilderDealsMondayReport)) });
+    if (job === "maintenance") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(7, 30, "Mon"), "builder-deals-maintenance", async () => ({ testRecords: await cleanupDealsTestRecords(), fubRetries: await runPendingDealsFubJobs(), cachedRenderCleanup: await pruneDealPhotoRenders() }))) });
     return res.status(400).json({ error: "unknown_job" });
   } catch (error) {
     // Never the raw error text: a database error quotes personal values. The redacted first line is enough for the cron log.

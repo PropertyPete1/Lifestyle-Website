@@ -212,3 +212,23 @@ describe("reading the scheduler's job list", () => {
     expect(listMock).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("re-arming jobs the scheduler stopped advancing", () => {
+  it("re-saves a Builder Deals job whose next run is more than ten minutes past, and one registered elsewhere, enabled with its own schedule", async () => {
+    const { ensureDealsCron, heartbeatJobIsStuck, DEALS_JOB_DEFINITIONS: defs } = await import("./registerCron");
+    const now = Date.now();
+    const trec = defs.find((job) => job.name === "builder-deals-trec-import")!;
+    const registered = defs.map((def, i) => ({ taskUid: `t${i}`, name: def.name, userId: "u", description: def.description, cronExpression: def.cron, callbackPath: def.path, callbackMethod: "POST", callbackPayload: JSON.stringify(def.payload), isEnable: true, nextExecutionAt: new Date(now + 60_000).toISOString() }));
+    registered.find((job) => job.name === trec.name)!.nextExecutionAt = new Date(now - 30 * 60_000).toISOString();
+    const stats = { taskUid: "s1", name: "daily-stats-sync", userId: "u", description: "stats", cronExpression: "0 0 9 * * *", callbackPath: "/api/scheduled/stats", callbackMethod: "POST", callbackPayload: "", isEnable: true, nextExecutionAt: new Date(now - 20 * 60 * 60_000).toISOString() };
+    listMock.mockReset();
+    listMock.mockResolvedValue({ total: registered.length + 1, actorUserId: "u", jobs: [...registered, stats] });
+    vi.mocked(updateHeartbeatJob).mockReset();
+    vi.mocked(updateHeartbeatJob).mockResolvedValue({});
+    await ensureDealsCron();
+    const calls = vi.mocked(updateHeartbeatJob).mock.calls.map(([uid, patch]) => [uid, (patch as { cron?: string; enable?: boolean }).cron, (patch as { enable?: boolean }).enable]);
+    expect(calls).toEqual([[registered.find((job) => job.name === trec.name)!.taskUid, trec.cron, true], ["s1", "0 0 9 * * *", true]]);
+    expect(heartbeatJobIsStuck({ isEnable: true, nextExecutionAt: new Date(now - 5 * 60_000).toISOString() })).toBe(false);
+    expect(heartbeatJobIsStuck({ isEnable: false, nextExecutionAt: new Date(now - 60 * 60_000).toISOString() })).toBe(false);
+  });
+});

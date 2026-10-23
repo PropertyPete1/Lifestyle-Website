@@ -76,8 +76,10 @@ describe("onboarding discovered communities", () => {
 
   it("adds a new community privately: inactive until its first sync, coarse labels, names in the scrub list", async () => {
     const result = await onboardDiscoveredCommunities([discovered, { ...discovered, name: "Old Place", sourceUrl: "https://www.chesmar.com/old-place/", status: "closeout" }, { ...discovered, name: "Bad", sourceUrl: "http://insecure.example/" }]);
-    expect(result.created).toHaveLength(1);
-    expect(result.skipped).toEqual([{ name: "Old Place", reason: "closeout" }, { name: "Bad", reason: "invalid_name_or_url" }]);
+    // The close-out is added too, hidden until its first clean update, like any new community.
+    expect(result.created).toHaveLength(2);
+    expect(result.skipped).toEqual([{ name: "Bad", reason: "invalid_name_or_url" }]);
+    expect(db.rows(dealCommunities).find((entry) => entry.privateName === "Old Place")).toMatchObject({ active: false, awaitingFirstSync: true });
     const row = db.rows(dealCommunities)[0]!;
     expect(row).toMatchObject({ builder: "Chesmar", privateName: "Sienna Lakes", privateAddress: "9010 Arroyo Grove, San Antonio, TX 78263", active: false, awaitingFirstSync: true, areaLabel: "Southeast San Antonio", publicLabel: "Southeast San Antonio | Half-Acre Lots and From the $400s", reelCode: autoReelCode(discovered.sourceUrl) });
     const scrub = JSON.parse(row.scrubList as string);

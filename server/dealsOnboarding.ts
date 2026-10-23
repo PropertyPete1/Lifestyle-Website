@@ -85,7 +85,9 @@ export async function onboardDiscoveredCommunities(discovered: readonly Discover
     let url: URL | null = null;
     try { url = new URL(community.sourceUrl); } catch { url = null; }
     if (!name || !url || url.protocol !== "https:") { result.skipped.push({ name: name || "(unnamed)", reason: "invalid_name_or_url" }); continue; }
-    if (community.status === "closeout") { result.skipped.push({ name, reason: "closeout" }); continue; }
+    // A close-out is added like any other (as discovery adds them): its last homes are often the best deals, and it
+    // stays hidden until its first clean update shows what is for sale (Legend's Blue Ridge Ranch, Oct 23: "Final
+    // Opportunity" on the research list, homes in Legend's own feed, rejected because no row had been made for it).
     const key = normalizedDealSourceKey(community.sourceUrl);
     if (known.has(key)) { result.existing += 1; continue; }
     const zip = zipOf(community);

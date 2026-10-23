@@ -92,7 +92,5 @@ export async function importResearchCommunities(csvPath = RESEARCH_COMMUNITIES_C
   const seen = new Set<string>();
   const discovered = usable.filter((community) => { const key = community.sourceUrl.replace(/\/+$/, "").toLowerCase(); if (seen.has(key)) return false; seen.add(key); return true; });
   const result = await onboardDiscoveredCommunities(discovered);
-  // Builders counted on the rows actually offered: close-outs are skipped by onboarding, so a builder with only those is not one.
-  const offered = discovered.filter((community) => community.status !== "closeout");
-  return { ...result, rows: rows.length, unusable: rows.length - usable.length, builders: new Set(offered.map((community) => community.builder)).size };
+  return { ...result, rows: rows.length, unusable: rows.length - usable.length, builders: new Set(discovered.map((community) => community.builder)).size };
 }

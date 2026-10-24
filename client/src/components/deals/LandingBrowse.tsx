@@ -362,6 +362,21 @@ export function PublicHomeCard({ home, onAddress }: { home: PublicHome; onAddres
   </article>;
 }
 
+/** Calls onNear when this marker comes within a screen of the viewport (infinite scroll, like New Home Buddy). */
+function AutoMore({ active, onNear }: { active: boolean; onNear: () => void }) {
+  const marker = useRef<HTMLDivElement>(null);
+  const near = useRef(onNear);
+  near.current = onNear;
+  useEffect(() => {
+    const element = marker.current;
+    if (!active || !element || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) near.current(); }, { rootMargin: "800px 0px" });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [active]);
+  return <div ref={marker} aria-hidden="true" className="h-px w-full" />;
+}
+
 /** The list and the map side by side (the map stays in view on a wide screen; a phone opens it with a button). */
 export function LandingBrowse({ communities, onUnlock, useHomes, top }: { communities: readonly LandingCommunity[]; onUnlock: () => void; useHomes: UseCommunityHomes; /** Shown at the top of the list column (the featured row). */ top?: ReactNode }) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -402,6 +417,8 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top }: { commun
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
           {shown.map((community) => <CommunityCard key={community.key} community={community} active={activeKey === community.key} onHover={(on) => setActiveKey(on ? community.key : null)} onOpen={() => setOpen(community)} />)}
         </div>
+        {/* The next page loads as the visitor nears the end of the list (the button stays for keyboards and old browsers). */}
+        <AutoMore key={shown.length} active={matching.length > shown.length} onNear={() => setPages((value) => value + 1)} />
         <ShowMore remaining={matching.length - shown.length} onClick={() => setPages((value) => value + 1)} />
       </div>
       {/* The map fills the side of the screen and stays there while the list scrolls (no empty space under it). */}

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { LockKeyhole, RotateCcw, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -12,11 +11,11 @@ import { clientLinkTokenInUrl, forgetClientLinkToken, keepClientLinkToken, remem
 import { GateSheet } from "@/components/deals/GateSheet";
 import { GatedCatalog, type GatedCommunity, type HomeRequest } from "@/components/deals/GatedCatalog";
 import { FeaturedDeals, type FeaturedDealsData } from "@/components/deals/FeaturedDeals";
-import { AreaMap } from "@/components/deals/AreaMap";
 import { AgentTools, type AgentWorkspaceData } from "@/components/deals/AgentTools";
 import { ComingSoonSection } from "@/components/deals/ComingSoon";
-import { DealsFooter, Incentive, ReelCard, formatChicagoDate, useInstagramEmbeds } from "@/components/deals/shared";
-import { BrowseBar, BROWSE_COPY, ShowMore } from "@/components/deals/BrowseBar";
+import { DealsFooter, formatChicagoDate, useInstagramEmbeds } from "@/components/deals/shared";
+import { BrowseBar, BROWSE_COPY } from "@/components/deals/BrowseBar";
+import { LandingBrowse } from "@/components/deals/LandingBrowse";
 import { BROWSE_PAGE, EMPTY_FILTERS, landingMatches, type BrowseFilters } from "@/lib/dealsBrowse";
 
 const sourceLabel = "This week's best new-build deals in San Antonio.";
@@ -50,11 +49,9 @@ function Landing() {
   const [src] = useState(() => new URLSearchParams(window.location.search).get("src")?.trim().slice(0, 40) || undefined);
   const catalog = trpc.deals.publicCatalog.useQuery(src ? { src } : undefined);
   const [filters, setFilters] = useState<BrowseFilters>(EMPTY_FILTERS);
-  const [pages, setPages] = useState(1);
   const all = catalog.data ?? [];
   const matching = useMemo(() => all.filter((community) => landingMatches(community, filters)), [all, filters]);
-  const visible = matching.slice(0, pages * BROWSE_PAGE);
-  const changeFilters = (next: BrowseFilters) => { setFilters(next); setPages(1); };
+  const changeFilters = (next: BrowseFilters) => setFilters(next);
   const featured = trpc.deals.featured.useQuery();
   const comingSoon = trpc.deals.comingSoon.useQuery();
   const [gateOpen, setGateOpen] = useState(true);
@@ -79,7 +76,7 @@ function Landing() {
   const pendingKey = state.data?.pending?.expiresAt ?? null;
   useEffect(() => { if (pendingKey) setGateOpen(true); }, [pendingKey]);
   const updatedAt = catalog.data?.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
-  return <main className="deals-light min-h-screen max-w-full overflow-x-clip bg-background"><header className="deals-chrome flex min-w-0 items-center justify-center border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link></header><section className="ambient-section px-5 pb-28 pt-14 sm:px-8"><div className="mx-auto max-w-6xl"><p className="eyebrow text-gold">{shared ? `Shared by ${shared.agentName}` : "Private buyer access"}</p><h1 className="mt-3 max-w-xl text-5xl leading-[0.9] sm:text-7xl">{sourceLabel}</h1><p className="mt-5 text-sm text-muted-foreground">{shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : "Hand-picked by Property Pete."} Updated {formatChicagoDate(updatedAt)}.</p><FeaturedDeals featured={featured.data as FeaturedDealsData | undefined} locked onSelect={() => setGateOpen(true)} />{all.length > BROWSE_PAGE / 2 && <BrowseBar filters={filters} onChange={changeFilters} areas={all} shown={matching.length} total={all.length} unit="communities" />}{all.length > 0 && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{BROWSE_COPY.none}</p>}<div className="mt-12 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-2">{visible.map((community, index) => <motion.article key={`${community.label}-${index}`} className="min-w-0 overflow-hidden border border-border bg-card" data-deals-from-your-reel={community.fromYourReel ? "true" : undefined} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}><ReelCard reelUrl={community.reelUrl} label={community.label} autoLoad={index === 0} /><div className="px-5 empty:hidden">{community.areaMap ? <AreaMap map={community.areaMap} variant="public" /> : null}</div><div className="p-5"><p className="eyebrow text-gold">{community.area}</p><h2 className="mt-2 text-3xl leading-tight">{community.label}</h2>{community.fromPriceLabel && <p className="mt-4 text-xl text-gold">{community.fromPriceLabel}</p>}<div className="mt-5"><Incentive incentive={community.incentive} compact /></div><p className="mt-4 text-sm text-muted-foreground">{community.homesAvailable > 0 ? `${community.homesAvailable} quick move-in home${community.homesAvailable === 1 ? "" : "s"}` : `To-be-built ${community.fromPriceLabel ? community.fromPriceLabel.replace(/^From/, "from") : "at current pricing"}`}</p></div></motion.article>)}</div><ShowMore remaining={matching.length - visible.length} onClick={() => setPages((value) => value + 1)} /><ComingSoonSection items={comingSoon.data} action={{ kind: "unlock", onClick: () => setGateOpen(true) }} /></div></section><button type="button" onClick={() => setGateOpen(true)} className="fixed bottom-5 left-5 right-5 z-30 min-h-14 bg-gold px-5 text-sm font-medium uppercase tracking-[0.14em] text-primary-foreground shadow-xl sm:left-auto sm:right-8 sm:w-72">Unlock the full list <LockKeyhole className="ml-2 inline h-4 w-4" /></button><DealsFooter />{askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} onClose={() => setGateOpen(false)} />}</main>;
+  return <main className="deals-light min-h-screen max-w-full overflow-x-clip bg-background"><header className="deals-chrome flex min-w-0 items-center justify-center border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link></header><section className="ambient-section px-5 pb-28 pt-10 sm:px-8"><div className="mx-auto max-w-7xl"><p className="eyebrow text-gold">{shared ? `Shared by ${shared.agentName}` : "Private buyer access"}</p><h1 className="mt-3 max-w-2xl text-4xl leading-tight sm:text-5xl">{sourceLabel}</h1><p className="mt-5 text-sm text-muted-foreground">{shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : "Hand-picked by Property Pete."} Updated {formatChicagoDate(updatedAt)}.</p><FeaturedDeals featured={featured.data as FeaturedDealsData | undefined} locked onSelect={() => setGateOpen(true)} />{all.length > BROWSE_PAGE / 2 && <BrowseBar filters={filters} onChange={changeFilters} areas={all} shown={matching.length} total={all.length} unit="communities" />}{all.length > 0 && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{BROWSE_COPY.none}</p>}<LandingBrowse communities={matching} onUnlock={() => setGateOpen(true)} /><ComingSoonSection items={comingSoon.data} action={{ kind: "unlock", onClick: () => setGateOpen(true) }} /></div></section><button type="button" onClick={() => setGateOpen(true)} className="fixed bottom-5 left-5 right-5 z-30 min-h-14 bg-gold px-5 text-sm font-medium uppercase tracking-[0.14em] text-primary-foreground shadow-xl sm:left-auto sm:right-8 sm:w-72">Unlock the full list <LockKeyhole className="ml-2 inline h-4 w-4" /></button><DealsFooter />{askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} onClose={() => setGateOpen(false)} />}</main>;
 }
 
 /**

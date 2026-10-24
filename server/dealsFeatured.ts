@@ -3,6 +3,7 @@ import { dealCommunities, dealHomes, dealIncentives, dealPhotos } from "../drizz
 import { scrubPrivateNames, selectDealCatalogHomes } from "../shared/deals";
 import { DEFAULT_PAYMENT_COSTS, builderExcluded, downPaymentPercentFrom, homeLotAcres, loanTypeLabel, lotAcres, mortgageRateFrom, rankFeatured, roundFeaturedForPublic, type FeaturedCandidate, type FeaturedDeal, type FeaturedDeals } from "../shared/dealsFeatured";
 import { getDb } from "./db";
+import { publicPhotoUrl, registerPublicPhotoReader, setPublicPhotos } from "./dealsPublicPhotos";
 import { communityScrubConfig, dealsCardHandle, dealsHandle, getDealSettings, hashSecret, publicNoPrivateNames, type DealsCatalogView } from "./dealsService";
 
 /**
@@ -132,30 +133,11 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
 /** A landing-page ranking replaces the public photo map whole (an empty strip empties it) and stamps the time; ranked on exact figures, shown in bands only. */
 function publicRanked(view: FeaturedView, ranked: FeaturedDeals, publicPhotos: Map<string, number>): FeaturedDeals {
   if (view !== "public") return ranked;
-  publicPhotoByKey = publicPhotos;
-  publicPhotosRankedAt = Date.now();
+  setPublicPhotos("featured", publicPhotos);
   return roundFeaturedForPublic(ranked);
 }
 
-/** The landing page's featured photo keys, from its latest ranking: the only photos the public route serves. */
-let publicPhotoByKey = new Map<string, number>();
-let publicPhotosRankedAt = 0;
-/** At most one landing-page re-rank in flight for the image route, however many requests ask at once. */
-let publicRerank: Promise<unknown> | null = null;
-/** An unknown key re-ranks at most this often, so made-up keys cannot make every request re-rank the catalog. */
-const PUBLIC_PHOTO_RERANK_MS = 60_000;
-
-/** The photo the landing page may show for a featured deal key; null when the key is not featured now. */
-export async function publicFeaturedPhotoId(key: string): Promise<number | null> {
-  if (!/^[a-f0-9]{12}$/.test(key)) return null;
-  if (!publicPhotoByKey.has(key) && Date.now() - publicPhotosRankedAt > PUBLIC_PHOTO_RERANK_MS) {
-    // Stamped before the slow read, so a burst of unknown keys starts one re-rank, not one each.
-    publicPhotosRankedAt = Date.now();
-    publicRerank ??= featuredDeals("public").catch(() => null).finally(() => { publicRerank = null; });
-    await publicRerank;
-  }
-  return publicPhotoByKey.get(key) ?? null;
-}
+registerPublicPhotoReader("featured", () => featuredDeals("public"));
 
 /** Each winner's cover (first shown photo): on the landing page a public render of it, on a private list the lead's own render. */
 async function withCoverPhotos(ranked: FeaturedDeals, homeByKey: ReadonlyMap<string, number>, view: FeaturedView): Promise<{ ranked: FeaturedDeals; publicPhotos: Map<string, number> }> {
@@ -175,7 +157,7 @@ async function withCoverPhotos(ranked: FeaturedDeals, homeByKey: ReadonlyMap<str
   const attach = (deal: FeaturedDeal): FeaturedDeal => {
     const photoId = deal.key ? cover.get(homeByKey.get(deal.key) ?? -1) : undefined;
     if (!photoId) return deal;
-    return { ...deal, photo: view === "public" ? `/deals/featured/img/${deal.key}` : `/deals/mine/img/${photoId}` };
+    return { ...deal, photo: view === "public" ? publicPhotoUrl(deal.key!) : `/deals/mine/img/${photoId}` };
   };
   return { ranked: { ...ranked, lowestPayment: ranked.lowestPayment.map(attach), bestRate: ranked.bestRate ? attach(ranked.bestRate) : null, bigLots: ranked.bigLots.map(attach) }, publicPhotos };
 }

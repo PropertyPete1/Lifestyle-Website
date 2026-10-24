@@ -125,6 +125,11 @@ export function registerDealsRoutes(app: Express) {
   }));
   // Static area map for a community: session-checked, marker-free, no-store (AREA MAP). The param may be "12" or "12.png".
   // The landing card's wide area map: no session, a wider circle, still centered on the ZIP code.
+  // The landing page's one region map (markers are drawn by the page, not baked in). Registered before the per-community route.
+  app.get("/deals/maps/region.webp", safe(async (req, res) => {
+    const { regionMapHandler } = await import("./dealsRegionMap");
+    await regionMapHandler(req, res);
+  }));
   app.get("/deals/maps/:communityId", safe(async (req, res) => {
     const { dealsMapImageHandler } = await import("./dealsMap");
     await dealsMapImageHandler(req, res, "public");
@@ -133,14 +138,16 @@ export function registerDealsRoutes(app: Express) {
     const { dealsMapImageHandler } = await import("./dealsMap");
     await dealsMapImageHandler(req, res);
   }));
-  // A featured home's cover on the landing page: only the photos the current Best Deals strip names, by opaque key.
-  app.get("/deals/featured/img/:key", safe(async (req, res) => {
-    const { publicFeaturedPhotoId } = await import("./dealsFeatured");
-    const photoId = await publicFeaturedPhotoId(String(req.params.key));
+  // A landing-page photo (a featured home's or a community's cover): only keys the latest landing read names.
+  app.get("/deals/pub/img/:key", safe(async (req, res) => {
+    const { publicPhotoIdForKey } = await import("./dealsPublicPhotos");
+    await import("./dealsFeatured");
+    await import("./dealsService");
+    const photoId = await publicPhotoIdForKey(String(req.params.key));
     if (!photoId) return res.status(404).end();
     const rendered = await (await import("./dealsPhotos")).renderDealPhotoForPublic(photoId);
     if (!rendered) return res.status(404).end();
-    // Short-lived: a photo an admin hides, or a home that leaves the strip, stops showing within a minute.
+    // Short-lived: a photo an admin hides, or a home that leaves the page, stops showing within a minute.
     res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Robots-Tag", "noindex, nofollow");

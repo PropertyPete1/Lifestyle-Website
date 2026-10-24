@@ -35,6 +35,7 @@ import {
   type DealScrubConfig,
 } from "../shared/deals";
 import { getDb } from "./db";
+import { registerPublicPhotoReader } from "./dealsPublicPhotos";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { effectiveScrubConfig } from "./dealsScrub";
 import { loanTypeLabel, priceBandFloor, priceBandLabel } from "../shared/dealsFeatured";
@@ -660,23 +661,41 @@ export async function publicDealsCatalog(src?: string | null) {
   const now = new Date();
   const settings = await getDealSettings();
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
-  const { areaMapRadius, communityAreaMap } = await import("./dealsMap");
+  const { areaMapRadius, areaMapGeometry, communityAreaMap } = await import("./dealsMap");
+  const { regionPin } = await import("./dealsRegionMap");
+  const { publicPhotoUrl, setPublicPhotos } = await import("./dealsPublicPhotos");
   const publicRadius = areaMapRadius(settings, "public");
-  const result = [] as Array<{ label: string; area: string; fromPrice: number | null; fromPriceLabel: string | null; reelUrl: string | null; homesAvailable: number; incentive: (ReturnType<typeof publicIncentive> & { pending?: true }) | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean }>;
-  if (!communities.length) return result;
+  const result = [] as Array<{ key: string; label: string; area: string; fromPrice: number | null; fromPriceLabel: string | null; reelUrl: string | null; homesAvailable: number; incentive: (ReturnType<typeof publicIncentive> & { pending?: true }) | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean; cover: string | null; pin: { x: number; y: number } | null }>;
+  if (!communities.length) { setPublicPhotos("covers", new Map()); return result; }
   const reelCode = src?.trim().toLowerCase() || null;
   // Two reads for the whole page, however many communities there are.
   const ids = communities.map((community) => community.id);
-  const [availableNow, incentives, heldLine] = await Promise.all([
-    db.select({ communityId: dealHomes.communityId }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"), eq(dealHomes.kind, "quick_move_in"))),
+  const [availableHomes, incentives, heldLine] = await Promise.all([
+    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
     liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
     heldLineCommunities(db, ids, now, settings.incentiveLapseDays),
   ]);
   const availableCount = new Map<number, number>();
-  for (const home of availableNow) availableCount.set(home.communityId, (availableCount.get(home.communityId) ?? 0) + 1);
+  for (const home of availableHomes) if (home.kind === "quick_move_in") availableCount.set(home.communityId, (availableCount.get(home.communityId) ?? 0) + 1);
+  // Each community's cover: the first shown photo of its cheapest shown home (a few homes are tried, cheapest first).
+  const homesByCommunity = groupBy(availableHomes, (home) => home.communityId);
+  const coverCandidates = new Map<number, number[]>();
+  for (const id of ids) coverCandidates.set(id, selectDealCatalogHomes(homesByCommunity.get(id) ?? []).slice(0, 3).map((home) => home.id));
+  const candidateIds = Array.from(coverCandidates.values()).flat();
+  const coverPhotos = candidateIds.length
+    ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, candidateIds), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
+    : [];
+  const firstPhoto = new Map<number, number>();
+  for (const photo of coverPhotos) if (!firstPhoto.has(photo.homeId)) firstPhoto.set(photo.homeId, photo.id);
+  const coverKeys = new Map<string, number>();
   for (const community of browseOrder(communities, reelCode)) {
     const incentive = incentives.get(community.id);
+    // Opaque per community: the page's key for the card, its map marker and its cover photo. Never the row id.
+    const key = dealsHandle(`deals-landing:${community.id}`, 12);
+    const coverPhoto = (coverCandidates.get(community.id) ?? []).map((homeId) => firstPhoto.get(homeId)).find((id): id is number => id !== undefined);
+    const geometry = areaMapGeometry(community, "public", publicRadius);
     const entry = {
+      key,
       fromYourReel: Boolean(reelCode) && community.reelCode.toLowerCase() === reelCode,
       label: community.publicLabel,
       area: community.areaLabel,
@@ -692,12 +711,20 @@ export async function publicDealsCatalog(src?: string | null) {
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       // A wide circle around the ZIP code centroid: "this side of town", never the community.
       areaMap: communityAreaMap(community, { variant: "public", radiusMiles: publicRadius }),
+      // A public render of the cover, by the community's opaque key; null until a photo is ready.
+      cover: coverPhoto ? publicPhotoUrl(key) : null,
+      // The region map marker sits at the same coarse grid cell the public area map is centered on.
+      pin: geometry ? regionPin(geometry.center) : null,
     };
     if (await dropPrivateResidue(community.id, entry, communityScrubConfig(community), "public")) continue;
+    if (coverPhoto) coverKeys.set(key, coverPhoto);
     result.push(entry);
   }
+  setPublicPhotos("covers", coverKeys);
   return result;
 }
+
+registerPublicPhotoReader("covers", () => publicDealsCatalog());
 
 /**
  * Reg Z on every buyer surface (1026.24(c), (d)): a rate, and any triggering term (a payment amount, a down payment, a

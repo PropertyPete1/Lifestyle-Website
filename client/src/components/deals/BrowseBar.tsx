@@ -18,10 +18,10 @@ export const BROWSE_COPY = {
   none: "No communities match these filters yet. Try fewer filters, or ask us: new homes are added every day.",
 } as const;
 
-const SELECT = "min-h-11 w-full min-w-0 max-w-full border border-input bg-background px-3 text-sm";
+const SELECT = "min-h-11 w-full min-w-0 max-w-full rounded-lg border border-input bg-background px-3 text-sm normal-case tracking-normal text-foreground";
 
 function Toggle({ on, label, onChange, name }: { on: boolean; label: string; onChange: (value: boolean) => void; name: string }) {
-  return <button type="button" aria-pressed={on} data-deals-filter={name} onClick={() => onChange(!on)} className={`inline-flex min-h-11 items-center border px-3 text-[11px] uppercase tracking-wide transition-colors ${on ? "border-gold bg-gold/10 text-gold" : "border-border text-muted-foreground hover:text-gold"}`}>{label}</button>;
+  return <button type="button" aria-pressed={on} data-deals-filter={name} onClick={() => onChange(!on)} className={`inline-flex min-h-11 items-center rounded-full border px-4 text-sm transition-colors ${on ? "border-gold bg-gold/10 text-gold" : "border-border text-muted-foreground hover:text-gold"}`}>{label}</button>;
 }
 
 /**
@@ -43,7 +43,7 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, showBe
   const choices = areaChoices(areas);
   const active = activeFilterCount(filters);
   const set = (patch: Partial<BrowseFilters>) => onChange({ ...filters, ...patch });
-  return <section aria-label={BROWSE_COPY.heading} data-deals-browse="true" className="mt-10 min-w-0 border border-border bg-card/60 p-4 sm:p-5">
+  return <section aria-label={BROWSE_COPY.heading} data-deals-browse="true" className="mt-10 min-w-0 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
     <p className="flex items-center gap-2 text-xs uppercase tracking-widest text-gold"><SlidersHorizontal className="h-4 w-4" />{BROWSE_COPY.heading}</p>
     <div className={`mt-3 grid min-w-0 grid-cols-2 gap-3 ${showBeds ? "sm:grid-cols-3" : ""}`}>
       <label className={`min-w-0 text-[11px] uppercase tracking-widest text-muted-foreground ${showBeds ? "col-span-2 sm:col-span-1" : ""}`}>{BROWSE_COPY.area}

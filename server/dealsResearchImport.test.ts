@@ -5,7 +5,7 @@ import { FakeDealsDb } from "./dealsSync.fakeDb";
 /** The research list goes in whole, hidden, with names in the scrub list and nothing private in a label. */
 const mocks = vi.hoisted(() => ({ getDb: vi.fn(), refreshCommunityGeography: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
-vi.mock("./dealsMap", () => ({ refreshCommunityGeography: (...args: unknown[]) => mocks.refreshCommunityGeography(...args), communityAreaMap: () => null, areaMapRadius: () => 5 }));
+vi.mock("./dealsMap", () => ({ refreshCommunityGeography: (...args: unknown[]) => mocks.refreshCommunityGeography(...args), communityAreaMap: () => null, areaMapGeometry: () => null, areaMapRadius: () => 5 }));
 
 import { builderNameFor, discoveredFromResearchRow, importResearchCommunities, parseCsv } from "./dealsResearchImport";
 import { hasPrivateTerm } from "../shared/deals";

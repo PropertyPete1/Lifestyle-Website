@@ -4,7 +4,7 @@ import { FakeDealsDb } from "./dealsSync.fakeDb";
 
 const mocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
-vi.mock("./dealsMap", () => ({ communityAreaMap: () => null, areaMapRadius: () => 5 }));
+vi.mock("./dealsMap", () => ({ communityAreaMap: () => null, areaMapGeometry: () => null, areaMapRadius: () => 5 }));
 
 import { PRIVACY_RESIDUE_EVENT_KIND, gatedDealsCatalog, privacyResidueCommunityId, privacyResidueSinceStart, publicDealsCatalog, resetPrivacyResidueCounter } from "./dealsService";
 

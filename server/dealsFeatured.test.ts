@@ -12,7 +12,8 @@ import { FakeDealsDb } from "./dealsSync.fakeDb";
 const mocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 
-import { featuredDeals, offerFromIncentive, publicFeaturedPhotoId } from "./dealsFeatured";
+import { featuredDeals, offerFromIncentive } from "./dealsFeatured";
+import { publicPhotoIdForKey as publicFeaturedPhotoId } from "./dealsPublicPhotos";
 import { dealsCardHandle } from "./dealsService";
 
 (globalThis as { React?: typeof React }).React = React;
@@ -331,7 +332,7 @@ describe("Best Deals from the database, by viewer", () => {
     offer74(other);
     const pub = await featuredDeals("public");
     const withPhoto = pub.lowestPayment.find((deal) => deal.photo)!;
-    expect(withPhoto.photo).toBe(`/deals/featured/img/${withPhoto.key}`);
+    expect(withPhoto.photo).toBe(`/deals/pub/img/${withPhoto.key}`);
     expect(pub.lowestPayment.find((deal) => deal.label === "North | No photo yet")).not.toHaveProperty("photo");
     // The route serves only the photo the strip names (the first one not hidden), by its key; anything else is not found.
     expect(await publicFeaturedPhotoId(withPhoto.key!)).toBe(cover);
@@ -408,10 +409,10 @@ describe("the Best Deals strip", () => {
     expect(html).toContain("Builder rates apply to select homes with the builder's lender and qualifying credit. Not a commitment to lend.");
     expect(html).not.toContain("—");
     // A deal with a cover photo shows it on its card; one without shows none.
-    const withPhoto = { ...deals, lowestPayment: deals.lowestPayment.map((deal, index) => index === 0 ? { ...deal, photo: "/deals/featured/img/abcdefabcdef" } : deal) };
+    const withPhoto = { ...deals, lowestPayment: deals.lowestPayment.map((deal, index) => index === 0 ? { ...deal, photo: "/deals/pub/img/abcdefabcdef" } : deal) };
     const photoHtml = renderToStaticMarkup(React.createElement(FeaturedDeals, { featured: withPhoto, locked: true }));
     expect(photoHtml.match(/data-deals-featured-photo="true"/g)).toHaveLength(1);
-    expect(photoHtml).toContain('src="/deals/featured/img/abcdefabcdef"');
+    expect(photoHtml).toContain('src="/deals/pub/img/abcdefabcdef"');
   });
 
   it("jumps to the home on the private list and renders nothing when there is nothing to rank", () => {

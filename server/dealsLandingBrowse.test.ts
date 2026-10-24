@@ -6,14 +6,15 @@ import { FakeDealsDb } from "./dealsSync.fakeDb";
 
 /**
  * The landing page laid out like a home search (October 24, 2026): photo cards beside one map of the market.
- * What reaches a visitor: an opaque key per community, a cover served by that key only while the latest landing read
- * names it, and a map marker at the coarse public grid cell (never the community or its ZIP).
+ * What reaches a visitor (prices and photos are public from October 24, 2026): an opaque key per community, photos by
+ * sealed token, and a map marker at the coarse public grid cell (never the community or its ZIP). Never an address,
+ * a plan, a builder or a community name.
  */
 const mocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 
-import { publicDealsCatalog } from "./dealsService";
-import { publicPhotoIdForKey, resetPublicPhotos } from "./dealsPublicPhotos";
+import { publicCommunityHomes, publicDealsCatalog, resetPublicHomesCache } from "./dealsService";
+import { photoIdFromToken, publicPhotoAllowed, resetPublicPhotoLimits } from "./dealsPhotoToken";
 import { regionPin, SAN_ANTONIO_REGION } from "./dealsRegionMap";
 
 (globalThis as { React?: typeof React }).React = React;
@@ -71,55 +72,76 @@ describe("the landing catalog", () => {
   beforeEach(() => {
     db = new FakeDealsDb();
     mocks.getDb.mockResolvedValue(db);
-    resetPublicPhotos();
+    resetPublicHomesCache();
+    resetPublicPhotoLimits();
   });
   const community = (over: Partial<typeof dealCommunities.$inferInsert>) => db.seed(dealCommunities, {
     builder: "Chesmar", privateName: "Fixture Lakes", sourceUrl: "https://www.chesmar.com/x/", privateAddress: "100 Fixture Blvd", publicLabel: "Southeast San Antonio | Lakes", areaLabel: "Southeast San Antonio",
-    amenities: "[]", reelCode: "fl1", scrubList: "{}", active: true, paused: false, manualMode: false, zipCentroidLat: "29.355424", zipCentroidLng: "-98.319795", ...over,
+    amenities: "[]", reelCode: "fl1", scrubList: JSON.stringify({ community: ["Fixture Lakes"], street: ["Fixture Blvd"] }), active: true, paused: false, manualMode: false, zipCentroidLat: "29.355424", zipCentroidLng: "-98.319795", fromPrice: 299_990, ...over,
   });
-  const home = (communityId: number, price: number, kind: "quick_move_in" | "to_be_built" = "quick_move_in") => db.seed(dealHomes, { communityId, sourceKey: `k-${Math.random()}`, sourceUrl: "https://www.chesmar.com/x/h/", kind, status: "available", origin: "official", price });
+  const home = (communityId: number, price: number, over: Partial<typeof dealHomes.$inferInsert> = {}) => db.seed(dealHomes, { communityId, sourceKey: `k-${Math.random()}`, sourceUrl: "https://www.chesmar.com/x/h/", privateAddress: "118 Fixture Blvd", privatePlanName: "Brandon", kind: "quick_move_in", status: "available", origin: "official", price, beds: "4", baths: "3", sqft: 2_100, ...over });
   const photo = (homeId: number, sortOrder: number, over: Partial<typeof dealPhotos.$inferInsert> = {}) => db.seed(dealPhotos, { homeId, sourceUrl: `https://www.chesmar.com/p${Math.random()}.jpg`, sourceHash: `h${Math.random()}`, sortOrder, processingState: "processed", automaticHidden: false, adminHidden: false, nextProcessingAttemptAt: new Date(), ...over });
 
-  it("gives each community an opaque key, its cheapest home's first shown photo as the cover, and a coarse map marker", async () => {
+  it("gives each community an opaque key, its exact starting price, its cheapest home's first shown photo as the cover, and a coarse map marker", async () => {
     const lakes = community({});
     const cheap = home(lakes, 300_000);
     home(lakes, 350_000);
     photo(cheap, 0, { automaticHidden: true });
     const cover = photo(cheap, 1);
     photo(cheap, 2);
-    const plain = community({ privateName: "Fixture Hills", publicLabel: "North San Antonio | Hills", areaLabel: "North San Antonio", reelCode: "fh1", zipCentroidLat: null, zipCentroidLng: null });
+    const plain = community({ privateName: "Fixture Hills", publicLabel: "North San Antonio | Hills", areaLabel: "North San Antonio", reelCode: "fh1", zipCentroidLat: null, zipCentroidLng: null, scrubList: "{}" });
     home(plain, 410_000);
     db.seed(dealIncentives, { communityId: plain, normalizedText: "x", publicText: "x", headlineRate: "4.99%", apr: "5.6%", confirmedAt: new Date(), active: true, held: false, manual: false });
-    const entries = await publicDealsCatalog() as Array<{ key: string; label: string; cover: string | null; pin: { x: number; y: number } | null }>;
+    const entries = await publicDealsCatalog() as Array<{ key: string; label: string; fromPriceLabel: string | null; cover: string | null; pin: { x: number; y: number } | null }>;
     const withCover = entries.find((entry) => entry.label === "Southeast San Antonio | Lakes")!;
     expect(withCover.key).toMatch(/^[a-f0-9]{12}$/);
-    expect(withCover.cover).toBe(`/deals/pub/img/${withCover.key}`);
-    expect(await publicPhotoIdForKey(withCover.key)).toBe(cover);
+    expect(withCover.fromPriceLabel).toBe("From $299,990");
+    expect(photoIdFromToken(withCover.cover!.replace("/deals/pub/img/", ""))).toBe(cover);
     // The marker is the coarse public cell's point, never the ZIP centroid itself.
     expect(withCover.pin).not.toBeNull();
     expect(withCover.pin).not.toEqual(regionPin({ lat: 29.355424, lng: -98.319795 }));
     const without = entries.find((entry) => entry.label === "North San Antonio | Hills")!;
     expect(without.cover).toBeNull();
     expect(without.pin).toBeNull();
-    expect(await publicPhotoIdForKey(without.key)).toBeNull();
     const json = JSON.stringify(entries);
     for (const secret of ["Fixture Lakes", "Fixture Hills", "100 Fixture", "chesmar", "29.355424", "-98.319795", `"id"`]) expect(json).not.toContain(secret);
-    // A cover the next read no longer names stops serving.
-    db.rows(dealPhotos).forEach((row) => { row.adminHidden = true; });
-    const again = await publicDealsCatalog() as Array<{ key: string; cover: string | null }>;
-    expect(again.find((entry) => entry.key === withCover.key)?.cover).toBeNull();
-    expect(await publicPhotoIdForKey(withCover.key)).toBeNull();
   });
 
-  it("answers a made-up key with nothing, and only re-reads the catalog once a minute for unknown keys", async () => {
-    community({});
-    expect(await publicPhotoIdForKey("not-a-key")).toBeNull();
-    const select = vi.spyOn(db, "select");
-    expect(await publicPhotoIdForKey("0123456789ab")).toBeNull();
-    const firstReads = select.mock.calls.length;
-    // The first unknown key re-read the landing page (its readers); the next one within the minute does not.
-    expect(firstReads).toBeGreaterThan(0);
-    expect(await publicPhotoIdForKey("ba9876543210")).toBeNull();
-    expect(select.mock.calls.length).toBe(firstReads);
+  it("shows a community's homes with prices, specs and photos, never an address, a plan or a name", async () => {
+    const lakes = community({});
+    const ready = home(lakes, 300_000, { previousPrice: 320_000, moveInDate: "Nov 2026" });
+    photo(ready, 0);
+    const second = photo(ready, 1);
+    home(lakes, 350_000);
+    home(lakes, 280_000, { status: "sold" });
+    const [entry] = await publicDealsCatalog() as Array<{ key: string }>;
+    const homes = await publicCommunityHomes(entry!.key) as Array<{ card: string; price: number; previousPrice: number; beds: string; photos: string[]; moveInDate: string }>;
+    expect(homes.map((item) => item.price)).toEqual([300_000, 350_000]);
+    expect(homes[0]).toMatchObject({ previousPrice: 320_000, beds: "4", moveInDate: "Nov 2026" });
+    expect(homes[0]!.photos).toHaveLength(2);
+    expect(photoIdFromToken(homes[0]!.photos[1]!.replace("/deals/pub/img/", ""))).toBe(second);
+    expect(homes[1]!.photos).toEqual([]);
+    const json = JSON.stringify(homes);
+    for (const secret of ["118 Fixture", "Brandon", "Fixture Lakes", "chesmar", "sourceKey", `"id"`]) expect(json).not.toContain(secret);
+    // A key that is not a live community's opens nothing.
+    expect(await publicCommunityHomes("0123456789ab")).toBeNull();
+    expect(await publicCommunityHomes("nope")).toBeNull();
+  });
+
+  it("drops a community's homes when a private name slips into them", async () => {
+    const lakes = community({});
+    home(lakes, 300_000, { lotSize: "Corner lot on Fixture Blvd" });
+    const [entry] = await publicDealsCatalog() as Array<{ key: string }>;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(await publicCommunityHomes(entry!.key)).toBeNull();
+    consoleError.mockRestore();
+  });
+
+  it("lets one visitor load a gallery's worth of photos a minute, not a scrape", () => {
+    const now = Date.now();
+    for (let index = 0; index < 300; index += 1) expect(publicPhotoAllowed("203.0.113.9", now)).toBe(true);
+    expect(publicPhotoAllowed("203.0.113.9", now)).toBe(false);
+    expect(publicPhotoAllowed("203.0.113.10", now)).toBe(true);
+    expect(publicPhotoAllowed("203.0.113.9", now + 61_000)).toBe(true);
   });
 });

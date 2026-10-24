@@ -1,9 +1,9 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealIncentives, dealPhotos } from "../drizzle/schema";
 import { scrubPrivateNames, selectDealCatalogHomes } from "../shared/deals";
-import { DEFAULT_PAYMENT_COSTS, builderExcluded, downPaymentPercentFrom, homeLotAcres, loanTypeLabel, lotAcres, mortgageRateFrom, rankFeatured, roundFeaturedForPublic, type FeaturedCandidate, type FeaturedDeal, type FeaturedDeals } from "../shared/dealsFeatured";
+import { DEFAULT_PAYMENT_COSTS, builderExcluded, downPaymentPercentFrom, homeLotAcres, loanTypeLabel, lotAcres, mortgageRateFrom, rankFeatured, type FeaturedCandidate, type FeaturedDeal, type FeaturedDeals } from "../shared/dealsFeatured";
 import { getDb } from "./db";
-import { publicPhotoUrl, registerPublicPhotoReader, setPublicPhotos } from "./dealsPublicPhotos";
+import { publicPhotoUrl } from "./dealsPhotoToken";
 import { communityScrubConfig, dealsCardHandle, dealsHandle, getDealSettings, hashSecret, publicNoPrivateNames, type DealsCatalogView } from "./dealsService";
 
 /**
@@ -71,10 +71,10 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
   };
   const excludedBuilders = Array.isArray(settings.featuredExcludedBuilders) ? settings.featuredExcludedBuilders.filter((entry): entry is string => typeof entry === "string") : ["Lennar"];
   const db = await getDb();
-  if (!db) return publicRanked(view, rankFeatured([], ranking), new Map());
+  if (!db) return rankFeatured([], ranking);
   const now = new Date();
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)));
-  if (!communities.length) return publicRanked(view, rankFeatured([], ranking), new Map());
+  if (!communities.length) return rankFeatured([], ranking);
   const ids = communities.map((community) => community.id);
   const [incentives, homes] = await Promise.all([
     db.select().from(dealIncentives).where(inArray(dealIncentives.communityId, ids)),
@@ -126,38 +126,25 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
       });
     }
   }
-  const { ranked, publicPhotos } = await withCoverPhotos(rankFeatured(candidates, ranking), homeByKey, view);
-  return publicRanked(view, ranked, publicPhotos);
+  // October 24, 2026: prices are public, so the landing page gets the same figures as the list (never a card handle or name).
+  return withCoverPhotos(rankFeatured(candidates, ranking), homeByKey, view);
 }
-
-/** A landing-page ranking replaces the public photo map whole (an empty strip empties it) and stamps the time; ranked on exact figures, shown in bands only. */
-function publicRanked(view: FeaturedView, ranked: FeaturedDeals, publicPhotos: Map<string, number>): FeaturedDeals {
-  if (view !== "public") return ranked;
-  setPublicPhotos("featured", publicPhotos);
-  return roundFeaturedForPublic(ranked);
-}
-
-registerPublicPhotoReader("featured", () => featuredDeals("public"));
 
 /** Each winner's cover (first shown photo): on the landing page a public render of it, on a private list the lead's own render. */
-async function withCoverPhotos(ranked: FeaturedDeals, homeByKey: ReadonlyMap<string, number>, view: FeaturedView): Promise<{ ranked: FeaturedDeals; publicPhotos: Map<string, number> }> {
-  const publicPhotos = new Map<string, number>();
+async function withCoverPhotos(ranked: FeaturedDeals, homeByKey: ReadonlyMap<string, number>, view: FeaturedView): Promise<FeaturedDeals> {
   const deals = [...ranked.lowestPayment, ...(ranked.bestRate ? [ranked.bestRate] : []), ...ranked.bigLots];
   const homeIds = Array.from(new Set(deals.map((deal) => deal.key ? homeByKey.get(deal.key) : undefined).filter((id): id is number => id !== undefined)));
   const db = await getDb();
-  if (!db || !homeIds.length) return { ranked, publicPhotos };
+  if (!db || !homeIds.length) return ranked;
   const rows = await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId }).from(dealPhotos)
     .where(and(inArray(dealPhotos.homeId, homeIds), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false)))
     .orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id));
   const cover = new Map<number, number>();
   for (const row of rows) if (row.homeId !== null && !cover.has(row.homeId)) cover.set(row.homeId, row.id);
-  if (view === "public") {
-    for (const deal of deals) { const photoId = deal.key ? cover.get(homeByKey.get(deal.key) ?? -1) : undefined; if (deal.key && photoId) publicPhotos.set(deal.key, photoId); }
-  }
   const attach = (deal: FeaturedDeal): FeaturedDeal => {
     const photoId = deal.key ? cover.get(homeByKey.get(deal.key) ?? -1) : undefined;
     if (!photoId) return deal;
-    return { ...deal, photo: view === "public" ? publicPhotoUrl(deal.key!) : `/deals/mine/img/${photoId}` };
+    return { ...deal, photo: view === "public" ? publicPhotoUrl(photoId) : `/deals/mine/img/${photoId}` };
   };
-  return { ranked: { ...ranked, lowestPayment: ranked.lowestPayment.map(attach), bestRate: ranked.bestRate ? attach(ranked.bestRate) : null, bigLots: ranked.bigLots.map(attach) }, publicPhotos };
+  return { ...ranked, lowestPayment: ranked.lowestPayment.map(attach), bestRate: ranked.bestRate ? attach(ranked.bestRate) : null, bigLots: ranked.bigLots.map(attach) };
 }

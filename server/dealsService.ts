@@ -35,7 +35,6 @@ import {
   type DealScrubConfig,
 } from "../shared/deals";
 import { getDb } from "./db";
-import { registerPublicPhotoReader } from "./dealsPublicPhotos";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { effectiveScrubConfig } from "./dealsScrub";
 import { loanTypeLabel, priceBandFloor, priceBandLabel } from "../shared/dealsFeatured";
@@ -663,10 +662,10 @@ export async function publicDealsCatalog(src?: string | null) {
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
   const { areaMapRadius, areaMapGeometry, communityAreaMap } = await import("./dealsMap");
   const { regionPin } = await import("./dealsRegionMap");
-  const { publicPhotoUrl, setPublicPhotos } = await import("./dealsPublicPhotos");
+  const { publicPhotoUrl } = await import("./dealsPhotoToken");
   const publicRadius = areaMapRadius(settings, "public");
   const result = [] as Array<{ key: string; label: string; area: string; fromPrice: number | null; fromPriceLabel: string | null; reelUrl: string | null; homesAvailable: number; incentive: (ReturnType<typeof publicIncentive> & { pending?: true }) | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean; cover: string | null; pin: { x: number; y: number } | null }>;
-  if (!communities.length) { setPublicPhotos("covers", new Map()); return result; }
+  if (!communities.length) return result;
   const reelCode = src?.trim().toLowerCase() || null;
   // Two reads for the whole page, however many communities there are.
   const ids = communities.map((community) => community.id);
@@ -687,7 +686,7 @@ export async function publicDealsCatalog(src?: string | null) {
     : [];
   const firstPhoto = new Map<number, number>();
   for (const photo of coverPhotos) if (!firstPhoto.has(photo.homeId)) firstPhoto.set(photo.homeId, photo.id);
-  const coverKeys = new Map<string, number>();
+
   for (const community of browseOrder(communities, reelCode)) {
     const incentive = incentives.get(community.id);
     // Opaque per community: the page's key for the card, its map marker and its cover photo. Never the row id.
@@ -699,9 +698,9 @@ export async function publicDealsCatalog(src?: string | null) {
       fromYourReel: Boolean(reelCode) && community.reelCode.toLowerCase() === reelCode,
       label: community.publicLabel,
       area: community.areaLabel,
-      // The starting price as a band only ("From the $490s"); the exact figure waits for sign-up.
-      fromPrice: community.fromPrice ? priceBandFloor(community.fromPrice) : null,
-      fromPriceLabel: community.fromPrice ? `From the ${priceBandLabel(community.fromPrice)}` : null,
+      // October 24, 2026: prices are public (the address, builder and community name are what sign-up opens).
+      fromPrice: community.fromPrice ?? null,
+      fromPriceLabel: community.fromPrice ? `From $${community.fromPrice.toLocaleString("en-US")}` : null,
       reelUrl: community.reelUrl,
       homesAvailable: availableCount.get(community.id) ?? 0,
       // The landing card shows the teaser and figures; the full wording and the deadlines wait for sign-up.
@@ -712,19 +711,72 @@ export async function publicDealsCatalog(src?: string | null) {
       // A wide circle around the ZIP code centroid: "this side of town", never the community.
       areaMap: communityAreaMap(community, { variant: "public", radiusMiles: publicRadius }),
       // A public render of the cover, by the community's opaque key; null until a photo is ready.
-      cover: coverPhoto ? publicPhotoUrl(key) : null,
+      cover: coverPhoto ? publicPhotoUrl(coverPhoto) : null,
       // The region map marker sits at the same coarse grid cell the public area map is centered on.
       pin: geometry ? regionPin(geometry.center) : null,
     };
     if (await dropPrivateResidue(community.id, entry, communityScrubConfig(community), "public")) continue;
-    if (coverPhoto) coverKeys.set(key, coverPhoto);
     result.push(entry);
   }
-  setPublicPhotos("covers", coverKeys);
   return result;
 }
 
-registerPublicPhotoReader("covers", () => publicDealsCatalog());
+/**
+ * One community's homes for the landing page (October 24, 2026: visitors see every home, its photos and its price
+ * before signing up). The same homes the private list shows, with no address, plan, builder or community name and
+ * no card handle; photos by sealed public token. Sign-up is what opens the addresses (an agent sends them).
+ */
+const publicHomesCache = new Map<string, { at: number; value: unknown[] | null }>();
+const PUBLIC_HOMES_CACHE_MS = 120_000;
+export async function publicCommunityHomes(key: string): Promise<unknown[] | null> {
+  if (!/^[a-f0-9]{12}$/.test(key)) return null;
+  const cached = publicHomesCache.get(key);
+  if (cached && Date.now() - cached.at < PUBLIC_HOMES_CACHE_MS) return cached.value;
+  const value = await readPublicCommunityHomes(key);
+  if (publicHomesCache.size >= 200) publicHomesCache.delete(publicHomesCache.keys().next().value as string);
+  publicHomesCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+async function readPublicCommunityHomes(key: string): Promise<unknown[] | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)));
+  const community = communities.find((row) => dealsHandle(`deals-landing:${row.id}`, 12) === key);
+  if (!community) return null;
+  const { publicPhotoUrl } = await import("./dealsPhotoToken");
+  const homes = selectDealCatalogHomes(await db.select().from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)));
+  const photoRows = homes.length
+    ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, homes.map((home) => home.id)), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
+    : [];
+  const photosBy = groupBy(photoRows, (photo) => photo.homeId);
+  const result = homes.map((home, index) => {
+    const photos = photosBy.get(home.id) ?? [];
+    return {
+      // Position on this page only: never an id, a source key or a card handle.
+      card: `${key}-${index}`,
+      kind: home.kind,
+      beds: home.beds,
+      baths: home.baths,
+      sqft: home.sqft,
+      price: home.price,
+      previousPrice: home.previousPrice,
+      moveInDate: home.moveInDate,
+      lotSize: home.lotSize,
+      photos: photos.map((photo) => publicPhotoUrl(photo.id)),
+      photoCount: photos.length,
+      photosOnRequest: photos.length === 0,
+    };
+  });
+  // The same residue check as every public surface: a private name anywhere in the payload drops it.
+  if (await dropPrivateResidue(community.id, { homes: result }, communityScrubConfig(community), "public")) return null;
+  return result;
+}
+
+/** Test seam only. */
+export function resetPublicHomesCache() {
+  publicHomesCache.clear();
+}
 
 /**
  * Reg Z on every buyer surface (1026.24(c), (d)): a rate, and any triggering term (a payment amount, a down payment, a

@@ -1800,9 +1800,19 @@ export async function renderDealPhotoForPublic(photoId: number): Promise<Rendere
     const cacheVersion = `public:${row.photo.processedVersion}`;
     const inMemory = renderMemory.get(cacheVersion);
     if (inMemory) return inMemory;
+    // Kept in storage too (keyed by the master's version), so a restart or a busy page does not redo the work.
+    const storedKey = `${PRIVATE_PREFIX}public/${photoId}-${row.photo.processedVersion.slice(0, 16)}.webp`;
     return await renderLimiter(async () => {
       const raced = renderMemory.get(cacheVersion);
       if (raced) return raced;
+      try {
+        const stored = await storageReadPrivate(storedKey);
+        if (stored.data.length) {
+          const value = { data: stored.data, contentType: "image/webp" };
+          renderMemory.set(cacheVersion, value);
+          return value;
+        }
+      } catch { /* not rendered yet */ }
       const source = await storageReadPrivate(row.photo.processedStorageKey as string);
       if (digest(source.data) !== row.photo.processedVersion) return null;
       const resized = await sharp(source.data, { limitInputPixels: MAX_INPUT_PIXELS, animated: false })
@@ -1814,6 +1824,7 @@ export async function renderDealPhotoForPublic(photoId: number): Promise<Rendere
         .toBuffer();
       const value = { data: rendered, contentType: "image/webp" };
       renderMemory.set(cacheVersion, value);
+      void storagePut(storedKey, rendered, "image/webp", { unique: false }).catch(() => undefined);
       return value;
     });
   } catch {

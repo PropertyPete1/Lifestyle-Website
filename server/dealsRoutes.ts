@@ -138,17 +138,16 @@ export function registerDealsRoutes(app: Express) {
     const { dealsMapImageHandler } = await import("./dealsMap");
     await dealsMapImageHandler(req, res);
   }));
-  // A landing-page photo (a featured home's or a community's cover): only keys the latest landing read names.
-  app.get("/deals/pub/img/:key", safe(async (req, res) => {
-    const { publicPhotoIdForKey } = await import("./dealsPublicPhotos");
-    await import("./dealsFeatured");
-    await import("./dealsService");
-    const photoId = await publicPhotoIdForKey(String(req.params.key));
+  // A public home photo (the landing page shows every home's photos before sign-up): by sealed token, rate-limited per visitor.
+  app.get("/deals/pub/img/:token", safe(async (req, res) => {
+    const { photoIdFromToken, publicPhotoAllowed } = await import("./dealsPhotoToken");
+    const photoId = photoIdFromToken(String(req.params.token));
     if (!photoId) return res.status(404).end();
+    if (!publicPhotoAllowed(req.ip || req.socket?.remoteAddress || "unknown")) return res.status(429).end();
     const rendered = await (await import("./dealsPhotos")).renderDealPhotoForPublic(photoId);
     if (!rendered) return res.status(404).end();
-    // Short-lived: a photo an admin hides, or a home that leaves the page, stops showing within a minute.
-    res.setHeader("Cache-Control", "public, max-age=60");
+    // A photo an admin hides, or a home that sells, stops showing within ten minutes.
+    res.setHeader("Cache-Control", "public, max-age=600");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.type(rendered.contentType).send(rendered.data);

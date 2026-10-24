@@ -15,7 +15,7 @@ import { AgentTools, type AgentWorkspaceData } from "@/components/deals/AgentToo
 import { ComingSoonSection } from "@/components/deals/ComingSoon";
 import { DealsFooter, formatChicagoDate, useInstagramEmbeds } from "@/components/deals/shared";
 import { BrowseBar, BROWSE_COPY } from "@/components/deals/BrowseBar";
-import { LandingBrowse } from "@/components/deals/LandingBrowse";
+import { LandingBrowse, type PublicHome, type UseCommunityHomes } from "@/components/deals/LandingBrowse";
 import { BROWSE_PAGE, EMPTY_FILTERS, landingMatches, type BrowseFilters } from "@/lib/dealsBrowse";
 
 const sourceLabel = "This week's best new-build deals in San Antonio.";
@@ -41,6 +41,12 @@ function ConnectSheet({ agentName, token }: { agentName: string; token: string }
   return <div className="fixed inset-0 z-[95] flex items-end bg-black/70 p-4 sm:items-center sm:justify-center"><section role="dialog" aria-modal="true" aria-labelledby="deals-connect-title" data-deals-connect="true" className="w-full max-w-md border border-gold/40 bg-card p-6 shadow-2xl"><p className="eyebrow text-gold">Shared by {agentName}</p><h2 id="deals-connect-title" className="mt-2 text-3xl leading-tight">Connect your list with {agentName}?</h2><p className="mt-3 text-sm text-muted-foreground">You already have access. Connecting shows every address on your list, and {agentName} hears about the homes you save.</p><Button type="button" disabled={attach.isPending} onClick={() => attach.mutate({ c: token })} className="mt-6 w-full bg-gold py-6 text-primary-foreground">{attach.isPending ? "Connecting…" : `Yes, connect with ${agentName}`}</Button><Button type="button" variant="outline" disabled={attach.isPending} onClick={goToList} className="mt-3 w-full py-6">No thanks, take me to my list</Button></section></div>;
 }
 
+/** A community's homes on the landing page (prices, photos and specs; never an address or a name). */
+const useLandingHomes: UseCommunityHomes = (key) => {
+  const query = trpc.deals.publicHomes.useQuery({ key: key ?? "" }, { enabled: Boolean(key && /^[a-f0-9]{12}$/.test(key)), staleTime: 60_000 });
+  return { isLoading: query.isLoading, data: query.data as PublicHome[] | undefined };
+};
+
 function Landing() {
   // An agent's client link (?c=, or the one this tab kept) goes to the state query, the gate and the start call.
   const [clientToken, setClientToken] = useState(() => rememberClientLinkToken(window.location.search));
@@ -54,7 +60,9 @@ function Landing() {
   const changeFilters = (next: BrowseFilters) => setFilters(next);
   const featured = trpc.deals.featured.useQuery();
   const comingSoon = trpc.deals.comingSoon.useQuery();
-  const [gateOpen, setGateOpen] = useState(true);
+  // October 24, 2026: visitors browse every home first; the sign-up opens when they ask for addresses, or when a
+  // link brings them to it (an agent's client link, a code in progress, an expired or blocked session, a lapsed list).
+  const [gateOpen, setGateOpen] = useState(() => Boolean(clientToken) || /[?&](gate|expired|blocked|error|google)=/.test(window.location.search) || /^\/deals\/(mine|team)/.test(window.location.pathname));
   useInstagramEmbeds();
   // With no token in hand, the server may name the link from this browser's lapsed agent-client session.
   const linkToken = clientToken ?? state.data?.clientLinkToken ?? undefined;
@@ -76,7 +84,7 @@ function Landing() {
   const pendingKey = state.data?.pending?.expiresAt ?? null;
   useEffect(() => { if (pendingKey) setGateOpen(true); }, [pendingKey]);
   const updatedAt = catalog.data?.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
-  return <main className="deals-light min-h-screen max-w-full overflow-x-clip bg-background"><header className="deals-chrome flex min-w-0 items-center justify-center border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link></header><section className="ambient-section px-5 pb-28 pt-10 sm:px-8"><div className="mx-auto max-w-7xl"><p className="eyebrow text-gold">{shared ? `Shared by ${shared.agentName}` : "Private buyer access"}</p><h1 className="mt-3 max-w-2xl text-4xl leading-tight sm:text-5xl">{sourceLabel}</h1><p className="mt-5 text-sm text-muted-foreground">{shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : "Hand-picked by Property Pete."} Updated {formatChicagoDate(updatedAt)}.</p><FeaturedDeals featured={featured.data as FeaturedDealsData | undefined} locked onSelect={() => setGateOpen(true)} />{all.length > BROWSE_PAGE / 2 && <BrowseBar filters={filters} onChange={changeFilters} areas={all} shown={matching.length} total={all.length} unit="communities" />}{all.length > 0 && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{BROWSE_COPY.none}</p>}<LandingBrowse communities={matching} onUnlock={() => setGateOpen(true)} /><ComingSoonSection items={comingSoon.data} action={{ kind: "unlock", onClick: () => setGateOpen(true) }} /></div></section><button type="button" onClick={() => setGateOpen(true)} className="fixed bottom-5 left-5 right-5 z-30 min-h-14 bg-gold px-5 text-sm font-medium uppercase tracking-[0.14em] text-primary-foreground shadow-xl sm:left-auto sm:right-8 sm:w-72">Unlock the full list <LockKeyhole className="ml-2 inline h-4 w-4" /></button><DealsFooter />{askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} onClose={() => setGateOpen(false)} />}</main>;
+  return <main className="deals-light min-h-screen max-w-full overflow-x-clip bg-background"><header className="deals-chrome flex min-w-0 items-center justify-center border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link></header><section className="ambient-section px-5 pb-28 pt-10 sm:px-8"><div className="mx-auto max-w-7xl"><p className="eyebrow text-gold">{shared ? `Shared by ${shared.agentName}` : "New construction deals"}</p><h1 className="mt-3 max-w-2xl text-4xl leading-tight sm:text-5xl">{sourceLabel}</h1><p className="mt-5 text-sm text-muted-foreground">{shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : "Hand-picked by Property Pete."} Updated {formatChicagoDate(updatedAt)}.</p><FeaturedDeals featured={featured.data as FeaturedDealsData | undefined} locked onSelect={() => setGateOpen(true)} />{all.length > BROWSE_PAGE / 2 && <BrowseBar filters={filters} onChange={changeFilters} areas={all} shown={matching.length} total={all.length} unit="communities" />}{all.length > 0 && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{BROWSE_COPY.none}</p>}<LandingBrowse communities={matching} useHomes={useLandingHomes} onUnlock={() => setGateOpen(true)} /><ComingSoonSection items={comingSoon.data} action={{ kind: "unlock", onClick: () => setGateOpen(true) }} /></div></section><button type="button" onClick={() => setGateOpen(true)} className="fixed bottom-5 left-5 right-5 z-30 min-h-14 bg-gold px-5 text-sm font-medium uppercase tracking-[0.14em] text-primary-foreground shadow-xl sm:left-auto sm:right-8 sm:w-72">Get addresses and tours <LockKeyhole className="ml-2 inline h-4 w-4" /></button><DealsFooter />{askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} onClose={() => setGateOpen(false)} />}</main>;
 }
 
 /**

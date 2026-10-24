@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 
 import { featuredDeals, offerFromIncentive } from "./dealsFeatured";
-import { publicPhotoIdForKey as publicFeaturedPhotoId } from "./dealsPublicPhotos";
+import { photoIdFromToken } from "./dealsPhotoToken";
 import { dealsCardHandle } from "./dealsService";
 
 (globalThis as { React?: typeof React }).React = React;
@@ -241,8 +241,8 @@ describe("Best Deals from the database, by viewer", () => {
       const featured = await featuredDeals(view);
       expect(JSON.stringify(featured)).not.toMatch(/Pulte/i);
       expect(featured.bestRate).toMatchObject({ rate: { loanType: "Conventional" } });
-      // The home's own 0.15-acre lot wins over the community's "up to 0.5 acres", so it is not a big lot (the landing page sees it to the tenth).
-      expect(featured.bestRate?.acres).toBe(view === "public" ? 0.2 : 0.15);
+      // The home's own 0.15-acre lot wins over the community's "up to 0.5 acres", so it is not a big lot.
+      expect(featured.bestRate?.acres).toBe(0.15);
       expect(featured.bigLots).toEqual([]);
     }
     // A park in the label never makes a big lot either.
@@ -251,44 +251,17 @@ describe("Best Deals from the database, by viewer", () => {
     expect((await featuredDeals("public")).bigLots).toEqual([]);
   });
 
-  it("gives the landing page bands only: price to the $10K, square feet to the hundred, lot to the tenth", async () => {
+  it("gives the landing page the same price and size as the list (prices are public), never a card handle or a name", async () => {
     const id = community({});
     home(id, { price: 349_990, sqft: 2_318, lotSize: "0.52 acres" });
     offer74(id);
     const pub = await featuredDeals("public");
-    expect(pub.lowestPayment[0]).toMatchObject({ price: 340_000, priceLabel: "$340s", sqft: 2_300, sqftLabel: "about 2,300 sq ft", acres: 0.5 });
-    // The payment is figured on the band, not the real price: the page prints the rate, down payment and term
-    // next to it, so a payment on the real price would give the real price away to within a hundred dollars.
-    expect(pub.lowestPayment[0]?.estMonthly).toBe(monthlyPrincipalAndInterest({ price: 340_000, ratePercent: 7.4, downPercent: 5 }));
-    expect(pub.lowestPayment[0]?.estMonthly).not.toBe(monthlyPrincipalAndInterest({ price: 349_990, ratePercent: 7.4, downPercent: 5 }));
-    expect(JSON.stringify(pub)).not.toMatch(/349990|2318|0\.52/);
-    const gated = await featuredDeals({ view: "gated" });
-    expect(gated.lowestPayment[0]).toMatchObject({ price: 349_990, sqft: 2_318 });
-    expect(gated.lowestPayment[0]).not.toHaveProperty("priceLabel");
+    expect(pub.lowestPayment[0]).toMatchObject({ price: 349_990, sqft: 2_318, acres: 0.52 });
+    expect(pub.lowestPayment[0]?.estMonthly).toBe(monthlyPrincipalAndInterest({ price: 349_990, ratePercent: 7.4, downPercent: 5 }));
+    expect(pub.lowestPayment[0]).not.toHaveProperty("card");
+    expect(JSON.stringify(pub)).not.toMatch(/Sienna|Chesmar|chesmar\.com|118 Sienna/);
     expect(priceBandLabel(1_250_000)).toBe("$1.2M+");
-    expect(decode(renderToStaticMarkup(React.createElement(FeaturedDeals, { featured: pub, locked: true })))).toContain("$340s · about 2,300 sq ft");
-  });
-
-  it("never lets the landing payment give the real price away, with or without a builder rate", async () => {
-    const market = community({ publicLabel: "Southeast San Antonio | New Homes", areaLabel: "Southeast San Antonio" });
-    home(market, { price: 412_500 });
-    offer74(market);
-    const rated = community({ publicLabel: "North San Antonio | Lakes", areaLabel: "North San Antonio", sourceUrl: "https://www.chesmar.com/north/" });
-    home(rated, { price: 374_990 });
-    db.seed(dealIncentives, { communityId: rated, normalizedText: "r", publicText: "Rates as low as 5.5% FHA with 3.5% down", confirmedAt: new Date(), active: true, held: false, manual: false, headlineRate: "5.5%", apr: "6.1%" });
-    const pub = await featuredDeals("public");
-    const priceFromMonthly = (estMonthly: number, ratePercent: number, downPercent: number) => {
-      const r = ratePercent / 100 / 12;
-      const perDollar = r / (1 - (1 + r) ** -360);
-      return estMonthly / perDollar / (1 - downPercent / 100);
-    };
-    for (const deal of [...pub.lowestPayment, pub.bestRate].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))) {
-      const recovered = priceFromMonthly(deal.estMonthly, deal.rate.ratePercent, deal.downPercent);
-      // Inverting the printed assumptions lands on the band floor (a dollar of payment is about $150 of price), never the real price.
-      expect(Math.abs(recovered - deal.price)).toBeLessThan(200);
-      expect([412_500, 374_990].some((real) => Math.abs(recovered - real) < 1_000)).toBe(false);
-    }
-    expect(JSON.stringify(pub)).not.toMatch(/412500|374990/);
+    expect(decode(renderToStaticMarkup(React.createElement(FeaturedDeals, { featured: pub, locked: true })))).toContain("$349,990 · 2,318 sq ft");
   });
 
   it("gives every landing deal its own opaque key, so same-label, same-band communities stay apart and the key names no row", async () => {
@@ -303,7 +276,7 @@ describe("Best Deals from the database, by viewer", () => {
     home(c, { price: 360_000 });
     offer74(c);
     const pub = await featuredDeals("public");
-    expect(pub.lowestPayment.map((deal) => deal.price)).toEqual([340_000, 340_000, 360_000]);
+    expect(pub.lowestPayment.map((deal) => deal.price)).toEqual([341_990, 348_500, 360_000]);
     const keys = [...pub.lowestPayment, pub.bestRate!].map((deal) => deal.key);
     expect(keys.every((key) => typeof key === "string" && /^[a-f0-9]{12}$/.test(key))).toBe(true);
     expect(new Set(pub.lowestPayment.map((deal) => deal.key)).size).toBe(3);
@@ -332,21 +305,16 @@ describe("Best Deals from the database, by viewer", () => {
     offer74(other);
     const pub = await featuredDeals("public");
     const withPhoto = pub.lowestPayment.find((deal) => deal.photo)!;
-    expect(withPhoto.photo).toBe(`/deals/pub/img/${withPhoto.key}`);
+    // A sealed token that opens to the cover (the first photo not hidden); never the row id itself.
+    const token = withPhoto.photo!.replace("/deals/pub/img/", "");
+    expect(withPhoto.photo).toMatch(/^\/deals\/pub\/img\/[A-Za-z0-9_-]{22}$/);
+    expect(photoIdFromToken(token)).toBe(cover);
+    expect(photoIdFromToken("A".repeat(22))).toBeNull();
+    expect(photoIdFromToken("../etc/passwd")).toBeNull();
     expect(pub.lowestPayment.find((deal) => deal.label === "North | No photo yet")).not.toHaveProperty("photo");
-    // The route serves only the photo the strip names (the first one not hidden), by its key; anything else is not found.
-    expect(await publicFeaturedPhotoId(withPhoto.key!)).toBe(cover);
-    expect(await publicFeaturedPhotoId("aaaaaaaaaaaa")).toBeNull();
-    expect(await publicFeaturedPhotoId("../etc/passwd")).toBeNull();
-    // No photo id on the landing page: only the opaque key (which can start with the same digits, so match whole values).
     expect(JSON.stringify(pub)).not.toContain("/deals/mine/img/");
-    expect(JSON.stringify(pub)).not.toMatch(new RegExp(`/img/${cover}"`));
     const gated = await featuredDeals({ view: "gated" });
     expect(gated.lowestPayment.find((deal) => deal.photo)?.photo).toBe(`/deals/mine/img/${cover}`);
-    // A strip that empties (the offer lapses) stops serving the old key on the next landing-page ranking.
-    db.rows(dealIncentives).forEach((row) => { row.active = false; });
-    expect((await featuredDeals("public")).lowestPayment).toEqual([]);
-    expect(await publicFeaturedPhotoId(withPhoto.key!)).toBeNull();
   });
 
   it("ranks a private list's strip among that list's homes only, so it is never short", async () => {
@@ -393,7 +361,7 @@ describe("the Best Deals strip", () => {
     const html = decode(renderToStaticMarkup(React.createElement(FeaturedDeals, { featured: deals, locked: true })));
     expect(html).toContain("Best deals right now");
     expect(html).toContain("Ranked by estimated monthly payment");
-    expect(html).toContain("Unlock to see it");
+    expect(html).toContain("Get the address");
     expect(html).not.toContain("See this home");
     expect(html).toContain("$2,335");
     expect(html).toContain("$354,990 · 4 beds · 2,011 sq ft");

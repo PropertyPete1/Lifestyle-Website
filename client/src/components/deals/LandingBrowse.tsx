@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Home, LockKeyhole, MapPin, Play, X } from "lucide-react";
 import { AreaMap } from "./AreaMap";
-import { Incentive, ReelCard, type DealsIncentive } from "./shared";
+import { Incentive, ReelCard, money, type DealsIncentive } from "./shared";
+import { ProtectedGallery } from "./GatedCatalog";
 import { ShowMore } from "./BrowseBar";
 import { BROWSE_PAGE } from "@/lib/dealsBrowse";
 
@@ -41,7 +42,12 @@ export const LANDING_COPY = {
   mapAttribution: "Map data and imagery from Google. Markers show the general area only, never the community.",
   showMap: "Show map",
   hideMap: "Hide map",
-  unlock: "Unlock homes, photos and prices",
+  unlock: "Get the addresses and a tour",
+  homeAddress: "Get this address",
+  homesHeading: (count: number) => `${count} home${count === 1 ? "" : "s"} available`,
+  homesLoading: "Loading homes…",
+  homesNone: "Homes are being added. Ask us for the current list.",
+  privacy: "Addresses and builder details come from your agent once you sign up.",
   close: "Close",
 } as const;
 
@@ -134,7 +140,10 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId }: {
   </figure>;
 }
 
-export function CommunitySheet({ community, onClose, onUnlock }: { community: LandingCommunity; onClose: () => void; onUnlock: () => void }) {
+/** How the sheet reads a community's homes (the page passes the server query; a preview passes fixed homes). */
+export type UseCommunityHomes = (key: string | undefined) => { isLoading: boolean; data?: readonly PublicHome[] | null };
+
+export function CommunitySheet({ community, onClose, onUnlock, useHomes }: { community: LandingCommunity; onClose: () => void; onUnlock: () => void; useHomes: UseCommunityHomes }) {
   const dialog = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   // The latest close handler, so the effect below runs once per opening (not on every parent render).
@@ -159,11 +168,13 @@ export function CommunitySheet({ community, onClose, onUnlock }: { community: La
     document.body.style.overflow = "hidden";
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = overflow; opener?.focus(); };
   }, []);
+  const homes = useHomes(community.key);
+  const list = homes.data ?? [];
   return <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 sm:items-center sm:p-6" onClick={onClose}>
-    <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="deals-community-title" data-deals-community-sheet="true" onClick={(event) => event.stopPropagation()} className="deals-light relative max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-t-2xl bg-background shadow-2xl sm:rounded-2xl">
+    <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="deals-community-title" data-deals-community-sheet="true" onClick={(event) => event.stopPropagation()} className="deals-light relative max-h-[94vh] w-full max-w-6xl overflow-y-auto rounded-t-2xl bg-background shadow-2xl sm:rounded-2xl">
       <button ref={closeButton} type="button" onClick={onClose} aria-label={LANDING_COPY.close} className="absolute right-2 top-2 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-background/90 text-muted-foreground shadow hover:text-foreground"><X className="h-5 w-5" /></button>
-      <div className="grid min-w-0 gap-6 p-5 sm:p-6 md:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-        <div className="mx-auto w-full min-w-0 max-w-[360px]"><ReelCard reelUrl={community.reelUrl} label={community.label} autoLoad /></div>
+      <div className="grid min-w-0 gap-6 p-5 sm:p-6 md:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
+        <div className="mx-auto w-full min-w-0 max-w-[340px]"><ReelCard reelUrl={community.reelUrl} label={community.label} autoLoad /></div>
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-widest text-gold">{community.area}</p>
           <h2 id="deals-community-title" className="mt-2 text-3xl leading-tight">{community.label}</h2>
@@ -172,14 +183,41 @@ export function CommunitySheet({ community, onClose, onUnlock }: { community: La
           {community.incentive && <div className="mt-5"><Incentive incentive={community.incentive} compact /></div>}
           {community.areaMap ? <AreaMap map={community.areaMap} variant="public" /> : null}
           <button type="button" onClick={onUnlock} className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-gold px-5 text-sm font-semibold text-primary-foreground shadow hover:opacity-95">{LANDING_COPY.unlock}<LockKeyhole className="h-4 w-4" /></button>
+          <p className="mt-2 text-xs text-muted-foreground">{LANDING_COPY.privacy}</p>
         </div>
+      </div>
+      <div className="border-t border-border px-5 pb-8 pt-6 sm:px-6" data-deals-public-homes="true">
+        <h3 className="text-xl font-semibold">{homes.isLoading ? LANDING_COPY.homesLoading : list.length ? LANDING_COPY.homesHeading(list.length) : LANDING_COPY.homesNone}</h3>
+        {list.length > 0 && <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2 lg:grid-cols-3">{list.map((home) => <PublicHomeCard key={home.card} home={home} onAddress={onUnlock} />)}</div>}
       </div>
     </section>
   </div>;
 }
 
+/** A home on the landing page: the same facts as the private list, with no address, plan, builder or community name. */
+export type PublicHome = { card: string; kind: string; beds?: string | number | null; baths?: string | number | null; sqft?: number | null; price?: number | null; previousPrice?: number | null; moveInDate?: string | null; lotSize?: string | null; photos?: string[] };
+
+export function PublicHomeCard({ home, onAddress }: { home: PublicHome; onAddress: () => void }) {
+  const dropped = Boolean(home.previousPrice && home.price && home.price < home.previousPrice);
+  return <article data-deals-public-home="true" className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+    <div className="[&>*]:mt-0"><ProtectedGallery photos={home.photos} /></div>
+    <div className="p-4">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[11px] font-medium text-foreground">{home.kind === "to_be_built" ? "To be built" : "Move-in ready"}</span>
+        {dropped && <span className="rounded-full bg-gold px-2.5 py-0.5 text-[11px] font-semibold text-primary-foreground">Price drop</span>}
+      </div>
+      <p className="mt-2 text-2xl font-semibold leading-tight">{home.price ? money.format(home.price) : "Ask for current pricing"}</p>
+      {dropped && home.previousPrice && <p className="text-sm text-muted-foreground line-through">{money.format(home.previousPrice)}</p>}
+      <p className="mt-1 text-sm text-foreground">{[home.beds && `${home.beds} beds`, home.baths && `${home.baths} baths`, home.sqft && `${home.sqft.toLocaleString()} sq ft`].filter(Boolean).join(" · ")}</p>
+      {home.moveInDate && <p className="mt-1 text-xs text-muted-foreground">Est. move-in: {home.moveInDate}</p>}
+      {home.lotSize && <p className="mt-0.5 text-xs text-muted-foreground">Lot: {home.lotSize}</p>}
+      <button type="button" onClick={onAddress} className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-gold/50 px-4 text-sm font-semibold text-gold hover:bg-gold/10">{LANDING_COPY.homeAddress}</button>
+    </div>
+  </article>;
+}
+
 /** The list and the map side by side (the map stays in view on a wide screen; a phone opens it with a button). */
-export function LandingBrowse({ communities, onUnlock }: { communities: readonly LandingCommunity[]; onUnlock: () => void }) {
+export function LandingBrowse({ communities, onUnlock, useHomes }: { communities: readonly LandingCommunity[]; onUnlock: () => void; useHomes: UseCommunityHomes }) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ id: string; keys: string[] } | null>(null);
   const [open, setOpen] = useState<LandingCommunity | null>(null);
@@ -208,6 +246,6 @@ export function LandingBrowse({ communities, onUnlock }: { communities: readonly
       </div>
       <aside className="hidden min-w-0 lg:block"><div className="sticky top-6">{map}</div></aside>
     </div>
-    {open && <CommunitySheet community={open} onClose={() => setOpen(null)} onUnlock={() => { setOpen(null); onUnlock(); }} />}
+    {open && <CommunitySheet community={open} useHomes={useHomes} onClose={() => setOpen(null)} onUnlock={() => { setOpen(null); onUnlock(); }} />}
   </>;
 }

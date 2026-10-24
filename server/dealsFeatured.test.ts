@@ -307,9 +307,9 @@ describe("Best Deals from the database, by viewer", () => {
     const withPhoto = pub.lowestPayment.find((deal) => deal.photo)!;
     // A sealed token that opens to the cover (the first photo not hidden); never the row id itself.
     const token = withPhoto.photo!.replace("/deals/pub/img/", "");
-    expect(withPhoto.photo).toMatch(/^\/deals\/pub\/img\/[A-Za-z0-9_-]{22}$/);
+    expect(withPhoto.photo).toMatch(/^\/deals\/pub\/img\/[a-f0-9]{32}$/);
     expect(photoIdFromToken(token)).toBe(cover);
-    expect(photoIdFromToken("A".repeat(22))).toBeNull();
+    expect(photoIdFromToken("a".repeat(32))).toBeNull();
     expect(photoIdFromToken("../etc/passwd")).toBeNull();
     expect(pub.lowestPayment.find((deal) => deal.label === "North | No photo yet")).not.toHaveProperty("photo");
     expect(JSON.stringify(pub)).not.toContain("/deals/mine/img/");

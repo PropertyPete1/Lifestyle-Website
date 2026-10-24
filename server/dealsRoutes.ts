@@ -144,7 +144,9 @@ export function registerDealsRoutes(app: Express) {
     const photoId = photoIdFromToken(String(req.params.token));
     if (!photoId) return res.status(404).end();
     if (!publicPhotoAllowed(req.ip || req.socket?.remoteAddress || "unknown")) return res.status(429).end();
-    const rendered = await (await import("./dealsPhotos")).renderDealPhotoForPublic(photoId);
+    const { PUBLIC_RENDER_BUSY, renderDealPhotoForPublic } = await import("./dealsPhotos");
+    const rendered = await renderDealPhotoForPublic(photoId);
+    if (rendered === PUBLIC_RENDER_BUSY || typeof rendered === "string") { res.setHeader("Retry-After", "2"); return res.status(503).end(); }
     if (!rendered) return res.status(404).end();
     // A photo an admin hides, or a home that sells, stops showing within ten minutes.
     res.setHeader("Cache-Control", "public, max-age=600");

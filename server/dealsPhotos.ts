@@ -1780,7 +1780,13 @@ export function resetDealPhotoRuntimeState() {
  * instead of a lead, and smaller. Only photos the current Best Deals strip names are ever asked for (the route
  * maps an opaque deal key to the photo), so this never opens the rest of the catalog to visitors.
  */
-export async function renderDealPhotoForPublic(photoId: number): Promise<RenderedPhoto | null> {
+/** Visitors' renders get their own lanes and a short queue, so they never hold up a signed-up buyer's photos. */
+const publicRenderLimiter = createLimiter(2);
+const PUBLIC_RENDER_QUEUE_MAX = 12;
+/** The answer when the public lanes are full: the route says "busy, try again" instead of queueing without end. */
+export const PUBLIC_RENDER_BUSY = "busy" as const;
+
+export async function renderDealPhotoForPublic(photoId: number): Promise<RenderedPhoto | null | typeof PUBLIC_RENDER_BUSY> {
   try {
     const db = await getDb();
     if (!db) return null;
@@ -1802,7 +1808,8 @@ export async function renderDealPhotoForPublic(photoId: number): Promise<Rendere
     if (inMemory) return inMemory;
     // Kept in storage too (keyed by the master's version), so a restart or a busy page does not redo the work.
     const storedKey = `${PRIVATE_PREFIX}public/${photoId}-${row.photo.processedVersion.slice(0, 16)}.webp`;
-    return await renderLimiter(async () => {
+    if (publicRenderLimiter.waiting() >= PUBLIC_RENDER_QUEUE_MAX) return PUBLIC_RENDER_BUSY;
+    return await publicRenderLimiter(async () => {
       const raced = renderMemory.get(cacheVersion);
       if (raced) return raced;
       try {

@@ -728,21 +728,40 @@ export async function publicDealsCatalog(src?: string | null) {
  */
 const publicHomesCache = new Map<string, { at: number; value: unknown[] | null }>();
 const PUBLIC_HOMES_CACHE_MS = 120_000;
+/** Landing key to community id for the live communities, read at most once a minute (one read at a time). */
+let landingKeys: { at: number; byKey: Map<string, number> } | null = null;
+let landingKeysRead: Promise<Map<string, number>> | null = null;
+async function landingCommunityId(key: string): Promise<number | null> {
+  if (!landingKeys || Date.now() - landingKeys.at > 60_000) {
+    landingKeysRead ??= (async () => {
+      const db = await getDb();
+      const rows = db ? await db.select({ id: dealCommunities.id }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))) : [];
+      const byKey = new Map(rows.map((row) => [dealsHandle(`deals-landing:${row.id}`, 12), row.id] as const));
+      landingKeys = { at: Date.now(), byKey };
+      return byKey;
+    })().finally(() => { landingKeysRead = null; });
+    await landingKeysRead;
+  }
+  return landingKeys?.byKey.get(key) ?? null;
+}
+
 export async function publicCommunityHomes(key: string): Promise<unknown[] | null> {
   if (!/^[a-f0-9]{12}$/.test(key)) return null;
   const cached = publicHomesCache.get(key);
   if (cached && Date.now() - cached.at < PUBLIC_HOMES_CACHE_MS) return cached.value;
-  const value = await readPublicCommunityHomes(key);
+  // A key that names no live community is answered without touching the homes, and never cached.
+  const communityId = await landingCommunityId(key);
+  if (!communityId) return null;
+  const value = await readPublicCommunityHomes(communityId, key);
   if (publicHomesCache.size >= 200) publicHomesCache.delete(publicHomesCache.keys().next().value as string);
   publicHomesCache.set(key, { at: Date.now(), value });
   return value;
 }
 
-async function readPublicCommunityHomes(key: string): Promise<unknown[] | null> {
+async function readPublicCommunityHomes(communityId: number, key: string): Promise<unknown[] | null> {
   const db = await getDb();
   if (!db) return null;
-  const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)));
-  const community = communities.find((row) => dealsHandle(`deals-landing:${row.id}`, 12) === key);
+  const community = (await db.select().from(dealCommunities).where(and(eq(dealCommunities.id, communityId), eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).limit(1))[0];
   if (!community) return null;
   const { publicPhotoUrl } = await import("./dealsPhotoToken");
   const homes = selectDealCatalogHomes(await db.select().from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)));
@@ -776,6 +795,8 @@ async function readPublicCommunityHomes(key: string): Promise<unknown[] | null> 
 /** Test seam only. */
 export function resetPublicHomesCache() {
   publicHomesCache.clear();
+  landingKeys = null;
+  landingKeysRead = null;
 }
 
 /**

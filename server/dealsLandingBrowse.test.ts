@@ -123,9 +123,14 @@ describe("the landing catalog", () => {
     expect(homes[1]!.photos).toEqual([]);
     const json = JSON.stringify(homes);
     for (const secret of ["118 Fixture", "Brandon", "Fixture Lakes", "chesmar", "sourceKey", `"id"`]) expect(json).not.toContain(secret);
-    // A key that is not a live community's opens nothing.
+    // A key that is not a live community's opens nothing, and made-up keys never re-read the communities.
+    const select = vi.spyOn(db, "select");
     expect(await publicCommunityHomes("0123456789ab")).toBeNull();
+    expect(await publicCommunityHomes("ba9876543210")).toBeNull();
+    expect(select).not.toHaveBeenCalled();
     expect(await publicCommunityHomes("nope")).toBeNull();
+    // Photo tokens are one unbroken hex word, so the privacy check can never read a builder name inside one.
+    for (const url of homes[0]!.photos) expect(url).toMatch(/^\/deals\/pub\/img\/[a-f0-9]{32}$/);
   });
 
   it("drops a community's homes when a private name slips into them", async () => {

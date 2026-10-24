@@ -18,13 +18,15 @@ export function photoToken(photoId: number): string {
   block.writeBigUInt64BE(BigInt(photoId), 8);
   const cipher = crypto.createCipheriv("aes-128-ecb", key(), null);
   cipher.setAutoPadding(false);
-  return Buffer.concat([cipher.update(block), cipher.final()]).toString("base64url");
+  // Hex, not base64url: the public privacy check splits words on "-" and "_", so a base64 token could spell a short
+  // builder name by chance and drop a community; one unbroken hex word never matches a name.
+  return Buffer.concat([cipher.update(block), cipher.final()]).toString("hex");
 }
 
 /** The photo id inside a token; null for anything that is not one of ours. */
 export function photoIdFromToken(token: string): number | null {
-  if (!/^[A-Za-z0-9_-]{22}$/.test(token)) return null;
-  const sealed = Buffer.from(token, "base64url");
+  if (!/^[a-f0-9]{32}$/.test(token)) return null;
+  const sealed = Buffer.from(token, "hex");
   if (sealed.length !== 16) return null;
   const decipher = crypto.createDecipheriv("aes-128-ecb", key(), null);
   decipher.setAutoPadding(false);

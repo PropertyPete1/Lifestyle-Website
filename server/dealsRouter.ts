@@ -264,7 +264,8 @@ function settings_testTeamNote(phone: string, settings: { testTeamNumbers: strin
 export const dealsRouter = router({
   /** Every community's public card; the one whose reel brought the visitor (`src`) comes first. */
   /** One community's homes on the landing page: prices, photos and specs, never an address or a name. */
-  publicHomes: publicProcedure.input(z.object({ key: z.string().regex(/^[a-f0-9]{12}$/) })).query(async ({ input }) => {
+  publicHomes: publicProcedure.input(z.object({ key: z.string().regex(/^[a-f0-9]{12}$/) })).query(async ({ input, ctx }) => {
+    dealsPublicHeaders(ctx.res);
     const { publicCommunityHomes } = await import("./dealsService");
     return (await publicCommunityHomes(input.key)) ?? [];
   }),

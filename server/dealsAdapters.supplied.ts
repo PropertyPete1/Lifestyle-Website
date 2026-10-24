@@ -52,7 +52,8 @@ export const suppliedHomeSchema = z.strictObject({
   beds: z.number().finite().nullable().optional(),
   baths: z.number().finite().nullable().optional(),
   sqft: z.number().finite().nullable().optional(),
-  status: z.enum(["available", "under_construction", "sold"]),
+  /** `pending`: the page still shows the home but marks it under contract (Legend's "Contract Pending"): off the market, not sold. */
+  status: z.enum(["available", "under_construction", "pending", "sold"]),
   /** "ready now", "Month YYYY" (e.g. "December 2026"), or null when the page gives none. */
   moveIn: z.string().trim().max(40).nullable().optional(),
   /** Optional photo links from the builder's own site or image host. */
@@ -116,7 +117,8 @@ function readMoveIn(value: string | null | undefined, now: Date): MoveIn {
 
 /** The status, ready-now flag and move-in month a reader would give this card (see ndgStatus). */
 function statusOf(home: SuppliedHome, moveIn: MoveIn, now: Date): { status: string; readyNow: boolean; moveInDate: string | null } | null {
-  if (home.status === "sold") return { status: "Sold", readyNow: false, moveInDate: null };
+  // An under-contract home is off the market: it leaves the site as a sold one does (a reader never lists a pending home).
+  if (home.status === "sold" || home.status === "pending") return { status: "Sold", readyNow: false, moveInDate: null };
   if (moveIn.kind === "invalid") return null;
   if (moveIn.kind === "ready") return home.status === "available" ? { status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null } : null;
   if (moveIn.kind === "none") return { status: "Quick Move-In", readyNow: false, moveInDate: null };
@@ -153,6 +155,7 @@ export function checkSuppliedCommunity(builder: string, stored: Pick<StoredSuppl
   if (age > SUPPLIED_IMPORT_STALE_MS) { reasons.add("supplied_import_stale"); problems.push(`captured ${Math.floor(age / 3_600_000)} hours ago (more than 36)`); }
   if (age < -SUPPLIED_IMPORT_FUTURE_SKEW_MS) { reasons.add("supplied_import_stale"); problems.push("captured in the future"); }
   if (!community.pageComplete) { reasons.add("supplied_import_incomplete"); problems.push("pageComplete is false"); }
+  // The page's own count includes the under-contract cards it still shows; sold ones it does not.
   const forSale = community.homes.filter((home) => home.status !== "sold").length;
   if (forSale !== community.homesShownCount) { reasons.add("supplied_import_incomplete"); problems.push(`${forSale} homes for sale sent, the page shows ${community.homesShownCount}`); }
   const urls = new Map<string, number>();
@@ -228,7 +231,7 @@ export function suppliedDealsSnapshot(config: CommunitySourceConfig, stored: Sto
   if (check.reasons.length) return failedResult(config, fetchedAt, privateSnapshot, check.reasons);
   // "No homes for sale" would sweep every home of the community to sold on the agent's word alone: it is taken only when
   // the import before it, captured earlier, said the same (two separate visits agree); otherwise the community holds.
-  const forSale = (item: StoredSuppliedImport) => item.community.homes.filter((home) => home.status !== "sold").length;
+  const forSale = (item: StoredSuppliedImport) => item.community.homes.filter((home) => home.status === "available" || home.status === "under_construction").length;
   if (forSale(stored) === 0 && !(previous && previous.capturedAt.getTime() < stored.capturedAt.getTime() && forSale(previous) === 0)) return failedResult(config, fetchedAt, privateSnapshot, ["supplied_import_incomplete"]);
   privateSnapshot.pages.push(sourcePage("community", config.sourceUrl, config.privateCommunityName));
   for (const home of check.homes) {

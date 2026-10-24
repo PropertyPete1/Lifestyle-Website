@@ -81,7 +81,7 @@ Strict: unknown fields anywhere are refused (400).
       beds?: number | null,           // whole number
       baths?: number | null,          // 2.5 for two full and one half
       sqft?: number | null,           // whole number
-      status: "available" | "under_construction" | "sold",
+      status: "available" | "under_construction" | "pending" | "sold",   // pending: shown but under contract ("Contract Pending")
       moveIn?: "ready now" | "Month YYYY" | null,   // e.g. "December 2026"
       photos?: string[]               // optional, up to 40, https on the builder's site or image host (Legend: assets.livelegendhomes.com)
     }>
@@ -92,7 +92,7 @@ Strict: unknown fields anywhere are refused (400).
 How it maps onto a reader's result (`DealAdapterResult`): each home becomes a
 private home record (`sourceUrl` = `url`, `privateAddress` = `address`,
 `privateName` = the street line, `privatePlanName` = `plan`). The status is the
-reader's: `sold` is "Sold" (recorded as sold); `available` with `ready now`, or
+reader's: `sold` is "Sold" (recorded as sold), and so is `pending` (an under-contract home leaves the site; it still counts in `homesShownCount` when the page shows it); `available` with `ready now`, or
 with a month already past, is "Quick Move-In (Move-In Ready)"; a future month is
 "Quick Move-In (Month YYYY)"; no move-in is "Quick Move-In". The offer text is
 cleaned exactly as the Legend reader cleans an offer (links, phone numbers,
@@ -210,7 +210,8 @@ hold after this import, if any (it needs an admin's review, not a new import).
 > and any "nearby" or "similar homes" cards from other communities. For each home card record: the home's page link, the full
 > address as shown, the plan name, the price in whole dollars (null if none is
 > shown), beds, baths (2.5 for two full and one half), square feet, the status
-> (`available`, `under_construction` or `sold`) and the move-in wording as
+> (`available`, `under_construction`, `pending` for a home the page marks under
+> contract or contract pending, or `sold`) and the move-in wording as
 > `ready now` or `Month YYYY` (null if none), and `photos`: every photo link of
 > that home (up to 40, in the order the site shows them), exactly as served from
 > `https://assets.livelegendhomes.com/...` (the `url` of each entry in the home's

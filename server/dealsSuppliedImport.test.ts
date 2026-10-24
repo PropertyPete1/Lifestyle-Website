@@ -139,7 +139,7 @@ describe("payload validation", () => {
       (data) => { data.communities[0].builderName = "x"; },
       (data) => { data.communities[0].homes[0].lotSize = "0.2 acres"; },
       (data) => { data.communities[0].homes[0].price = "329990"; },
-      (data) => { data.communities[0].homes[0].status = "pending"; },
+      (data) => { data.communities[0].homes[0].status = "contract pending"; },
       (data) => { data.communities[0].homesShownCount = 1.5; },
       (data) => { data.communities[0].pageComplete = "true"; },
       (data) => { data.capturedAt = "yesterday"; },
@@ -235,6 +235,23 @@ describe("supplied import through the normal sync", () => {
     const holds = digestHolds().filter((hold) => hold.kind === "catalog");
     expect(holds).toEqual([expect.objectContaining({ reason: "supplied_import_incomplete", detail: SUPPLIED_IMPORT_HOLD_DETAIL.supplied_import_incomplete })]);
     expect(describeCatalogHold("supplied_import_incomplete")[0]).toMatch(/partial/);
+  });
+
+  /** October 24, 2026: Legend's Cinco Lakes and Melissa Ranch showed "Contract Pending" cards the import could not name, so it sent fewer homes than the page's count and both held. */
+  it("an under-contract home (pending) counts toward the page's count and leaves the site like a sold one", async () => {
+    await generateSuppliedImportKey(BUILDER);
+    const id = seedCommunity();
+    await importNow(payload([community([home(101), home(102), home(103)])], hoursAgo(10)), hoursAgo(9));
+    expect(available(id)).toHaveLength(3);
+    const { response } = await importNow(payload([community([home(101), home(102), home(103, { status: "pending", moveIn: null })], { homesShownCount: 3 })], hoursAgo(5)), hoursAgo(4));
+    expect(response.communities[0]).toMatchObject({ status: "published", reasons: [] });
+    expect(available(id).map((entry) => entry.privateAddress?.slice(0, 3))).toEqual(["101", "102"]);
+    expect(homesOf(id).find((entry) => entry.privateAddress?.startsWith("103"))?.status).toBe("sold");
+    // Every card under contract is not "no homes": with no earlier visit agreeing, nothing is swept.
+    const id2 = seedCommunity({ sourceUrl: C2, privateName: "Fixture Crossing" });
+    const allPending = await importNow(payload([community([home(201, { status: "pending" }, C2)], { communityUrl: C2, homesShownCount: 1 })], hoursAgo(3)), hoursAgo(2));
+    expect(allPending.response.communities[0]).toMatchObject({ status: "held", reasons: ["supplied_import_incomplete"] });
+    expect(available(id2)).toHaveLength(0);
   });
 
   it("an import older than 36 hours holds supplied_import_stale on the next refresh instead of publishing", async () => {

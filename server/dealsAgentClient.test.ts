@@ -58,9 +58,9 @@ describe("the gate for an agent's client", () => {
   it("asks the realtor question as before when there is no client link", () => {
     const html = render({ pending: null, clientLink: null, consentText: "consent" } as GateDealsState);
     expect(html).toContain("Are you a realtor, or working with one?");
-    expect(html).toContain("Addresses and tours");
+    expect(html).toContain("Schedule a tour.");
     // Upfront about what signing up means: working with LDR, and an agent reaching out.
-    expect(html).toContain("These deals are for buyers who want to work with Lifestyle Design Realty. Add your number and one of our agents will reach out with the addresses, the builder details and a time to tour.");
+    expect(html).toContain("Add your number and one of our agents will reach out to set up your tour and answer your questions.");
     expect(html).toContain("Lifestyle Design Realty agents: enter your own mobile number to open your agent tools.");
     const continueButton = html.match(/<button[^>]*>(?:(?!<\/button>).)*Continue(?:(?!<\/button>).)*<\/button>/)?.[0] ?? "";
     expect(continueButton).toContain('disabled=""');

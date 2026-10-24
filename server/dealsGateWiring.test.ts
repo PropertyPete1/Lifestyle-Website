@@ -92,8 +92,8 @@ describe("/deals/mine: only a dead session falls back to the landing page", () =
     expect(html).toContain(MINE_COPY.loadFailedHint);
     expect(html).toMatch(new RegExp(`<button[^>]*>(?:(?!</button>).)*${MINE_COPY.retry}</button>`));
     expect(html).toContain('data-deals-retry="true"');
-    expect(html).not.toContain("Get addresses and tours");
-    expect(html).not.toContain("Addresses and tours");
+    expect(html).not.toContain("Schedule a tour <");
+    expect(html).not.toContain("Schedule a tour.");
     expect(mocks.state).not.toHaveBeenCalled();
     expect(mocks.publicCatalog).not.toHaveBeenCalled();
     // The failure message itself is not shown to the visitor.
@@ -114,8 +114,8 @@ describe("/deals/mine: only a dead session falls back to the landing page", () =
     mocks.state.mockReturnValue({ data: { session: null, pending: null, consentText: "consent", googleEnabled: false, commentKeyword: "HOME", textLine: "(512) 542-1477", blockedMessage: null }, isLoading: false });
     mocks.publicCatalog.mockReturnValue({ data: [], isLoading: false });
     const html = decode(renderMine());
-    expect(html).toContain("Get addresses and tours");
-    expect(html).toContain("Addresses and tours");
+    expect(html).toContain("Schedule a tour <");
+    expect(html).toContain("Schedule a tour.");
     expect(html).not.toContain(MINE_COPY.loadFailed);
     expect(mocks.state).toHaveBeenCalled();
   });
@@ -126,7 +126,7 @@ describe("/deals/mine: only a dead session falls back to the landing page", () =
     expect(html).toContain("Prepared for @demo_buyer");
     expect(html).toContain('data-deals-gated="true"');
     expect(html).not.toContain(MINE_COPY.loadFailed);
-    expect(html).not.toContain("Get addresses and tours");
+    expect(html).not.toContain("Schedule a tour <");
   });
 
   it("shows the readable profile error under the name prompt and hides the prompt once a save succeeded", () => {

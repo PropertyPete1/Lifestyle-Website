@@ -43,12 +43,12 @@ export const LANDING_COPY = {
   mapAttribution: "Map data and imagery from Google. Markers show the general area only, never the community.",
   showMap: "Show map",
   hideMap: "Hide map",
-  unlock: "Get the addresses and a tour",
-  homeAddress: "Get this address",
+  unlock: "Schedule a tour",
+  homeAddress: "Schedule a tour",
   homesHeading: (count: number) => `${count} home${count === 1 ? "" : "s"} available`,
   homesLoading: "Loading homes…",
   homesNone: "Homes are being added. Ask us for the current list.",
-  privacy: "Addresses and builder details come from your agent once you sign up.",
+  privacy: "One of our agents will reach out to set it up and answer your questions.",
   close: "Close",
 } as const;
 

@@ -48,12 +48,13 @@ describe("the region map", () => {
 describe("the community card", () => {
   it("shows the cover, the price band, the builder rate only with its APR, and how many homes are ready", () => {
     const incentive = { text: "x", headlineRate: "4.99%", apr: "5.6%", followOnRate: null, followOnPeriod: null } as never;
-    expect(rateBadge(incentive)).toBe("4.99%");
+    expect(rateBadge(incentive)).toEqual({ rate: "4.99%", apr: "5.6%" });
     expect(rateBadge({ ...(incentive as object), apr: null } as never)).toBeNull();
     expect(rateBadge({ text: "x", pending: true } as never)).toBeNull();
     const html = renderToStaticMarkup(React.createElement(CommunityCard, { community: { key: "abcdefabcdef", label: "Southeast San Antonio | Lakes", area: "Southeast San Antonio", fromPriceLabel: "From the $300s", reelUrl: "https://www.instagram.com/reel/x/", homesAvailable: 3, incentive, cover: "/deals/pub/img/abcdefabcdef" }, active: true, onHover: () => undefined, onOpen: () => undefined }));
     expect(html).toContain('src="/deals/pub/img/abcdefabcdef"');
-    expect(html).toContain("4.99% builder rate");
+    // The rate never prints without its APR.
+    expect(html).toContain("4.99% rate · 5.6% APR");
     expect(html).toContain("From the $300s");
     expect(html).toContain("3 move-in ready homes");
     expect(html).toContain("Video tour");

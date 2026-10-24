@@ -59,9 +59,11 @@ function regionMapUrl(): string {
 export async function loadRegionMap(fetcher: typeof fetch = fetch): Promise<Buffer | null> {
   if (cached && cached.expiresAt > Date.now()) return cached.bytes;
   if (failedUntil > Date.now() || !ENV.forgeApiUrl || !ENV.forgeApiKey) return null;
+  let url: string;
+  try { url = regionMapUrl(); } catch { failedUntil = Date.now() + FAILURE_MS; return null; }
   loading ??= (async () => {
     try {
-      const response = await fetcher(regionMapUrl(), { method: "GET", redirect: "error", signal: AbortSignal.timeout(15_000) });
+      const response = await fetcher(url, { method: "GET", redirect: "error", signal: AbortSignal.timeout(15_000) });
       if (!response.ok || !(response.headers.get("content-type") ?? "").toLowerCase().startsWith("image/")) throw new Error("not an image");
       const raw = Buffer.from(await response.arrayBuffer());
       if (!raw.length || raw.length > 8_000_000) throw new Error("bad size");

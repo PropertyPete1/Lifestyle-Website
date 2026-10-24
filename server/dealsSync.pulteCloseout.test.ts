@@ -1,6 +1,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dealCommunities, dealIncentives } from "../drizzle/schema";
+import { dealCommunities, dealHomes, dealIncentives } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 import type { CommunitySourceConfig, DealAdapterResult, HtmlFetcher } from "./dealsAdapters";
 
@@ -98,6 +98,8 @@ describe("Pulte group closeout: the brand offer read within the hour", () => {
     await refreshOfficialDeals({ communityIds: [ridge, bluff], now: new Date() });
     expect(liveFor(ridge)).toHaveLength(0);
     expect(liveFor(bluff)).toHaveLength(0);
+    // The landing lists only a community with something to show (Oct 24): one plan each stands in.
+    for (const id of [ridge, bluff]) db.seed(dealHomes, { communityId: id, sourceKey: `plan-${id}`, sourceUrl: `https://www.centex.com/plan-${id}`, kind: "to_be_built", status: "available", origin: "manual", price: 450_000 });
     const catalog = await publicDealsCatalog();
     expect(catalog.find((entry) => entry.label.endsWith("cx1"))!.incentive).toBeNull();
     expect(catalog.find((entry) => entry.label.endsWith("cx2"))!.incentive).toBeNull();

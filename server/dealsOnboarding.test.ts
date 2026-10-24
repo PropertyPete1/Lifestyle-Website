@@ -28,7 +28,11 @@ describe("area labels and headlines", () => {
     expect(areaLabelFor({ centroid: { lat: 29.518, lng: -98.316 }, city: "Converse" })).toBe("Northeast San Antonio");
     expect(areaLabelFor({ centroid: { lat: 29.70, lng: -98.12 }, city: "New Braunfels" })).toBe("New Braunfels");
     // A small far-out town is too precise: the direction from San Antonio instead.
-    expect(areaLabelFor({ centroid: { lat: 29.02, lng: -98.48 }, city: "Somerset" })).toBe("South of San Antonio");
+    // Oct 24: outside the metro the nearest listed town within 9 miles names it (Pleasanton here); open country is a side.
+    expect(areaLabelFor({ centroid: { lat: 29.02, lng: -98.48 }, city: "Somerset" })).toBe("Pleasanton");
+    expect(areaLabelFor({ centroid: { lat: 29.05, lng: -98.35 }, city: "Somerset" })).toBe("South of San Antonio");
+    // A builder that lists Esperanza as "San Antonio" still reads as Boerne.
+    expect(areaLabelFor({ centroid: { lat: 29.82, lng: -98.67 }, city: "San Antonio" })).toBe("Boerne");
     expect(areaLabelFor({ city: "Seguin" })).toBe("Seguin");
     expect(areaLabelFor({ city: "Adkins" })).toBe("Greater San Antonio");
     expect(sectorOf({ lat: 29.7, lng: -98.49 })).toBe("North");

@@ -714,6 +714,9 @@ export async function publicDealsCatalog(src?: string | null) {
   for (const photo of coverPhotos) if (!firstPhoto.has(photo.homeId)) firstPhoto.set(photo.homeId, photo.id);
 
   for (const community of browseOrder(communities, reelCode)) {
+    // A community with no home or plan to show (the builder lists none right now, or its reader finds none) is left off
+    // the landing: a card with no photo and nothing behind it is a dead end (52 such cards on October 24, 2026).
+    if (!(coverCandidates.get(community.id) ?? []).length) continue;
     const incentive = incentives.get(community.id);
     // Opaque per community: the page's key for the card, its map marker and its cover photo. Never the row id.
     const key = dealsHandle(`deals-landing:${community.id}`, 12);

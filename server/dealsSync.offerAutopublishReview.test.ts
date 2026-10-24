@@ -57,6 +57,12 @@ beforeEach(() => {
 afterEach(() => { vi.clearAllMocks(); });
 
 function seedCommunity() {
+  const id = seedCommunityRow();
+  // The landing lists only a community with something to show (Oct 24): one plan stands in.
+  db.seed(dealHomes, { communityId: id, sourceKey: `plan-${id}`, sourceUrl: `${COMMUNITY_URL}/plan-${id}`, privatePlanName: "Fixture Plan", kind: "to_be_built", status: "available", origin: "official", price: 450_000 });
+  return id;
+}
+function seedCommunityRow() {
   return db.seed(dealCommunities, { builder: "M/I Homes", privateName: "Fixture Gardens", sourceUrl: COMMUNITY_URL, privateAddress: "8106 Fixture Patch, San Antonio, TX 78263", publicLabel: "Southeast San Antonio | New Phase", areaLabel: "Southeast San Antonio", reelCode: "vg1", scrubList: JSON.stringify({ community: ["Fixture Gardens"], street: ["Fixture Patch"], lender: ["M/I Financial"] }), active: true, paused: false, manualMode: false, zipCentroidLat: "29.3", zipCentroidLng: "-98.4" });
 }
 function seedLead() {

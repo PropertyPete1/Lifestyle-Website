@@ -27,6 +27,8 @@ beforeEach(() => {
 
 afterEach(() => vi.clearAllMocks());
 
+/** The landing lists only a community with something to show (Oct 24): one plan stands in where a test reads the landing. */
+const seedLandingPlan = (id = communityId) => db.seed(dealHomes, { communityId: id, sourceKey: `landing-plan-${id}`, sourceUrl: `https://www.mihomes.com/landing-plan-${id}`, kind: "to_be_built", status: "available", origin: "official", price: 450_000 });
 const seedHome = (values: Partial<typeof dealHomes.$inferInsert>) => db.seed(dealHomes, { communityId, sourceKey: `key-${Math.random()}`, sourceUrl: `https://www.mihomes.com/${Math.random()}`, kind: "quick_move_in", status: "available", origin: "official", price: 400_000, ...values });
 const catalog = async () => (await gatedDealsCatalog(leadId) as Array<{ homes: Array<{ kind: string }>; incentive: unknown; amenities: string[]; label: string }>)[0];
 
@@ -42,12 +44,13 @@ describe("gated catalog selection and privacy", () => {
   });
 
   it("scrubs community text by category and drops only the offending community when private residue survives, recording it without the term", async () => {
+    seedLandingPlan();
     const entry = await catalog();
     expect(entry.amenities).toEqual(["Walking trails", "this community clubhouse"]);
     expect(JSON.stringify(entry)).not.toContain("Fixture Gardens");
     expect(JSON.stringify(entry)).not.toContain("Fixture Street");
     const cleanId = db.seed(dealCommunities, { builder: "Chesmar", privateName: "Fixture Lakes", sourceUrl: "https://www.chesmar.com/x", privateAddress: "", publicLabel: "Southeast San Antonio | Half-Acre Lots", areaLabel: "Southeast San Antonio", amenities: "[]", reelCode: "sl1", scrubList: "{}", active: true, paused: false, manualMode: false });
-    void cleanId;
+    seedLandingPlan(cleanId);
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     db.rows(dealCommunities)[0].scrubList = JSON.stringify({ other: ["VGX"] });
     db.rows(dealCommunities)[0].amenities = JSON.stringify(["Near VGX"]);
@@ -76,6 +79,7 @@ describe("gated catalog selection and privacy", () => {
   });
 
   it("ignores admin-excluded terms in the public and gated residue checks and in the scrubber", async () => {
+    seedLandingPlan();
     db.rows(dealCommunities)[0].scrubList = JSON.stringify({ plan: ["Magnolia"], street: ["Fixture Street", "New Homes in San Antonio"], other: ["VGX"], excludedTerms: ["New Homes in San Antonio", "VGX"] });
     db.rows(dealCommunities)[0].amenities = JSON.stringify(["Near VGX", "New Homes in San Antonio welcome center"]);
     const entry = await catalog();
@@ -89,6 +93,7 @@ describe("gated catalog selection and privacy", () => {
   });
 
   it("applies the incentive lapse days at render time and never shows a held, expired or lapsed record", async () => {
+    seedLandingPlan();
     const seedIncentive = (values: Partial<typeof dealIncentives.$inferInsert>) => db.seed(dealIncentives, { communityId, normalizedText: `t${Math.random()}`, publicText: "Promo", active: true, held: false, ...values });
     seedIncentive({ publicText: "Lapsed no-date promo", confirmedAt: new Date(Date.now() - 15 * DAY) });
     expect((await catalog()).incentive).toBeNull();
@@ -104,6 +109,7 @@ describe("gated catalog selection and privacy", () => {
   });
 
   it("prints rate figures without their own label, however an older row or an admin stored them", async () => {
+    seedLandingPlan();
     db.seed(dealIncentives, {
       communityId, normalizedText: "labelled", publicText: "4.999% (5.737% APR) FHA 30-year financing.", active: true, held: false, confirmedAt: new Date(),
       headlineRate: "4.999% rate", followOnRate: "5.25 % interest rate", followOnPeriod: "Years 2 to 30", apr: "5.737% APR.",

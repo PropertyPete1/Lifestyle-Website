@@ -19,6 +19,29 @@ const EARTH_MILES = 3958.8;
  */
 export const MAJOR_TOWNS = ["New Braunfels", "Seguin", "Boerne", "Floresville", "Pleasanton", "Bulverde", "Spring Branch", "Canyon Lake", "Castroville", "Mico", "Hondo", "Lytle", "Devine", "La Vernia", "Marion", "Bandera", "Poteet", "Comfort"] as const;
 
+/** Each town's centre (approximate). Outside the metro, a community whose builder lists "San Antonio" (Perry's
+ * Esperanza, 3 miles from Boerne) takes the name of a town within TOWN_MILES of its ZIP centre (Peter, Oct 24: "where
+ * are all the communities in Boerne"). */
+const TOWN_CENTERS: Record<(typeof MAJOR_TOWNS)[number], { lat: number; lng: number }> = {
+  "New Braunfels": { lat: 29.703, lng: -98.1245 }, Seguin: { lat: 29.5688, lng: -97.9647 }, Boerne: { lat: 29.7947, lng: -98.732 },
+  Floresville: { lat: 29.1336, lng: -98.1561 }, Pleasanton: { lat: 28.9672, lng: -98.4786 }, Bulverde: { lat: 29.7438, lng: -98.4531 },
+  "Spring Branch": { lat: 29.8808, lng: -98.387 }, "Canyon Lake": { lat: 29.8752, lng: -98.2625 }, Castroville: { lat: 29.3558, lng: -98.8786 },
+  Mico: { lat: 29.5466, lng: -98.9083 }, Hondo: { lat: 29.3475, lng: -99.1417 }, Lytle: { lat: 29.2333, lng: -98.7964 },
+  Devine: { lat: 29.1394, lng: -98.9031 }, "La Vernia": { lat: 29.3566, lng: -98.1156 }, Marion: { lat: 29.5713, lng: -98.142 },
+  Bandera: { lat: 29.7266, lng: -99.0737 }, Poteet: { lat: 29.0408, lng: -98.5681 }, Comfort: { lat: 29.9677, lng: -98.905 },
+};
+const TOWN_MILES = 9;
+
+/** The listed town nearest a point, when one is within TOWN_MILES. */
+export function nearestTown(point: { lat: number; lng: number }): string | null {
+  let best: { town: string; miles: number } | null = null;
+  for (const town of MAJOR_TOWNS) {
+    const miles = milesBetween(point, TOWN_CENTERS[town]);
+    if (miles <= TOWN_MILES && (!best || miles < best.miles)) best = { town, miles };
+  }
+  return best?.town ?? null;
+}
+
 const SECTORS = ["North", "Northeast", "East", "Southeast", "South", "Southwest", "West", "Northwest"] as const;
 export type Sector = (typeof SECTORS)[number];
 
@@ -65,7 +88,7 @@ export function areaLabelFor(input: { centroid?: { lat: number; lng: number } | 
   const sector = sectorOf(input.centroid);
   // Inside the metro, a side of town is coarse enough; a suburb's own name would point at too few communities.
   if (miles <= METRO_MILES) return `${sector} San Antonio`;
-  return town ?? `${sector} of San Antonio`;
+  return town ?? nearestTown(input.centroid) ?? `${sector} of San Antonio`;
 }
 
 /** True for an area label this module generates (a side of San Antonio, a listed town, or the metro). */

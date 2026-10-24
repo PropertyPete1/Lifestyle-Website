@@ -140,7 +140,8 @@ export function registerDealsRoutes(app: Express) {
     if (!photoId) return res.status(404).end();
     const rendered = await (await import("./dealsPhotos")).renderDealPhotoForPublic(photoId);
     if (!rendered) return res.status(404).end();
-    res.setHeader("Cache-Control", "public, max-age=600");
+    // Short-lived: a photo an admin hides, or a home that leaves the strip, stops showing within a minute.
+    res.setHeader("Cache-Control", "public, max-age=60");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.type(rendered.contentType).send(rendered.data);

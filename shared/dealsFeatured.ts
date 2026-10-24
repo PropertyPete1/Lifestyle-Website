@@ -29,7 +29,6 @@ export function mortgageRateFrom(value: string | null | undefined): number | nul
   return rate !== null && rate >= MIN_RATE && rate <= MAX_RATE ? rate : null;
 }
 
-/** Monthly principal and interest, in whole dollars. Taxes, insurance and HOA are not included. */
 /** The monthly costs besides principal and interest, as yearly percentages of the price (HOA as dollars a month). */
 export type PaymentCosts = { taxRatePercent: number; insuranceRatePercent: number; hoaMonthly: number; mortgageInsuranceRatePercent: number };
 /**
@@ -39,19 +38,31 @@ export type PaymentCosts = { taxRatePercent: number; insuranceRatePercent: numbe
  */
 export const DEFAULT_PAYMENT_COSTS: PaymentCosts = { taxRatePercent: 3, insuranceRatePercent: 1.2, hoaMonthly: 60, mortgageInsuranceRatePercent: 0.55 };
 
-/** The whole estimated monthly payment: principal and interest, mortgage insurance under 20% down, property tax, insurance and HOA. */
-export function estimatedMonthlyPayment(input: { price: number; ratePercent: number; downPercent: number; costs: PaymentCosts; years?: number }): number {
+/**
+ * Whether the loan carries monthly mortgage insurance: FHA always does (its annual MIP does not depend on the down
+ * payment), VA never does, and anything else (conventional, or unknown) does under 20% down.
+ */
+export function carriesMortgageInsurance(loanType: string | null | undefined, downPercent: number): boolean {
+  const type = loanType ?? "";
+  if (/\bFHA\b/i.test(type)) return true;
+  if (/\bVA\b/i.test(type)) return false;
+  return downPercent < 20;
+}
+
+/** The whole estimated monthly payment: principal and interest, mortgage insurance (see carriesMortgageInsurance), property tax, insurance and HOA. */
+export function estimatedMonthlyPayment(input: { price: number; ratePercent: number; downPercent: number; costs: PaymentCosts; loanType?: string | null; years?: number }): number {
   const down = Math.min(Math.max(input.downPercent, 0), 100);
   const loan = input.price * (1 - down / 100);
   const months = (input.years ?? DEFAULT_TERM_YEARS) * 12;
   const monthlyRate = input.ratePercent / 100 / 12;
   const principalAndInterest = loan <= 0 ? 0 : monthlyRate === 0 ? loan / months : (loan * monthlyRate) / (1 - (1 + monthlyRate) ** -months);
-  const mortgageInsurance = down < 20 ? (loan * input.costs.mortgageInsuranceRatePercent) / 100 / 12 : 0;
+  const mortgageInsurance = carriesMortgageInsurance(input.loanType, down) ? (loan * input.costs.mortgageInsuranceRatePercent) / 100 / 12 : 0;
   const tax = (input.price * input.costs.taxRatePercent) / 100 / 12;
   const insurance = (input.price * input.costs.insuranceRatePercent) / 100 / 12;
   return Math.round(principalAndInterest + mortgageInsurance + tax + insurance + input.costs.hoaMonthly);
 }
 
+/** Monthly principal and interest, in whole dollars. Taxes, insurance and HOA are not included. */
 export function monthlyPrincipalAndInterest(input: { price: number; ratePercent: number; downPercent: number; years?: number }): number {
   const years = input.years ?? DEFAULT_TERM_YEARS;
   const down = Math.min(Math.max(input.downPercent, 0), 100);
@@ -242,7 +253,7 @@ function priced(candidate: FeaturedCandidate, settings: FeaturedSettings): Featu
     kind: candidate.kind,
     beds: candidate.beds ?? null,
     sqft: candidate.sqft ?? null,
-    estMonthly: estimatedMonthlyPayment({ price: candidate.price, ratePercent: rate.ratePercent, downPercent, costs: settings.costs ?? DEFAULT_PAYMENT_COSTS }),
+    estMonthly: estimatedMonthlyPayment({ price: candidate.price, ratePercent: rate.ratePercent, downPercent, loanType: rate.loanType, costs: settings.costs ?? DEFAULT_PAYMENT_COSTS }),
     rate,
     downPercent,
     acres: candidate.acres,
@@ -328,7 +339,7 @@ export function roundForPublic(deal: FeaturedDeal, costs: PaymentCosts = DEFAULT
     price: bandPrice,
     priceLabel: `${priceBandLabel(deal.price)}`,
     // The payment is figured on the band's low end, so it cannot be turned back into the exact price.
-    estMonthly: estimatedMonthlyPayment({ price: bandPrice, ratePercent: deal.rate.ratePercent, downPercent: deal.downPercent, costs }),
+    estMonthly: estimatedMonthlyPayment({ price: bandPrice, ratePercent: deal.rate.ratePercent, downPercent: deal.downPercent, loanType: deal.rate.loanType, costs }),
     sqft: deal.sqft ? roundedSqft(deal.sqft) : deal.sqft ?? null,
     sqftLabel: deal.sqft ? `about ${roundedSqft(deal.sqft).toLocaleString("en-US")} sq ft` : null,
     acres: deal.acres ? Math.round(deal.acres * 10) / 10 : deal.acres,

@@ -1775,7 +1775,6 @@ export function resetDealPhotoRuntimeState() {
   failedRowsRecovered = false;
 }
 
-/** Produces only per-lead watermarked image bytes; no object URL leaves the server. */
 /**
  * A featured home's cover on the landing page (no lead yet): the same checked master, marked for the brokerage
  * instead of a lead, and smaller. Only photos the current Best Deals strip names are ever asked for (the route
@@ -1822,6 +1821,7 @@ export async function renderDealPhotoForPublic(photoId: number): Promise<Rendere
   }
 }
 
+/** Produces only per-lead watermarked image bytes; no object URL leaves the server. */
 export async function renderDealPhotoForLead(photoId: number, leadId: number): Promise<RenderedPhoto | null> {
   try {
     const db = await getDb();

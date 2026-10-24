@@ -40,6 +40,11 @@ describe("the payment math", () => {
     // 20% down carries no mortgage insurance.
     expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 20, costs: NO_COSTS })).toBe(monthlyPrincipalAndInterest({ price: 170_000, ratePercent: 4.99, downPercent: 20 }));
     expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 20, costs: { ...NO_COSTS, mortgageInsuranceRatePercent: 0.55 } })).toBe(monthlyPrincipalAndInterest({ price: 170_000, ratePercent: 4.99, downPercent: 20 }));
+    // VA has no monthly mortgage insurance at 0% down; FHA keeps its MIP even at 20% down.
+    const mi = { ...NO_COSTS, mortgageInsuranceRatePercent: 0.55 };
+    expect(estimatedMonthlyPayment({ price: 400_000, ratePercent: 5.5, downPercent: 0, loanType: "VA", costs: mi })).toBe(monthlyPrincipalAndInterest({ price: 400_000, ratePercent: 5.5, downPercent: 0 }));
+    expect(estimatedMonthlyPayment({ price: 400_000, ratePercent: 5.5, downPercent: 0, loanType: "Conventional", costs: mi })).toBe(monthlyPrincipalAndInterest({ price: 400_000, ratePercent: 5.5, downPercent: 0 }) + 183);
+    expect(estimatedMonthlyPayment({ price: 400_000, ratePercent: 5.5, downPercent: 20, loanType: "FHA", costs: mi })).toBe(monthlyPrincipalAndInterest({ price: 400_000, ratePercent: 5.5, downPercent: 20 }) + 147);
   });
 
   it("reads rates, down payments and lot sizes out of builder wording", () => {
@@ -332,9 +337,15 @@ describe("Best Deals from the database, by viewer", () => {
     expect(await publicFeaturedPhotoId(withPhoto.key!)).toBe(cover);
     expect(await publicFeaturedPhotoId("aaaaaaaaaaaa")).toBeNull();
     expect(await publicFeaturedPhotoId("../etc/passwd")).toBeNull();
-    expect(JSON.stringify(pub)).not.toContain(`/img/${cover}`);
+    // No photo id on the landing page: only the opaque key (which can start with the same digits, so match whole values).
+    expect(JSON.stringify(pub)).not.toContain("/deals/mine/img/");
+    expect(JSON.stringify(pub)).not.toMatch(new RegExp(`/img/${cover}"`));
     const gated = await featuredDeals({ view: "gated" });
     expect(gated.lowestPayment.find((deal) => deal.photo)?.photo).toBe(`/deals/mine/img/${cover}`);
+    // A strip that empties (the offer lapses) stops serving the old key on the next landing-page ranking.
+    db.rows(dealIncentives).forEach((row) => { row.active = false; });
+    expect((await featuredDeals("public")).lowestPayment).toEqual([]);
+    expect(await publicFeaturedPhotoId(withPhoto.key!)).toBeNull();
   });
 
   it("ranks a private list's strip among that list's homes only, so it is never short", async () => {

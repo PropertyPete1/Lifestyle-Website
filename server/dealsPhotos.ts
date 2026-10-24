@@ -340,9 +340,23 @@ export function parseBuilderPhotoSettings(value: string): BuilderPhotoSettings {
   } catch { throw new PhotoProcessingError("watermark_settings_invalid"); }
 }
 
+/**
+ * Sanity's image CDN resizes on request: Davidson's 3840 px PNG renderings run past the download cap, so a Sanity image
+ * with no size of its own is fetched at 2400 px as a JPEG (the stored source URL, and so the photo's identity, is unchanged).
+ */
+export function sizedDownloadUrl(url: URL): URL {
+  if (url.hostname.toLowerCase() !== "cdn.sanity.io" || !url.pathname.startsWith("/images/") || url.search) return url;
+  const sized = new URL(url.toString());
+  sized.searchParams.set("w", "2400");
+  sized.searchParams.set("fm", "jpg");
+  sized.searchParams.set("q", "88");
+  sized.searchParams.set("fit", "max");
+  return sized;
+}
+
 /** Read a builder image with strict redirects and a streaming download cap. */
 export async function downloadDealPhoto(raw: string, fetcher: typeof fetch = fetch): Promise<Buffer> {
-  let url = safeDealImageUrl(raw);
+  let url = sizedDownloadUrl(safeDealImageUrl(raw));
   const initialHost = url.hostname;
   const signal = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
   for (let redirects = 0; redirects <= 3; redirects++) {
@@ -1831,6 +1845,18 @@ const PUBLIC_RENDER_QUEUE_MAX = 80;
 /** The answer when the public lanes are full: the route says "busy, try again" instead of queueing without end. */
 export const PUBLIC_RENDER_BUSY = "busy" as const;
 
+/**
+ * A processed photo whose stored master is missing or no longer matches (October 24, 2026: a Vista Gardens cover answered
+ * 404 on every load): back to pending, so the queue makes it again; the pages stop listing it until it is processed.
+ */
+async function requeueBrokenProcessedPhoto(photoId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(dealPhotos).set({ processingState: "pending", processingAttempts: 0, nextProcessingAttemptAt: new Date(), processingStartedAt: null, lastProcessingError: "stored_master_missing" })
+    .where(and(eq(dealPhotos.id, photoId), eq(dealPhotos.processingState, "processed"))).catch(() => undefined);
+  console.warn(`[deals-photos] photo ${photoId}: stored master missing, queued again`);
+}
+
 export async function renderDealPhotoForPublic(photoId: number): Promise<RenderedPhoto | null | typeof PUBLIC_RENDER_BUSY> {
   try {
     const db = await getDb();
@@ -1865,8 +1891,13 @@ export async function renderDealPhotoForPublic(photoId: number): Promise<Rendere
           return value;
         }
       } catch { /* not rendered yet */ }
-      const source = await storageReadPrivate(row.photo.processedStorageKey as string);
-      if (digest(source.data) !== row.photo.processedVersion) return null;
+      let source: { data: Buffer };
+      try { source = await storageReadPrivate(row.photo.processedStorageKey as string); } catch (error) {
+        // The stored master is gone (storage answered 4xx): the photo is processed again rather than staying a broken image.
+        if (/\((?:403|404|410)\)/.test(error instanceof Error ? error.message : "")) await requeueBrokenProcessedPhoto(photoId);
+        return null;
+      }
+      if (digest(source.data) !== row.photo.processedVersion) { await requeueBrokenProcessedPhoto(photoId); return null; }
       const resized = await sharp(source.data, { limitInputPixels: MAX_INPUT_PIXELS, animated: false })
         .resize({ width: 960, height: 720, fit: "inside", withoutEnlargement: true })
         .toBuffer({ resolveWithObject: true });

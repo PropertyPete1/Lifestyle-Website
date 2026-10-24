@@ -1,5 +1,6 @@
 import PageShell from "@/components/PageShell";
-import RecruitForm from "@/components/RecruitForm";
+import { useEffect, useState } from "react";
+import RecruitForm, { BUILDER_DEALS_RECRUIT_SOURCE } from "@/components/RecruitForm";
 import LeadFlowDiagram from "@/components/LeadFlowDiagram";
 import { SITE } from "@shared/site";
 import { IMG } from "@/lib/assets";
@@ -22,7 +23,19 @@ const PILLARS = [
   { title: "Broker Support", body: "Direct access to Broker & Owner Steven Van Orden and Owner Peter Allen — deal structuring, negotiation help, and mentorship on demand. Proudly veteran-owned and operated, we run our brokerage with the same discipline and accountability." },
 ];
 
+/** A realtor sent here from the Builder Deals gate (?from=builder-deals), with the number they typed there (this tab only). */
+function builderDealsArrival(): { fromDeals: boolean; phone: string } {
+  if (typeof window === "undefined") return { fromDeals: false, phone: "" };
+  const fromDeals = new URLSearchParams(window.location.search).get("from") === "builder-deals";
+  let phone = "";
+  if (fromDeals) { try { phone = window.sessionStorage.getItem("ldr_recruit_phone") ?? ""; } catch { phone = ""; } }
+  return { fromDeals, phone: phone.slice(0, 40) };
+}
+
 export default function Join() {
+  const [arrival] = useState(builderDealsArrival);
+  // Straight to the application for an agent sent from Builder Deals.
+  useEffect(() => { if (arrival.fromDeals) window.setTimeout(() => document.querySelector("[data-join-from-deals]")?.scrollIntoView({ block: "start" }), 300); }, [arrival.fromDeals]);
   return (
     <PageShell>
       <section className="relative min-h-[60svh] flex items-end">
@@ -81,8 +94,12 @@ export default function Join() {
           </p>
           <p className="mt-3 font-serif italic text-lg text-foreground/90">— Stefanie</p>
         </div>
-        <div className="bg-card border border-border p-6 lg:p-10">
-          <RecruitForm />
+        {arrival.fromDeals && <div data-join-from-deals="true" className="mb-6 border border-gold/50 bg-gold/10 p-5">
+          <p className="eyebrow text-gold">From Builder Deals</p>
+          <p className="mt-2 leading-relaxed text-foreground/90">Builder Deals are for home buyers. Agents on our team get every one of these deals, with the addresses, rates and photos, for their own clients. Tell us about yourself and our broker will reach out.</p>
+        </div>}
+        <div id="apply" className="bg-card border border-border p-6 lg:p-10">
+          <RecruitForm sourceTag={arrival.fromDeals ? BUILDER_DEALS_RECRUIT_SOURCE : undefined} initialPhone={arrival.phone} />
         </div>
 
         {/* Closing tagline + email contact for agents who prefer email.

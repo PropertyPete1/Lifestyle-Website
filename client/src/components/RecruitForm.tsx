@@ -20,10 +20,13 @@ import { CheckCircle2 } from "lucide-react";
  * Posts to FUB tagged "Recruit - Website"; all five answers saved as notes;
  * intent per rules: active license + full-time + closed transactions = Hot.
  */
-export default function RecruitForm() {
+/** Recruits sent from Builder Deals carry their own FUB tag, so recruiting knows which track they came in on. */
+export const BUILDER_DEALS_RECRUIT_SOURCE = "Recruit - Builder Deals";
+
+export default function RecruitForm({ sourceTag = "Recruit - Website", initialPhone = "" }: { sourceTag?: string; initialPhone?: string } = {}) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(initialPhone);
   const [licenseNumber, setLicenseNumber] = useState("");
   const [transactionsClosed, setTransactionsClosed] = useState("");
   const [fullTime, setFullTime] = useState("");
@@ -62,7 +65,7 @@ export default function RecruitForm() {
       name,
       email,
       phone,
-      sourceTag: "Recruit - Website",
+      sourceTag,
       visitorId: getVisitorId() || undefined,
       answers: {
         licenseNumber,

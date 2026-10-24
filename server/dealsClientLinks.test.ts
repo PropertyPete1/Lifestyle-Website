@@ -569,3 +569,47 @@ describe("round 3: what a returning client, the nightly screening and team chang
     expect(teamMaxAge / (24 * HOUR)).toBeLessThan(1.01);
   });
 });
+
+describe("a realtor at the gate (Oct 24: realtors go to recruiting and stay off Builder Deals)", () => {
+  it("blocks the number and the browser for good, answers realtor, and keeps sending that browser to recruiting until they join the team", async () => {
+    testSettings();
+    const { SELF_DECLARED_REALTOR_REASON, browserIsRealtorBlocked } = await import("./dealsService");
+    const REALTOR = "+12105550777";
+    const device = "realtor-device";
+    const start = responseRecorder();
+    const result = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.probe]: "p" }), res: start.response, rawPhone: REALTOR, choice: "realtor", source: "sl1" });
+    expect(result).toEqual({ ok: false, kind: "realtor" });
+    const blocks = db.rows(dealBlocklist).filter((row) => row.reason === SELF_DECLARED_REALTOR_REASON);
+    expect(blocks.map((row) => [row.phoneE164, Boolean(row.deviceHash), row.expiresAt ?? null])).toEqual([[REALTOR, false, null], [null, true, null]]);
+    expect(await browserIsRealtorBlocked(request({ [DEALS_COOKIE.device]: device }))).toBe(true);
+    expect(await browserIsRealtorBlocked(request({ [DEALS_COOKIE.device]: "someone-else" }))).toBe(false);
+    // Coming back as a "buyer", from this browser or another one with the same number: recruiting again.
+    const again = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.probe]: "p" }), res: responseRecorder().response, rawPhone: "+12105550888", choice: "buyer" });
+    expect(again).toEqual({ ok: false, kind: "realtor" });
+    const otherBrowser = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: "fresh-browser", [DEALS_COOKIE.probe]: "p" }), res: responseRecorder().response, rawPhone: REALTOR, choice: "buyer" });
+    expect(otherBrowser).toEqual({ ok: false, kind: "realtor" });
+    // Once they join the team, the team check comes first: in.
+    db.seed(dealTeamAllowlist, { name: "New Agent", phoneE164: REALTOR, source: "manual", active: true });
+    expect(await classifyDealsAccess({ phone: REALTOR, deviceHash: hashSecret(device), isTest: false, testSkipChecks: false, brokerageDomains: [], fubRealtorTags: [], fubRealtorSources: [] })).toEqual({ allowed: true, team: true, flags: ["team"] });
+    // A buyer who says they have an agent is not sent to recruiting.
+    const hasAgent = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: "buyer-device", [DEALS_COOKIE.probe]: "p" }), res: responseRecorder().response, rawPhone: "+12105550999", choice: "has_agent" });
+    expect(hasAgent).toEqual({ ok: false, kind: "has_agent" });
+  });
+});
+
+describe("the name and email typed on the gate (Oct 24, Peter: we want their name and email)", () => {
+  it("lands on the verified lead, cleaned; a junk email is dropped", async () => {
+    vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
+    testSettings();
+    const device = "typed-device";
+    const start = responseRecorder();
+    const pending = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.probe]: "p" }), res: start.response, rawPhone: CLIENT_PHONE, choice: "buyer", name: "  Maria   Lopez ", email: " Maria@Example.com " });
+    expect(pending.ok).toBe(true);
+    const finish = responseRecorder();
+    const done = await completeVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.pending]: start.cookie(DEALS_COOKIE.pending)! }), res: finish.response, code: TEST_OTP });
+    expect(done).toMatchObject({ ok: true });
+    expect(db.rows(dealLeads).find((row) => row.phoneE164 === CLIENT_PHONE)).toMatchObject({ name: "Maria Lopez", email: "maria@example.com" });
+    const { typedIdentity } = await import("./dealsService");
+    expect(typedIdentity("M", "not-an-email")).toEqual({ name: null, email: null });
+  });
+});

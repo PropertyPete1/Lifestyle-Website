@@ -344,3 +344,17 @@ describe("libvips settings for the web instance", () => {
     expect(sharp.concurrency()).toBe(1);
   });
 });
+
+describe("Sanity images are fetched resized (Davidson's 3840 px PNGs ran past the download cap)", () => {
+  it("asks Sanity for a 2400 px JPEG, leaves a sized link and every other host alone, and fetches that URL", async () => {
+    const { sizedDownloadUrl, downloadDealPhoto } = await import("./dealsPhotos");
+    const raw = "https://cdn.sanity.io/images/2nureyi3/production/228d84e62d2acd3ce6f2da6ab344960d7c17d683-3840x2880.png";
+    expect(sizedDownloadUrl(new URL(raw)).toString()).toBe(`${raw}?w=2400&fm=jpg&q=88&fit=max`);
+    expect(sizedDownloadUrl(new URL(`${raw}?w=800`)).toString()).toBe(`${raw}?w=800`);
+    expect(sizedDownloadUrl(new URL("https://images.ctfassets.net/a/b.png")).toString()).toBe("https://images.ctfassets.net/a/b.png");
+    const seen: string[] = [];
+    const fetcher = (async (input: URL | string) => { seen.push(String(input)); return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/jpeg" } }); }) as typeof fetch;
+    expect((await downloadDealPhoto(raw, fetcher)).length).toBe(3);
+    expect(seen).toEqual([`${raw}?w=2400&fm=jpg&q=88&fit=max`]);
+  });
+});

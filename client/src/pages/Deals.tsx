@@ -51,6 +51,9 @@ function Landing() {
   // An agent's client link (?c=, or the one this tab kept) goes to the state query, the gate and the start call.
   const [clientToken, setClientToken] = useState(() => rememberClientLinkToken(window.location.search));
   const state = trpc.deals.state.useQuery(clientToken ? { c: clientToken } : undefined);
+  // An agent kept off Builder Deals (their own answer or the screening) is sent to the agent recruiting page.
+  const realtorRedirect = state.data && "realtorRedirect" in state.data ? state.data.realtorRedirect : null;
+  useEffect(() => { if (realtorRedirect && realtorRedirect.startsWith("/")) window.location.replace(realtorRedirect); }, [realtorRedirect]);
   // The reel that brought the visitor (?src=) puts its community first.
   const [src] = useState(() => new URLSearchParams(window.location.search).get("src")?.trim().slice(0, 40) || undefined);
   const catalog = trpc.deals.publicCatalog.useQuery(src ? { src } : undefined);

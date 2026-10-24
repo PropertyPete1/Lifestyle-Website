@@ -8,6 +8,8 @@ export type DealEligibility = {
   allowed: boolean;
   team: boolean;
   blockedBy?: "has_agent" | "blocklist" | "known_agent" | "brokerage_domain" | "fub_realtor";
+  /** For a blocklist match: the stored reason (an agent block sends the visitor to recruiting). */
+  blockReason?: string;
   matchOn?: "phone" | "email" | "device";
   flags: string[];
 };
@@ -153,7 +155,7 @@ export async function classifyDealsAccess(input: {
   }
   if (input.choice === "has_agent") return { allowed: false, team: false, blockedBy: "has_agent", flags: ["has_agent"] };
   const block = await getActiveBlock({ phone: input.phone, email: email ?? undefined, deviceHash: input.deviceHash });
-  if (block) return { allowed: false, team: false, blockedBy: "blocklist", matchOn: block.phoneE164 ? "phone" : block.email ? "email" : "device", flags: ["blocked"] };
+  if (block) return { allowed: false, team: false, blockedBy: "blocklist", blockReason: block.reason, matchOn: block.phoneE164 ? "phone" : block.email ? "email" : "device", flags: ["blocked"] };
   const [phoneSuppressed, emailSuppressed] = await Promise.all([isDoNotAutoImport(input.phone), email ? isDoNotAutoImport(email) : Promise.resolve(false)]);
   const eligiblePhone = phoneSuppressed ? null : input.phone;
   const eligibleEmail = emailSuppressed ? null : email;

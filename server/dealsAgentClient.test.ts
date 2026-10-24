@@ -60,7 +60,7 @@ describe("the gate for an agent's client", () => {
     expect(html).toContain("Are you a realtor, or working with one?");
     expect(html).toContain("Schedule a tour.");
     // Upfront about what signing up means: working with LDR, and an agent reaching out.
-    expect(html).toContain("Add your number and one of our agents will reach out to set up your tour and answer your questions.");
+    expect(html).toContain("Add your name, email and number, and one of our agents will reach out to set up your tour and answer your questions.");
     expect(html).toContain("Lifestyle Design Realty agents: enter your own mobile number to open your agent tools.");
     const continueButton = html.match(/<button[^>]*>(?:(?!<\/button>).)*Continue(?:(?!<\/button>).)*<\/button>/)?.[0] ?? "";
     expect(continueButton).toContain('disabled=""');

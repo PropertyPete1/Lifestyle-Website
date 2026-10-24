@@ -162,28 +162,44 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
     const z = w / spot.span;
     return clamp({ z, tx: w / 2 - spot.x * z, ty: h / 2 - spot.y * (z / REGION_VIEW.aspect) }, w, h);
   };
-  useEffect(() => {
+  // Until the visitor moves the map, a change of box size re-centres it on San Antonio (the box settles after the list loads).
+  const touched = useRef(false);
+  /** The box's size right now. Every action reads it fresh: a size kept from the first paint, before the list column
+   * appeared, put New Braunfels over Converse and Austin over Kyle (Peter, Oct 24). */
+  const measure = (): { w: number; h: number } | null => {
     const element = box.current;
-    if (!element) return;
-    const measure = () => {
-      const w = element.clientWidth;
-      const h = element.clientHeight;
-      if (!w || !h) return;
-      setSize({ w, h });
-      setView((current) => current ? clamp(current, w, h) : goTo(REGION_VIEW.home, w, h));
-    };
-    measure();
-    // The map box follows the window (full height beside the list, or a fixed share of a phone screen), so the window's
-    // own resize is the signal; no ResizeObserver (NowHiringBanner stays the only one, see bannerResizeObserver.test).
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, []);
+    if (!element || !element.clientWidth || !element.clientHeight) return null;
+    const next = { w: element.clientWidth, h: element.clientHeight };
+    setSize((current) => current && current.w === next.w && current.h === next.h ? current : next);
+    return next;
+  };
+  const settle = () => {
+    const now = measure();
+    if (!now) return;
+    setView((current) => !current || !touched.current ? goTo(REGION_VIEW.home, now.w, now.h) : clamp(current, now.w, now.h));
+  };
+  useEffect(() => {
+    settle();
+    // The map box follows the window and the page layout; the window's resize and a few settling checks after load
+    // are the signals (no ResizeObserver: NowHiringBanner stays the only one, see bannerResizeObserver.test).
+    const timers = [150, 600, 1500, 3000].map((ms) => window.setTimeout(settle, ms));
+    window.addEventListener("resize", settle);
+    return () => { timers.forEach((id) => window.clearTimeout(id)); window.removeEventListener("resize", settle); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const zoomAt = (factor: number, px: number, py: number) => {
     const current = viewRef.current;
-    if (!current || !size) return;
+    const now = measure();
+    if (!current || !now) return;
+    touched.current = true;
     const z = current.z * factor;
     const ratio = z / current.z;
-    setView(clamp({ z, tx: px - (px - current.tx) * ratio, ty: py - (py - current.ty) * ratio }, size.w, size.h));
+    setView(clamp({ z, tx: px - (px - current.tx) * ratio, ty: py - (py - current.ty) * ratio }, now.w, now.h));
+  };
+  const jumpTo = (spot: { x: number; y: number; span: number }) => {
+    const now = measure();
+    if (!now) return;
+    touched.current = true;
+    setView(goTo(spot, now.w, now.h));
   };
   // The wheel zooms the map, not the page (a passive listener could not stop the page scrolling).
   useEffect(() => {
@@ -198,6 +214,8 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
     return () => element.removeEventListener("wheel", onWheel);
   });
   const onPointerDown = (event: React.PointerEvent) => {
+    measure();
+    touched.current = true;
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pointers.current.size === 1) gesture.current = { moved: 0, pinch: null };
     (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
@@ -232,7 +250,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
   // Hovering a card shades its general area on the map (New Home Buddy style), around the same coarse point its marker uses.
   const activePin = activeKey ? items.find((item) => item.key === activeKey)?.pin ?? null : null;
   if (failed) return null;
-  const zoomButton = (factor: number) => () => size && zoomAt(factor, size.w / 2, size.h / 2);
+  const zoomButton = (factor: number) => () => { const now = measure(); if (now) zoomAt(factor, now.w / 2, now.h / 2); };
   return <figure aria-label={LANDING_COPY.mapLabel} data-deals-region-map="true" className={`relative min-w-0 overflow-hidden rounded-xl border border-border bg-[#e8eaed] shadow-sm ${className}`}>
     <div ref={box} className="absolute inset-0 cursor-grab touch-none select-none active:cursor-grabbing" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
       onClickCapture={(event) => { if (gesture.current.moved > 6) { event.stopPropagation(); event.preventDefault(); } }}>
@@ -258,7 +276,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
       </div>}
     </div>
     <div className="pointer-events-none absolute left-2 right-2 top-2 flex flex-wrap items-start justify-between gap-2">
-      <div className="pointer-events-auto flex flex-wrap gap-1.5">{REGION_VIEW.jumps.map((spot) => <button key={spot.label} type="button" onClick={() => size && setView(goTo(spot, size.w, size.h))} className="min-h-9 rounded-full border border-border bg-white/95 px-3 text-xs font-medium text-foreground shadow-sm hover:border-gold">{spot.label}</button>)}</div>
+      <div className="pointer-events-auto flex flex-wrap gap-1.5">{REGION_VIEW.jumps.map((spot) => <button key={spot.label} type="button" onClick={() => jumpTo(spot)} className="min-h-9 rounded-full border border-border bg-white/95 px-3 text-xs font-medium text-foreground shadow-sm hover:border-gold">{spot.label}</button>)}</div>
       <div className="pointer-events-auto flex flex-col overflow-hidden rounded-lg border border-border bg-white/95 shadow-sm">
         <button type="button" onClick={zoomButton(1.5)} aria-label="Zoom in" className="flex h-9 w-9 items-center justify-center text-lg font-semibold hover:bg-secondary">+</button>
         <button type="button" onClick={zoomButton(1 / 1.5)} aria-label="Zoom out" className="flex h-9 w-9 items-center justify-center border-t border-border text-lg font-semibold hover:bg-secondary">−</button>
@@ -358,7 +376,17 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top }: { commun
   useEffect(() => { if (selected && !selected.keys.some((key) => keyed.some((item) => item.key === key))) setSelected(null); }, [keyed, selected]);
   const matching = selected ? keyed.filter((item) => selected.keys.includes(item.key)) : keyed;
   const shown = matching.slice(0, pages * BROWSE_PAGE);
-  const mapProps = { items: keyed, activeKey, onHover: setActiveKey, onSelect: setSelected, selectedId: selected?.id ?? null };
+  const listTop = useRef<HTMLDivElement>(null);
+  // A lone community's marker opens that community (its homes and photos); a group's marker narrows the list to it.
+  const selectMarker = (marker: { id: string; keys: string[] } | null) => {
+    if (marker && marker.keys.length === 1) {
+      const community = keyed.find((item) => item.key === marker.keys[0]);
+      if (community) { setOpen(community); return; }
+    }
+    setSelected(marker);
+    if (marker) window.setTimeout(() => listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+  const mapProps = { items: keyed, activeKey, onHover: setActiveKey, onSelect: selectMarker, selectedId: selected?.id ?? null };
   const map = <RegionMap {...mapProps} className="h-[65vh] w-full" />;
   return <>
     <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,42%)]">
@@ -368,6 +396,7 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top }: { commun
           <button type="button" onClick={() => setMapOnPhone((value) => !value)} aria-expanded={mapOnPhone} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border bg-card px-4 text-sm shadow-sm"><MapPin className="h-4 w-4 text-gold" />{mapOnPhone ? LANDING_COPY.hideMap : LANDING_COPY.showMap}</button>
         </div>
         {mapOnPhone && <div className="mb-6 lg:hidden">{map}</div>}
+        <div ref={listTop} className="scroll-mt-4" />
         {selected && <div role="status" className="mb-4 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-2 text-sm"><span>{LANDING_COPY.areaFilter(matching.length)}</span><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
           {shown.map((community) => <CommunityCard key={community.key} community={community} active={activeKey === community.key} onHover={(on) => setActiveKey(on ? community.key : null)} onOpen={() => setOpen(community)} />)}

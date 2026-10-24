@@ -40,7 +40,9 @@ import {
   createPendingVerification,
 } from "./dealsService";
 import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
-import { AGENT_CLIENT_SOURCE, staleSessionLeadId } from "./dealsService";
+import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, browserIsRealtorBlocked, staleSessionLeadId } from "./dealsService";
+/** What a realtor sees for the moment before the recruiting page opens. */
+export const REALTOR_GATE_MESSAGE = "Builder Deals are for home buyers. Agents: these deals are open to our team for your clients. Taking you to our agent page.";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   const allowlisted = isAdminEmail(ctx.user.email) || ctx.user.openId === ENV.ownerOpenId;
@@ -210,7 +212,10 @@ const photoRegionInput = z.object({ x: z.number(), y: z.number(), width: z.numbe
 const clientLinkToken = z.string().trim().max(80).optional();
 const gateInput = z.object({
   phone: z.string().trim().min(1).max(60),
-  choice: z.enum(["buyer", "has_agent"]),
+  choice: z.enum(["buyer", "has_agent", "realtor"]),
+  /** Typed on the gate (optional for older pages still open; the gate asks for both). */
+  name: z.string().trim().max(190).optional(),
+  email: z.string().trim().max(320).optional(),
   src: z.string().max(120).optional(),
   ig: z.string().max(160).optional(),
   /** An LDR agent's client link token (?c=); the agent question is skipped for it. */
@@ -305,6 +310,8 @@ export const dealsRouter = router({
       commentKeyword: settings.commentKeyword,
       textLine: settings.textLine,
       blockedMessage: clientLink ? linkClientBlockedMessage(clientLink.agentName, settings.textLine) : safeBlockedMessage(settings),
+      /** This browser belongs to an agent kept off Builder Deals: the page sends it to recruiting (never for a team member or an agent's client). */
+      realtorRedirect: !session && !clientLink && await browserIsRealtorBlocked(ctx.req) ? REALTOR_RECRUIT_PATH : null,
       clientLink,
       /** The link found from this browser's lapsed session, for the gate to post with the code. */
       clientLinkToken: rememberedLive ? remembered : null,
@@ -322,7 +329,7 @@ export const dealsRouter = router({
     if (!cookieState.hasProbe || !(await reserveGateSubmit({ ip, deviceHash: cookieState.deviceHash, sourceCode }))) {
       return { ok: false as const, kind: cookieState.hasProbe ? "rate_limited" : "cookie_blocked", message: cookieState.hasProbe ? `We're getting a lot of traffic, so please try again in a bit. Or text ${settings.commentKeyword} to ${settings.textLine}.` : `Your browser is blocking cookies. Open this link in Safari or Chrome. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
     }
-    const result = await createPendingVerification({ req: ctx.req, res: ctx.res, rawPhone: input.phone, choice: input.choice, source: sanitizeSourceCode(input.src), ig: sanitizeInstagramHandle(input.ig), clientLinkToken: input.c });
+    const result = await createPendingVerification({ req: ctx.req, res: ctx.res, rawPhone: input.phone, choice: input.choice, name: input.name, email: input.email, source: sanitizeSourceCode(input.src), ig: sanitizeInstagramHandle(input.ig), clientLinkToken: input.c });
     if (!result.ok) {
       const settings = await getDealSettings();
       if (result.kind === "link_other_phone" || result.kind === "link_dead") return { ok: false as const, kind: result.kind, message: clientLinkRefusal(result.kind, "agentName" in result ? result.agentName ?? null : null, settings.textLine) };
@@ -331,6 +338,7 @@ export const dealsRouter = router({
         const shown = await presentClientLink(input.c);
         return { ok: false as const, kind: "blocked", message: linkClientBlockedMessage(shown?.agentName, settings.textLine) };
       }
+      if (result.kind === "realtor") return { ok: false as const, kind: "realtor", message: REALTOR_GATE_MESSAGE, redirect: REALTOR_RECRUIT_PATH };
       if (result.kind === "has_agent" || result.kind === "blocked") return { ok: false as const, kind: "blocked", message: safeBlockedMessage(settings) };
       if (result.kind === "cookie_blocked") return { ok: false as const, kind: "cookie_blocked", message: `Your browser is blocking cookies. Open this link in Safari or Chrome. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
       if (result.kind === "outside_us") return { ok: false as const, kind: "outside_us", message: `US mobile numbers only for now. Outside the US? Text ${settings.commentKeyword} to ${settings.textLine} and we'll help you directly.` };

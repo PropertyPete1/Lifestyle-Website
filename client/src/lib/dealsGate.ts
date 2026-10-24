@@ -5,7 +5,7 @@
  * Server copy (blocked, outside US, rate limited, cannot receive) is rendered
  * verbatim; this module only owns the wording for client-side situations.
  */
-export type GateStep = "gate" | "confirm-agent" | "code" | "blocked" | "expired" | "cookie-blocked";
+export type GateStep = "gate" | "confirm-agent" | "confirm-realtor" | "realtor" | "code" | "blocked" | "expired" | "cookie-blocked";
 
 export type GateParams = {
   src?: string;
@@ -26,7 +26,7 @@ export type GateDealsState = { pending: GatePending | null } | undefined;
 
 export type GateStartResult =
   | { ok: true; displayPhone: string }
-  | { ok: false; kind: string; message: string; displayPhone?: string | null };
+  | { ok: false; kind: string; message: string; displayPhone?: string | null; redirect?: string };
 export type GateResendResult = { ok: true } | { ok: false; kind: string; message: string };
 
 /**
@@ -210,6 +210,8 @@ export function gateReducer(gate: GateState, action: GateAction): GateState {
       if (result.ok) return { ...gate, step: "code", message: null, codeError: null, cannotReceive: false, pendingDisplayPhone: result.displayPhone, dismissedPending: null };
       if (result.kind === "cookie_blocked") return { ...gate, step: "cookie-blocked", message: result.message, codeError: null, cannotReceive: false };
       if (result.kind === "blocked") return { ...gate, step: "blocked", message: result.message, codeError: null, cannotReceive: false };
+      // A realtor is sent to the recruiting page (the sheet opens it); this step shows the note and a link meanwhile.
+      if (result.kind === "realtor") return { ...gate, step: "realtor", message: result.message, codeError: null, cannotReceive: false };
       if (result.kind === "cannot_receive") {
         // The pending row is kept server-side, so the visitor lands on the code
         // step where "Call me" (the voice channel) is the obvious next step.
@@ -218,7 +220,7 @@ export function gateReducer(gate: GateState, action: GateAction): GateState {
       return { ...gate, step: "gate", message: result.message, codeError: null, cannotReceive: false };
     }
     case "start_failed":
-      return { ...gate, step: gate.step === "confirm-agent" ? "gate" : gate.step, message: GATE_COPY.startFailed, codeError: null };
+      return { ...gate, step: gate.step === "confirm-agent" || gate.step === "confirm-realtor" ? "gate" : gate.step, message: GATE_COPY.startFailed, codeError: null };
     case "resend_result": {
       const { result } = action;
       if (result.ok) return { ...gate, message: action.channel === "call" ? GATE_COPY.calling : GATE_COPY.freshCode, cannotReceive: false, codeError: null };
@@ -258,3 +260,6 @@ export function codeStepAlert(gate: GateState): string | null {
   if (gate.codeError && gate.codeError !== "expired") return GATE_COPY.codeMismatch;
   return null;
 }
+
+/** Where the gate leaves a realtor's typed number for the recruiting form (this tab only; never in a URL). */
+export const RECRUIT_PREFILL_KEY = "ldr_recruit_phone";

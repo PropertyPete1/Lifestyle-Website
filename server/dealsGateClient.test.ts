@@ -29,7 +29,7 @@ const SERVER_CANNOT_RECEIVE = "That number can't receive texts. Try a mobile num
 function render(gate: GateState, state: GateDealsState, overrides: Partial<GateSheetViewProps> = {}) {
   const noop = () => undefined;
   const props: GateSheetViewProps = {
-    gate, state: state as GateSheetViewProps["state"], phone: "(210) 555-0123", code: "", choice: "buyer",
+    gate, state: state as GateSheetViewProps["state"], phone: "(210) 555-0123", name: "Maria Lopez", email: "maria@example.com", code: "", choice: "buyer",
     onPhone: noop, onCode: noop, onChoice: noop, onContinue: noop, onConfirmAgent: noop, onGo: noop, onResend: noop, onChangeNumber: noop, onCopyLink: noop, onClose: noop,
     ...overrides,
   };
@@ -275,14 +275,31 @@ describe("gate controls: consent before Continue, pressed pills, tap targets, vo
     // Still disabled without a choice or a full number.
     expect(continueDisabled(render(fresh(), noPending, { choice: null }))).toBe(true);
     expect(continueDisabled(render(fresh(), noPending, { phone: "(210) 555" }))).toBe(true);
+    // Oct 24 (Peter): name and email are asked for too.
+    expect(continueDisabled(render(fresh(), noPending, { name: "" }))).toBe(true);
+    expect(continueDisabled(render(fresh(), noPending, { email: "maria@" }))).toBe(true);
+    expect(render(fresh(), noPending)).toMatch(/id="deals-name"[\s\S]*id="deals-email"[\s\S]*id="deals-phone"/);
   });
 
   it("marks the realtor pills with aria-pressed", () => {
     const buyer = render(fresh(), noPending, { choice: "buyer" });
     expect(buyer).toMatch(/<button[^>]*aria-pressed="true"[^>]*>No, just me<\/button>/);
-    expect(buyer).toMatch(/<button[^>]*aria-pressed="false"[^>]*>Yes<\/button>/);
+    expect(buyer).toMatch(/<button[^>]*aria-pressed="false"[^>]*>I have an agent<\/button>/);
+    expect(buyer).toMatch(/<button[^>]*aria-pressed="false"[^>]*>I&#x27;m a realtor<\/button>/);
     const none = render(fresh(), noPending, { choice: null });
-    expect(none.match(/aria-pressed="false"/g)?.length).toBe(2);
+    expect(none.match(/aria-pressed="false"/g)?.length).toBe(3);
+  });
+
+  it("asks a realtor to confirm, then shows the agent note and a link to the recruiting page (Oct 24: realtors go to recruiting)", () => {
+    const confirm = decode(render(gateReducer(fresh(), { type: "go", step: "confirm-realtor" }), noPending));
+    expect(confirm).toContain("Just to confirm: you're a licensed real estate agent?");
+    expect(confirm).toContain("Yes, I'm an agent");
+    const sent = gateReducer(fresh(), { type: "start_result", result: { ok: false, kind: "realtor", message: "Builder Deals are for home buyers.", redirect: "/join?from=builder-deals" } });
+    expect(sent.step).toBe("realtor");
+    const html = decode(render(sent, noPending));
+    expect(html).toContain("Builder Deals are for buyers");
+    expect(html).toMatch(/href="\/join\?from=builder-deals"/);
+    expect(gateReducer(gateReducer(fresh(), { type: "go", step: "confirm-realtor" }), { type: "start_failed" }).step).toBe("gate");
   });
 
   it("gives the code-step recovery links and every close button a 44 px tap target", () => {
@@ -312,7 +329,7 @@ describe("gate controls: consent before Continue, pressed pills, tap targets, vo
     expect(sms).toContain("Check your messages.");
     expect(sms).not.toContain("Pick up, we're calling you.");
     const confirm = decode(render(gateReducer(fresh(), { type: "go", step: "confirm-agent" }), noPending));
-    expect(confirm).toContain("you're a licensed agent");
-    expect(confirm).not.toContain("you are a licensed agent");
+    expect(confirm).toContain("you're already working with an agent");
+    expect(confirm).not.toContain("you are already");
   });
 });

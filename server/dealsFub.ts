@@ -175,6 +175,38 @@ export async function tagBuilderDealsScreeningContact(input: { phone: string | n
   } catch { return { ok: false as const, error: "FUB screening update failed" }; }
 }
 
+/** The FUB tag a realtor sent from Builder Deals to recruiting carries (its own recruiting track, Peter, Oct 24 2026). */
+export const BUILDER_DEALS_RECRUIT_TAG = "Recruit - Builder Deals";
+
+/**
+ * A visitor told the Builder Deals gate they are a realtor: an existing FUB contact gets the recruiting tag and a note;
+ * otherwise a new contact is created through an event (source "Builder Deals - Agent Recruiting") so recruiting follows up.
+ */
+export async function recordBuilderDealsRealtor(input: { phone: string; name?: string | null; email?: string | null; source?: string | null }) {
+  try {
+    const note = `Said they are a realtor on the Builder Deals gate${input.source ? ` (came in from ${input.source})` : ""}. Sent to the agent recruiting page and kept off Builder Deals until they join the team.`;
+    const person = await findPerson({ phone: input.phone, email: null }) ?? (input.email ? await findPerson({ phone: null, email: input.email }) : null);
+    if (person?.id !== undefined) {
+      const personId = String(person.id);
+      const full = await loadPerson(personId);
+      const tags = Array.from(new Set([...fubTags(full), BUILDER_DEALS_RECRUIT_TAG]));
+      await fub(`/people/${encodeURIComponent(personId)}`, { method: "PUT", body: JSON.stringify({ tags, mergeTags: false }) });
+      await postFubNote(personId, "Builder Deals: realtor", note);
+      return { ok: true as const, personId, created: false };
+    }
+    const res = await fub("/events", { method: "POST", body: JSON.stringify({
+      source: "Builder Deals - Agent Recruiting", system: "Lifestyle Design Realty", type: "General Inquiry", message: note,
+      person: {
+        ...(input.name ? { firstName: input.name.split(" ")[0], lastName: input.name.split(" ").slice(1).join(" ") || undefined } : {}),
+        phones: [{ value: input.phone }], ...(input.email ? { emails: [{ value: input.email }] } : {}), tags: [BUILDER_DEALS_RECRUIT_TAG],
+      },
+    }) });
+    const body = await res.json().catch(() => ({})) as { person?: { id?: string | number }; personId?: string | number };
+    const personId = body.person?.id ?? body.personId;
+    return { ok: true as const, personId: personId === undefined ? null : String(personId), created: true };
+  } catch { return { ok: false as const, error: "FUB realtor update failed" }; }
+}
+
 function textInFubObject(value: unknown): string[] {
   if (typeof value === "string" || typeof value === "number") return [String(value)];
   if (Array.isArray(value)) return value.flatMap(textInFubObject);

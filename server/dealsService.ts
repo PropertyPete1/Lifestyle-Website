@@ -473,8 +473,22 @@ export async function recordDealsLanding(input: { sourceCode: string; deviceHash
 
 /** The reason written when a visitor answers "Yes" to the agent question; an LDR agent's own client is exempt from it. */
 export const HAS_AGENT_BLOCK_REASON = "Confirmed working with an agent";
+/**
+ * October 24, 2026 (Peter): a visitor who says they are a realtor is sent to the agent recruiting page and kept off
+ * Builder Deals for good (phone and browser), until they join the team (team members pass before any block).
+ */
+export const SELF_DECLARED_REALTOR_REASON = "Said they are a realtor";
+/** Where a realtor is sent: the recruiting page, marked as coming from Builder Deals (no personal data in the URL). */
+export const REALTOR_RECRUIT_PATH = "/join?from=builder-deals";
+/** Block reasons that mean "this is an agent": those visitors are sent to recruiting rather than shown the buyers-only message. */
+const REALTOR_BLOCK_REASONS = new Set([SELF_DECLARED_REALTOR_REASON, "known_agent", "fub_realtor", "brokerage_domain"]);
+export function isRealtorBlockReason(reason: string | null | undefined): boolean {
+  if (!reason) return false;
+  const base = reason.endsWith(" device cooldown") ? reason.slice(0, -" device cooldown".length) : reason;
+  return REALTOR_BLOCK_REASONS.has(base);
+}
 /** Reasons the automatic realtor screening writes. An agent's own client is exempt from these; an admin's block is not. */
-const SCREENING_BLOCK_REASONS = new Set([HAS_AGENT_BLOCK_REASON, "has_agent", "known_agent", "fub_realtor", "brokerage_domain", "post_verification", "realtor screening"]);
+const SCREENING_BLOCK_REASONS = new Set([HAS_AGENT_BLOCK_REASON, "has_agent", "known_agent", "fub_realtor", "brokerage_domain", "post_verification", "realtor screening", SELF_DECLARED_REALTOR_REASON]);
 /** Every stored form of a screening reason: the reason itself and its 24 h device cooldown row. */
 const SCREENING_REASON_VALUES = Array.from(SCREENING_BLOCK_REASONS).flatMap((reason) => [reason, `${reason} device cooldown`]);
 export function isScreeningBlockReason(reason: string) {
@@ -494,6 +508,14 @@ export async function getActiveBlock(input: { phone?: string; email?: string; de
   // An agent's client: the screening reasons are excluded in SQL, so no number of them can hide an admin block.
   const screening = input.ignoreHasAgent ? [notInArray(dealBlocklist.reason, SCREENING_REASON_VALUES)] : [];
   return (await db.select().from(dealBlocklist).where(and(or(...matches), or(isNull(dealBlocklist.expiresAt), gt(dealBlocklist.expiresAt, now)), ...screening)).limit(1))[0];
+}
+
+/** This browser is kept off Builder Deals as an agent (its own answer or the screening): the page sends it to recruiting. */
+export async function browserIsRealtorBlocked(req: Request): Promise<boolean> {
+  const device = parseCookie(req.headers.cookie || "")[DEALS_COOKIE.device];
+  if (!device) return false;
+  const block = await getActiveBlock({ deviceHash: hashSecret(device) }).catch(() => undefined);
+  return isRealtorBlockReason(block?.reason);
 }
 
 export async function blockDealAccess(input: { phone?: string | null; email?: string | null; deviceHash?: string | null; searchPhone?: string | null; reason: string; expiresAt?: Date | null }) {
@@ -1039,7 +1061,14 @@ export async function exchangeAccessToken(req: Request, res: Response, rawToken:
 /** Buyers an LDR agent sent carry this source; it is never one of the reel codes. */
 export const AGENT_CLIENT_SOURCE = "agent";
 
-export async function createPendingVerification(input: { req: Request; res: Response; rawPhone: string; choice: "buyer" | "has_agent"; source?: string | null; ig?: string | null; clientLinkToken?: string | null }) {
+/** The name and email typed on the gate, cleaned: a name of 2-190 characters, an email that looks like one (lowercased). */
+export function typedIdentity(name?: string | null, email?: string | null): { name: string | null; email: string | null } {
+  const cleanName = (name ?? "").replace(/\s+/g, " ").trim().slice(0, 190);
+  const cleanEmail = (email ?? "").trim().toLowerCase().slice(0, 320);
+  return { name: cleanName.length >= 2 ? cleanName : null, email: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanEmail) ? cleanEmail : null };
+}
+
+export async function createPendingVerification(input: { req: Request; res: Response; rawPhone: string; choice: "buyer" | "has_agent" | "realtor"; source?: string | null; ig?: string | null; clientLinkToken?: string | null; /** Typed on the gate (Oct 24, Peter: "we want their name and email"); unverified, so never a block key on its own. */ name?: string | null; email?: string | null }) {
   const settings = await getDealSettings();
   const normalized = normalizeUsPhone(input.rawPhone, { allowCanada: settings.allowCanada });
   if (!normalized.ok) return { ok: false as const, kind: normalized.reason === "outside_us" ? "outside_us" : "invalid_phone" };
@@ -1048,6 +1077,9 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   const ip = realClientIp(input.req);
   const ig = sanitizeInstagramHandle(input.ig);
   const google = getGoogleDealsIdentity(input.req);
+  const typed = typedIdentity(input.name, input.email);
+  // Google's verified email wins; the typed one still feeds the agent screening (a brokerage address) and the lead.
+  const screeningEmail = google?.email ?? typed.email;
   const isTest = settings.testNumbers.includes(normalized.e164);
   // An agent's client link wins over any reel code on the same URL. It opens
   // only for its own client (the number the agent typed, or the first number
@@ -1056,7 +1088,7 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   const { clientLinkForPhone, teamRowsForLead } = await import("./dealsClientLinks");
   const linkCheck = input.clientLinkToken ? await clientLinkForPhone(input.clientLinkToken, normalized.e164) : null;
   if (linkCheck && !linkCheck.ok) {
-    const teamMember = settings.testTeamNumbers.includes(normalized.e164) || (await teamRowsForLead({ phoneE164: normalized.e164, email: google?.email ?? null })).length > 0;
+    const teamMember = settings.testTeamNumbers.includes(normalized.e164) || (await teamRowsForLead({ phoneE164: normalized.e164, email: screeningEmail })).length > 0;
     if (!teamMember) {
       await logDealEvent({ kind: "client_link_refused", sourceCode: AGENT_CLIENT_SOURCE, deviceHash, ip, phone: normalized.e164, detail: linkCheck.kind });
       return { ok: false as const, kind: linkCheck.kind === "other_phone" ? "link_other_phone" as const : "link_dead" as const, agentName: linkCheck.agentName };
@@ -1066,11 +1098,24 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   const sourceCode = input.clientLinkToken ? AGENT_CLIENT_SOURCE : currentDealSource(input.source, settings);
   const { classifyDealsAccess } = await import("./dealsEligibility");
   const eligibility = await classifyDealsAccess({
-    phone: normalized.e164, email: google?.email, deviceHash, isTest,
+    phone: normalized.e164, email: screeningEmail, deviceHash, isTest,
     testSkipChecks: settings.testNumbersSkipChecks, testTeamNumbers: settings.testTeamNumbers,
     brokerageDomains: settings.brokerageDomains, fubRealtorTags: settings.fubRealtorTags,
-    fubRealtorSources: settings.fubRealtorSources, choice: input.clientLinkToken ? "buyer" : input.choice, clientLink: Boolean(clientLink),
+    fubRealtorSources: settings.fubRealtorSources, choice: input.clientLinkToken || input.choice === "realtor" ? "buyer" : input.choice, clientLink: Boolean(clientLink),
   });
+  // A realtor (by their own answer) goes to recruiting and stays off Builder Deals: the number they typed and this browser,
+  // with no end date. Joining the team lifts it (team members pass before any block). FUB hears about them as a recruit.
+  if (input.choice === "realtor" && !input.clientLinkToken && !eligibility.team) {
+    if (!isTest) {
+      await blockDealAccess({ phone: normalized.e164, reason: SELF_DECLARED_REALTOR_REASON });
+      await blockDealAccess({ deviceHash, reason: SELF_DECLARED_REALTOR_REASON });
+      void import("./dealsFub").then(({ recordBuilderDealsRealtor }) => recordBuilderDealsRealtor({ phone: normalized.e164, name: google?.name ?? typed.name, email: screeningEmail, source: sourceCode }))
+        .then((result) => { if (!result.ok) console.error("[deals] realtor recruit update failed"); })
+        .catch(() => console.error("[deals] realtor recruit update failed"));
+    }
+    await logDealEvent({ kind: "realtor", sourceCode, deviceHash, ip, phone: normalized.e164 });
+    return { ok: false as const, kind: "realtor" as const };
+  }
   // Staff/test previews must not create an accidental "has agent" device
   // block merely because they test the visible confirmation choice.
   if (input.choice === "has_agent" && !eligibility.team) {
@@ -1082,17 +1127,19 @@ export async function createPendingVerification(input: { req: Request; res: Resp
     if (eligibility.blockedBy !== "blocklist") {
       // Before SMS verification, never permanently block an unverified typed
       // phone because of an email-only match. A matching phone can be blocked.
-      await blockDealAccess({ phone: eligibility.matchOn === "phone" ? normalized.e164 : null, email: eligibility.matchOn === "email" ? google?.email ?? null : null, reason: eligibility.blockedBy ?? "realtor screening" });
+      await blockDealAccess({ phone: eligibility.matchOn === "phone" ? normalized.e164 : null, email: eligibility.matchOn === "email" ? screeningEmail : null, reason: eligibility.blockedBy ?? "realtor screening" });
       await blockDealAccess({ deviceHash, reason: `${eligibility.blockedBy ?? "realtor screening"} device cooldown`, expiresAt: new Date(Date.now() + 24 * 60 * 60_000) });
     }
     await logDealEvent({ kind: "blocked", sourceCode, deviceHash, ip, detail: eligibility.blockedBy ?? "screening" });
+    // An agent the screening (or an earlier answer) caught is sent to recruiting too; an agent's own client never is.
+    if (!clientLink && isRealtorBlockReason(eligibility.blockedBy === "blocklist" ? eligibility.blockReason : eligibility.blockedBy)) return { ok: false as const, kind: "realtor" as const };
     return { ok: false as const, kind: "blocked" };
   }
 
   const { profileRealtorFlags } = await import("./dealsEligibility");
   // An agent vouches for their own client: no "possible agent" profile flags for them.
   const profileFlags = eligibility.team || clientLink ? [] : await profileRealtorFlags({
-    name: google?.name,
+    name: google?.name ?? typed.name,
     instagramHandle: ig,
     handleKeywords: settings.handleKeywords,
     trecCounties: settings.trecCounties,
@@ -1105,7 +1152,7 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   const clientLinkRef = clientLink && !eligibility.team ? { clientLinkId: clientLink.link.id, agentTeamId: clientLink.agent.teamId } : {};
   await db.insert(dealPendingVerifications).values({
     opaqueIdHash: hashSecret(opaque), phoneE164: normalized.e164, choice: "buyer", sourceCode, instagramHandle: ig,
-    deviceHash, clientIp: ip, consentAt: new Date(), flags: JSON.stringify({ google, flags: [...eligibility.flags, ...profileFlags], team: eligibility.team, ...clientLinkRef }), expiresAt: new Date(Date.now() + PENDING_MINUTES * 60_000),
+    deviceHash, clientIp: ip, consentAt: new Date(), flags: JSON.stringify({ google, ...(typed.name || typed.email ? { typed } : {}), flags: [...eligibility.flags, ...profileFlags], team: eligibility.team, ...clientLinkRef }), expiresAt: new Date(Date.now() + PENDING_MINUTES * 60_000),
   });
   await logDealEvent({ kind: "consent", sourceCode, deviceHash, ip, phone: normalized.e164, detail: DEALS_CONSENT_TEXT });
   setDealCookie(input.res, DEALS_COOKIE.pending, opaque, PENDING_MINUTES * 60);
@@ -1171,7 +1218,7 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   if (!pending || !deviceHash) return { ok: false as const, kind: "expired" };
   const settings = await getDealSettings();
   const isTest = settings.testNumbers.includes(pending.phoneE164);
-  const identity = JSON.parse(pending.flags || "{}") as { google?: GoogleDealsIdentity; flags?: string[]; team?: boolean; completed?: VerificationReceipt; clientLinkId?: number; agentTeamId?: number };
+  const identity = JSON.parse(pending.flags || "{}") as { google?: GoogleDealsIdentity; typed?: { name: string | null; email: string | null }; flags?: string[]; team?: boolean; completed?: VerificationReceipt; clientLinkId?: number; agentTeamId?: number };
   const storedLink = Number.isSafeInteger(identity.clientLinkId) && Number.isSafeInteger(identity.agentTeamId) ? { linkId: identity.clientLinkId as number, agentTeamId: identity.agentTeamId as number } : null;
   const cookies = parseCookie(input.req.headers.cookie || "");
   // Both cookie values are high-entropy, HTTP-only, device-bound secrets. This
@@ -1204,7 +1251,7 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   // The link is checked again now: turned off, agent removed, or bound to another number meanwhile attaches nothing.
   const clientLink = storedLink && await (await import("./dealsClientLinks")).clientLinkStillValid(storedLink.linkId, pending.phoneE164) ? storedLink : null;
   const eligibility = await (await import("./dealsEligibility")).classifyDealsAccess({
-    phone: pending.phoneE164, email: identity.google?.email, deviceHash,
+    phone: pending.phoneE164, email: identity.google?.email ?? identity.typed?.email ?? undefined, deviceHash,
     isTest, testSkipChecks: settings.testNumbersSkipChecks, testTeamNumbers: settings.testTeamNumbers,
     brokerageDomains: settings.brokerageDomains, fubRealtorTags: settings.fubRealtorTags,
     fubRealtorSources: settings.fubRealtorSources, clientLink: Boolean(clientLink),
@@ -1236,11 +1283,11 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   const instagramHandle = handleOwner ? null : pending.instagramHandle;
   let leadId: number;
   if (old) {
-    await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? instagramHandle, email: old.email ?? identity.google?.email ?? null, name: old.name ?? identity.google?.name ?? null, flags: JSON.stringify(flags), ...agentFields }).where(eq(dealLeads.id, old.id));
+    await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? instagramHandle, email: old.email ?? identity.google?.email ?? identity.typed?.email ?? null, name: old.name ?? identity.google?.name ?? identity.typed?.name ?? null, flags: JSON.stringify(flags), ...agentFields }).where(eq(dealLeads.id, old.id));
     leadId = old.id;
   } else {
     try {
-      const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle, email: identity.google?.email ?? null, name: identity.google?.name ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentAt: pending.consentAt, consentIp: pending.clientIp, deviceHash, expiresAt, status: eligibility.team ? "team" : "verified", flags: JSON.stringify(flags), ...agentFields });
+      const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle, email: identity.google?.email ?? identity.typed?.email ?? null, name: identity.google?.name ?? identity.typed?.name ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentAt: pending.consentAt, consentIp: pending.clientIp, deviceHash, expiresAt, status: eligibility.team ? "team" : "verified", flags: JSON.stringify(flags), ...agentFields });
       leadId = Number((result as unknown as [{ insertId: number }])[0].insertId);
     } catch (error) {
       // Two verify submissions can legitimately race. The unique normalized

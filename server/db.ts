@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   InsertCityMatch,
@@ -466,7 +466,7 @@ export async function getAnalyticsSummary(days = 30) {
       .from(leads)
       .where(
         and(
-          eq(leads.sourceTag, "Recruit - Website"),
+          inArray(leads.sourceTag, ["Recruit - Website", "Recruit - Builder Deals"]),
           sql`${leads.createdAt} >= (NOW() - INTERVAL ${sql.raw(String(windowDays))} DAY)`
         )
       ),

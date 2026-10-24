@@ -72,9 +72,12 @@ const CLOSE_BUTTON = "float-right -mr-2 -mt-2 flex h-11 w-11 items-center justif
 /** Arrows stay readable on bright exteriors and dark interiors alike, with a near-44 px tap target. */
 const GALLERY_ARROW = "z-10 size-10 border-white/30 bg-black/60 text-white shadow-md hover:bg-black/75 hover:text-white dark:border-white/30 dark:bg-black/60 dark:hover:bg-black/75";
 
-export function ProtectedGallery({ photos }: { photos?: string[] }) {
+export function ProtectedGallery({ photos: all }: { photos?: string[] }) {
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
+  // A photo that will not load (after its retries) leaves the gallery instead of showing a broken frame.
+  const [broken, setBroken] = useState<ReadonlySet<string>>(() => new Set());
+  const photos = all?.filter((src) => !broken.has(src));
   useEffect(() => {
     if (!api) return;
     const onSelect = () => setCurrent(api.selectedScrollSnap());
@@ -86,7 +89,7 @@ export function ProtectedGallery({ photos }: { photos?: string[] }) {
   if (!photos?.length) return <div className="mt-4 flex aspect-[4/3] w-full min-w-0 max-w-full items-center justify-center border border-border bg-secondary px-4 text-center text-xs text-muted-foreground">{PHOTOS_ON_REQUEST}</div>;
   const many = photos.length > 1;
   return <Carousel setApi={setApi} className="relative mt-4 w-full min-w-0 max-w-full overflow-hidden" opts={{ loop: many }}>
-    <CarouselContent className="ml-0 min-w-0">{photos.map((src, index) => <CarouselItem key={src} className="min-w-0 basis-full pl-0"><RetryImage src={src} alt={`Home photo ${index + 1} of ${photos.length}`} loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} className="block aspect-[4/3] w-full min-w-0 max-w-full select-none object-cover [-webkit-touch-callout:none]" /></CarouselItem>)}</CarouselContent>
+    <CarouselContent className="ml-0 min-w-0">{photos.map((src, index) => <CarouselItem key={src} className="min-w-0 basis-full pl-0"><RetryImage src={src} onGiveUp={() => setBroken((current) => new Set(current).add(src))} alt={`Home photo ${index + 1} of ${photos.length}`} loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} className="block aspect-[4/3] w-full min-w-0 max-w-full select-none object-cover [-webkit-touch-callout:none]" /></CarouselItem>)}</CarouselContent>
     {many && <>
       <CarouselPrevious aria-label="Previous home photo" className={`left-2 ${GALLERY_ARROW}`} />
       <CarouselNext aria-label="Next home photo" className={`right-2 ${GALLERY_ARROW}`} />

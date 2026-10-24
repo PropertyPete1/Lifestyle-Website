@@ -391,11 +391,12 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top }: { commun
   return <>
     <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,42%)]">
       <div className="min-w-0">
-        {top && <div className="mb-6 min-w-0">{top}</div>}
+        {/* On a phone the map button sits right under the search, before the featured row (Peter: map and search first). */}
         <div className="mb-4 flex min-w-0 flex-wrap items-center gap-2 lg:hidden">
           <button type="button" onClick={() => setMapOnPhone((value) => !value)} aria-expanded={mapOnPhone} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border bg-card px-4 text-sm shadow-sm"><MapPin className="h-4 w-4 text-gold" />{mapOnPhone ? LANDING_COPY.hideMap : LANDING_COPY.showMap}</button>
         </div>
         {mapOnPhone && <div className="mb-6 lg:hidden">{map}</div>}
+        {top && <div className="mb-6 min-w-0">{top}</div>}
         <div ref={listTop} className="scroll-mt-4" />
         {selected && <div role="status" className="mb-4 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-2 text-sm"><span>{LANDING_COPY.areaFilter(matching.length)}</span><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">

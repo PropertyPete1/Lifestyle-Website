@@ -151,6 +151,8 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "s3.amazonaws.com",
   "assets.drbhomes.com",
   "assets.livelegendhomes.com",
+  // Drees serves its photos from its own asset host.
+  "assetcloud.dreeshomes.com",
   // View Homes serves its photos from its WordPress uploads (…/wp-content/uploads/…); the path is checked below.
   "yourviewhome.com",
   // Texas Homes serves its photos from its Drupal files (…/sites/default/files/…); the path is checked below.

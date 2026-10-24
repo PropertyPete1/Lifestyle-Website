@@ -1,6 +1,6 @@
 import {
   DREES_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parsePromotionalRate, postJsonDocument, sameOfficialHost, sourcePage, successfulResult,
-  type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivatePlanOrHome,
+  type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 
 /**
@@ -153,6 +153,29 @@ export function withParentAddress(rows: DreesNeighborhood[]): DreesNeighborhood[
   });
 }
 
+/** Drees serves its photos from its own asset host. */
+export const DREES_PHOTO_HOST = "assetcloud.dreeshomes.com";
+/** A listing's photos from its `images` list, every one kept: the builder's own asset-host images, with floor plans and drawings placed after the photos so one is never the cover. */
+export function dreesGallery(images: unknown): PrivateGalleryImage[] {
+  const photos: PrivateGalleryImage[] = [];
+  const drawings: PrivateGalleryImage[] = [];
+  const seen = new Set<string>();
+  for (const raw of arr(images)) {
+    const image = obj(raw);
+    if (!image) continue;
+    const url = asUrl(str(image.imagePath) ?? "");
+    if (!url || url.protocol !== "https:" || url.hostname.toLowerCase() !== DREES_PHOTO_HOST || /\.(?:svg|pdf)$/i.test(url.pathname)) continue;
+    url.search = ""; url.hash = "";
+    const key = url.toString();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // A drawing is marked as one or labeled as one ("Floor plan", "Site plan"); "exterior of the Canyon floor plan" is a photo.
+    const drawing = Boolean(image.svgPath || image.floorPlanLevel) || [image.altText, image.caption, image.imageName].some((label) => /^(?:first|second|1st|2nd)?\s*(?:floor\s*plan|floorplan|site\s*plan|plat)\b/i.test(str(label) ?? ""));
+    (drawing ? drawings : photos).push({ sourceUrl: key, caption: "Representative image", width: null, height: null, srcSet: null });
+  }
+  return [...photos, ...drawings];
+}
+
 /** The San Antonio market's page id from the areas body; null when the body is not the list or names no such market. */
 export function parseDreesAreaId(body: string): number | null {
   let parsed: unknown;
@@ -209,7 +232,7 @@ export function parseDreesHomes(body: string, communityPage: string, now: Date):
       garage: num(home.garagesLow),
       readyNow: false,
       moveInDate: model ? null : status.moveInDate,
-      gallery: [],
+      gallery: dreesGallery(home.images),
     });
   }
   return { homes, listed: data.homes.length, total: num(data.filteredRecords), foreignHome, offer: dreesOfferText(data.promos) };
@@ -245,7 +268,7 @@ export function parseDreesPlans(body: string, communityPage: string): { plans: P
       squareFeet: positive(plan.sqFtLow),
       garage: num(plan.garagesLow),
       readyNow: false,
-      gallery: [],
+      gallery: dreesGallery(plan.images),
     });
   }
   return { plans, foreignPlan };

@@ -40,6 +40,13 @@ export const DEALS_JOB_DEFINITIONS = [
   // None starts at :13 of an odd minute, where the catalog call reads builder pages.
   { name: "builder-deals-photo-queue-b", cron: "43 */2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (even minutes, :43): 20 s of due Builder Deals photo processing per call, answered within 24 s" },
   { name: "builder-deals-photo-queue-c", cron: "43 1-59/2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (odd minutes, :43, after the catalog call has answered): 20 s of due Builder Deals photo processing per call, answered within 24 s" },
+  // October 24, 2026: four more at the quarter minutes, so a photo call starts every 15 s and the onboarding backlog
+  // clears in about half the time. Overlapping drains are safe: each claims its rows, a process runs at most two, and
+  // the memory guard stops starting photos past PHOTO_RSS_STOP_MB.
+  { name: "builder-deals-photo-queue-d", cron: "28 */2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (even minutes, :28): 20 s of due Builder Deals photo processing per call, answered within 24 s" },
+  { name: "builder-deals-photo-queue-e", cron: "58 */2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (even minutes, :58): 20 s of due Builder Deals photo processing per call, answered within 24 s" },
+  { name: "builder-deals-photo-queue-f", cron: "28 1-59/2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (odd minutes, :28): 20 s of due Builder Deals photo processing per call, answered within 24 s" },
+  { name: "builder-deals-photo-queue-g", cron: "58 1-59/2 * * * *", path: DEALS_CRON_PATH, payload: { job: "photos" }, description: "Every 2 minutes (odd minutes, :58): 20 s of due Builder Deals photo processing per call, answered within 24 s" },
   { name: "builder-deals-activity-note", cron: "47 30 6-12 * * *", path: DEALS_CRON_PATH, payload: { job: "activity" }, description: "1:30 AM Central one-per-day FUB activity note, with hourly retry fires until it has run" },
   { name: "builder-deals-fub-retry", cron: "17 0 * * * *", path: DEALS_CRON_PATH, payload: { job: "fub" }, description: "Hourly Builder Deals CRM retry" },
   { name: "builder-deals-alert-digest", cron: "41 5 * * * *", path: DEALS_CRON_PATH, payload: { job: "alerts" }, description: "Hourly Builder Deals durable alert delivery and digest" },

@@ -151,18 +151,22 @@ describe("Builder Deals cron registration", () => {
     expect(dealsJobNeedsReconcile({ cronExpression: " 13 */2 * * * * ", callbackPath: DEALS_CRON_PATH, callbackPayload: '{"job":"photos"}' }, photoJob)).toBe(false);
   });
 
-  it("adds two photo jobs half a minute apart, so a call starts every 30 s and none lands on the catalog's start", () => {
+  it("spreads the photo jobs a quarter minute apart, so a call starts every 15 s and none lands on the catalog's start", () => {
     const photoJobs = DEALS_JOB_DEFINITIONS.filter((job) => job.payload.job === "photos");
     expect(photoJobs.map((job) => [job.name, job.cron])).toEqual([
       ["builder-deals-photo-queue", "13 */2 * * * *"],
       ["builder-deals-photo-queue-b", "43 */2 * * * *"],
       ["builder-deals-photo-queue-c", "43 1-59/2 * * * *"],
+      ["builder-deals-photo-queue-d", "28 */2 * * * *"],
+      ["builder-deals-photo-queue-e", "58 */2 * * * *"],
+      ["builder-deals-photo-queue-f", "28 1-59/2 * * * *"],
+      ["builder-deals-photo-queue-g", "58 1-59/2 * * * *"],
     ]);
     expect(new Set(DEALS_JOB_DEFINITIONS.map((job) => job.name)).size).toBe(DEALS_JOB_DEFINITIONS.length);
     // Second-of-the-2-minute-cycle each call starts at: photo jobs and the catalog call never share a start.
     const startsInCycle = (cron: string) => { const [sec, min] = cron.split(" "); return min === "*/2" ? [Number(sec)] : [60 + Number(sec)]; };
     const starts = [...photoJobs.flatMap((job) => startsInCycle(job.cron)), ...startsInCycle(DEALS_JOB_DEFINITIONS.find((job) => job.payload.job === "catalog")!.cron)].sort((a, b) => a - b);
-    expect(starts).toEqual([13, 43, 73, 103]);
+    expect(starts).toEqual([13, 28, 43, 58, 73, 88, 103, 118]);
   });
 
 });

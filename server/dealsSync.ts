@@ -2,7 +2,7 @@ import { and, desc, eq, gte, inArray, isNull, like, lt, ne, or } from "drizzle-o
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealJobRuns, dealPhotos, dealSyncDigestEntries } from "../drizzle/schema";
 import { getDb } from "./db";
 import { chicagoClock, chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
-import { builderScrubConfig, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, mentionsTriggeringTerm, normalizeIncentiveText, publicTextResidue, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher } from "./dealsAdapters";
+import { builderScrubConfig, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, mentionsTriggeringTerm, normalizeIncentiveText, publicTextResidue, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher, type PrivatePlanOrHome } from "./dealsAdapters";
 export { builderScrubConfig };
 import { dealScrubTerms, emptyDealScrubConfig, mergeDealScrubConfig, normalizedDealSourceKey, normalizedText, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
 import { applyScrubExclusions, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
@@ -700,6 +700,18 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     record(result, label(plan));
     await upsertPhotos(result.id, plan.gallery);
   }
+  // A move-in-ready home the builder shows without a photo of its own gets its plan's photos (same community, same plan name), shown as representative.
+  const planGalleries = new Map<string, NonNullable<PrivatePlanOrHome["gallery"]>>();
+  for (const plan of snapshot.private.plans) {
+    const name = (plan.privatePlanName ?? plan.privateName ?? "").trim().toLowerCase();
+    if (name && plan.gallery?.length && !planGalleries.has(name)) planGalleries.set(name, plan.gallery);
+  }
+  const homeGallery = (home: PrivatePlanOrHome) => {
+    if (home.gallery?.length) return home.gallery;
+    const name = (home.privatePlanName ?? "").trim().toLowerCase();
+    const borrowed = name ? planGalleries.get(name) : undefined;
+    return borrowed?.map((image) => ({ ...image, caption: "Representative image" }));
+  };
   for (const home of snapshot.private.homes) {
     const sold = /sold/i.test(home.status ?? "");
     // Only publish a QMI when the official page explicitly labels it as such.
@@ -708,7 +720,7 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     const result = await upsertHome({ communityId: community.id, sourceUrl: home.sourceUrl, privatePlanName: home.privatePlanName ?? home.privateName, privateAddress: home.privateAddress ?? null, kind: "quick_move_in", beds: home.bedrooms === null ? null : String(home.bedrooms), baths: home.bathrooms === null ? null : String(home.bathrooms), sqft: home.squareFeet, price: home.price, moveInDate: home.moveInDate ?? null, garage: home.garage ? String(home.garage) : null, homesite: home.homesite ?? null, readyNow: home.readyNow ?? false, status: sold ? "sold" : "available" }, now);
     if (!sold) publishable.add(normalizedDealSourceKey(home.sourceUrl));
     record(result, label(home));
-    if (!sold) await upsertPhotos(result.id, home.gallery);
+    if (!sold) await upsertPhotos(result.id, homeGallery(home));
   }
   // A complete official snapshot (both kinds, both builders) proves absence:
   // official available rows not in it are sold. Hidden and manual rows never flip.

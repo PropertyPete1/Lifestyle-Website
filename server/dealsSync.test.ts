@@ -803,6 +803,24 @@ describe("catalog batch and the photo queue", () => {
     expect(mocks.processPendingDealPhotos).not.toHaveBeenCalled();
   });
 
+  it("a move-in-ready home shown without a photo of its own gets its plan's photos; one with its own keeps them", async () => {
+    const at = Date.parse("2026-10-21T11:00:00Z");
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({
+      plans: [{ sourceUrl: `${COMMUNITY_URL}/plans/lewis`, privateName: "Lewis", privatePlanName: "Lewis", gallery: [{ sourceUrl: "https://dam.mihomes.com/plans/lewis-front.jpg" }, { sourceUrl: "https://dam.mihomes.com/plans/lewis-kitchen.jpg" }] }],
+      homes: [
+        { sourceUrl: home("8301-a"), privatePlanName: "LEWIS ", gallery: [] },
+        { sourceUrl: home("8302-a"), privatePlanName: "Lewis", gallery: [{ sourceUrl: "https://dam.mihomes.com/gallery/8302-front.jpg" }] },
+        { sourceUrl: home("8303-a"), privatePlanName: "Crown", gallery: [] },
+      ],
+    }));
+    expect(await refreshDueCommunitiesBatch({ clock: () => at })).toMatchObject({ checked: 1, ok: 1 });
+    const homeId = (url: string) => db.rows(dealHomes).find((row) => row.sourceUrl === url)!.id;
+    const urls = (id: number) => db.rows(dealPhotos).filter((row) => row.homeId === id).sort((a, b) => a.sortOrder - b.sortOrder).map((row) => row.sourceUrl);
+    expect(urls(homeId(home("8301-a")))).toEqual(["https://dam.mihomes.com/plans/lewis-front.jpg", "https://dam.mihomes.com/plans/lewis-kitchen.jpg"]);
+    expect(urls(homeId(home("8302-a")))).toEqual(["https://dam.mihomes.com/gallery/8302-front.jpg"]);
+    expect(urls(homeId(home("8303-a")))).toEqual([]);
+  });
+
   it("a queued Refresh now is taken by the next batch even when the community was pulled today", async () => {
     const at = Date.parse("2026-10-21T11:00:00Z");
     mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));

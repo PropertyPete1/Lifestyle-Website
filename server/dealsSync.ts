@@ -767,6 +767,8 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     summary.sold.push(missing.privateAddress ?? missing.privatePlanName ?? `home ${missing.id}`);
   }
   await writeCommunityFacts(community, snapshot, sourceConfig);
+  // The headline's price band and area catch up with the facts this run wrote.
+  await import("./dealsOnboarding").then(({ refreshLiveAreaLabel }) => refreshLiveAreaLabel(community.id)).catch(() => null);
   // The discovered names are stored before the offer is judged, so the stored list is the one the offer was scrubbed with.
   await mergeDiscoveredNames(community, snapshot);
   await applyScrapedIncentive(community, snapshot, sourceConfig, now, summary, holds);

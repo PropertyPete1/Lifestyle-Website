@@ -154,6 +154,10 @@ describe("live area labels (Oct 24, 2026: Castroville homes read \"Greater San A
     expect(refreshedAreaLabel({ areaLabel: "Greater San Antonio", publicLabel: "Greater San Antonio | From the $400s and Move-In Ready Homes", centroid: castroville, city: "Castroville" }))
       .toEqual({ areaLabel: "Castroville", publicLabel: "Castroville | From the $400s and Move-In Ready Homes" });
     expect(refreshedAreaLabel({ areaLabel: "Castroville", publicLabel: "Castroville | New Homes", centroid: castroville, city: "Castroville" })).toBeNull();
+    // The price band follows the current starting price; an unchanged one is left alone.
+    expect(refreshedAreaLabel({ areaLabel: "Castroville", publicLabel: "Castroville | From the $500s and Move-In Ready Homes", centroid: castroville, city: "Castroville", fromPrice: 449_999 }))
+      .toEqual({ areaLabel: "Castroville", publicLabel: "Castroville | From the $400s and Move-In Ready Homes" });
+    expect(refreshedAreaLabel({ areaLabel: "Castroville", publicLabel: "Castroville | From the $400s and Move-In Ready Homes", centroid: castroville, city: "Castroville", fromPrice: 449_999 })).toBeNull();
     expect(refreshedAreaLabel({ areaLabel: "Greater San Antonio", publicLabel: "Pete's favorite half-acre deal", centroid: castroville, city: "Castroville" })).toBeNull();
     expect(refreshedAreaLabel({ areaLabel: "Hill Country Hideaway", publicLabel: "Hill Country Hideaway | New Homes", centroid: castroville, city: "Castroville" })).toBeNull();
   });

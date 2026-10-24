@@ -102,11 +102,16 @@ export function isGeneratedArea(area: string): boolean {
  * town list grew): the headline keeps its words, only the area in front of " | " changes. Null when nothing changes, or
  * when the label is not the generated shape (an admin's own label is never touched).
  */
-export function refreshedAreaLabel(row: { areaLabel: string; publicLabel: string; centroid: { lat: number; lng: number } | null; city: string | null }): { areaLabel: string; publicLabel: string } | null {
+export function refreshedAreaLabel(row: { areaLabel: string; publicLabel: string; centroid: { lat: number; lng: number } | null; city: string | null; fromPrice?: number | null }): { areaLabel: string; publicLabel: string } | null {
   if (!isGeneratedArea(row.areaLabel) || !row.publicLabel.startsWith(`${row.areaLabel} | `)) return null;
   const area = areaLabelFor({ centroid: row.centroid, city: row.city });
-  if (area === row.areaLabel) return null;
-  return { areaLabel: area, publicLabel: `${area}${row.publicLabel.slice(row.areaLabel.length)}`.slice(0, 190) };
+  let headline = row.publicLabel.slice(row.areaLabel.length);
+  // The headline's price band follows the community's current starting price (Oct 24: "From the $500s" over a $449,999 card).
+  const band = row.fromPrice ? priceBand(row.fromPrice) : null;
+  if (band) headline = headline.replace(/From the \$\d00s|Over \$1M|Under \$100K/, band);
+  const publicLabel = `${area}${headline}`.slice(0, 190);
+  if (area === row.areaLabel && publicLabel === row.publicLabel) return null;
+  return { areaLabel: area, publicLabel };
 }
 
 /** Facts a headline may be built from; every phrase comes from the fixed vocabulary below. */

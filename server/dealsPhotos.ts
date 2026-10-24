@@ -6,7 +6,7 @@ import sharp, { type Metadata } from "sharp";
 import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealPhotoRenders, dealPhotos, dealLeads, dealSettings } from "../drizzle/schema";
 import { getDb } from "./db";
-import { storageDelete, storagePut, storageReadPrivate } from "./storage";
+import { storageDelete, storageExistsPrivate, storagePut, storageReadPrivate } from "./storage";
 import { dealScrubTerms, displayForLead } from "../shared/deals";
 import { effectiveScrubConfig } from "./dealsScrub";
 import { recordDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
@@ -1849,12 +1849,39 @@ export const PUBLIC_RENDER_BUSY = "busy" as const;
  * A processed photo whose stored master is missing or no longer matches (October 24, 2026: a Vista Gardens cover answered
  * 404 on every load): back to pending, so the queue makes it again; the pages stop listing it until it is processed.
  */
-async function requeueBrokenProcessedPhoto(photoId: number) {
+async function requeueBrokenProcessedPhoto(photoId: number, scanCommunity = true) {
   const db = await getDb();
   if (!db) return;
   await db.update(dealPhotos).set({ processingState: "pending", processingAttempts: 0, nextProcessingAttemptAt: new Date(), processingStartedAt: null, lastProcessingError: "stored_master_missing" })
     .where(and(eq(dealPhotos.id, photoId), eq(dealPhotos.processingState, "processed"))).catch(() => undefined);
+  if (scanCommunity) void scanCommunityMasters(photoId).catch(() => undefined);
   console.warn(`[deals-photos] photo ${photoId}: stored master missing, queued again`);
+}
+
+/** Communities whose processed photos were checked recently (a missing master usually has company: Vista Gardens lost several). */
+const masterScanAt = new Map<number, number>();
+const MASTER_SCAN_EVERY_MS = 6 * 60 * 60_000;
+
+/**
+ * Checks every processed photo of the community a broken photo belongs to (one byte each, three at a time) and queues
+ * the ones whose master is gone, so the cover and gallery stop cycling through broken photos one visit at a time.
+ */
+async function scanCommunityMasters(photoId: number) {
+  const db = await getDb();
+  if (!db) return;
+  const owner = (await db.select({ communityId: dealHomes.communityId }).from(dealPhotos).innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id)).where(eq(dealPhotos.id, photoId)).limit(1))[0];
+  if (!owner) return;
+  const last = masterScanAt.get(owner.communityId) ?? 0;
+  if (Date.now() - last < MASTER_SCAN_EVERY_MS) return;
+  masterScanAt.set(owner.communityId, Date.now());
+  const rows = await db.select({ id: dealPhotos.id, key: dealPhotos.processedStorageKey }).from(dealPhotos).innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
+    .where(and(eq(dealHomes.communityId, owner.communityId), eq(dealHomes.status, "available"), eq(dealPhotos.processingState, "processed"), isNotNull(dealPhotos.processedStorageKey))).limit(1500);
+  let missing = 0;
+  for (let index = 0; index < rows.length; index += 3) {
+    const checks = await Promise.all(rows.slice(index, index + 3).map(async (row) => ({ row, there: await storageExistsPrivate(row.key as string) })));
+    for (const { row, there } of checks) if (there === false) { missing++; await requeueBrokenProcessedPhoto(row.id, false); }
+  }
+  console.warn(`[deals-photos] community ${owner.communityId}: checked ${rows.length} photo masters, ${missing} missing and queued again`);
 }
 
 export async function renderDealPhotoForPublic(photoId: number): Promise<RenderedPhoto | null | typeof PUBLIC_RENDER_BUSY> {

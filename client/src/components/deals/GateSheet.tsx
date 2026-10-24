@@ -144,7 +144,7 @@ export function GateSheet({ state, onClose, clientToken, lapsed = false }: { sta
       dispatch({ type: "start_result", result });
       // A realtor goes to the recruiting page; the number they typed rides along in this tab only, for the form.
       if (!result.ok && result.kind === "realtor") {
-        try { window.sessionStorage.setItem(RECRUIT_PREFILL_KEY, phone); } catch { /* storage blocked: the form starts empty */ }
+        try { window.sessionStorage.setItem(RECRUIT_PREFILL_KEY, JSON.stringify({ phone, name, email })); } catch { /* storage blocked: the form starts empty */ }
         const target = "redirect" in result && typeof result.redirect === "string" && result.redirect.startsWith("/") ? result.redirect : GATE_REALTOR_COPY.path;
         window.setTimeout(() => window.location.assign(target), 1200);
       }

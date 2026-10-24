@@ -24,12 +24,17 @@ const PILLARS = [
 ];
 
 /** A realtor sent here from the Builder Deals gate (?from=builder-deals), with the number they typed there (this tab only). */
-function builderDealsArrival(): { fromDeals: boolean; phone: string } {
-  if (typeof window === "undefined") return { fromDeals: false, phone: "" };
+function builderDealsArrival(): { fromDeals: boolean; phone: string; name: string; email: string } {
+  const empty = { phone: "", name: "", email: "" };
+  if (typeof window === "undefined") return { fromDeals: false, ...empty };
   const fromDeals = new URLSearchParams(window.location.search).get("from") === "builder-deals";
-  let phone = "";
-  if (fromDeals) { try { phone = window.sessionStorage.getItem("ldr_recruit_phone") ?? ""; } catch { phone = ""; } }
-  return { fromDeals, phone: phone.slice(0, 40) };
+  if (!fromDeals) return { fromDeals, ...empty };
+  try {
+    const raw = window.sessionStorage.getItem("ldr_recruit_phone") ?? "";
+    const parsed = raw.startsWith("{") ? JSON.parse(raw) as Partial<Record<"phone" | "name" | "email", unknown>> : { phone: raw };
+    const text = (value: unknown, max: number) => typeof value === "string" ? value.slice(0, max) : "";
+    return { fromDeals, phone: text(parsed.phone, 40), name: text(parsed.name, 190), email: text(parsed.email, 320) };
+  } catch { return { fromDeals, ...empty }; }
 }
 
 export default function Join() {
@@ -94,12 +99,12 @@ export default function Join() {
           </p>
           <p className="mt-3 font-serif italic text-lg text-foreground/90">— Stefanie</p>
         </div>
-        {arrival.fromDeals && <div data-join-from-deals="true" className="mb-6 border border-gold/50 bg-gold/10 p-5">
+        {arrival.fromDeals && <div data-join-from-deals="true" className="mb-6 scroll-mt-28 border border-gold/50 bg-gold/10 p-5">
           <p className="eyebrow text-gold">From Builder Deals</p>
           <p className="mt-2 leading-relaxed text-foreground/90">Builder Deals are for home buyers. Agents on our team get every one of these deals, with the addresses, rates and photos, for their own clients. Tell us about yourself and our broker will reach out.</p>
         </div>}
         <div id="apply" className="bg-card border border-border p-6 lg:p-10">
-          <RecruitForm sourceTag={arrival.fromDeals ? BUILDER_DEALS_RECRUIT_SOURCE : undefined} initialPhone={arrival.phone} />
+          <RecruitForm sourceTag={arrival.fromDeals ? BUILDER_DEALS_RECRUIT_SOURCE : undefined} initialPhone={arrival.phone} initialName={arrival.name} initialEmail={arrival.email} />
         </div>
 
         {/* Closing tagline + email contact for agents who prefer email.

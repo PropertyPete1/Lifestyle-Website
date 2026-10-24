@@ -23,9 +23,9 @@ import { CheckCircle2 } from "lucide-react";
 /** Recruits sent from Builder Deals carry their own FUB tag, so recruiting knows which track they came in on. */
 export const BUILDER_DEALS_RECRUIT_SOURCE = "Recruit - Builder Deals";
 
-export default function RecruitForm({ sourceTag = "Recruit - Website", initialPhone = "" }: { sourceTag?: string; initialPhone?: string } = {}) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+export default function RecruitForm({ sourceTag = "Recruit - Website", initialPhone = "", initialName = "", initialEmail = "" }: { sourceTag?: string; initialPhone?: string; initialName?: string; initialEmail?: string } = {}) {
+  const [name, setName] = useState(initialName);
+  const [email, setEmail] = useState(initialEmail);
   const [phone, setPhone] = useState(initialPhone);
   const [licenseNumber, setLicenseNumber] = useState("");
   const [transactionsClosed, setTransactionsClosed] = useState("");

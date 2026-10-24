@@ -42,6 +42,22 @@ import {
 import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
 import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, browserIsRealtorBlocked, staleSessionLeadId } from "./dealsService";
 /** What a realtor sees for the moment before the recruiting page opens. */
+/**
+ * The landing's two public reads (every community, the featured row) are the same for every visitor: kept for a minute
+ * and shared by requests that arrive together (Oct 24: the first paint waited 3.7 s on them). Off under tests.
+ */
+const PUBLIC_PAGE_CACHE_MS = 60_000;
+const publicPageEntries = new Map<string, { at: number; value: Promise<unknown> }>();
+function publicPageCache<T>(key: string, load: () => Promise<T>): Promise<T> {
+  if (process.env.VITEST) return load();
+  const hit = publicPageEntries.get(key);
+  if (hit && Date.now() - hit.at < PUBLIC_PAGE_CACHE_MS) return hit.value as Promise<T>;
+  const value = load();
+  publicPageEntries.set(key, { at: Date.now(), value });
+  value.catch(() => publicPageEntries.delete(key));
+  if (publicPageEntries.size > 200) publicPageEntries.delete(publicPageEntries.keys().next().value as string);
+  return value;
+}
 export const REALTOR_GATE_MESSAGE = "Builder Deals are for home buyers. Agents: these deals are open to our team for your clients. Taking you to our agent page.";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
@@ -276,7 +292,7 @@ export const dealsRouter = router({
   }),
   publicCatalog: publicProcedure.input(z.object({ src: z.string().trim().max(40).optional() }).optional()).query(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);
-    return publicDealsCatalog(input?.src);
+    return publicPageCache(`catalog:${(input?.src ?? "").toLowerCase()}`, () => publicDealsCatalog(input?.src));
   }),
   /** The Coming Soon section: area and price band only, for the landing page and the unlocked list alike. */
   comingSoon: publicProcedure.query(async ({ ctx }) => {
@@ -287,7 +303,7 @@ export const dealsRouter = router({
   featured: publicProcedure.query(async ({ ctx }) => {
     dealsPublicHeaders(ctx.res);
     const { featuredDeals } = await import("./dealsFeatured");
-    return featuredDeals("public");
+    return publicPageCache("featured", () => featuredDeals("public"));
   }),
   state: publicProcedure.input(z.object({ c: clientLinkToken }).optional()).query(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);

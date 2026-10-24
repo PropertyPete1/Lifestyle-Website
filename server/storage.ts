@@ -180,6 +180,19 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
   return url;
 }
 
+/** Whether a private Builder Deals object is there (one byte read); null when storage could not say. */
+export async function storageExistsPrivate(relKey: string): Promise<boolean | null> {
+  try {
+    const key = normalizeStorageKey(relKey);
+    if (!key.startsWith("builder-deals-private/")) return null;
+    const url = await storageGetSignedUrl(key);
+    const response = await fetch(url, { redirect: "error", headers: { Range: "bytes=0-0" }, signal: AbortSignal.timeout(10_000) });
+    await response.body?.cancel().catch(() => undefined);
+    if (response.ok) return true;
+    return [403, 404, 410].includes(response.status) ? false : null;
+  } catch { return null; }
+}
+
 /**
  * Server-only reader for private Builder Deals assets. The signed object URL
  * remains inside the server process and the caller receives bytes, never it.

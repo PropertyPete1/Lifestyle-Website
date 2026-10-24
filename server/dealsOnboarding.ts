@@ -133,7 +133,7 @@ export async function refreshLiveAreaLabel(communityId: number): Promise<{ areaL
   const lng = Number.parseFloat(row.zipCentroidLng ?? "");
   const centroid = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
   const city = row.privateAddress.split(";")[0]!.split(",").map((part) => part.trim()).at(-2) ?? null;
-  const next = refreshedAreaLabel({ areaLabel: row.areaLabel, publicLabel: row.publicLabel, centroid, city });
+  const next = refreshedAreaLabel({ areaLabel: row.areaLabel, publicLabel: row.publicLabel, centroid, city, fromPrice: row.fromPrice });
   if (next) await db.update(dealCommunities).set(next).where(eq(dealCommunities.id, communityId));
   return next;
 }

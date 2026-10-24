@@ -30,6 +30,28 @@ export function mortgageRateFrom(value: string | null | undefined): number | nul
 }
 
 /** Monthly principal and interest, in whole dollars. Taxes, insurance and HOA are not included. */
+/** The monthly costs besides principal and interest, as yearly percentages of the price (HOA as dollars a month). */
+export type PaymentCosts = { taxRatePercent: number; insuranceRatePercent: number; hoaMonthly: number; mortgageInsuranceRatePercent: number };
+/**
+ * October 24, 2026 defaults for San Antonio area new construction: ~3% total property tax (MUD/PID districts are
+ * common), homeowners insurance ~1.2% of the price a year, a typical HOA, and FHA's 0.55% annual mortgage insurance
+ * whenever less than 20% is put down. Admin edits them.
+ */
+export const DEFAULT_PAYMENT_COSTS: PaymentCosts = { taxRatePercent: 3, insuranceRatePercent: 1.2, hoaMonthly: 60, mortgageInsuranceRatePercent: 0.55 };
+
+/** The whole estimated monthly payment: principal and interest, mortgage insurance under 20% down, property tax, insurance and HOA. */
+export function estimatedMonthlyPayment(input: { price: number; ratePercent: number; downPercent: number; costs: PaymentCosts; years?: number }): number {
+  const down = Math.min(Math.max(input.downPercent, 0), 100);
+  const loan = input.price * (1 - down / 100);
+  const months = (input.years ?? DEFAULT_TERM_YEARS) * 12;
+  const monthlyRate = input.ratePercent / 100 / 12;
+  const principalAndInterest = loan <= 0 ? 0 : monthlyRate === 0 ? loan / months : (loan * monthlyRate) / (1 - (1 + monthlyRate) ** -months);
+  const mortgageInsurance = down < 20 ? (loan * input.costs.mortgageInsuranceRatePercent) / 100 / 12 : 0;
+  const tax = (input.price * input.costs.taxRatePercent) / 100 / 12;
+  const insurance = (input.price * input.costs.insuranceRatePercent) / 100 / 12;
+  return Math.round(principalAndInterest + mortgageInsurance + tax + insurance + input.costs.hoaMonthly);
+}
+
 export function monthlyPrincipalAndInterest(input: { price: number; ratePercent: number; downPercent: number; years?: number }): number {
   const years = input.years ?? DEFAULT_TERM_YEARS;
   const down = Math.min(Math.max(input.downPercent, 0), 100);
@@ -188,6 +210,8 @@ export type FeaturedDeal = {
   sqftLabel?: string | null;
   /** Opaque, per-deal: lets the strip tell two deals with the same label and band apart. Never an id. */
   key?: string;
+  /** The home's cover photo (the landing page's public render, or the lead's own on a private list); absent when it has none yet. */
+  photo?: string;
 };
 
 export type FeaturedDeals = {
@@ -195,10 +219,10 @@ export type FeaturedDeals = {
   bestRate: FeaturedDeal | null;
   bigLots: FeaturedDeal[];
   /** The assumptions printed under the section. */
-  assumptions: { marketRatePercent: number; defaultDownPercent: number; termYears: number };
+  assumptions: { marketRatePercent: number; defaultDownPercent: number; termYears: number; costs: PaymentCosts };
 };
 
-export type FeaturedSettings = { marketRatePercent: number; defaultDownPercent: number; limit?: number };
+export type FeaturedSettings = { marketRatePercent: number; defaultDownPercent: number; limit?: number; costs?: PaymentCosts };
 
 function priced(candidate: FeaturedCandidate, settings: FeaturedSettings): FeaturedDeal | null {
   if (!candidate.price || candidate.price <= 0) return null;
@@ -218,7 +242,7 @@ function priced(candidate: FeaturedCandidate, settings: FeaturedSettings): Featu
     kind: candidate.kind,
     beds: candidate.beds ?? null,
     sqft: candidate.sqft ?? null,
-    estMonthly: monthlyPrincipalAndInterest({ price: candidate.price, ratePercent: rate.ratePercent, downPercent }),
+    estMonthly: estimatedMonthlyPayment({ price: candidate.price, ratePercent: rate.ratePercent, downPercent, costs: settings.costs ?? DEFAULT_PAYMENT_COSTS }),
     rate,
     downPercent,
     acres: candidate.acres,
@@ -245,7 +269,9 @@ const strip = ({ communityKey: _key, ...deal }: FeaturedDeal & { communityKey: s
  */
 export function rankFeatured(candidates: readonly FeaturedCandidate[], settings: FeaturedSettings): FeaturedDeals {
   const limit = settings.limit ?? FEATURED_LIMIT;
-  const eligible = candidates.filter((candidate) => !candidate.excluded);
+  // October 24, 2026: a featured payment is figured at the builder's own published rate only, never the market rate.
+  // A home whose builder publishes no rate is still on the list; it just does not compete here.
+  const eligible = candidates.filter((candidate) => !candidate.excluded && typeof candidate.offer?.ratePercent === "number");
   const priced_ = eligible.flatMap((candidate) => {
     const deal = priced(candidate, settings);
     return deal ? [{ ...deal, communityKey: candidate.communityKey }] : [];
@@ -259,7 +285,7 @@ export function rankFeatured(candidates: readonly FeaturedCandidate[], settings:
     .sort((a, b) => a.rate.ratePercent - b.rate.ratePercent || a.estMonthly - b.estMonthly);
   const bestRate = offers[0] ? { ...strip(offers[0]), reason: "rate" as const } : null;
   const bigLots = bestPerCommunity(comparable.filter((deal) => (deal.acres ?? 0) >= BIG_LOT_ACRES)).slice(0, limit).map((deal) => ({ ...strip(deal), reason: "lot" as const }));
-  return { lowestPayment, bestRate, bigLots, assumptions: { marketRatePercent: settings.marketRatePercent, defaultDownPercent: settings.defaultDownPercent, termYears: DEFAULT_TERM_YEARS } };
+  return { lowestPayment, bestRate, bigLots, assumptions: { marketRatePercent: settings.marketRatePercent, defaultDownPercent: settings.defaultDownPercent, termYears: DEFAULT_TERM_YEARS, costs: settings.costs ?? DEFAULT_PAYMENT_COSTS } };
 }
 
 /** "Lennar" excludes "Lennar", "Lennar Homes", "Lennar Mortgage" and "www.lennar.com"; a blank entry excludes nothing. */
@@ -295,14 +321,14 @@ export function roundedSqft(sqft: number): number {
  * feet to the hundred, lot size to the tenth of an acre. Exact figures could be
  * typed into a listing site to find the home without talking to an agent.
  */
-export function roundForPublic(deal: FeaturedDeal): FeaturedDeal {
+export function roundForPublic(deal: FeaturedDeal, costs: PaymentCosts = DEFAULT_PAYMENT_COSTS): FeaturedDeal {
   const bandPrice = priceBandFloor(deal.price);
   return {
     ...deal,
     price: bandPrice,
     priceLabel: `${priceBandLabel(deal.price)}`,
     // The payment is figured on the band's low end, so it cannot be turned back into the exact price.
-    estMonthly: monthlyPrincipalAndInterest({ price: bandPrice, ratePercent: deal.rate.ratePercent, downPercent: deal.downPercent }),
+    estMonthly: estimatedMonthlyPayment({ price: bandPrice, ratePercent: deal.rate.ratePercent, downPercent: deal.downPercent, costs }),
     sqft: deal.sqft ? roundedSqft(deal.sqft) : deal.sqft ?? null,
     sqftLabel: deal.sqft ? `about ${roundedSqft(deal.sqft).toLocaleString("en-US")} sq ft` : null,
     acres: deal.acres ? Math.round(deal.acres * 10) / 10 : deal.acres,
@@ -310,5 +336,6 @@ export function roundForPublic(deal: FeaturedDeal): FeaturedDeal {
 }
 
 export function roundFeaturedForPublic(featured: FeaturedDeals): FeaturedDeals {
-  return { ...featured, lowestPayment: featured.lowestPayment.map(roundForPublic), bestRate: featured.bestRate ? roundForPublic(featured.bestRate) : null, bigLots: featured.bigLots.map(roundForPublic) };
+  const round = (deal: FeaturedDeal) => roundForPublic(deal, featured.assumptions.costs ?? DEFAULT_PAYMENT_COSTS);
+  return { ...featured, lowestPayment: featured.lowestPayment.map(round), bestRate: featured.bestRate ? round(featured.bestRate) : null, bigLots: featured.bigLots.map(round) };
 }

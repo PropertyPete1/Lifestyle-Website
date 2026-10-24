@@ -10,7 +10,7 @@ import { Field, GOLD_BUTTON, ListField, Metric, Section, SwitchRow, TAP, Warning
 import { ageLabel, displayDate, mergeUntouched, touchedKeys, touchedPatch } from "./helpers";
 import type { Health, Overview, Settings } from "./types";
 
-type NumberKey = "expiryHours" | "clientLinkExpiryHours" | "clientLinkDays" | "paymentMarketRate" | "paymentDownPercent" | "areaMapRadiusMiles" | "publicAreaMapRadiusMiles" | "catalogRefreshDays" | "hasAgentBlockDays" | "incentiveLapseDays" | "dailyVerificationCap" | "phoneLimitPerHour" | "ipLimitPerHour" | "testPhoneLimitPerHour";
+type NumberKey = "expiryHours" | "clientLinkExpiryHours" | "clientLinkDays" | "paymentMarketRate" | "paymentDownPercent" | "paymentTaxRate" | "paymentInsuranceRate" | "paymentHoaMonthly" | "paymentMortgageInsuranceRate" | "areaMapRadiusMiles" | "publicAreaMapRadiusMiles" | "catalogRefreshDays" | "hasAgentBlockDays" | "incentiveLapseDays" | "dailyVerificationCap" | "phoneLimitPerHour" | "ipLimitPerHour" | "testPhoneLimitPerHour";
 type ToggleKey = "allowCanada" | "skipTwilioForTestNumbers" | "testNumbersSkipChecks" | "testModeFullPipeline";
 type ListKey = "testNumbers" | "testTeamNumbers" | "activeReelCodes" | "brokerageDomains" | "fubRealtorTags" | "fubRealtorSources" | "handleKeywords" | "trecCounties" | "alertRecipients" | "syncEmailRecipients" | "driveDestinations" | "featuredExcludedBuilders";
 
@@ -19,6 +19,10 @@ const NUMBER_FIELDS: Array<{ key: NumberKey; label: string; min: number; max: nu
   { key: "clientLinkExpiryHours", label: "Agent client access (hours)", min: 1, max: 24 * 90 },
   { key: "clientLinkDays", label: "Agent client link valid (days)", min: 1, max: 365 },
   { key: "paymentMarketRate", label: "Best Deals market rate (%)", min: 1, max: 15, step: 0.01 },
+  { key: "paymentTaxRate", label: "Best Deals property tax (% of price a year)", min: 0, max: 6, step: 0.01 },
+  { key: "paymentInsuranceRate", label: "Best Deals home insurance (% of price a year)", min: 0, max: 5, step: 0.01 },
+  { key: "paymentHoaMonthly", label: "Best Deals HOA ($ a month)", min: 0, max: 2000, step: 1 },
+  { key: "paymentMortgageInsuranceRate", label: "Best Deals mortgage insurance under 20% down (% of loan a year)", min: 0, max: 3, step: 0.01 },
   { key: "paymentDownPercent", label: "Best Deals default down payment (%)", min: 0, max: 100, step: 0.5 },
   { key: "areaMapRadiusMiles", label: "Area map circle after sign-up (miles)", min: 1, max: 20, step: 0.5 },
   { key: "publicAreaMapRadiusMiles", label: "Area map circle on the public card (miles)", min: 1, max: 20, step: 0.5 },

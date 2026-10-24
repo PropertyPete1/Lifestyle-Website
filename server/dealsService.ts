@@ -82,6 +82,14 @@ export type DealSettings = {
   paymentDownPercent: number;
   /** Best Deals: builders never featured (still listed). */
   featuredExcludedBuilders: string[];
+  /** Best Deals payment: total property tax, percent of price a year. */
+  paymentTaxRate: number;
+  /** Best Deals payment: homeowners insurance, percent of price a year. */
+  paymentInsuranceRate: number;
+  /** Best Deals payment: HOA dues, dollars a month. */
+  paymentHoaMonthly: number;
+  /** Best Deals payment: annual mortgage insurance under 20% down, percent of the loan. */
+  paymentMortgageInsuranceRate: number;
   /** Area map circle on the private list, in miles, around the ZIP code centroid. */
   areaMapRadiusMiles: number;
   /** Area map circle on the public landing card (wider, zoomed out). */
@@ -122,6 +130,10 @@ const DEFAULT_SETTINGS: DealSettings = {
   paymentMarketRate: 7.4,
   paymentDownPercent: 5,
   featuredExcludedBuilders: ["Lennar"],
+  paymentTaxRate: 3,
+  paymentInsuranceRate: 1.2,
+  paymentHoaMonthly: 60,
+  paymentMortgageInsuranceRate: 0.55,
   areaMapRadiusMiles: 5,
   publicAreaMapRadiusMiles: 8,
   catalogRefreshDays: 1,

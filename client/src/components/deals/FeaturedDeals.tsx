@@ -39,7 +39,8 @@ export function dealKey(deal: Pick<FeaturedDeal, "key" | "card" | "label" | "pri
 function DealRow({ deal, rank, locked, onSelect, tags = [] }: { deal: FeaturedDeal; rank?: number; locked: boolean; onSelect?: (deal: FeaturedDeal) => void; tags?: string[] }) {
   const action = locked ? FEATURED_COPY.unlock : FEATURED_COPY.see;
   return <li className="min-w-0 border border-border bg-card">
-    <button type="button" onClick={() => onSelect?.(deal)} className="flex w-full min-w-0 items-start gap-4 p-4 text-left transition-colors hover:bg-gold/5" data-deals-featured={deal.reason} aria-label={`${action}: ${deal.label}, ${money.format(deal.estMonthly)} a month estimated`}>
+    <button type="button" onClick={() => onSelect?.(deal)} className="flex w-full min-w-0 flex-wrap items-start gap-4 p-4 text-left transition-colors hover:bg-gold/5" data-deals-featured={deal.reason} aria-label={`${action}: ${deal.label}, ${money.format(deal.estMonthly)} a month estimated`}>
+      {deal.photo && <img src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className="block aspect-[4/3] w-full min-w-0 basis-full select-none object-cover [-webkit-touch-callout:none]" />}
       {rank !== undefined && <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-gold/50 font-serif text-lg text-gold">{rank}</span>}
       <span className="min-w-0 flex-1">
         {tags.length > 0 && <span className="mb-2 flex flex-wrap gap-1.5">{tags.map((tag) => <span key={tag} data-deals-featured-tag={tag} className="bg-gold px-2 py-0.5 text-[10px] font-medium uppercase tracking-widest text-primary-foreground">{tag}</span>)}</span>}
@@ -86,6 +87,6 @@ export function FeaturedDeals({ featured, locked = false, onSelect }: { featured
         <ul className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">{bigLots.map((deal, index) => <DealRow key={`${deal.card ?? deal.label}-lot-${index}`} deal={deal} locked={locked} onSelect={onSelect} />)}</ul>
       </div>}
     </div>
-    <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground" data-deals-featured-assumptions="true">Estimated principal and interest on a {assumptions.termYears}-year loan. Builder rates apply to select homes with the builder's lender and qualifying credit; homes without a builder rate use the {formatRate(assumptions.marketRatePercent)} market rate and {Number(assumptions.defaultDownPercent.toFixed(2))}% down. Taxes, insurance and HOA are extra. Not a commitment to lend. {FEATURED_COPY.updated}</p>
+    <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground" data-deals-featured-assumptions="true">Estimated monthly payment on a {assumptions.termYears}-year loan: principal and interest, mortgage insurance under 20% down, property tax at {Number(assumptions.costs.taxRatePercent.toFixed(2))}% and home insurance at {Number(assumptions.costs.insuranceRatePercent.toFixed(2))}% of the price a year, and about {money.format(assumptions.costs.hoaMonthly)} a month HOA. Your taxes, insurance and HOA will vary by home. Builder rates apply to select homes with the builder's lender and qualifying credit. Not a commitment to lend. {FEATURED_COPY.updated}</p>
   </section>;
 }

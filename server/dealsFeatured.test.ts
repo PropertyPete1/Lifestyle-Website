@@ -1,8 +1,8 @@
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { dealCommunities, dealHomes, dealIncentives, dealSettings } from "../drizzle/schema";
-import { acresFromText, builderExcluded, downPaymentPercentFrom, homeLotAcres, loanTypeLabel, lotAcres, monthlyPrincipalAndInterest, mortgageRateFrom, percentFrom, priceBandLabel, rankFeatured, type FeaturedCandidate } from "../shared/dealsFeatured";
+import { dealCommunities, dealHomes, dealIncentives, dealPhotos, dealSettings } from "../drizzle/schema";
+import { DEFAULT_PAYMENT_COSTS, acresFromText, builderExcluded, downPaymentPercentFrom, estimatedMonthlyPayment, homeLotAcres, loanTypeLabel, lotAcres, monthlyPrincipalAndInterest, mortgageRateFrom, percentFrom, priceBandLabel, rankFeatured, type FeaturedCandidate } from "../shared/dealsFeatured";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 
 /**
@@ -12,14 +12,18 @@ import { FakeDealsDb } from "./dealsSync.fakeDb";
 const mocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 
-import { featuredDeals, offerFromIncentive } from "./dealsFeatured";
+import { featuredDeals, offerFromIncentive, publicFeaturedPhotoId } from "./dealsFeatured";
 import { dealsCardHandle } from "./dealsService";
 
 (globalThis as { React?: typeof React }).React = React;
 const { FeaturedDeals, dealKey, rateLine } = await import("../client/src/components/deals/FeaturedDeals");
 const decode = (value: string) => value.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
 
-const settings = { marketRatePercent: 7.4, defaultDownPercent: 5 };
+// Taxes, insurance and HOA at zero keep these figures principal and interest; the full payment has its own test.
+const NO_COSTS = { taxRatePercent: 0, insuranceRatePercent: 0, hoaMonthly: 0, mortgageInsuranceRatePercent: 0 };
+const settings = { marketRatePercent: 7.4, defaultDownPercent: 5, costs: NO_COSTS };
+/** A builder offer at 7.4% that states no down payment (so the default 5% is used). */
+const at74 = { ratePercent: 7.4, firstYearRatePercent: null, loanType: null, downPercent: null };
 const candidate = (over: Partial<FeaturedCandidate>): FeaturedCandidate => ({ communityKey: "1", label: "Area | Label", area: "Area", price: 400_000, kind: "quick_move_in", offer: null, acres: null, excluded: false, ...over });
 
 describe("the payment math", () => {
@@ -28,6 +32,14 @@ describe("the payment math", () => {
     expect(monthlyPrincipalAndInterest({ price: 315_000, ratePercent: 7, downPercent: 5 })).toBe(1991);
     expect(monthlyPrincipalAndInterest({ price: 360_000, ratePercent: 0.0001, downPercent: 0 })).toBe(1000);
     expect(monthlyPrincipalAndInterest({ price: 100_000, ratePercent: 6, downPercent: 100 })).toBe(0);
+  });
+
+  it("figures the whole monthly payment: principal and interest, mortgage insurance under 20% down, tax, insurance and HOA", () => {
+    // A $170K home at a 4.99% FHA builder rate with 3.5% down: $880 P&I, $75 mortgage insurance, $425 tax, $170 insurance, $60 HOA.
+    expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 3.5, costs: DEFAULT_PAYMENT_COSTS })).toBe(1610);
+    // 20% down carries no mortgage insurance.
+    expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 20, costs: NO_COSTS })).toBe(monthlyPrincipalAndInterest({ price: 170_000, ratePercent: 4.99, downPercent: 20 }));
+    expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 20, costs: { ...NO_COSTS, mortgageInsuranceRatePercent: 0.55 } })).toBe(monthlyPrincipalAndInterest({ price: 170_000, ratePercent: 4.99, downPercent: 20 }));
   });
 
   it("reads rates, down payments and lot sizes out of builder wording", () => {
@@ -100,25 +112,28 @@ describe("the payment math", () => {
 describe("the meeting table", () => {
   it("picks the three lowest payments from three different communities, cheapest first", () => {
     const ranked = rankFeatured([
-      candidate({ communityKey: "a", label: "A", price: 300_000 }),
-      candidate({ communityKey: "a", label: "A", price: 280_000, card: "a2" }),
+      candidate({ communityKey: "a", label: "A", price: 300_000, offer: at74 }),
+      candidate({ communityKey: "a", label: "A", price: 280_000, card: "a2", offer: at74 }),
       candidate({ communityKey: "b", label: "B", price: 350_000, offer: { ratePercent: 4.999, firstYearRatePercent: null, loanType: "FHA", downPercent: 3.5 } }),
-      candidate({ communityKey: "c", label: "C", price: 330_000 }),
-      candidate({ communityKey: "d", label: "D", price: 290_000 }),
-      candidate({ communityKey: "e", label: "Lennar place", price: 150_000, excluded: true }),
+      candidate({ communityKey: "c", label: "C", price: 330_000, offer: at74 }),
+      candidate({ communityKey: "d", label: "D", price: 290_000, offer: at74 }),
+      candidate({ communityKey: "e", label: "Lennar place", price: 150_000, excluded: true, offer: at74 }),
+      // No builder rate published: never featured at a market rate.
+      candidate({ communityKey: "f", label: "No rate", price: 120_000 }),
     ], settings);
     // B's builder rate beats A's lower price; C is fourth and drops off.
     expect(ranked.lowestPayment.map((deal) => [deal.label, deal.estMonthly])).toEqual([["B", 1813], ["A", 1842], ["D", 1908]]);
-    expect(ranked.lowestPayment[1]).toMatchObject({ label: "A", card: "a2", price: 280_000, downPercent: 5, rate: { ratePercent: 7.4, builderOffer: false } });
+    expect(ranked.lowestPayment[1]).toMatchObject({ label: "A", card: "a2", price: 280_000, downPercent: 5, rate: { ratePercent: 7.4, builderOffer: true } });
+    expect([...ranked.lowestPayment, ranked.bestRate, ...ranked.bigLots].some((deal) => deal?.label === "No rate")).toBe(false);
     expect(ranked.lowestPayment.some((deal) => deal.label === "Lennar place")).toBe(false);
     expect(ranked.bestRate).toMatchObject({ label: "B", reason: "rate", rate: { ratePercent: 4.999, loanType: "FHA", builderOffer: true }, downPercent: 3.5 });
   });
 
   it("judges a community on its move-in-ready homes, and on plans only when it has none", () => {
     const ranked = rankFeatured([
-      candidate({ communityKey: "a", label: "A", price: 450_000 }),
-      candidate({ communityKey: "a", label: "A plan", price: 200_000, kind: "to_be_built" }),
-      candidate({ communityKey: "b", label: "B plan", price: 300_000, kind: "to_be_built" }),
+      candidate({ communityKey: "a", label: "A", price: 450_000, offer: at74 }),
+      candidate({ communityKey: "a", label: "A plan", price: 200_000, kind: "to_be_built", offer: at74 }),
+      candidate({ communityKey: "b", label: "B plan", price: 300_000, kind: "to_be_built", offer: at74 }),
     ], settings);
     expect(ranked.lowestPayment.map((deal) => deal.label)).toEqual(["B plan", "A"]);
   });
@@ -136,15 +151,16 @@ describe("the meeting table", () => {
     expect(ranked.bestRate?.label).toBe("Fixed");
     expect(rateLine(ranked.lowestPayment.find((deal) => deal.label === "Buydown")!)).toBe("at 3.99% first year, then 5.99% Conventional, 5% down");
     expect(rateLine(ranked.bestRate!)).toBe("at 5.5% VA, 0% down");
-    expect(rateLine(rankFeatured([candidate({})], settings).lowestPayment[0]!)).toBe("at the 7.4% market rate, 5% down");
+    // A home whose builder publishes no rate is never priced at a market rate here: it is not featured.
+    expect(rankFeatured([candidate({})], settings)).toMatchObject({ lowestPayment: [], bestRate: null, bigLots: [] });
   });
 
   it("lists big lots (half an acre and up) cheapest first, one per community", () => {
     const ranked = rankFeatured([
-      candidate({ communityKey: "a", label: "Half acre", price: 500_000, acres: 0.5 }),
-      candidate({ communityKey: "a", label: "Half acre", price: 520_000, acres: 0.5 }),
-      candidate({ communityKey: "b", label: "Acre", price: 700_000, acres: 1 }),
-      candidate({ communityKey: "c", label: "Small", price: 250_000, acres: 0.18 }),
+      candidate({ communityKey: "a", label: "Half acre", price: 500_000, acres: 0.5, offer: at74 }),
+      candidate({ communityKey: "a", label: "Half acre", price: 520_000, acres: 0.5, offer: at74 }),
+      candidate({ communityKey: "b", label: "Acre", price: 700_000, acres: 1, offer: at74 }),
+      candidate({ communityKey: "c", label: "Small", price: 250_000, acres: 0.18, offer: at74 }),
     ], settings);
     expect(ranked.bigLots.map((deal) => [deal.label, deal.price])).toEqual([["Half acre", 500_000], ["Acre", 700_000]]);
     expect(rankFeatured([], settings)).toMatchObject({ lowestPayment: [], bestRate: null, bigLots: [], assumptions: { marketRatePercent: 7.4, defaultDownPercent: 5, termYears: 30 } });
@@ -162,8 +178,10 @@ describe("Best Deals from the database, by viewer", () => {
   beforeEach(() => {
     db = new FakeDealsDb();
     mocks.getDb.mockResolvedValue(db);
-    db.seed(dealSettings, { key: "builder_deals", value: JSON.stringify({ paymentMarketRate: 7.4, paymentDownPercent: 5, featuredExcludedBuilders: ["Lennar"] }) });
+    db.seed(dealSettings, { key: "builder_deals", value: JSON.stringify({ paymentMarketRate: 7.4, paymentDownPercent: 5, featuredExcludedBuilders: ["Lennar"], paymentTaxRate: 0, paymentInsuranceRate: 0, paymentHoaMonthly: 0, paymentMortgageInsuranceRate: 0 }) });
   });
+  /** A live builder offer at 7.4% (with its APR) and no stated down payment. */
+  const offer74 = (communityId: number) => db.seed(dealIncentives, { communityId, normalizedText: "o", publicText: "o", headlineRate: "7.4%", apr: "7.6%", confirmedAt: new Date(), active: true, held: false, manual: false });
 
   it("gives the landing page labels and payments only, the private list card handles, and the team names", async () => {
     const sienna = community({});
@@ -172,8 +190,10 @@ describe("Best Deals from the database, by viewer", () => {
     db.seed(dealIncentives, { communityId: sienna, normalizedText: "x", publicText: "x", headlineRate: "4.999%", apr: "5.737%", loanType: "FHA", downPayment: "3.5%", confirmedAt: new Date(), active: true, held: false, manual: false });
     const vista = community({ builder: "M/I Homes", privateName: "Vista Gardens", publicLabel: "Southeast San Antonio | New Phase Now Selling", scrubList: JSON.stringify({ community: ["Vista Gardens"] }) });
     home(vista, { price: 354_990, privateAddress: "9 Vista Way" });
+    offer74(vista);
     const lennar = community({ builder: "Lennar", privateName: "Cheap Acres", publicLabel: "West San Antonio | Starter Homes", scrubList: "{}" });
     home(lennar, { price: 199_990, privateAddress: "1 Cheap Rd" });
+    offer74(lennar);
     const paused = community({ privateName: "Paused Place", publicLabel: "North | Paused", paused: true, scrubList: "{}" });
     home(paused, { price: 150_000 });
 
@@ -196,10 +216,13 @@ describe("Best Deals from the database, by viewer", () => {
   it("keeps a hand-added (Manual) Lennar community out, found by its scrub names or its site", async () => {
     const byScrub = community({ builder: "Manual", privateName: "Cheap Acres", publicLabel: "West San Antonio | Starter Homes", sourceUrl: "https://example.com/cheap", scrubList: JSON.stringify({ builder: ["Lennar"] }) });
     home(byScrub, { price: 219_990 });
+    offer74(byScrub);
     const bySite = community({ builder: "Manual", privateName: "Other Acres", publicLabel: "North San Antonio | Starter Homes", sourceUrl: "https://www.lennar.com/new-homes/texas/san-antonio/x", scrubList: "{}" });
     home(bySite, { price: 209_990 });
+    offer74(bySite);
     const fair = community({ builder: "Manual", privateName: "Fair Place", publicLabel: "East San Antonio | New Homes", sourceUrl: "https://example.com/fair", scrubList: "{}" });
     home(fair, { price: 330_000 });
+    offer74(fair);
     const pub = await featuredDeals("public");
     expect(pub.lowestPayment.map((deal) => deal.label)).toEqual(["East San Antonio | New Homes"]);
   });
@@ -225,6 +248,7 @@ describe("Best Deals from the database, by viewer", () => {
   it("gives the landing page bands only: price to the $10K, square feet to the hundred, lot to the tenth", async () => {
     const id = community({});
     home(id, { price: 349_990, sqft: 2_318, lotSize: "0.52 acres" });
+    offer74(id);
     const pub = await featuredDeals("public");
     expect(pub.lowestPayment[0]).toMatchObject({ price: 340_000, priceLabel: "$340s", sqft: 2_300, sqftLabel: "about 2,300 sq ft", acres: 0.5 });
     // The payment is figured on the band, not the real price: the page prints the rate, down payment and term
@@ -242,6 +266,7 @@ describe("Best Deals from the database, by viewer", () => {
   it("never lets the landing payment give the real price away, with or without a builder rate", async () => {
     const market = community({ publicLabel: "Southeast San Antonio | New Homes", areaLabel: "Southeast San Antonio" });
     home(market, { price: 412_500 });
+    offer74(market);
     const rated = community({ publicLabel: "North San Antonio | Lakes", areaLabel: "North San Antonio", sourceUrl: "https://www.chesmar.com/north/" });
     home(rated, { price: 374_990 });
     db.seed(dealIncentives, { communityId: rated, normalizedText: "r", publicText: "Rates as low as 5.5% FHA with 3.5% down", confirmedAt: new Date(), active: true, held: false, manual: false, headlineRate: "5.5%", apr: "6.1%" });
@@ -264,11 +289,13 @@ describe("Best Deals from the database, by viewer", () => {
     // Discovery labels hundreds of communities from a fixed vocabulary, so labels and bands repeat.
     const a = community({ publicLabel: "Northwest San Antonio | From the $300s", areaLabel: "Northwest San Antonio" });
     home(a, { price: 341_990 });
+    offer74(a);
     const b = community({ publicLabel: "Northwest San Antonio | From the $300s", areaLabel: "Northwest San Antonio", sourceUrl: "https://www.chesmar.com/b/" });
     home(b, { price: 348_500 });
     db.seed(dealIncentives, { communityId: b, normalizedText: "r", publicText: "Rates as low as 7.25% FHA with 3.5% down", confirmedAt: new Date(), active: true, held: false, manual: false, headlineRate: "7.25%", apr: "7.9%" });
     const c = community({ publicLabel: "North San Antonio | Lakes", areaLabel: "North San Antonio", sourceUrl: "https://www.chesmar.com/c/" });
     home(c, { price: 360_000 });
+    offer74(c);
     const pub = await featuredDeals("public");
     expect(pub.lowestPayment.map((deal) => deal.price)).toEqual([340_000, 340_000, 360_000]);
     const keys = [...pub.lowestPayment, pub.bestRate!].map((deal) => deal.key);
@@ -286,10 +313,35 @@ describe("Best Deals from the database, by viewer", () => {
     expect(JSON.stringify(pub)).not.toMatch(new RegExp(`"key":"${a}"|k-|sourceKey`));
   });
 
+  it("shows each featured home's cover photo: a public render by opaque key on the landing page, the lead's render on a private list", async () => {
+    const id = community({});
+    const homeId = home(id, { sourceKey: "with-photo", price: 300_000 });
+    offer74(id);
+    const shown = (sortOrder: number, over: Partial<typeof dealPhotos.$inferInsert> = {}) => db.seed(dealPhotos, { homeId, sourceUrl: `https://www.chesmar.com/p${sortOrder}.jpg`, sourceHash: `h${sortOrder}`, sortOrder, processingState: "processed", automaticHidden: false, adminHidden: false, nextProcessingAttemptAt: new Date(), ...over });
+    shown(0, { automaticHidden: true });
+    const cover = shown(1);
+    shown(2);
+    const other = community({ privateName: "No Photo Place", publicLabel: "North | No photo yet", scrubList: "{}" });
+    home(other, { price: 310_000 });
+    offer74(other);
+    const pub = await featuredDeals("public");
+    const withPhoto = pub.lowestPayment.find((deal) => deal.photo)!;
+    expect(withPhoto.photo).toBe(`/deals/featured/img/${withPhoto.key}`);
+    expect(pub.lowestPayment.find((deal) => deal.label === "North | No photo yet")).not.toHaveProperty("photo");
+    // The route serves only the photo the strip names (the first one not hidden), by its key; anything else is not found.
+    expect(await publicFeaturedPhotoId(withPhoto.key!)).toBe(cover);
+    expect(await publicFeaturedPhotoId("aaaaaaaaaaaa")).toBeNull();
+    expect(await publicFeaturedPhotoId("../etc/passwd")).toBeNull();
+    expect(JSON.stringify(pub)).not.toContain(`/img/${cover}`);
+    const gated = await featuredDeals({ view: "gated" });
+    expect(gated.lowestPayment.find((deal) => deal.photo)?.photo).toBe(`/deals/mine/img/${cover}`);
+  });
+
   it("ranks a private list's strip among that list's homes only, so it is never short", async () => {
     const keys = ["a", "b", "c", "d"].map((letter, index) => {
       const id = community({ privateName: `Place ${letter}`, publicLabel: `Area ${letter} | New Homes`, scrubList: "{}" });
       home(id, { sourceKey: `key-${letter}`, price: 300_000 + index * 10_000 });
+      offer74(id);
       return dealsCardHandle(`key-${letter}`);
     });
     // The cheapest community is not on this buyer's list.
@@ -301,17 +353,19 @@ describe("Best Deals from the database, by viewer", () => {
   it("drops a community whose public label slipped a private name, and ignores a held or lapsed offer", async () => {
     const leaky = community({ publicLabel: "Sienna Lakes | Big Lots" });
     home(leaky, { price: 300_000 });
+    offer74(leaky);
     const held = community({ privateName: "Held Place", publicLabel: "East | Held offer", scrubList: "{}" });
     home(held, { price: 320_000 });
     db.seed(dealIncentives, { communityId: held, normalizedText: "x", publicText: "x", headlineRate: "3.5%", confirmedAt: new Date(), active: true, held: true, manual: false });
     const lapsed = community({ privateName: "Old Place", publicLabel: "South | Old offer", scrubList: "{}" });
     home(lapsed, { price: 330_000 });
     db.seed(dealIncentives, { communityId: lapsed, normalizedText: "x", publicText: "x", headlineRate: "3.5%", confirmedAt: new Date(Date.now() - 60 * 86_400_000), active: true, held: false, manual: false });
+    // A held or lapsed offer is no builder rate, so those homes are not featured at all (never at a market rate).
     const pub = await featuredDeals("public");
-    expect(pub.lowestPayment.map((deal) => deal.label)).toEqual(["East | Held offer", "South | Old offer"]);
+    expect(pub.lowestPayment).toEqual([]);
     expect(pub.bestRate).toBeNull();
     // The private list scrubs the slip exactly as its catalog does, so the deal stays, without the name.
-    expect((await featuredDeals({ view: "gated" })).lowestPayment.map((deal) => deal.label)).toEqual(["this community | Big Lots", "East | Held offer", "South | Old offer"]);
+    expect((await featuredDeals({ view: "gated" })).lowestPayment.map((deal) => deal.label)).toEqual(["this community | Big Lots"]);
     // The team sees the label the admin wrote, private names and all.
     expect((await featuredDeals({ view: "full", builderPages: true })).lowestPayment[0]?.label).toBe("Sienna Lakes | Big Lots");
   });
@@ -319,7 +373,7 @@ describe("Best Deals from the database, by viewer", () => {
 
 describe("the Best Deals strip", () => {
   const deals = rankFeatured([
-    candidate({ communityKey: "a", label: "Southeast San Antonio | New Phase Now Selling", price: 354_990, beds: "4", sqft: 2_011, card: "card-a" }),
+    candidate({ communityKey: "a", label: "Southeast San Antonio | New Phase Now Selling", price: 354_990, beds: "4", sqft: 2_011, card: "card-a", offer: { ...at74, aprPercent: 7.6 } }),
     candidate({ communityKey: "b", label: "Southeast San Antonio | Half-Acre Lots and Lakes", price: 499_990, acres: 0.5, card: "card-b", offer: { ratePercent: 4.999, firstYearRatePercent: null, loanType: "FHA", downPercent: 3.5 } }),
   ], settings);
 
@@ -331,15 +385,22 @@ describe("the Best Deals strip", () => {
     expect(html).not.toContain("See this home");
     expect(html).toContain("$2,335");
     expect(html).toContain("$354,990 · 4 beds · 2,011 sq ft");
-    expect(html).toContain("at the 7.4% market rate, 5% down");
+    expect(html).toContain("at 7.4% (7.6% APR), 5% down");
+    expect(html).not.toContain("market rate");
     expect(html).toContain("at 4.999% FHA, 3.5% down · 0.5 acre lot");
     // The half-acre home wins all three ways: it is shown once, tagged, not repeated under its own headings.
     expect(html.match(/>Southeast San Antonio \| Half-Acre Lots and Lakes</g)).toHaveLength(1);
     expect(html).toContain('data-deals-featured-tag="Best builder rate"');
     expect(html).toContain('data-deals-featured-tag="Big lot"');
     expect(html).not.toContain(">Best builder rate</p>");
-    expect(html).toContain("Builder rates apply to select homes with the builder's lender and qualifying credit; homes without a builder rate use the 7.4% market rate and 5% down. Taxes, insurance and HOA are extra. Not a commitment to lend.");
+    expect(html).toContain("Estimated monthly payment on a 30-year loan: principal and interest, mortgage insurance under 20% down, property tax at 0% and home insurance at 0% of the price a year");
+    expect(html).toContain("Builder rates apply to select homes with the builder's lender and qualifying credit. Not a commitment to lend.");
     expect(html).not.toContain("—");
+    // A deal with a cover photo shows it on its card; one without shows none.
+    const withPhoto = { ...deals, lowestPayment: deals.lowestPayment.map((deal, index) => index === 0 ? { ...deal, photo: "/deals/featured/img/abcdefabcdef" } : deal) };
+    const photoHtml = renderToStaticMarkup(React.createElement(FeaturedDeals, { featured: withPhoto, locked: true }));
+    expect(photoHtml.match(/data-deals-featured-photo="true"/g)).toHaveLength(1);
+    expect(photoHtml).toContain('src="/deals/featured/img/abcdefabcdef"');
   });
 
   it("jumps to the home on the private list and renders nothing when there is nothing to rank", () => {

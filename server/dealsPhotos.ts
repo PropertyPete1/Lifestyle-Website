@@ -1776,6 +1776,52 @@ export function resetDealPhotoRuntimeState() {
 }
 
 /** Produces only per-lead watermarked image bytes; no object URL leaves the server. */
+/**
+ * A featured home's cover on the landing page (no lead yet): the same checked master, marked for the brokerage
+ * instead of a lead, and smaller. Only photos the current Best Deals strip names are ever asked for (the route
+ * maps an opaque deal key to the photo), so this never opens the rest of the catalog to visitors.
+ */
+export async function renderDealPhotoForPublic(photoId: number): Promise<RenderedPhoto | null> {
+  try {
+    const db = await getDb();
+    if (!db) return null;
+    const row = (await db.select({ photo: dealPhotos }).from(dealPhotos)
+      .innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
+      .innerJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
+      .where(and(
+        eq(dealPhotos.id, photoId),
+        eq(dealPhotos.processingState, "processed"),
+        eq(dealPhotos.automaticHidden, false),
+        eq(dealPhotos.adminHidden, false),
+        eq(dealHomes.status, "available"),
+        eq(dealCommunities.paused, false),
+        eq(dealCommunities.active, true),
+      )).limit(1))[0];
+    if (!row?.photo.processedStorageKey || !row.photo.processedVersion) return null;
+    const cacheVersion = `public:${row.photo.processedVersion}`;
+    const inMemory = renderMemory.get(cacheVersion);
+    if (inMemory) return inMemory;
+    return await renderLimiter(async () => {
+      const raced = renderMemory.get(cacheVersion);
+      if (raced) return raced;
+      const source = await storageReadPrivate(row.photo.processedStorageKey as string);
+      if (digest(source.data) !== row.photo.processedVersion) return null;
+      const resized = await sharp(source.data, { limitInputPixels: MAX_INPUT_PIXELS, animated: false })
+        .resize({ width: 960, height: 720, fit: "inside", withoutEnlargement: true })
+        .toBuffer({ resolveWithObject: true });
+      const rendered = await sharp(resized.data)
+        .composite([{ input: tiledWatermarkSvg("Lifestyle Design Realty", resized.info.width, resized.info.height), gravity: "center" }])
+        .webp({ quality: 82, effort: 4, smartSubsample: true })
+        .toBuffer();
+      const value = { data: rendered, contentType: "image/webp" };
+      renderMemory.set(cacheVersion, value);
+      return value;
+    });
+  } catch {
+    return null;
+  }
+}
+
 export async function renderDealPhotoForLead(photoId: number, leadId: number): Promise<RenderedPhoto | null> {
   try {
     const db = await getDb();

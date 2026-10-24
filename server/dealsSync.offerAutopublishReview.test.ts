@@ -281,7 +281,7 @@ describe("Reg Z on every buyer surface: no rate without its stored APR", () => {
     expect(await gated(lead)).toMatchObject({ text: "Rates as low as 4.99% on select homes.", headlineRate: "4.99%", apr: "5.62%" });
   });
 
-  it("the featured strip never uses or prints a builder rate with no APR: those homes rank and print at the market rate", async () => {
+  it("the featured strip never uses or prints a builder rate with no APR: those homes are not featured (never at a market rate)", async () => {
     const id = seedCommunity();
     db.seed(dealHomes, { communityId: id, sourceKey: "home-a", sourceUrl: `${COMMUNITY_URL}/a`, privateAddress: "1 Fixture Patch", kind: "quick_move_in", status: "available", origin: "official", price: 400_000 });
     const none = await featuredDeals("public");
@@ -289,10 +289,10 @@ describe("Reg Z on every buyer surface: no rate without its stored APR", () => {
     const featured = await featuredDeals("public");
     expect(featured).toEqual(none);
     expect(featured.bestRate).toBeNull();
+    expect(featured.lowestPayment).toEqual([]);
     const { rateLine } = await import("../client/src/components/deals/FeaturedDeals");
-    expect(rateLine(featured.lowestPayment[0]!)).toBe("at the 7.4% market rate, 5% down");
     // A deal that says it has no APR prints no figure.
-    expect(rateLine({ ...featured.lowestPayment[0]!, rate: { ratePercent: 4.99, firstYearRatePercent: null, loanType: "FHA", builderOffer: true, aprPercent: null }, downPercent: 3.5 })).toBe("with the builder's financing, 3.5% down");
+    expect(rateLine({ rate: { ratePercent: 4.99, firstYearRatePercent: null, loanType: "FHA", builderOffer: true, aprPercent: null }, downPercent: 3.5 })).toBe("with the builder's financing, 3.5% down");
   });
 });
 

@@ -133,6 +133,18 @@ export function registerDealsRoutes(app: Express) {
     const { dealsMapImageHandler } = await import("./dealsMap");
     await dealsMapImageHandler(req, res);
   }));
+  // A featured home's cover on the landing page: only the photos the current Best Deals strip names, by opaque key.
+  app.get("/deals/featured/img/:key", safe(async (req, res) => {
+    const { publicFeaturedPhotoId } = await import("./dealsFeatured");
+    const photoId = await publicFeaturedPhotoId(String(req.params.key));
+    if (!photoId) return res.status(404).end();
+    const rendered = await (await import("./dealsPhotos")).renderDealPhotoForPublic(photoId);
+    if (!rendered) return res.status(404).end();
+    res.setHeader("Cache-Control", "public, max-age=600");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    res.type(rendered.contentType).send(rendered.data);
+  }));
   app.get("/deals/mine/img/:photoId", safe(async (req, res) => {
     const { isLiveDealSession } = await import("./dealsService");
     const session = await isLiveDealSession(req);

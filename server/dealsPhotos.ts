@@ -136,6 +136,8 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "drhorton.com",
   // PulteGroup (Pulte, Centex, Del Webb) serves its photos from Picturepark.
   "pultegroup.cdn.picturepark.com",
+  // …and its Picturepark share links (…/Go/<token>/V/<id>/<size>, redirecting on the same host to …/v/<token>/<id>/<format>); the path is checked below.
+  "pultegroup.picturepark.com",
   // Homefiniti-platform builders serve photos from media.<builder>.com.
   "media.firstamericahomes.com",
   "media.coventryhomes.com",
@@ -169,6 +171,9 @@ const APPROVED_IMAGE_HOSTS = new Set([
   "empirehomes.com",
   // LGI Homes serves its photos from Sitecore's edge CDN (…/lgihomesinc…/…); the path is checked below.
   "edge.sitecorecloud.io",
+  // …and, since October 2026, from its Sitecore Content Hub public links (…/api/public/content/<id>); the path is checked below.
+  "mss-p-022.sitecorecontenthub.cloud",
+  "mss-p-022-delivery.sitecorecontenthub.cloud",
 ]);
 const ACCEPTED_IMAGE_FORMATS = new Set(["jpeg", "png", "webp", "avif", "gif", "heif"]);
 
@@ -395,6 +400,8 @@ export function safeDealImageUrl(raw: string): URL {
   // A shared image CDN is approved for the builder's own account only.
   if (url.hostname.toLowerCase() === "res.cloudinary.com" && !url.pathname.startsWith("/perryhomes/")) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "edge.sitecorecloud.io" && !/^\/lgihomes/i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
+  if (url.hostname.toLowerCase() === "pultegroup.picturepark.com" && !/^\/(?:Go\/[A-Za-z0-9_-]+\/V\/\d+\/\d+|v\/[A-Za-z0-9_-]+\/[0-9a-f]{32}\/[A-Za-z]+)$/.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
+  if (/^mss-p-022(?:-delivery)?\.sitecorecontenthub\.cloud$/i.test(url.hostname) && !/^\/api\/public\/content\/[0-9a-f]{32}$/i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "s3.amazonaws.com" && !/^\/buildercloud\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "yourviewhome.com" && !/^\/wp-content\/uploads\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "www.texas-homes.com" && !/^\/sites\/default\/files\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");

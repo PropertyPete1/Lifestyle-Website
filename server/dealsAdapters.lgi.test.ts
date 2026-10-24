@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LgiHomesAdapter, lgiComponentProps, lgiListingEntries, lgiRecord, lgiSelling, parseLgiCommunity } from "./dealsAdapters.lgi";
+import { LgiHomesAdapter, lgiComponentProps, lgiPhotoHostPath, lgiListingEntries, lgiRecord, lgiSelling, parseLgiCommunity } from "./dealsAdapters.lgi";
 import { parseNextData } from "./dealsAdapters.davidson";
 import { DEAL_ADAPTERS, loadOfficialDeals, type CommunitySourceConfig } from "./dealsAdapters";
 
@@ -140,5 +140,19 @@ describe("LGI Homes reader: a community", () => {
   it("is an adapter the registry knows", () => {
     expect(new LgiHomesAdapter().builder).toBe("LGI Homes");
     expect(DEAL_ADAPTERS["LGI Homes"].builder).toBe("LGI Homes");
+  });
+
+  /** October 24, 2026: every San Antonio plan's primaryImage had moved to LGI's Sitecore Content Hub links, so 39 plans showed no photo. */
+  it("keeps a plan photo on LGI's Content Hub links as well as its edge CDN, nothing else on those hosts", () => {
+    const hub = "https://mss-p-022.sitecorecontenthub.cloud/api/public/content/90bfa3e4054845bdb760013dd9942ddf?v=f54da49c";
+    const delivery = "https://mss-p-022-delivery.sitecorecontenthub.cloud/api/public/content/1c43a7e7207d4be99c3012c658a64cdc?v=300f67bd";
+    const withImage = (src: string) => ({ ...plan({ name: "Ash", price: 245_900, beds: 2, baths: 2, garage: 1, sqft: 1_002 }), primaryImage: v({ src, alt: "Exterior" }) });
+    const read = (src: string) => parseLgiCommunity(communityPage({ plans: [withImage(src)] }), COMMUNITY)!.plans[0]!.gallery!.map((image) => image.sourceUrl);
+    expect(read(hub)).toEqual([hub]);
+    expect(read(delivery)).toEqual([delivery]);
+    expect(read("https://mss-p-022.sitecorecontenthub.cloud/api/other/90bfa3e4054845bdb760013dd9942ddf")).toEqual([]);
+    expect(read("https://mss-p-099.sitecorecontenthub.cloud/api/public/content/90bfa3e4054845bdb760013dd9942ddf")).toEqual([]);
+    expect(lgiPhotoHostPath(new URL("https://edge.sitecorecloud.io/lgihomesinc3717/media/x.jpg"))).toBe(true);
+    expect(lgiPhotoHostPath(new URL("https://edge.sitecorecloud.io/someone-else/media/x.jpg"))).toBe(false);
   });
 });

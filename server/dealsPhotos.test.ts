@@ -43,6 +43,9 @@ describe("Builder Deals private photo primitives", () => {
     expect(() => safeDealImageUrl("https://res.cloudinary.com/someone-else/image/upload/v1/x.jpg")).toThrow("unapproved_source");
     expect(safeDealImageUrl("https://www.drhorton.com/-/media/drhorton/productcatalog/x/y.jpg").hostname).toBe("www.drhorton.com");
     expect(safeDealImageUrl("https://pultegroup.cdn.picturepark.com/v/47GVJF5O/").hostname).toBe("pultegroup.cdn.picturepark.com");
+    expect(safeDealImageUrl("https://pultegroup.picturepark.com/Go/6VM8HriT/V/426548/13").hostname).toBe("pultegroup.picturepark.com");
+    expect(safeDealImageUrl("https://pultegroup.picturepark.com/v/E1Tnh4yn/1b120d30be53427996d54a45be567af3/WebsiteFormat").hostname).toBe("pultegroup.picturepark.com");
+    expect(() => safeDealImageUrl("https://pultegroup.picturepark.com/Account/Login")).toThrow("unapproved_source");
     // Builders whose photo host serves other things too are approved under their image paths only.
     expect(safeDealImageUrl("https://yourviewhome.com/wp-content/uploads/2026/01/x.jpg").hostname).toBe("yourviewhome.com");
     expect(() => safeDealImageUrl("https://yourviewhome.com/region/texas/x.jpg")).toThrow("unapproved_source");
@@ -56,6 +59,9 @@ describe("Builder Deals private photo primitives", () => {
     expect(safeDealImageUrl("https://cms.beazer.com/contentassets/abc/x.jpg").hostname).toBe("cms.beazer.com");
     expect(() => safeDealImageUrl("https://www.beazer.com/_next/image?url=x")).toThrow("unapproved_source");
     expect(safeDealImageUrl("https://empirehomes.com/wp-content/uploads/2025/10/x.jpg").hostname).toBe("empirehomes.com");
+    expect(safeDealImageUrl("https://mss-p-022.sitecorecontenthub.cloud/api/public/content/90bfa3e4054845bdb760013dd9942ddf?v=f54da49c").hostname).toBe("mss-p-022.sitecorecontenthub.cloud");
+    expect(safeDealImageUrl("https://mss-p-022-delivery.sitecorecontenthub.cloud/api/public/content/1c43a7e7207d4be99c3012c658a64cdc").hostname).toBe("mss-p-022-delivery.sitecorecontenthub.cloud");
+    expect(() => safeDealImageUrl("https://mss-p-022.sitecorecontenthub.cloud/api/other/x")).toThrow("unapproved_source");
     expect(() => safeDealImageUrl("https://empirehomes.com/us/texas/x.jpg")).toThrow("unapproved_source");
   });
 

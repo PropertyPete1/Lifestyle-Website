@@ -46,6 +46,18 @@ const field = (value: unknown): unknown => { const item = obj(value); if (!item)
 /** A key-value item ("sale status") comes as `{ jsonValue: { fields: { Key: { value } } } }`. */
 const keyOf = (value: unknown): string | null => { const item = obj(field(value)) ?? obj(value); const fields = obj(item?.fields); return str(field(fields?.Key)) ?? str(field(fields?.Value)) ?? str(item?.name); };
 
+/**
+ * LGI's own image hosts: Sitecore's edge CDN under its tenant path (…/lgihomes…/…) and, since October 2026, its
+ * Sitecore Content Hub public links (`mss-p-022[-delivery].sitecorecontenthub.cloud/api/public/content/<id>`),
+ * which is where every San Antonio plan's `primaryImage` now points.
+ */
+export const LGI_CONTENT_HUB_HOSTS = ["mss-p-022.sitecorecontenthub.cloud", "mss-p-022-delivery.sitecorecontenthub.cloud"] as const;
+export function lgiPhotoHostPath(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  if (host === "edge.sitecorecloud.io") return /^\/lgihomes/i.test(url.pathname);
+  return (LGI_CONTENT_HUB_HOSTS as readonly string[]).includes(host) && /^\/api\/public\/content\/[0-9a-f]{32}$/i.test(url.pathname);
+}
+
 /** The props of the named component on the page, found through the route's placeholders. */
 export function lgiComponentProps(data: Json | null, componentName: string): Json | null {
   const pageProps = obj(obj(data?.props)?.pageProps);
@@ -133,7 +145,7 @@ export function parseLgiCommunity(html: string, pageUrl: string): LgiPage | null
     const image = str(obj(field(plan.primaryImage))?.src);
     const gallery: PrivateGalleryImage[] = [];
     const imageUrl = image ? asUrl(image) : null;
-    if (imageUrl && (sameOfficialHost(imageUrl, host) || (imageUrl.hostname === "edge.sitecorecloud.io" && /^\/lgihomes/i.test(imageUrl.pathname)))) gallery.push({ sourceUrl: imageUrl.toString(), caption: "Representative image", width: null, height: null, srcSet: null });
+    if (imageUrl && imageUrl.protocol === "https:" && (sameOfficialHost(imageUrl, host) || lgiPhotoHostPath(imageUrl))) gallery.push({ sourceUrl: imageUrl.toString(), caption: "Representative image", width: null, height: null, srcSet: null });
     plans.push({
       sourceUrl: page.toString(),
       privateName: planName,

@@ -105,10 +105,17 @@ export function flag(value: unknown): boolean | null {
   return null;
 }
 
+/**
+ * PulteGroup's photo links on Picturepark: the CDN form (`pultegroup.cdn.picturepark.com/v/<token>/`) and, for most
+ * San Antonio homes and plans since October 2026, the share form (`pultegroup.picturepark.com/Go/<token>/V/<id>/<size>`,
+ * which answers with a same-host redirect to the image). Kept exactly as given (another size number is a 404).
+ */
+export const PULTE_PHOTO_PATH = /^https:\/\/(?:pultegroup\.cdn\.picturepark\.com\/v\/[A-Za-z0-9_-]+\/?|pultegroup\.picturepark\.com\/Go\/[A-Za-z0-9_-]+\/V\/\d+\/\d+)$/;
+
 function gallery(images: unknown, representative: boolean): PrivateGalleryImage[] {
   if (!Array.isArray(images)) return [];
   const sorted = (images as Array<Record<string, unknown>>)
-    .filter((image) => typeof image.path === "string" && /^https:\/\/pultegroup\.cdn\.picturepark\.com\/v\/[A-Za-z0-9_-]+\/?$/.test(image.path))
+    .filter((image) => typeof image.path === "string" && PULTE_PHOTO_PATH.test(image.path))
     .sort((a, b) => (num(a.imageRank) ?? 999) - (num(b.imageRank) ?? 999));
   const seen = new Set<string>();
   const out: PrivateGalleryImage[] = [];
@@ -119,7 +126,7 @@ function gallery(images: unknown, representative: boolean): PrivateGalleryImage[
     const type = str(image.imageType) ?? "";
     // Floor-plan drawings and event artwork carry the plan name or a promotion, never the home.
     if (/floor\s*plan|site\s*plan|logo|event|promotion/i.test(`${type} ${str(image.caption) ?? ""} ${str(image.altText) ?? ""}`)) continue;
-    out.push({ sourceUrl: path.endsWith("/") ? path : `${path}/`, caption: representative ? "Representative image" : null, width: null, height: null, srcSet: null });
+    out.push({ sourceUrl: path.endsWith("/") || /\/Go\//.test(path) ? path : `${path}/`, caption: representative ? "Representative image" : null, width: null, height: null, srcSet: null });
   }
   return out;
 }

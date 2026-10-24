@@ -211,7 +211,10 @@ hold after this import, if any (it needs an admin's review, not a new import).
 > address as shown, the plan name, the price in whole dollars (null if none is
 > shown), beds, baths (2.5 for two full and one half), square feet, the status
 > (`available`, `under_construction` or `sold`) and the move-in wording as
-> `ready now` or `Month YYYY` (null if none). Note the number of homes for sale
+> `ready now` or `Month YYYY` (null if none), and `photos`: every photo link of
+> that home (up to 40, in the order the site shows them), exactly as served from
+> `https://assets.livelegendhomes.com/...` (the `url` of each entry in the home's
+> `images` list in the site's own data; never a floor plan). Note the number of homes for sale
 > the page itself states (or the number of cards you counted), sold homes
 > excluded, and set `pageComplete` to true only if you are sure you saw every
 > card. Copy the community's offer banner text exactly as shown (null if there

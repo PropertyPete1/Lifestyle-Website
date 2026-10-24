@@ -356,7 +356,9 @@ describe("Drees Custom Homes: a parent community listed without its sub-neighbor
     const { fetcher, requests } = dreesSite();
     const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
     expect(result.holdReasons).toEqual([]);
-    expect(requests).toEqual([`GET ${COMMUNITY}`, `GET ${API}areas`, `POST ${API}community 310095`, `POST ${API}qmi 326325`, `POST ${API}plan 326325`]);
+    expect(requests.slice(0, 5)).toEqual([`GET ${COMMUNITY}`, `GET ${API}areas`, `POST ${API}community 310095`, `POST ${API}qmi 326325`, `POST ${API}plan 326325`]);
+    // Then the own page of each listing the API left without photos (plain GETs on the site).
+    for (const request of requests.slice(5)) expect(request).toMatch(/^GET https:\/\/www\.dreeshomes\.com\/new-homes-san-antonio\//);
     expect(result.private.homes.map((home) => [home.privateAddress, home.status, home.price, home.bedrooms, home.bathrooms, home.squareFeet, home.moveInDate])).toEqual([
       ["203 Haby Hollow, San Antonio, TX 78253", "Quick Move-In (November 2026)", 574_900, 5, 4.5, 3_615, "November 2026"],
       ["346 Haby Hollow, San Antonio, TX 78253", "Quick Move-In", 549_900, 5, 4.5, 3_102, null],

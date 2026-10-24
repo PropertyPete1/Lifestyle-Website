@@ -88,6 +88,10 @@ describe("PulteGroup reader: record shapes", () => {
     expect(home).toMatchObject({ privateName: "13723 Fixture Pass", privateAddress: "13723 Fixture Pass, San Antonio, TX 78245", privatePlanName: "Livingston", status: "Quick Move-In (Move-In Ready)", price: 274_790, previousPrice: 289_790, priceDrop: 15_000, bedrooms: 3, bathrooms: 2, squareFeet: 1_438, garage: 2, homesite: "Homesite 01505", readyNow: true, moveInDate: null });
     expect(home.sourceUrl).toBe(`https://${HOST}/homes/texas/san-antonio/san-antonio/fixture-ridge-211073/livingston-699869/1154490`);
     expect(home.gallery!.map((photo) => photo.sourceUrl)).toEqual(["https://pultegroup.cdn.picturepark.com/v/Q1Exterior/", "https://pultegroup.cdn.picturepark.com/v/Q2Interior/"]);
+    // October 24, 2026: most San Antonio homes and plans carry Picturepark share links (…/Go/<token>/V/<id>/<size>), kept exactly as given.
+    const share = (id: string, rank: number, imageType: string, caption = "") => ({ ...image(id, rank, imageType, caption), path: `https://pultegroup.picturepark.com/Go/${id}/V/42654${rank}/13` });
+    const shared = parsePulteQmi({ ...JSON.parse(qmis)[0], images: [share("6VM8HriT", 1, "Inventory Elevation", "Exterior HC101"), share("WXY05fVz", 2, "Plan Floorplan-New"), { ...share("x", 3, "Home Interior"), path: "https://pultegroup.picturepark.com/Go/x/V/1/13/extra" }, { ...share("y", 4, "Home Interior"), path: "https://evil.picturepark.com/Go/y/V/1/13" }] }, HOST)!;
+    expect(shared.gallery!.map((photo) => photo.sourceUrl)).toEqual(["https://pultegroup.picturepark.com/Go/6VM8HriT/V/426541/13"]);
     expect(parsePulteQmi(JSON.parse(qmis)[1], HOST)).toMatchObject({ status: "Quick Move-In (December 2026)", moveInDate: "December 2026", price: 312_990, previousPrice: null, bathrooms: 2.5 });
     expect(parsePulteQmi(JSON.parse(qmis)[2], HOST, new Date("2026-10-20T12:00:00Z"))).toMatchObject({ status: "Sold" });
     expect(parsePulteQmi({ planName: "No address" }, HOST)).toBeNull();

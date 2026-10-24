@@ -29,8 +29,10 @@ import {
  *   `bedLow`, `bathLow`, `halfBathLow`, `sqFtLow`, `garagesLow`).
  * The cards show "Move-in date: Jan 23, 2027" only; no "ready now" wording,
  * so a date that has passed is an undated quick move-in, never a ready one.
- * Photos come from a separate image endpoint and are not read. Official host
- * only. Everything here is private operational data.
+ * The list bodies usually carry `images: null`; each plan's and home's own page
+ * carries its gallery in `<neighborhood-details-base-product-block v-bind="…">`
+ * (`details.url`, `details.images[]`, the same image shape), read for a listing
+ * the list left without one. Official host only. Everything here is private operational data.
  *
  * Page shapes (October 2026):
  * - market:    /new-homes-san-antonio/
@@ -71,7 +73,7 @@ const bathCount = (full: unknown, half: unknown): number | null => {
 };
 
 let listCache: { fetchedAt: number; neighborhoods: Json[] } | null = null;
-export function resetDreesCaches(): void { listCache = null; }
+export function resetDreesCaches(): void { listCache = null; detailCache.clear(); }
 
 /** The page's own ids from its inline script; null when the page does not name a neighborhood or parent community. */
 export function parseDreesPage(html: string): { contentId: number; parent: boolean; url: string | null } | null {
@@ -174,6 +176,56 @@ export function dreesGallery(images: unknown): PrivateGalleryImage[] {
     (drawing ? drawings : photos).push({ sourceUrl: key, caption: "Representative image", width: null, height: null, srcSet: null });
   }
   return [...photos, ...drawings];
+}
+
+/**
+ * A plan's or home's gallery from its own page: the detail block's `details.images`, kept only when the block's
+ * `details.url` is this page (a same-host page for another listing is not this one's). Null when the page has no
+ * such block or it names another listing.
+ */
+export function parseDreesDetailGallery(html: string, pageUrl: string): PrivateGalleryImage[] | null {
+  const tag = /<neighborhood-details-base-product-block\b[^>]*?\sv-bind="([^"]*)"/.exec(html);
+  if (!tag) return null;
+  let parsed: unknown;
+  try { parsed = JSON.parse(decodeHtmlEntities(tag[1]!)); } catch { return null; }
+  const details = obj(obj(parsed)?.details);
+  const page = asUrl(pageUrl);
+  const path = details ? str(details.url) : null;
+  const own = path && page ? asUrl(new URL(path, page).toString()) : null;
+  if (!details || !page || !own || !sameOfficialHost(own, page.hostname)) return null;
+  if (comparablePath(own.pathname.replace(/\/+$/, "")) !== comparablePath(page.pathname.replace(/\/+$/, ""))) return null;
+  return dreesGallery(details.images);
+}
+
+/** Galleries read from listing pages, kept half a day (an empty answer an hour) so each sync does not reread them. */
+const DETAIL_CACHE_MS = 12 * 60 * 60 * 1000;
+const DETAIL_EMPTY_CACHE_MS = 60 * 60 * 1000;
+/** Pages read per community run (the rest come on the next run, the cached ones are not reread). */
+export const DREES_DETAIL_PAGES_PER_RUN = 40;
+const DETAIL_CONCURRENCY = 3;
+const detailCache = new Map<string, { at: number; gallery: PrivateGalleryImage[] }>();
+
+/** Fills in the gallery of each listing the list left without one, from its own page; a page that fails is left for the next run. */
+export async function fillDreesGalleries(items: PrivatePlanOrHome[], fetcher: HtmlFetcher, now: number): Promise<void> {
+  const missing = items.filter((item) => !item.gallery?.length && item.status !== "Model" && !/\/unreadable-\d+$/.test(item.sourceUrl));
+  const toRead: PrivatePlanOrHome[] = [];
+  for (const item of missing) {
+    const cached = detailCache.get(item.sourceUrl);
+    if (cached && now - cached.at < (cached.gallery.length ? DETAIL_CACHE_MS : DETAIL_EMPTY_CACHE_MS)) { if (cached.gallery.length) item.gallery = cached.gallery; continue; }
+    if (toRead.length < DREES_DETAIL_PAGES_PER_RUN) toRead.push(item);
+  }
+  let next = 0;
+  const worker = async () => {
+    while (next < toRead.length) {
+      const item = toRead[next++]!;
+      const page = await getDocument(item.sourceUrl, fetcher, "text/html,application/xhtml+xml", DREES_HOST);
+      if (!page.ok) continue;
+      const gallery = parseDreesDetailGallery(page.text, item.sourceUrl) ?? [];
+      detailCache.set(item.sourceUrl, { at: now, gallery });
+      if (gallery.length) item.gallery = gallery;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(DETAIL_CONCURRENCY, toRead.length) }, worker));
 }
 
 /** The San Antonio market's page id from the areas body; null when the body is not the list or names no such market. */
@@ -351,6 +403,7 @@ export class DreesAdapter implements DealAdapter {
     const plans = parseDreesPlans(plansBody.text, communityPage);
     if (!plans) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (plans.foreignPlan) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+    await fillDreesGalleries([...homes.homes, ...plans.plans], fetcher, now().getTime());
     privateSnapshot.communityFacts = { fromPrice: row.record.priceFrom && row.record.priceFrom >= 50_000 ? row.record.priceFrom : null, schoolDistrict: null, lotSizes: null, amenities: [] };
     for (const home of homes.homes) { privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }
     for (const plan of plans.plans) { privateSnapshot.plans.push(plan); privateSnapshot.pages.push(sourcePage("plan", plan.sourceUrl, plan.privatePlanName ?? null)); }

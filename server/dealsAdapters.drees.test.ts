@@ -141,7 +141,11 @@ describe("Drees reader: a community", () => {
   it("reads the page, the market list (once an hour) and the two search queries, and publishes the homes, plans and promotion scrubbed; a parent community publishes its sub-neighborhoods' homes", async () => {
     const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
     expect(result.holdReasons).toEqual([]);
-    expect(requested.map(([url, body]) => [url.replace(HOST, ""), body])).toEqual([[COMMUNITY.replace(HOST, ""), null], ["/api/en/dreeshomes/areas", null], ["/api/en/dreeshomes/community", JSON.stringify({ contentId: 310095, pageSize: 1000, pageNumber: 1 })], ["/api/en/dreeshomes/qmi", JSON.stringify({ contentId: 309651, pageSize: 1000, pageNumber: 1 })], ["/api/en/dreeshomes/plan", JSON.stringify({ contentId: 309651, pageSize: 1000, pageNumber: 1 })]]);
+    expect(requested.slice(0, 5).map(([url, body]) => [url.replace(HOST, ""), body])).toEqual([[COMMUNITY.replace(HOST, ""), null], ["/api/en/dreeshomes/areas", null], ["/api/en/dreeshomes/community", JSON.stringify({ contentId: 310095, pageSize: 1000, pageNumber: 1 })], ["/api/en/dreeshomes/qmi", JSON.stringify({ contentId: 309651, pageSize: 1000, pageNumber: 1 })], ["/api/en/dreeshomes/plan", JSON.stringify({ contentId: 309651, pageSize: 1000, pageNumber: 1 })]]);
+    // Then the own page of each listing the lists left without photos (plain GETs under this community; never the model).
+    const pages = requested.slice(5);
+    expect(pages.length).toBeGreaterThan(0);
+    for (const [url, body] of pages) { expect(body).toBeNull(); expect(url.startsWith(COMMUNITY)).toBe(true); }
     expect(result.private.homes).toHaveLength(4);
     expect(result.private.plans).toHaveLength(2);
     expect(result.private.communityFacts).toMatchObject({ fromPrice: 1_174_900 });

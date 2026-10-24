@@ -1343,7 +1343,7 @@ function servedHomes(qb: SelectBuilder) {
  * Homes buyers can see, and how many of them show no photo yet (no processed, unhidden photo): the number that
  * says when the site looks complete, which the raw queue size does not (most of the queue is later gallery photos).
  */
-export async function shownHomePhotoCoverage(): Promise<{ shownHomes: number; withoutPhoto: number; pendingPhotosForShownHomes: number } | null> {
+export async function shownHomePhotoCoverage() {
   const db = await getDb();
   if (!db) return null;
   const served = servedHomes(db);
@@ -1357,7 +1357,35 @@ export async function shownHomePhotoCoverage(): Promise<{ shownHomes: number; wi
     .innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
     .innerJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
     .where(and(homeIsShown, inArray(dealPhotos.processingState, ["pending", "processing"]))))[0];
-  return { shownHomes: Number(homes?.total ?? 0), withoutPhoto: Number(homes?.without ?? 0), pendingPhotosForShownHomes: Number(pending?.count ?? 0) };
+  // Why the homes without a photo have none: per home, what its photo rows look like.
+  const rows = db.select({
+    homeId: sql<number>`${dealPhotos.homeId}`.as("rows_home_id"),
+    total: sql<number>`count(*)`.as("rows_total"),
+    queued: sql<number>`sum(case when ${dealPhotos.processingState} in ('pending','processing') then 1 else 0 end)`.as("rows_queued"),
+    failed: sql<number>`sum(case when ${dealPhotos.processingState} = 'failed' then 1 else 0 end)`.as("rows_failed"),
+  }).from(dealPhotos).groupBy(dealPhotos.homeId).as("photo_rows");
+  const why = await db.select({
+    builder: dealCommunities.builder,
+    noPhotoRows: sql<number>`sum(case when ${rows.homeId} is null then 1 else 0 end)`,
+    queued: sql<number>`sum(case when ${rows.queued} > 0 then 1 else 0 end)`,
+    allFailed: sql<number>`sum(case when ${rows.total} > 0 and ${rows.failed} = ${rows.total} then 1 else 0 end)`,
+    hiddenOrOther: sql<number>`sum(case when ${rows.total} > 0 and ${rows.queued} = 0 and ${rows.failed} < ${rows.total} then 1 else 0 end)`,
+    homes: sql<number>`count(*)`,
+  })
+    .from(dealHomes)
+    .innerJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
+    .leftJoin(served, eq(served.homeId, dealHomes.id))
+    .leftJoin(rows, eq(rows.homeId, dealHomes.id))
+    .where(and(homeIsShown, isNull(served.homeId)))
+    .groupBy(dealCommunities.builder);
+  const withoutPhotoWhy = { noPhotoRows: 0, queued: 0, allFailed: 0, hiddenOrOther: 0, byBuilder: [] as { builder: string | null; homes: number; noPhotoRows: number; queued: number; allFailed: number; hiddenOrOther: number }[] };
+  for (const r of why) {
+    const b = { builder: r.builder, homes: Number(r.homes ?? 0), noPhotoRows: Number(r.noPhotoRows ?? 0), queued: Number(r.queued ?? 0), allFailed: Number(r.allFailed ?? 0), hiddenOrOther: Number(r.hiddenOrOther ?? 0) };
+    withoutPhotoWhy.noPhotoRows += b.noPhotoRows; withoutPhotoWhy.queued += b.queued; withoutPhotoWhy.allFailed += b.allFailed; withoutPhotoWhy.hiddenOrOther += b.hiddenOrOther;
+    withoutPhotoWhy.byBuilder.push(b);
+  }
+  withoutPhotoWhy.byBuilder.sort((a, b) => b.homes - a.homes);
+  return { shownHomes: Number(homes?.total ?? 0), withoutPhoto: Number(homes?.without ?? 0), pendingPhotosForShownHomes: Number(pending?.count ?? 0), withoutPhotoWhy };
 }
 
 /**

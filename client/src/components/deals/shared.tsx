@@ -1,8 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ImgHTMLAttributes } from "react";
 import { Link } from "wouter";
 import { Play, Send } from "lucide-react";
 import { SITE } from "@shared/site";
 import { youtubeEmbedUrl, youtubeVideoId } from "@/lib/dealsVideo";
+
+/**
+ * A photo that tries again on its own: a first-time render can answer "busy" (503) while the server is working,
+ * so the image waits a moment and asks twice more before giving up.
+ */
+export function RetryImage({ src, onGiveUp, ...rest }: ImgHTMLAttributes<HTMLImageElement> & { src: string; onGiveUp?: () => void }) {
+  const [attempt, setAttempt] = useState(0);
+  const shown = attempt ? `${src}${src.includes("?") ? "&" : "?"}r=${attempt}` : src;
+  return <img {...rest} src={shown} onError={() => { if (attempt < 2) window.setTimeout(() => setAttempt((value) => value + 1), 1500 * (attempt + 1)); else onGiveUp?.(); }} />;
+}
 
 export const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 

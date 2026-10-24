@@ -1781,8 +1781,9 @@ export function resetDealPhotoRuntimeState() {
  * maps an opaque deal key to the photo), so this never opens the rest of the catalog to visitors.
  */
 /** Visitors' renders get their own lanes and a short queue, so they never hold up a signed-up buyer's photos. */
-const publicRenderLimiter = createLimiter(2);
-const PUBLIC_RENDER_QUEUE_MAX = 12;
+const publicRenderLimiter = createLimiter(3);
+/** A few galleries' worth of first-time renders may wait; past that the route answers "busy" and the page retries. */
+const PUBLIC_RENDER_QUEUE_MAX = 80;
 /** The answer when the public lanes are full: the route says "busy, try again" instead of queueing without end. */
 export const PUBLIC_RENDER_BUSY = "busy" as const;
 

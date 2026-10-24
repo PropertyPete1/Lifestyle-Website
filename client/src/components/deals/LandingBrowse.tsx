@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Home, LockKeyhole, MapPin, Play, X } from "lucide-react";
 import { AreaMap } from "./AreaMap";
-import { Incentive, ReelCard, money, type DealsIncentive } from "./shared";
+import { Incentive, ReelCard, RetryImage, money, type DealsIncentive } from "./shared";
 import { ProtectedGallery } from "./GatedCatalog";
 import { ShowMore } from "./BrowseBar";
 import { BROWSE_PAGE } from "@/lib/dealsBrowse";
@@ -70,7 +71,7 @@ export function CommunityCard({ community, active, onHover, onOpen }: { communit
     <button type="button" onClick={onOpen} onFocus={() => onHover(true)} onBlur={() => onHover(false)} className="block w-full min-w-0 text-left">
       <div className="relative aspect-[4/3] w-full overflow-hidden bg-secondary">
         {cover
-          ? <img src={cover} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
+          ? <RetryImage src={cover} alt="" loading="lazy" decoding="async" draggable={false} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
           : <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground"><Home className="h-8 w-8" /><span className="text-xs">{LANDING_COPY.photosSoon}</span></div>}
         <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-1.5">
           {community.fromYourReel && <span className="rounded-full bg-gold px-2.5 py-1 text-[11px] font-semibold text-primary-foreground shadow">{LANDING_COPY.fromYourReel}</span>}
@@ -170,7 +171,8 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes }: { com
   }, []);
   const homes = useHomes(community.key);
   const list = homes.data ?? [];
-  return <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 sm:items-center sm:p-6" onClick={onClose}>
+  // On document.body, so no section's stacking (or the page's floating button) can sit over the sheet.
+  return createPortal(<div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 sm:items-center sm:p-6" onClick={onClose}>
     <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="deals-community-title" data-deals-community-sheet="true" onClick={(event) => event.stopPropagation()} className="deals-light relative max-h-[94vh] w-full max-w-6xl overflow-y-auto rounded-t-2xl bg-background shadow-2xl sm:rounded-2xl">
       <button ref={closeButton} type="button" onClick={onClose} aria-label={LANDING_COPY.close} className="absolute right-2 top-2 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-background/90 text-muted-foreground shadow hover:text-foreground"><X className="h-5 w-5" /></button>
       <div className="grid min-w-0 gap-6 p-5 sm:p-6 md:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
@@ -191,7 +193,7 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes }: { com
         {list.length > 0 && <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2 lg:grid-cols-3">{list.map((home) => <PublicHomeCard key={home.card} home={home} onAddress={onUnlock} />)}</div>}
       </div>
     </section>
-  </div>;
+  </div>, document.body);
 }
 
 /** A home on the landing page: the same facts as the private list, with no address, plan, builder or community name. */

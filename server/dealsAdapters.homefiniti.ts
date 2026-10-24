@@ -280,6 +280,30 @@ function parseCardHomes(html: string, root: HtmlElement, community: URL): Map<st
     if (out.has(path)) { const known = out.get(path); if (!known || !card || JSON.stringify(known) !== JSON.stringify(card)) out.set(path, null); }
     else out.set(path, card);
   }
+  // First America's cards (October 24, 2026): `div.oi-map-item[data-listing-type=spec]` with the price (`.fs-4`), the
+  // address (`.address`, street then "City, TX 78155"), `.stat` spans ("5 Beds", "3.0 Baths", "2,824 Sq. Ft.") and a
+  // map pop-up repeating the price; a card whose two prices differ reads as nothing.
+  for (const block of descendants(root).filter((item) => item.tag !== "article" && elementClass(item, "oi-map-item") && item.attributes["data-listing-type"] === "spec")) {
+    const inner = descendants(block);
+    const own = Array.from(new Set(inner.filter((item) => item.tag === "a" && item.attributes.href).map((item) => asUrl(new URL(decodeHtmlEntities(item.attributes.href!).split(/[?#]/)[0]!, community).toString())).filter((url): url is URL => Boolean(url && sameOfficialHost(url, community.hostname))).map((url) => pathKey(url))));
+    if (own.length !== 1) continue;
+    const path = own[0]!;
+    const prices = inner.filter((item) => elementClass(item, "fs-4") || (elementClass(item, "fs-5") && elementClass(item, "f-display"))).map((item) => num((/\$\s*([\d,]{5,9})/.exec(elementText(item, html)) ?? [])[1]?.replace(/,/g, "")));
+    const price = prices[0] ?? null;
+    const stat = (pattern: RegExp) => inner.filter((item) => elementClass(item, "stat")).map((item) => pattern.exec(elementText(item, html))).find(Boolean);
+    const beds = stat(/^(\d{1,2})\s*Beds?$/i);
+    const baths = stat(/^(\d{1,2}(?:\.\d)?)\s*Baths?$/i);
+    const sqft = stat(/^([\d,]{3,6})\s*Sq\.?\s*Ft\.?$/i);
+    const address = inner.find((item) => elementClass(item, "address"));
+    const lines = address ? html.slice(address.contentStart, address.contentEnd).replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").split("\n").map((line) => decodeHtmlEntities(line).replace(/\s+/g, " ").trim()).filter(Boolean) : [];
+    const image = inner.find((item) => item.tag === "img" && item.attributes.src)?.attributes.src ?? null;
+    const consistent = price !== null && price > 0 && prices.every((value) => value === price);
+    const card: CardHome | null = consistent && beds && baths && sqft && lines[0]
+      ? { path, street: lines[0], city: lines[1]?.split(",")[0]?.trim() || null, price, bedrooms: Number(beds[1]), bathrooms: Number(baths[1]), squareFeet: Number(sqft[1]!.replace(/,/g, "")), image }
+      : null;
+    if (out.has(path)) { const known = out.get(path); if (!known || !card || JSON.stringify(known) !== JSON.stringify(card)) out.set(path, null); }
+    else out.set(path, card);
+  }
   return out;
 }
 
@@ -325,8 +349,16 @@ function readHomefinitiPage(html: string, community: URL, host: string): Homefin
   // page one level under a plan in this community, never another page.
   const cardHomes = parseCardHomes(html, root, community);
   const recordByPath = new Map(records.homes.map((home) => [pathKey(new URL(home.sourceUrl)), home] as const));
-  const homeDepth = pathKey(community).split("/").filter(Boolean).length + 2;
-  const unrecorded = Array.from(cardHomes.keys()).filter((path) => !recordByPath.has(path) && path.startsWith(`${pathKey(community)}/`) && path.split("/").filter(Boolean).length === homeDepth);
+  // Homes sit two levels under the community: under its page's path, or under the shorter path its own records use (First
+  // America's Cordova Crossing, Oct 24 2026: page /new-homes/tx/san-antonio-metro/seguin/cordova-crossing/, homes under
+  // /new-homes/tx/seguin/cordova-crossing/<plan>/<home>/), never anywhere else.
+  const homeBases = new Set([pathKey(community)]);
+  for (const path of Array.from(recordByPath.keys())) {
+    const segments = path.split("/").filter(Boolean);
+    const at = segments.lastIndexOf(communitySlug);
+    if (at >= 0 && segments.length === at + 3) homeBases.add(`/${segments.slice(0, at + 1).join("/")}`);
+  }
+  const unrecorded = Array.from(cardHomes.keys()).filter((path) => !recordByPath.has(path) && Array.from(homeBases).some((base) => path.startsWith(`${base}/`) && path.split("/").filter(Boolean).length === base.split("/").filter(Boolean).length + 2));
   const fromCards: HomefinitiRecord[] = [];
   if (unrecorded.length) {
     const pairs = Array.from(recordByPath).filter(([path]) => cardHomes.has(path));

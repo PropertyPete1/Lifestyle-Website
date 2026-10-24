@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Home, LockKeyhole, MapPin, Play, X } from "lucide-react";
+import { Flame, Home, LockKeyhole, MapPin, Play, X } from "lucide-react";
 import { AreaMap } from "./AreaMap";
-import { Incentive, ReelCard, RetryImage, money, type DealsIncentive } from "./shared";
+import { Incentive, RedHotBadge, RedHotSavings, ReelCard, RetryImage, money, type DealsIncentive } from "./shared";
 import { ProtectedGallery } from "./GatedCatalog";
 import { ShowMore } from "./BrowseBar";
 import { BROWSE_PAGE } from "@/lib/dealsBrowse";
@@ -28,6 +28,8 @@ export type LandingCommunity = {
   fromYourReel?: boolean;
   cover?: string | null;
   pin?: { x: number; y: number } | null;
+  /** Homes here that are Red Hot Deals. */
+  redHotDeals?: number;
 };
 
 export const LANDING_COPY = {
@@ -37,6 +39,7 @@ export const LANDING_COPY = {
   videoTour: "Video tour",
   fromYourReel: "From your reel",
   rate: (badge: { rate: string; apr: string }) => `${badge.rate} rate · ${badge.apr} APR`,
+  redHot: (count: number) => count === 1 ? "Red Hot Deal" : `${count} Red Hot Deals`,
   areaFilter: (count: number) => `Showing ${count} in this part of town`,
   clearArea: "Show all",
   mapLabel: "Map of the communities",
@@ -75,6 +78,7 @@ export function CommunityCard({ community, active, onHover, onOpen }: { communit
           : <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground"><Home className="h-8 w-8" /><span className="text-xs">{LANDING_COPY.photosSoon}</span></div>}
         <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-1.5">
           {community.fromYourReel && <span className="rounded-full bg-gold px-2.5 py-1 text-[11px] font-semibold text-primary-foreground shadow">{LANDING_COPY.fromYourReel}</span>}
+          {(community.redHotDeals ?? 0) > 0 && <span data-deals-card-red-hot="true" className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-white shadow"><Flame className="h-3.5 w-3.5" />{LANDING_COPY.redHot(community.redHotDeals!)}</span>}
           {rate && <span data-deals-card-rate="true" className="rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-semibold text-foreground shadow">{LANDING_COPY.rate(rate)}</span>}
         </div>
         {community.reelUrl && <span className="pointer-events-none absolute bottom-3 right-3 inline-flex items-center gap-1 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white"><Play className="h-3 w-3 fill-current" />{LANDING_COPY.videoTour}</span>}
@@ -92,15 +96,15 @@ export function CommunityCard({ community, active, onHover, onOpen }: { communit
 
 type Marker = { id: string; x: number; y: number; keys: string[]; label: string };
 
-/** Markers closer than this share one numbered bubble (fractions of the map's width). */
+/** Markers closer than this share one numbered bubble (fractions of the map's width at its opening zoom). */
 const GROUP_CELL = 0.045;
 
 /** One marker per community, grouped where they overlap; a group shows its count, a lone community its price band. */
-export function groupMarkers(items: ReadonlyArray<{ key: string; pin?: { x: number; y: number } | null; fromPriceLabel?: string | null }>): Marker[] {
+export function groupMarkers(items: ReadonlyArray<{ key: string; pin?: { x: number; y: number } | null; fromPriceLabel?: string | null }>, cell = GROUP_CELL): Marker[] {
   const groups = new Map<string, { xs: number[]; ys: number[]; keys: string[]; labels: string[] }>();
   for (const item of items) {
     if (!item.pin) continue;
-    const id = `${Math.floor(item.pin.x / GROUP_CELL)}:${Math.floor(item.pin.y / GROUP_CELL)}`;
+    const id = `${Math.floor(item.pin.x / cell)}:${Math.floor(item.pin.y / cell)}`;
     const group = groups.get(id) ?? { xs: [], ys: [], keys: [], labels: [] };
     group.xs.push(item.pin.x); group.ys.push(item.pin.y); group.keys.push(item.key); group.labels.push((item.fromPriceLabel ?? "").replace(/^From the /, ""));
     groups.set(id, group);
@@ -109,35 +113,158 @@ export function groupMarkers(items: ReadonlyArray<{ key: string; pin?: { x: numb
   return Array.from(groups.entries()).map(([id, group]) => ({ id, x: mean(group.xs), y: mean(group.ys), keys: group.keys, label: group.keys.length > 1 ? String(group.keys.length) : group.labels[0] || "1" }));
 }
 
-export function RegionMap({ items, activeKey, onHover, onSelect, selectedId }: {
+/**
+ * The market picture's shape and its opening view (San Antonio), as server/dealsRegionMap.ts computes them (a test
+ * keeps the two equal), and the quick jumps. October 24, 2026 (Peter): the map drags and zooms up to Austin.
+ */
+export const REGION_VIEW = {
+  aspect: 1920 / 1840,
+  home: { x: 0.4810, y: 0.6503, span: 0.6146 },
+  jumps: [
+    { label: "San Antonio", x: 0.4810, y: 0.6503, span: 0.6146 },
+    { label: "New Braunfels", x: 0.5933, y: 0.5442, span: 0.32 },
+    { label: "Austin", x: 0.7313, y: 0.2622, span: 0.36 },
+  ],
+} as const;
+/** The shaded area around a hovered community: a few miles across, as a share of the picture's width (never the exact spot). */
+export const AREA_DIAMETER = 0.04;
+/** On-screen marker spacing that groups markers, in CSS pixels. */
+const GROUP_PIXELS = 34;
+const MAX_ZOOM = 5;
+
+type View = { z: number; tx: number; ty: number };
+
+export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, className = "" }: {
   items: ReadonlyArray<{ key: string; pin?: { x: number; y: number } | null; fromPriceLabel?: string | null }>;
   activeKey: string | null;
   onHover: (key: string | null) => void;
   onSelect: (marker: { id: string; keys: string[] } | null) => void;
   selectedId: string | null;
+  /** The box's size (the page gives it a height); the map covers the whole box. */
+  className?: string;
 }) {
   const [failed, setFailed] = useState(false);
-  const markers = useMemo(() => groupMarkers(items), [items]);
+  const box = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [view, setView] = useState<View | null>(null);
+  const viewRef = useRef<View | null>(null);
+  viewRef.current = view;
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const gesture = useRef<{ moved: number; pinch: number | null }>({ moved: 0, pinch: null });
+
+  const minWidth = (w: number, h: number) => Math.max(w, h * REGION_VIEW.aspect);
+  const clamp = (next: View, w: number, h: number): View => {
+    const z = Math.min(Math.max(next.z, minWidth(w, h)), minWidth(w, h) * MAX_ZOOM);
+    const height = z / REGION_VIEW.aspect;
+    return { z, tx: Math.min(0, Math.max(w - z, next.tx)), ty: Math.min(0, Math.max(h - height, next.ty)) };
+  };
+  const goTo = (spot: { x: number; y: number; span: number }, w: number, h: number) => {
+    const z = w / spot.span;
+    return clamp({ z, tx: w / 2 - spot.x * z, ty: h / 2 - spot.y * (z / REGION_VIEW.aspect) }, w, h);
+  };
+  useEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    const measure = () => {
+      const w = element.clientWidth;
+      const h = element.clientHeight;
+      if (!w || !h) return;
+      setSize({ w, h });
+      setView((current) => current ? clamp(current, w, h) : goTo(REGION_VIEW.home, w, h));
+    };
+    measure();
+    // The map box follows the window (full height beside the list, or a fixed share of a phone screen), so the window's
+    // own resize is the signal; no ResizeObserver (NowHiringBanner stays the only one, see bannerResizeObserver.test).
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+  const zoomAt = (factor: number, px: number, py: number) => {
+    const current = viewRef.current;
+    if (!current || !size) return;
+    const z = current.z * factor;
+    const ratio = z / current.z;
+    setView(clamp({ z, tx: px - (px - current.tx) * ratio, ty: py - (py - current.ty) * ratio }, size.w, size.h));
+  };
+  // The wheel zooms the map, not the page (a passive listener could not stop the page scrolling).
+  useEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const rect = element.getBoundingClientRect();
+      zoomAt(Math.exp(-event.deltaY * 0.0015), event.clientX - rect.left, event.clientY - rect.top);
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  });
+  const onPointerDown = (event: React.PointerEvent) => {
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.current.size === 1) gesture.current = { moved: 0, pinch: null };
+    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+  };
+  const onPointerMove = (event: React.PointerEvent) => {
+    const before = pointers.current.get(event.pointerId);
+    if (!before || !size) return;
+    const current = viewRef.current;
+    if (!current) return;
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.current.size === 1) {
+      const dx = event.clientX - before.x;
+      const dy = event.clientY - before.y;
+      gesture.current.moved += Math.abs(dx) + Math.abs(dy);
+      setView(clamp({ ...current, tx: current.tx + dx, ty: current.ty + dy }, size.w, size.h));
+    } else if (pointers.current.size === 2) {
+      const [a, b] = Array.from(pointers.current.values()) as [{ x: number; y: number }, { x: number; y: number }];
+      const distance = Math.hypot(a.x - b.x, a.y - b.y);
+      const rect = box.current!.getBoundingClientRect();
+      if (gesture.current.pinch) zoomAt(distance / gesture.current.pinch, (a.x + b.x) / 2 - rect.left, (a.y + b.y) / 2 - rect.top);
+      gesture.current.pinch = distance;
+      gesture.current.moved += 10;
+    }
+  };
+  const onPointerUp = (event: React.PointerEvent) => {
+    pointers.current.delete(event.pointerId);
+    if (pointers.current.size < 2) gesture.current.pinch = null;
+  };
+  const cell = view ? Math.max(0.004, GROUP_PIXELS / view.z) : GROUP_CELL;
+  const bucket = Math.round(Math.log2(cell) * 4);
+  const markers = useMemo(() => groupMarkers(items, 2 ** (bucket / 4)), [items, bucket]);
+  // Hovering a card shades its general area on the map (New Home Buddy style), around the same coarse point its marker uses.
+  const activePin = activeKey ? items.find((item) => item.key === activeKey)?.pin ?? null : null;
   if (failed) return null;
-  return <figure aria-label={LANDING_COPY.mapLabel} data-deals-region-map="true" className="min-w-0">
-    <div className="relative aspect-square w-full overflow-hidden rounded-xl border border-border bg-secondary shadow-sm">
-      <img src="/deals/maps/region.webp" alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(true)} className="block h-full w-full select-none object-cover" />
-      {markers.map((marker) => {
-        const lit = (activeKey !== null && marker.keys.includes(activeKey)) || selectedId === marker.id;
-        const group = marker.keys.length > 1;
-        // A group is a numbered bubble; a lone community is a dot that shows its price band when lit.
-        const shape = group ? "min-h-7 min-w-7 px-1.5 text-[11px]" : lit ? "min-h-7 px-2 text-[11px]" : "h-4 w-4";
-        return <button key={marker.id} type="button" data-deals-marker={group ? "group" : "single"} data-active={lit ? "true" : undefined}
-          aria-label={group ? `${marker.keys.length} communities here. Show them` : `Community ${marker.label}. Show it`}
-          onMouseEnter={() => onHover(group ? null : marker.keys[0]!)} onMouseLeave={() => onHover(null)}
-          onClick={() => onSelect(selectedId === marker.id ? null : { id: marker.id, keys: marker.keys })}
-          style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }}
-          className={`absolute inline-flex -translate-x-1/2 -translate-y-1/2 before:absolute before:-inset-3 before:content-[''] items-center justify-center whitespace-nowrap rounded-full border-2 border-white font-semibold shadow-md transition-transform ${shape} ${lit ? "z-20 scale-110 bg-gold text-primary-foreground" : "z-10 bg-[oklch(0.25_0.02_260)] text-white hover:scale-110"}`}>
-          {group || lit ? marker.label : null}
-        </button>;
-      })}
+  const zoomButton = (factor: number) => () => size && zoomAt(factor, size.w / 2, size.h / 2);
+  return <figure aria-label={LANDING_COPY.mapLabel} data-deals-region-map="true" className={`relative min-w-0 overflow-hidden rounded-xl border border-border bg-[#e8eaed] shadow-sm ${className}`}>
+    <div ref={box} className="absolute inset-0 cursor-grab touch-none select-none active:cursor-grabbing" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
+      onClickCapture={(event) => { if (gesture.current.moved > 6) { event.stopPropagation(); event.preventDefault(); } }}>
+      {view && <div data-deals-map-content="true" className="absolute left-0 top-0" style={{ width: view.z, height: view.z / REGION_VIEW.aspect, transform: `translate(${view.tx}px, ${view.ty}px)` }}>
+        <img src="/deals/maps/region.webp" alt="" decoding="async" draggable={false} onError={() => setFailed(true)} className="pointer-events-none block h-full w-full select-none" />
+        {activePin && <span aria-hidden="true" data-deals-map-area="true" style={{ left: `${activePin.x * 100}%`, top: `${activePin.y * 100}%`, width: `${AREA_DIAMETER * 100}%` }}
+          className="pointer-events-none absolute z-[5] aspect-square min-w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-gold/80 bg-gold/25 shadow-[0_0_0_6px_rgba(184,146,74,0.12)] transition-all duration-200" />}
+        {markers.map((marker) => {
+          const lit = (activeKey !== null && marker.keys.includes(activeKey)) || selectedId === marker.id;
+          const group = marker.keys.length > 1;
+          // A group is a numbered bubble; a lone community is a dot that shows its price band when lit.
+          const shape = group ? "min-h-7 min-w-7 px-1.5 text-[11px]" : lit ? "min-h-7 px-2 text-[11px]" : "h-4 w-4";
+          return <button key={marker.id} type="button" data-deals-marker={group ? "group" : "single"} data-active={lit ? "true" : undefined}
+            aria-label={group ? `${marker.keys.length} communities here. Show them` : `Community ${marker.label}. Show it`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseEnter={() => onHover(group ? null : marker.keys[0]!)} onMouseLeave={() => onHover(null)}
+            onClick={() => onSelect(selectedId === marker.id ? null : { id: marker.id, keys: marker.keys })}
+            style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }}
+            className={`absolute inline-flex -translate-x-1/2 -translate-y-1/2 before:absolute before:-inset-3 before:content-[''] items-center justify-center whitespace-nowrap rounded-full border-2 border-white font-semibold shadow-md transition-transform ${shape} ${lit ? "z-20 scale-110 bg-gold text-primary-foreground" : "z-10 bg-[oklch(0.25_0.02_260)] text-white hover:scale-110"}`}>
+            {group || lit ? marker.label : null}
+          </button>;
+        })}
+      </div>}
     </div>
-    <figcaption className="mt-2 text-[10px] leading-relaxed text-muted-foreground">{LANDING_COPY.mapAttribution}</figcaption>
+    <div className="pointer-events-none absolute left-2 right-2 top-2 flex flex-wrap items-start justify-between gap-2">
+      <div className="pointer-events-auto flex flex-wrap gap-1.5">{REGION_VIEW.jumps.map((spot) => <button key={spot.label} type="button" onClick={() => size && setView(goTo(spot, size.w, size.h))} className="min-h-9 rounded-full border border-border bg-white/95 px-3 text-xs font-medium text-foreground shadow-sm hover:border-gold">{spot.label}</button>)}</div>
+      <div className="pointer-events-auto flex flex-col overflow-hidden rounded-lg border border-border bg-white/95 shadow-sm">
+        <button type="button" onClick={zoomButton(1.5)} aria-label="Zoom in" className="flex h-9 w-9 items-center justify-center text-lg font-semibold hover:bg-secondary">+</button>
+        <button type="button" onClick={zoomButton(1 / 1.5)} aria-label="Zoom out" className="flex h-9 w-9 items-center justify-center border-t border-border text-lg font-semibold hover:bg-secondary">−</button>
+      </div>
+    </div>
+    <figcaption className="pointer-events-none absolute bottom-2 left-2 right-2 rounded bg-white/85 px-2 py-1 text-[10px] leading-snug text-muted-foreground">{LANDING_COPY.mapAttribution}</figcaption>
   </figure>;
 }
 
@@ -200,16 +327,15 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes }: { com
 export type PublicHome = { card: string; kind: string; beds?: string | number | null; baths?: string | number | null; sqft?: number | null; price?: number | null; previousPrice?: number | null; moveInDate?: string | null; lotSize?: string | null; photos?: string[] };
 
 export function PublicHomeCard({ home, onAddress }: { home: PublicHome; onAddress: () => void }) {
-  const dropped = Boolean(home.previousPrice && home.price && home.price < home.previousPrice);
   return <article data-deals-public-home="true" className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
     <div className="[&>*]:mt-0"><ProtectedGallery photos={home.photos} /></div>
     <div className="p-4">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[11px] font-medium text-foreground">{home.kind === "to_be_built" ? "To be built" : "Move-in ready"}</span>
-        {dropped && <span className="rounded-full bg-gold px-2.5 py-0.5 text-[11px] font-semibold text-primary-foreground">Price drop</span>}
+        <RedHotBadge price={home.price} previousPrice={home.previousPrice} />
       </div>
       <p className="mt-2 text-2xl font-semibold leading-tight">{home.price ? money.format(home.price) : "Ask for current pricing"}</p>
-      {dropped && home.previousPrice && <p className="text-sm text-muted-foreground line-through">{money.format(home.previousPrice)}</p>}
+      <RedHotSavings price={home.price} previousPrice={home.previousPrice} />
       <p className="mt-1 text-sm text-foreground">{[home.beds && `${home.beds} beds`, home.baths && `${home.baths} baths`, home.sqft && `${home.sqft.toLocaleString()} sq ft`].filter(Boolean).join(" · ")}</p>
       {home.moveInDate && <p className="mt-1 text-xs text-muted-foreground">Est. move-in: {home.moveInDate}</p>}
       {home.lotSize && <p className="mt-0.5 text-xs text-muted-foreground">Lot: {home.lotSize}</p>}
@@ -219,7 +345,7 @@ export function PublicHomeCard({ home, onAddress }: { home: PublicHome; onAddres
 }
 
 /** The list and the map side by side (the map stays in view on a wide screen; a phone opens it with a button). */
-export function LandingBrowse({ communities, onUnlock, useHomes }: { communities: readonly LandingCommunity[]; onUnlock: () => void; useHomes: UseCommunityHomes }) {
+export function LandingBrowse({ communities, onUnlock, useHomes, top }: { communities: readonly LandingCommunity[]; onUnlock: () => void; useHomes: UseCommunityHomes; /** Shown at the top of the list column (the featured row). */ top?: ReactNode }) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ id: string; keys: string[] } | null>(null);
   const [open, setOpen] = useState<LandingCommunity | null>(null);
@@ -232,10 +358,12 @@ export function LandingBrowse({ communities, onUnlock, useHomes }: { communities
   useEffect(() => { if (selected && !selected.keys.some((key) => keyed.some((item) => item.key === key))) setSelected(null); }, [keyed, selected]);
   const matching = selected ? keyed.filter((item) => selected.keys.includes(item.key)) : keyed;
   const shown = matching.slice(0, pages * BROWSE_PAGE);
-  const map = <RegionMap items={keyed} activeKey={activeKey} onHover={setActiveKey} onSelect={setSelected} selectedId={selected?.id ?? null} />;
+  const mapProps = { items: keyed, activeKey, onHover: setActiveKey, onSelect: setSelected, selectedId: selected?.id ?? null };
+  const map = <RegionMap {...mapProps} className="h-[65vh] w-full" />;
   return <>
-    <div className="mt-8 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,40%)]">
+    <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,42%)]">
       <div className="min-w-0">
+        {top && <div className="mb-6 min-w-0">{top}</div>}
         <div className="mb-4 flex min-w-0 flex-wrap items-center gap-2 lg:hidden">
           <button type="button" onClick={() => setMapOnPhone((value) => !value)} aria-expanded={mapOnPhone} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border bg-card px-4 text-sm shadow-sm"><MapPin className="h-4 w-4 text-gold" />{mapOnPhone ? LANDING_COPY.hideMap : LANDING_COPY.showMap}</button>
         </div>
@@ -246,7 +374,8 @@ export function LandingBrowse({ communities, onUnlock, useHomes }: { communities
         </div>
         <ShowMore remaining={matching.length - shown.length} onClick={() => setPages((value) => value + 1)} />
       </div>
-      <aside className="hidden min-w-0 lg:block"><div className="sticky top-6">{map}</div></aside>
+      {/* The map fills the side of the screen and stays there while the list scrolls (no empty space under it). */}
+      <aside className="hidden min-w-0 lg:block"><div className="sticky top-0 h-[100dvh] py-4"><RegionMap {...mapProps} className="h-full w-full" /></div></aside>
     </div>
     {open && <CommunitySheet community={open} useHomes={useHomes} onClose={() => setOpen(null)} onUnlock={() => { setOpen(null); onUnlock(); }} />}
   </>;

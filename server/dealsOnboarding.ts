@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { dealCommunities } from "../drizzle/schema";
 import { mergeDealScrubConfig, normalizedDealSourceKey, type DealScrubConfig } from "../shared/deals";
 import { lotAcres } from "../shared/dealsFeatured";
-import { areaLabelFor, publicLabelFor, type HeadlineFacts } from "../shared/dealsArea";
+import { areaLabelFor, publicLabelFor, refreshedAreaLabel, type HeadlineFacts } from "../shared/dealsArea";
 import { getDb } from "./db";
 import { hashSecret } from "./dealsService";
 import { builderScrubConfig } from "./dealsSync";
@@ -121,6 +121,21 @@ export async function onboardDiscoveredCommunities(discovered: readonly Discover
     await relabelFromCentroid(id, factsById.get(id)).catch(() => null);
   }
   return result;
+}
+
+/** A live community's generated area brought up to date from its centroid and city (see refreshedAreaLabel); null when unchanged. */
+export async function refreshLiveAreaLabel(communityId: number): Promise<{ areaLabel: string; publicLabel: string } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const row = (await db.select().from(dealCommunities).where(eq(dealCommunities.id, communityId)).limit(1))[0];
+  if (!row) return null;
+  const lat = Number.parseFloat(row.zipCentroidLat ?? "");
+  const lng = Number.parseFloat(row.zipCentroidLng ?? "");
+  const centroid = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  const city = row.privateAddress.split(";")[0]!.split(",").map((part) => part.trim()).at(-2) ?? null;
+  const next = refreshedAreaLabel({ areaLabel: row.areaLabel, publicLabel: row.publicLabel, centroid, city });
+  if (next) await db.update(dealCommunities).set(next).where(eq(dealCommunities.id, communityId));
+  return next;
 }
 
 /** Recompute an auto community's area and headline from its centroid and current facts (only while it awaits its first sync). */

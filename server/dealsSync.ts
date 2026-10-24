@@ -2,7 +2,7 @@ import { and, desc, eq, gte, inArray, isNull, like, lt, ne, or } from "drizzle-o
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealJobRuns, dealPhotos, dealSyncDigestEntries } from "../drizzle/schema";
 import { getDb } from "./db";
 import { chicagoClock, chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
-import { builderScrubConfig, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, mentionsTriggeringTerm, normalizeIncentiveText, publicTextResidue, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher, type PrivatePlanOrHome } from "./dealsAdapters";
+import { builderScrubConfig, getDocument, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, mentionsTriggeringTerm, normalizeIncentiveText, publicTextResidue, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher, type PrivatePlanOrHome } from "./dealsAdapters";
 export { builderScrubConfig };
 import { dealScrubTerms, emptyDealScrubConfig, mergeDealScrubConfig, normalizedDealSourceKey, normalizedText, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
 import { applyScrubExclusions, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
@@ -123,15 +123,16 @@ export function communitySourceConfig(community: CommunityRow): CommunitySourceC
   };
 }
 
-type HomeUpsertInput = { communityId: number; sourceUrl: string; privatePlanName?: string | null; privateAddress?: string | null; kind: "quick_move_in" | "to_be_built"; beds?: string | null; baths?: string | null; sqft?: number | null; price?: number | null; moveInDate?: string | null; lotSize?: string | null; garage?: string | null; homesite?: string | null; readyNow?: boolean; status?: "available" | "sold" };
+type HomeUpsertInput = { communityId: number; sourceUrl: string; privatePlanName?: string | null; privateAddress?: string | null; kind: "quick_move_in" | "to_be_built"; beds?: string | null; baths?: string | null; sqft?: number | null; price?: number | null; moveInDate?: string | null; lotSize?: string | null; garage?: string | null; homesite?: string | null; readyNow?: boolean; status?: "available" | "sold"; /** The builder's own published original price (a struck-through "was" price), when it shows one. */ builderWasPrice?: number | null };
 type HomeUpsertResult = { id: number; inserted: boolean; skipped: boolean; priceChange: { from: number; to: number } | null; statusChange: { from: string; to: string } | null };
 
 const PRICE_WINDOW_MS = 30 * 24 * 60 * 60_000;
 
 /**
  * Keyed by the builder's listing URL so updates change the record in place.
- * Every observed price is written to deal_home_price_history; previousPrice is
- * derived only from that history (never from a card's strike-through price).
+ * Every observed price is written to deal_home_price_history; previousPrice is the higher of that history's 30-day
+ * high and the builder's own published "was" price (October 24, 2026, Peter: show D.R. Horton's markdowns as Red Hot
+ * Deals), when either is above today's price.
  */
 async function upsertHome(input: HomeUpsertInput, now = new Date()): Promise<HomeUpsertResult> {
   const db = await getDb();
@@ -146,9 +147,11 @@ async function upsertHome(input: HomeUpsertInput, now = new Date()): Promise<Hom
     (legacySourceKey === sourceKey ? undefined : (await db.select().from(dealHomes).where(eq(dealHomes.sourceKey, legacySourceKey)).limit(1))[0]);
   const incomingPrice = storedPrice(input.price);
   const status = input.status ?? "available";
-  const { status: _status, ...fields } = input;
+  const { status: _status, builderWasPrice: rawWas, ...fields } = input;
+  const builderWas = storedPrice(rawWas ?? null);
   if (!existing) {
-    const result = await db.insert(dealHomes).values({ ...fields, sourceUrl, sourceKey, price: incomingPrice, previousPrice: null, status, origin: "official" });
+    const firstPrevious = builderWas !== null && incomingPrice !== null && builderWas > incomingPrice ? builderWas : null;
+    const result = await db.insert(dealHomes).values({ ...fields, sourceUrl, sourceKey, price: incomingPrice, previousPrice: firstPrevious, status, origin: "official" });
     const id = Number((result as unknown as [{ insertId: number }])[0].insertId);
     if (incomingPrice !== null) await db.insert(dealHomePriceHistory).values({ homeId: id, price: incomingPrice, observedAt: now });
     return { id, inserted: true, skipped: false, priceChange: null, statusChange: null };
@@ -173,6 +176,7 @@ async function upsertHome(input: HomeUpsertInput, now = new Date()): Promise<Hom
     const history = await db.select({ price: dealHomePriceHistory.price }).from(dealHomePriceHistory)
       .where(and(eq(dealHomePriceHistory.homeId, existing.id), gte(dealHomePriceHistory.observedAt, new Date(now.getTime() - PRICE_WINDOW_MS))));
     const candidates = history.map((row) => storedPrice(row.price)).filter((value): value is number => value !== null);
+    if (builderWas !== null) candidates.push(builderWas);
     const high = candidates.length ? Math.max(...candidates) : null;
     previousPrice = high !== null && high > price ? high : null;
   }
@@ -649,6 +653,35 @@ export function leaseRenewingFetcher(heartbeat: (() => Promise<void>) | undefine
   };
 }
 
+/** How long a community's page must have kept failing before a "not found" answer takes it off the site. */
+export const COMMUNITY_GONE_AFTER_MS = 20 * 60 * 60_000;
+
+/**
+ * A builder that sells out a community takes its page down (Sitterle's Kinder Gale 65's, October 2026). When the page
+ * has failed on every read for most of a day and a fresh read now answers 404 or 410, the community comes off the site:
+ * it is turned off and its official available homes are marked sold, with one digest line. A timeout, a server error, a
+ * refusal or a redirect never retires anything; an admin can turn the community back on.
+ */
+export async function retireIfCommunityGone(community: CommunityRow, reason: string, now: Date, summaries: CommunityChangeSummary[], fetcher: HtmlFetcher = fetch): Promise<boolean> {
+  const stored = community.catalogHoldReason?.replace(/^dismissed:/, "") ?? null;
+  if (reason !== "community_fetch_failed" || stored !== reason || !community.catalogHoldSeenAt) return false;
+  if (now.getTime() - community.catalogHoldSeenAt.getTime() < COMMUNITY_GONE_AFTER_MS) return false;
+  let host: string;
+  try { host = new URL(community.sourceUrl).host; } catch { return false; }
+  const page = await getDocument(community.sourceUrl, fetcher, "text/html,application/xhtml+xml", host);
+  if (page.ok || (page.status !== 404 && page.status !== 410)) return false;
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const available = await db.select().from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.origin, "official"), eq(dealHomes.status, "available")));
+  for (const home of available) await db.update(dealHomes).set({ status: "sold" }).where(eq(dealHomes.id, home.id));
+  await db.update(dealCommunities).set({ active: false, catalogUpdatedAt: now }).where(eq(dealCommunities.id, community.id));
+  const summary = emptySummary(community);
+  summary.sold.push(...available.map((home) => home.privateAddress ?? home.privatePlanName ?? `home ${home.id}`));
+  summary.incentive.push(`community taken off the site: the builder's page has answered "not found" since ${isoDay(community.catalogHoldSeenAt)} (turn it back on in admin if that is wrong)`);
+  summaries.push(summary);
+  return true;
+}
+
 async function refreshCommunity(community: CommunityRow, now: Date, summaries: CommunityChangeSummary[], holds: HoldNotice[], heartbeat?: () => Promise<void>): Promise<RefreshResult> {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
@@ -661,6 +694,8 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
   if (community.awaitingFirstSync && !hasBuilderReader(community.builder)) return { ...base, ok: false, skipped: "no_builder_reader" };
   await db.update(dealCommunities).set({ lastAttemptAt: now }).where(eq(dealCommunities.id, community.id));
   if (!community.zipCentroidLat || !community.zipCentroidLng) await refreshCommunityGeography(community.id).catch(() => null);
+  // A generated area label catches up with the centroid and the town list (Castroville homes were "Greater San Antonio").
+  await import("./dealsOnboarding").then(({ refreshLiveAreaLabel }) => refreshLiveAreaLabel(community.id)).catch(() => null);
   const sourceConfig = communitySourceConfig(community);
   if (!sourceConfig) {
     await recordCatalogHold(community, "invalid_source_url", now, holds);
@@ -675,6 +710,7 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
   const snapshot = supplied ? suppliedDealsSnapshot(sourceConfig, supplied.latest, now, supplied.previous) : await loadOfficialDeals(sourceConfig, heartbeat ? { fetcher: leaseRenewingFetcher(heartbeat) } : {});
   if (!snapshot.catalogOk) {
     const reason = snapshot.holdReasons.join(", ");
+    if (!supplied && await retireIfCommunityGone(community, reason, now, summaries).catch(() => false)) return { ...base, ok: false, reason: "community_removed" };
     await recordCatalogHold(community, reason, now, holds);
     return { ...base, ok: false, reason };
   }
@@ -695,7 +731,7 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     if (result.statusChange?.to === "sold") summary.sold.push(name);
   };
   for (const plan of snapshot.private.plans) {
-    const result = await upsertHome({ communityId: community.id, sourceUrl: plan.sourceUrl, privatePlanName: plan.privatePlanName ?? plan.privateName, privateAddress: plan.privateAddress ?? null, kind: "to_be_built", beds: plan.bedrooms === null ? null : String(plan.bedrooms), baths: plan.bathrooms === null ? null : String(plan.bathrooms), sqft: plan.squareFeet, price: plan.price, moveInDate: plan.moveInDate ?? null, garage: plan.garage ? String(plan.garage) : null, homesite: plan.homesite ?? null, readyNow: plan.readyNow ?? false, status: "available" }, now);
+    const result = await upsertHome({ communityId: community.id, sourceUrl: plan.sourceUrl, builderWasPrice: plan.previousPrice ?? null, privatePlanName: plan.privatePlanName ?? plan.privateName, privateAddress: plan.privateAddress ?? null, kind: "to_be_built", beds: plan.bedrooms === null ? null : String(plan.bedrooms), baths: plan.bathrooms === null ? null : String(plan.bathrooms), sqft: plan.squareFeet, price: plan.price, moveInDate: plan.moveInDate ?? null, garage: plan.garage ? String(plan.garage) : null, homesite: plan.homesite ?? null, readyNow: plan.readyNow ?? false, status: "available" }, now);
     publishable.add(normalizedDealSourceKey(plan.sourceUrl));
     record(result, label(plan));
     await upsertPhotos(result.id, plan.gallery);
@@ -717,7 +753,7 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     // Only publish a QMI when the official page explicitly labels it as such.
     const quickMoveIn = /quick\s+move|available\s+now/i.test(home.status ?? "");
     if (!sold && !quickMoveIn) continue; // A model or unlabeled card is treated as absent below.
-    const result = await upsertHome({ communityId: community.id, sourceUrl: home.sourceUrl, privatePlanName: home.privatePlanName ?? home.privateName, privateAddress: home.privateAddress ?? null, kind: "quick_move_in", beds: home.bedrooms === null ? null : String(home.bedrooms), baths: home.bathrooms === null ? null : String(home.bathrooms), sqft: home.squareFeet, price: home.price, moveInDate: home.moveInDate ?? null, garage: home.garage ? String(home.garage) : null, homesite: home.homesite ?? null, readyNow: home.readyNow ?? false, status: sold ? "sold" : "available" }, now);
+    const result = await upsertHome({ communityId: community.id, sourceUrl: home.sourceUrl, builderWasPrice: home.previousPrice ?? null, privatePlanName: home.privatePlanName ?? home.privateName, privateAddress: home.privateAddress ?? null, kind: "quick_move_in", beds: home.bedrooms === null ? null : String(home.bedrooms), baths: home.bathrooms === null ? null : String(home.bathrooms), sqft: home.squareFeet, price: home.price, moveInDate: home.moveInDate ?? null, garage: home.garage ? String(home.garage) : null, homesite: home.homesite ?? null, readyNow: home.readyNow ?? false, status: sold ? "sold" : "available" }, now);
     if (!sold) publishable.add(normalizedDealSourceKey(home.sourceUrl));
     record(result, label(home));
     if (!sold) await upsertPhotos(result.id, homeGallery(home));

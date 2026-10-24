@@ -12,8 +12,12 @@ const CENTRAL_MILES = 4;
 const METRO_MILES = 22;
 const EARTH_MILES = 3958.8;
 
-/** Larger towns a label may name; a small town is too precise and falls back to the side of San Antonio. */
-export const MAJOR_TOWNS = ["New Braunfels", "Seguin", "Boerne", "Floresville", "Pleasanton", "Bulverde", "Spring Branch", "Canyon Lake"] as const;
+/**
+ * Towns a label may name (outside the metro only); a town not listed falls back to the side of San Antonio. October 24,
+ * 2026 (Peter): the outskirt towns buyers search by name (Castroville, Mico, Lytle and the rest) are named too; each has
+ * several communities, so the name never points at one.
+ */
+export const MAJOR_TOWNS = ["New Braunfels", "Seguin", "Boerne", "Floresville", "Pleasanton", "Bulverde", "Spring Branch", "Canyon Lake", "Castroville", "Mico", "Hondo", "Lytle", "Devine", "La Vernia", "Marion", "Bandera", "Poteet", "Comfort"] as const;
 
 const SECTORS = ["North", "Northeast", "East", "Southeast", "South", "Southwest", "West", "Northwest"] as const;
 export type Sector = (typeof SECTORS)[number];
@@ -62,6 +66,24 @@ export function areaLabelFor(input: { centroid?: { lat: number; lng: number } | 
   // Inside the metro, a side of town is coarse enough; a suburb's own name would point at too few communities.
   if (miles <= METRO_MILES) return `${sector} San Antonio`;
   return town ?? `${sector} of San Antonio`;
+}
+
+/** True for an area label this module generates (a side of San Antonio, a listed town, or the metro). */
+export function isGeneratedArea(area: string): boolean {
+  return area === "Greater San Antonio" || area === "Central San Antonio" || (MAJOR_TOWNS as readonly string[]).includes(area)
+    || SECTORS.some((sector) => area === `${sector} San Antonio` || area === `${sector} of San Antonio`);
+}
+
+/**
+ * A live community's generated area, brought up to date (its ZIP centroid arrived after it was first labeled, or the
+ * town list grew): the headline keeps its words, only the area in front of " | " changes. Null when nothing changes, or
+ * when the label is not the generated shape (an admin's own label is never touched).
+ */
+export function refreshedAreaLabel(row: { areaLabel: string; publicLabel: string; centroid: { lat: number; lng: number } | null; city: string | null }): { areaLabel: string; publicLabel: string } | null {
+  if (!isGeneratedArea(row.areaLabel) || !row.publicLabel.startsWith(`${row.areaLabel} | `)) return null;
+  const area = areaLabelFor({ centroid: row.centroid, city: row.city });
+  if (area === row.areaLabel) return null;
+  return { areaLabel: area, publicLabel: `${area}${row.publicLabel.slice(row.areaLabel.length)}`.slice(0, 190) };
 }
 
 /** Facts a headline may be built from; every phrase comes from the fixed vocabulary below. */

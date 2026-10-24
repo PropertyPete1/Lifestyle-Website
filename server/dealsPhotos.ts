@@ -1254,6 +1254,43 @@ export async function reprocessBuilderPhotos(builder: string): Promise<number> {
   return affectedRows(result);
 }
 
+/** Admin only: the failed photos by builder and error, with up to two of their source links (private operational data). */
+export async function dealPhotoFailures(): Promise<Array<{ builder: string | null; error: string | null; count: number; samples: string[] }> | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select({
+    builder: dealCommunities.builder,
+    error: dealPhotos.lastProcessingError,
+    count: sql<number>`count(*)`,
+    first: sql<string | null>`min(${dealPhotos.sourceUrl})`,
+    last: sql<string | null>`max(${dealPhotos.sourceUrl})`,
+  }).from(dealPhotos)
+    .innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
+    .innerJoin(dealCommunities, eq(dealHomes.communityId, dealCommunities.id))
+    .where(eq(dealPhotos.processingState, "failed"))
+    .groupBy(dealCommunities.builder, dealPhotos.lastProcessingError);
+  return rows
+    .map((row) => ({ builder: row.builder, error: row.error, count: Number(row.count ?? 0), samples: Array.from(new Set([row.first, row.last].filter((value): value is string => Boolean(value)))) }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/** Admin only: put failed photos back in line (optionally one builder or one error). Processed and hidden photos are untouched. */
+export async function requeueFailedDealPhotos(input: { builder?: string; error?: string } = {}): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const conditions = [eq(dealPhotos.processingState, "failed")];
+  if (input.error) conditions.push(eq(dealPhotos.lastProcessingError, input.error));
+  if (input.builder) {
+    const key = builderKey(input.builder);
+    if (!key) return 0;
+    const communities = await db.select({ id: dealCommunities.id }).from(dealCommunities).where(sql`LOWER(TRIM(${dealCommunities.builder})) = ${key}`);
+    if (!communities.length) return 0;
+    conditions.push(inArray(dealPhotos.homeId, db.select({ id: dealHomes.id }).from(dealHomes).where(inArray(dealHomes.communityId, communities.map((community) => community.id)))));
+  }
+  const result = await db.update(dealPhotos).set({ processingState: "pending", processingAttempts: 0, nextProcessingAttemptAt: new Date(), processingStartedAt: null, lastProcessingError: null }).where(and(...conditions));
+  return affectedRows(result);
+}
+
 export type DealPhotoDrainResult = {
   /** The process passed PHOTO_RSS_STOP_MB, so no further photo was started this drain. */
   stoppedForMemory?: boolean;

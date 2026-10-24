@@ -15,24 +15,40 @@ vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }))
 
 import { publicCommunityHomes, publicDealsCatalog, resetPublicHomesCache } from "./dealsService";
 import { photoIdFromToken, publicPhotoAllowed, resetPublicPhotoLimits } from "./dealsPhotoToken";
-import { regionPin, SAN_ANTONIO_REGION } from "./dealsRegionMap";
+import { regionHomeView, regionPin, SAN_ANTONIO_REGION } from "./dealsRegionMap";
 
 (globalThis as { React?: typeof React }).React = React;
-const { CommunityCard, groupMarkers, rateBadge } = await import("../client/src/components/deals/LandingBrowse");
+const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW } = await import("../client/src/components/deals/LandingBrowse");
 
 describe("the region map", () => {
   it("places a point by the map's own projection and leaves off anything outside the picture", () => {
     expect(regionPin(SAN_ANTONIO_REGION.center)).toEqual({ x: 0.5, y: 0.5 });
+    const downtown = regionPin({ lat: 29.4241, lng: -98.4936 })!;
     const newBraunfels = regionPin({ lat: 29.703, lng: -98.124 })!;
-    expect(newBraunfels.x).toBeGreaterThan(0.5);
-    expect(newBraunfels.y).toBeLessThan(0.5);
+    expect(newBraunfels.x).toBeGreaterThan(downtown.x);
+    expect(newBraunfels.y).toBeLessThan(downtown.y);
     const lackland = regionPin({ lat: 29.384, lng: -98.613 })!;
-    expect(lackland.x).toBeLessThan(0.5);
-    expect(lackland.y).toBeGreaterThan(0.5);
-    // Austin and Houston are off the San Antonio picture.
-    expect(regionPin({ lat: 30.267, lng: -97.743 })).toBeNull();
+    expect(lackland.x).toBeLessThan(downtown.x);
+    expect(lackland.y).toBeGreaterThan(downtown.y);
+    // Oct 24, 2026: the picture reaches Austin and Georgetown (north and east of San Antonio); Houston is off it.
+    const austin = regionPin({ lat: 30.267, lng: -97.743 })!;
+    expect(austin.x).toBeGreaterThan(newBraunfels.x);
+    expect(austin.y).toBeLessThan(newBraunfels.y);
+    expect(regionPin({ lat: 30.633, lng: -97.677 })).not.toBeNull();
+    expect(regionPin({ lat: 29.35, lng: -99.14 })).not.toBeNull();
     expect(regionPin({ lat: 29.76, lng: -95.37 })).toBeNull();
     expect(regionPin({ lat: Number.NaN, lng: -98.4 })).toBeNull();
+  });
+
+  it("opens the page's map on San Antonio with the server's own picture shape, and its quick jumps land on their towns", () => {
+    const home = regionHomeView();
+    expect(REGION_VIEW.aspect).toBeCloseTo(home.aspect, 6);
+    expect(REGION_VIEW.home.x).toBeCloseTo(home.x, 3);
+    expect(REGION_VIEW.home.y).toBeCloseTo(home.y, 3);
+    expect(REGION_VIEW.home.span).toBeCloseTo(home.span, 3);
+    const jump = (label: string) => REGION_VIEW.jumps.find((spot) => spot.label === label)!;
+    expect(jump("New Braunfels")).toMatchObject(regionPin({ lat: 29.703, lng: -98.124 })!);
+    expect(jump("Austin")).toMatchObject(regionPin({ lat: 30.32, lng: -97.76 })!);
   });
 
   it("groups markers that overlap into one numbered bubble; a lone marker shows its price band", () => {

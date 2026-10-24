@@ -120,6 +120,8 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
         kind: home.kind,
         beds: home.beds,
         sqft: home.sqft,
+        garage: home.garage,
+        previousPrice: home.previousPrice,
         offer,
         acres: homeAcres,
         excluded,

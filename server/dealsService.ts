@@ -37,7 +37,7 @@ import {
 import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { effectiveScrubConfig } from "./dealsScrub";
-import { loanTypeLabel, priceBandFloor, priceBandLabel } from "../shared/dealsFeatured";
+import { loanTypeLabel, priceBandFloor, priceBandLabel, redHotDeal } from "../shared/dealsFeatured";
 import { incentiveTeaser } from "../shared/dealsTeaser";
 import { heldIncentivePublicEntry, heldIncentiveShowsLine } from "../shared/dealsHeldIncentive";
 import { checkTwilioVerify } from "./dealsVerification";
@@ -670,16 +670,20 @@ export async function publicDealsCatalog(src?: string | null) {
   // Two reads for the whole page, however many communities there are.
   const ids = communities.map((community) => community.id);
   const [availableHomes, incentives, heldLine] = await Promise.all([
-    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
+    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price, previousPrice: dealHomes.previousPrice }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
     liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
     heldLineCommunities(db, ids, now, settings.incentiveLapseDays),
   ]);
   const availableCount = new Map<number, number>();
   for (const home of availableHomes) if (home.kind === "quick_move_in") availableCount.set(home.communityId, (availableCount.get(home.communityId) ?? 0) + 1);
-  // Each community's cover: the first shown photo of its cheapest shown home (a few homes are tried, cheapest first).
+  // Each community's cover: the first shown photo of its cheapest shown home; when the cheapest have none ready yet,
+  // any of its shown homes (Oct 24, 2026: a community with photos on other homes showed "Photos coming soon").
   const homesByCommunity = groupBy(availableHomes, (home) => home.communityId);
   const coverCandidates = new Map<number, number[]>();
-  for (const id of ids) coverCandidates.set(id, selectDealCatalogHomes(homesByCommunity.get(id) ?? []).slice(0, 3).map((home) => home.id));
+  for (const id of ids) coverCandidates.set(id, selectDealCatalogHomes(homesByCommunity.get(id) ?? []).map((home) => home.id));
+  // Red Hot Deals: shown homes whose price really came down (redHotDeal), counted per community for its card and the filter.
+  const redHotCount = new Map<number, number>();
+  for (const id of ids) redHotCount.set(id, selectDealCatalogHomes(homesByCommunity.get(id) ?? []).filter((home) => redHotDeal(home.price, home.previousPrice)).length);
   const candidateIds = Array.from(coverCandidates.values()).flat();
   const coverPhotos = candidateIds.length
     ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, candidateIds), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
@@ -703,6 +707,7 @@ export async function publicDealsCatalog(src?: string | null) {
       fromPriceLabel: community.fromPrice ? `From $${community.fromPrice.toLocaleString("en-US")}` : null,
       reelUrl: community.reelUrl,
       homesAvailable: availableCount.get(community.id) ?? 0,
+      redHotDeals: redHotCount.get(community.id) ?? 0,
       // The landing card shows the teaser and figures; the full wording and the deadlines wait for sign-up.
       // A held offer shows the neutral line only, never a figure or name from its text.
       // A rate never shows without its APR (rateDisclosedIncentive).

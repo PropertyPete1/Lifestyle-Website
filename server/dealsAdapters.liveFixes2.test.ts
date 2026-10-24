@@ -226,7 +226,7 @@ describe("First America Homes: the 'Ready For You' card label (October 20, 2026)
     expect(held.public.homes).toEqual([]);
   });
 
-  it("a repeated record never stands in for a card that has no record of its own (the home would be swept to sold); copies that disagree hold", async () => {
+  it("a repeated record never stands in for a card that has no record of its own (the card is read instead); copies that disagree hold", async () => {
     const page = live("firstamerica-cordova-crossing");
     const record = (street: string) => new RegExp(`<script type='application/ld\\+json'>(?:(?!</script>)[\\s\\S])*?"name": "${street}"(?:(?!</script>)[\\s\\S])*?</script>`);
     const kept = record("2708 Sierra Chicas Lane").exec(page)![0];
@@ -234,7 +234,12 @@ describe("First America Homes: the 'Ready For You' card label (October 20, 2026)
     const masked = page.replace(record("2713 Sierra Chicas Lane"), kept);
     expect(parseHomefinitiRecords(masked, "www.firstamericahomes.com").homes).toHaveLength(8);
     const missing = siteFetcher({ [COMMUNITY]: masked });
-    expect((await loadOfficialDeals(config, { fetcher: missing.fetcher, now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    // Since Oct 24, 2026 the record-less home is read from its own card (every other card agrees with its record), so
+    // it is neither swept to sold nor does it hold the community; the repeated record still stands for 2708 only.
+    const read = await loadOfficialDeals(config, { fetcher: missing.fetcher, now: () => NOW });
+    expect(read.holdReasons).toEqual([]);
+    expect(read.private.homes.filter((home) => home.privateName === "2708 Sierra Chicas Lane")).toHaveLength(1);
+    expect(read.private.homes.find((home) => home.privateName === "2713 Sierra Chicas Lane")).toBeDefined();
     // Two records of one home with different prices: neither is read.
     const disagree = siteFetcher({ [COMMUNITY]: page.replace("</body>", `${kept.replace('"price": "397670.00"', '"price": "297670.00"')}</body>`) });
     expect((await loadOfficialDeals(config, { fetcher: disagree.fetcher, now: () => NOW })).holdReasons).toEqual(["invalid_inventory_response"]);

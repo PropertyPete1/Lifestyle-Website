@@ -43,7 +43,7 @@ const PRIVATE = ["Legend", "Fixture Ranch", "Fixture Crossing", "Fixture Way", "
 
 type Home = SuppliedImport["communities"][number]["homes"][number];
 type Community = SuppliedImport["communities"][number];
-const home = (n: number, over: Partial<Home> = {}, community = C1): Home => ({ url: `${community}/quick-move-in-homes/${n}-fixture-way`, address: `${n} Fixture Way, Cibolo, TX 78108`, plan: "Kerrville", price: 329_990 + n, beds: 4, baths: 2.5, sqft: 2_100, status: "available", moveIn: "ready now", ...over });
+const home = (n: number, over: Partial<Home> = {}, community = C1): Home => ({ url: `${community}/quick-move-in-homes/${n}-fixture-way`, address: `${n} Fixture Way, Cibolo, TX 78108`, plan: "Kerrville", price: 329_990 + n, beds: 4, baths: 2.5, sqft: 2_100, garage: 2, status: "available", moveIn: "ready now", ...over });
 const community = (homes: Home[], over: Partial<Community> = {}): Community => ({ communityUrl: C1, pageComplete: true, homesShownCount: homes.filter((entry) => entry.status !== "sold").length, incentiveText: GOOD_OFFER, homes, ...over });
 const payload = (communities: Community[], capturedAt: Date): SuppliedImport => ({ builder: BUILDER, capturedAt: capturedAt.toISOString(), communities });
 

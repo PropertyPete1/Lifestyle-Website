@@ -30,7 +30,7 @@ const at = (hours: number) => new Date(T0.getTime() + hours * 3_600_000);
 const DAY = 86_400_000;
 
 function item(sourceUrl: string, overrides: Partial<PrivatePlanOrHome> = {}): PrivatePlanOrHome {
-  return { sourceUrl, privateName: sourceUrl.split("/").pop()!, status: "Quick Move-In", price: 400_000, bedrooms: 4, bathrooms: 3, squareFeet: 2_300, gallery: [], ...overrides };
+  return { sourceUrl, privateName: sourceUrl.split("/").pop()!, status: "Quick Move-In", price: 400_000, bedrooms: 4, bathrooms: 3, squareFeet: 2_300, garage: 2, gallery: [], ...overrides };
 }
 type Read = { text: string | null; holds?: string[]; offerRead?: boolean; facts?: PromotionalRateFacts };
 function snapshot(read: Read): DealAdapterResult {
@@ -294,8 +294,8 @@ describe("a held offer for any other reason", () => {
 
   it("the featured ranking ignores a held offer's rate: those homes rank exactly as homes with no offer", async () => {
     const id = seedCommunity();
-    db.seed(dealHomes, { communityId: id, sourceKey: "home-a", sourceUrl: `${COMMUNITY_URL}/a`, privateAddress: "1 Fixture Patch", kind: "quick_move_in", status: "available", origin: "official", price: 400_000 });
-    db.seed(dealHomes, { communityId: id, sourceKey: "home-b", sourceUrl: `${COMMUNITY_URL}/b`, privateAddress: "2 Fixture Patch", kind: "quick_move_in", status: "available", origin: "official", price: 350_000 });
+    db.seed(dealHomes, { communityId: id, sourceKey: "home-a", sourceUrl: `${COMMUNITY_URL}/a`, privateAddress: "1 Fixture Patch", kind: "quick_move_in", status: "available", origin: "official", price: 400_000, garage: "2" });
+    db.seed(dealHomes, { communityId: id, sourceKey: "home-b", sourceUrl: `${COMMUNITY_URL}/b`, privateAddress: "2 Fixture Patch", kind: "quick_move_in", status: "available", origin: "official", price: 350_000, garage: "2" });
     const none = { public: await featuredDeals("public"), gated: await featuredDeals({ view: "gated" }), full: await featuredDeals({ view: "full", builderPages: true }) };
     expect(none.public.bestRate).toBeNull();
     db.seed(dealIncentives, { communityId: id, normalizedText: "held", publicText: FIGURES, headlineRate: "2.99%", followOnRate: "3.99%", apr: "4.1%", loanType: "FHA", downPayment: "3.5% down payment", repaymentTerms: "30-year fixed", confirmedAt: new Date(), active: false, held: true, holdReason: JSON.stringify(["ambiguous_rate"]), manual: false });

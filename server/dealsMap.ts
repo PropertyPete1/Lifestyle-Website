@@ -60,8 +60,25 @@ export function areaMapRadius(settings: { areaMapRadiusMiles?: unknown; publicAr
 type Centroid = { lat: number; lng: number };
 
 export function zipFromAddress(address: string | null | undefined): string | null {
-  const match = /\b(\d{5})(?:-\d{4})?\s*$/.exec((address ?? "").trim());
-  return match ? match[1] : null;
+  const text = (address ?? "").trim();
+  const match = /\b(\d{5})(?:-\d{4})?\s*$/.exec(text);
+  if (match) return match[1]!;
+  // The ZIP after the state, however the builder wrote it: "TX78222", "TX 78148, USA", "TX, 78009", "TX 78254, U.S.A.".
+  const afterState = Array.from(text.matchAll(/\bTX(?![A-Za-z])[\s,]*?(\d{5})(?:-\d{4})?(?!\d)/gi)).at(-1);
+  return afterState ? afterState[1]! : null;
+}
+
+/**
+ * When the builder lists no ZIP ("San Antonio, TX", "3612 Muller Oak Pass, Seguin, TX"): the ZIP Google gives the
+ * listed address, so the pin is still that ZIP's centroid (never the street). A city with no street gives no ZIP and
+ * stays without a pin rather than being placed on the city's centre.
+ */
+export async function zipForAddress(address: string): Promise<string | null> {
+  const first = address.split(";")[0]!.trim();
+  if (!/\d/.test(first)) return null;
+  const result = await makeRequest<GeocodingResult>("/maps/api/geocode/json", { address: first, components: "country:US|administrative_area:TX" });
+  const postal = result.results?.[0]?.address_components?.find((part) => part.types?.includes("postal_code"))?.short_name;
+  return postal && /^\d{5}$/.test(postal) ? postal : null;
 }
 
 function finiteCoordinate(value: unknown, limit: number): number | null {
@@ -119,9 +136,9 @@ export async function refreshCommunityGeography(communityId: number): Promise<{ 
   if (!db) return { ok: false, reason: "database_unavailable" };
   const community = (await db.select().from(dealCommunities).where(eq(dealCommunities.id, communityId)).limit(1))[0];
   if (!community) return { ok: false, reason: "not_found" };
-  const zip = zipFromAddress(community.privateAddress);
-  if (!zip) return { ok: false, reason: "no_zip_in_private_address" };
   try {
+    const zip = zipFromAddress(community.privateAddress) ?? await zipForAddress(community.privateAddress);
+    if (!zip) return { ok: false, reason: "no_zip_in_private_address" };
     const centroid = await geocodeZipCentroid(zip);
     if (!centroid) return { ok: false, reason: "zip_not_geocoded" };
     let chips: string[] = [];

@@ -49,7 +49,11 @@ export function carriesMortgageInsurance(loanType: string | null | undefined, do
   return downPercent < 20;
 }
 
-/** The whole estimated monthly payment: principal and interest, mortgage insurance (see carriesMortgageInsurance), property tax, insurance and HOA. */
+/**
+ * The estimated monthly mortgage payment: principal and interest plus mortgage insurance when the loan carries it (see
+ * carriesMortgageInsurance). October 24, 2026 (Peter): property tax, home insurance and HOA are left out; they vary by
+ * home and by the buyer's homestead exemption, and a figure built on guesses for them made every payment look wrong.
+ */
 export function estimatedMonthlyPayment(input: { price: number; ratePercent: number; downPercent: number; costs: PaymentCosts; loanType?: string | null; years?: number }): number {
   const down = Math.min(Math.max(input.downPercent, 0), 100);
   const loan = input.price * (1 - down / 100);
@@ -57,9 +61,7 @@ export function estimatedMonthlyPayment(input: { price: number; ratePercent: num
   const monthlyRate = input.ratePercent / 100 / 12;
   const principalAndInterest = loan <= 0 ? 0 : monthlyRate === 0 ? loan / months : (loan * monthlyRate) / (1 - (1 + monthlyRate) ** -months);
   const mortgageInsurance = carriesMortgageInsurance(input.loanType, down) ? (loan * input.costs.mortgageInsuranceRatePercent) / 100 / 12 : 0;
-  const tax = (input.price * input.costs.taxRatePercent) / 100 / 12;
-  const insurance = (input.price * input.costs.insuranceRatePercent) / 100 / 12;
-  return Math.round(principalAndInterest + mortgageInsurance + tax + insurance + input.costs.hoaMonthly);
+  return Math.round(principalAndInterest + mortgageInsurance);
 }
 
 /** Monthly principal and interest, in whole dollars. Taxes, insurance and HOA are not included. */
@@ -199,7 +201,18 @@ export type FeaturedCandidate = {
   acres: number | null;
   /** Builders kept out of Best Deals (Lennar by default). */
   excluded: boolean;
+  /** Garage spaces as the builder lists them ("2", "2.5", "3 car"); a home with none listed is never featured. */
+  garage?: string | number | null;
+  /** The home's original price when it came down (see redHotDeal). */
+  previousPrice?: number | null;
 };
+
+/** Garage spaces from the builder's figure ("2", "2.5", "3-car", 2): the first number, or null when none is given. */
+export function garageSpaces(value: string | number | null | undefined): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const match = /(\d+(?:\.\d+)?)/.exec(value ?? "");
+  return match ? Number(match[1]) : null;
+}
 
 export type FeaturedDeal = {
   reason: "payment" | "rate" | "lot";
@@ -223,6 +236,8 @@ export type FeaturedDeal = {
   key?: string;
   /** The home's cover photo (the landing page's public render, or the lead's own on a private list); absent when it has none yet. */
   photo?: string;
+  /** The original price when the home is a Red Hot Deal (a real price drop). */
+  previousPrice?: number | null;
 };
 
 export type FeaturedDeals = {
@@ -253,6 +268,7 @@ function priced(candidate: FeaturedCandidate, settings: FeaturedSettings): Featu
     kind: candidate.kind,
     beds: candidate.beds ?? null,
     sqft: candidate.sqft ?? null,
+    ...(redHotDeal(candidate.price, candidate.previousPrice) ? { previousPrice: candidate.previousPrice! } : {}),
     estMonthly: estimatedMonthlyPayment({ price: candidate.price, ratePercent: rate.ratePercent, downPercent, loanType: rate.loanType, costs: settings.costs ?? DEFAULT_PAYMENT_COSTS }),
     rate,
     downPercent,
@@ -282,7 +298,8 @@ export function rankFeatured(candidates: readonly FeaturedCandidate[], settings:
   const limit = settings.limit ?? FEATURED_LIMIT;
   // October 24, 2026: a featured payment is figured at the builder's own published rate only, never the market rate.
   // A home whose builder publishes no rate is still on the list; it just does not compete here.
-  const eligible = candidates.filter((candidate) => !candidate.excluded && typeof candidate.offer?.ratePercent === "number");
+  // October 24, 2026 (Peter): a featured home has a garage; one listed with none (or no figure) is never featured.
+  const eligible = candidates.filter((candidate) => !candidate.excluded && typeof candidate.offer?.ratePercent === "number" && (garageSpaces(candidate.garage) ?? 0) >= 1);
   const priced_ = eligible.flatMap((candidate) => {
     const deal = priced(candidate, settings);
     return deal ? [{ ...deal, communityKey: candidate.communityKey }] : [];
@@ -349,4 +366,18 @@ export function roundForPublic(deal: FeaturedDeal, costs: PaymentCosts = DEFAULT
 export function roundFeaturedForPublic(featured: FeaturedDeals): FeaturedDeals {
   const round = (deal: FeaturedDeal) => roundForPublic(deal, featured.assumptions.costs ?? DEFAULT_PAYMENT_COSTS);
   return { ...featured, lowestPayment: featured.lowestPayment.map(round), bestRate: featured.bestRate ? round(featured.bestRate) : null, bigLots: featured.bigLots.map(round) };
+}
+
+/**
+ * RED HOT DEALS (October 24, 2026, Peter): a home whose price really came down, by at least $5,000 or 2% of the price,
+ * whichever is more. The original price is the builder's own published "was" price (D.R. Horton's red event cards) or
+ * the highest price this site saw in the last 30 days. The badge says "Red Hot Deal" and shows the savings; it never
+ * says why a home is promoted.
+ */
+export const RED_HOT_MIN_SAVINGS = 5_000;
+export const RED_HOT_MIN_PERCENT = 2;
+export function redHotDeal(price: number | null | undefined, previousPrice: number | null | undefined): { savings: number; was: number } | null {
+  if (!price || !previousPrice || !Number.isFinite(price) || !Number.isFinite(previousPrice) || previousPrice <= price) return null;
+  const savings = previousPrice - price;
+  return savings >= Math.max(RED_HOT_MIN_SAVINGS, (price * RED_HOT_MIN_PERCENT) / 100) ? { savings, was: previousPrice } : null;
 }

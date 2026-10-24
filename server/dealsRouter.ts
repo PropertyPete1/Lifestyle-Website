@@ -726,6 +726,14 @@ export const dealsRouter = router({
     }),
     /** Homes buyers can see and how many still show no photo: when the site looks complete. */
     photoCoverage: adminProcedure.query(async () => (await import("./dealsPhotos")).shownHomePhotoCoverage()),
+    /** Why photos failed (builder, error, count, two source links), so a failure is fixed at its cause. */
+    photoFailures: adminProcedure.query(async ({ ctx }) => { ctx.res.setHeader("Cache-Control", "no-store, private"); return (await import("./dealsPhotos")).dealPhotoFailures(); }),
+    /** Failed photos back in line (optionally one builder or one error); nothing else is touched. */
+    requeueFailedPhotos: adminProcedure.input(z.object({ builder: z.string().min(1).optional(), error: z.string().min(1).max(80).optional() }).optional()).mutation(async ({ input }) => {
+      const requeued = await (await import("./dealsPhotos")).requeueFailedDealPhotos(input ?? {});
+      if (requeued > 0) kickPhotoQueue(20);
+      return { ok: true as const, requeued };
+    }),
     reprocessPhoto: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
       const { requeueDealPhoto } = await import("./dealsPhotos"); await requeueDealPhoto(input.id); kickPhotoQueue(5); return { ok: true as const, queued: true as const };
     }),

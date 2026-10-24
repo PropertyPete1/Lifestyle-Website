@@ -138,3 +138,19 @@ describe("onboarding discovered communities", () => {
     expect(initialScrubConfig({ builder: "Meritage Homes", name: "Kallison Ranch", address: "123 Ranch View Trl, San Antonio, TX" })).toMatchObject({ builder: ["Meritage Homes"], community: ["Kallison Ranch"], street: ["Ranch View"] });
   });
 });
+
+describe("live area labels (Oct 24, 2026: Castroville homes read \"Greater San Antonio\")", () => {
+  it("names the outskirt towns buyers search for, and brings a generated label up to date without touching its headline or an admin's label", async () => {
+    const { areaLabelFor, refreshedAreaLabel } = await import("../shared/dealsArea");
+    const castroville = { lat: 29.329257, lng: -98.87 };
+    expect(areaLabelFor({ centroid: castroville, city: "Castroville" })).toBe("Castroville");
+    expect(areaLabelFor({ centroid: { lat: 29.55, lng: -98.98 }, city: "Mico" })).toBe("Mico");
+    // Inside the metro a side of town is still used, whatever the city.
+    expect(areaLabelFor({ centroid: { lat: 29.33, lng: -98.55 }, city: "Castroville" })).toBe("Southwest San Antonio");
+    expect(refreshedAreaLabel({ areaLabel: "Greater San Antonio", publicLabel: "Greater San Antonio | From the $400s and Move-In Ready Homes", centroid: castroville, city: "Castroville" }))
+      .toEqual({ areaLabel: "Castroville", publicLabel: "Castroville | From the $400s and Move-In Ready Homes" });
+    expect(refreshedAreaLabel({ areaLabel: "Castroville", publicLabel: "Castroville | New Homes", centroid: castroville, city: "Castroville" })).toBeNull();
+    expect(refreshedAreaLabel({ areaLabel: "Greater San Antonio", publicLabel: "Pete's favorite half-acre deal", centroid: castroville, city: "Castroville" })).toBeNull();
+    expect(refreshedAreaLabel({ areaLabel: "Hill Country Hideaway", publicLabel: "Hill Country Hideaway | New Homes", centroid: castroville, city: "Castroville" })).toBeNull();
+  });
+});

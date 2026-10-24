@@ -112,11 +112,12 @@ function builderRows(state: Json | null, name: string, builderId: string | null)
  * site's "Ready Now!" says; a future date names its month. "Under
  * Construction" is a quick move-in for its month, or undated once the estimate
  * has passed (the site still says "Ready Now!", the status says otherwise).
- * Other wording, or none, gives no status (the run is held).
+ * A blank status is read as "Active": the site renders such a home by its date
+ * alone (9822 Brivet Creek, Windsong, Oct 24 2026: status "", moved in August,
+ * its page says "Ready Now!"). Other wording gives no status (the run is held).
  */
 export function scottFelderStatus(status: string | null, moveInDate: string | null, now: Date): { status: string | null; readyNow: boolean; moveInDate: string | null } {
-  const label = (status ?? "").replace(/\s+/g, " ").trim();
-  if (!label) return { status: null, readyNow: false, moveInDate: null };
+  const label = (status ?? "").replace(/\s+/g, " ").trim() || "Active";
   if (/\bsold\b|under\s+contract/i.test(label)) return { status: "Sold", readyNow: false, moveInDate: null };
   const active = /^active$/i.test(label);
   if (!active && !/^under\s+construction$/i.test(label)) return { status: null, readyNow: false, moveInDate: null };

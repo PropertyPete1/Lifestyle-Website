@@ -9,7 +9,7 @@ import { identityPatternStyle } from "@/lib/dealsIdentityPattern";
 import { PROFILE_NAME_MAX, PROFILE_TIMELINES, profileInput, type ProfileInput } from "@/lib/dealsMine";
 import { AreaMap } from "./AreaMap";
 import { Countdown } from "./Countdown";
-import { DealsFooter, Incentive, ReelCard, RetryImage, formatChicagoDate, money, type DealsIncentive } from "./shared";
+import { DealsFooter, Incentive, RedHotBadge, RedHotSavings, ReelCard, RetryImage, formatChicagoDate, money, type DealsIncentive } from "./shared";
 import { FeaturedDeals, type FeaturedDealsData } from "./FeaturedDeals";
 import { BrowseBar, BROWSE_COPY, ShowMore } from "./BrowseBar";
 import { BROWSE_PAGE, EMPTY_FILTERS, OPEN_ALL_UP_TO, dealSelection, gatedCommunityVisible, homeFiltersOn, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
@@ -111,13 +111,12 @@ export function SaveButton({ saved, saving, onToggle }: { saved: boolean; saving
 
 function HomeCard({ home, teamPreview, saved, saving, onRequest, onSave }: { home: GatedHome; teamPreview: boolean; saved: boolean; saving?: boolean; onRequest?: (request: HomeRequest) => void; onSave?: (card: string, saved: boolean) => void }) {
   const toBeBuilt = home.kind === "to_be_built";
-  const dropped = Boolean(home.previousPrice && home.price && home.price < home.previousPrice);
   const details = home.details ?? null;
   return <article id={`home-${home.card}`} className="min-w-0 max-w-full scroll-mt-6 overflow-hidden border border-border bg-card p-5">
-    <div className="flex items-start justify-between gap-4"><p className="eyebrow text-gold">{toBeBuilt ? "To Be Built" : "Available now"}</p>{dropped && <span className="bg-gold px-2 py-1 text-[10px] uppercase tracking-widest text-primary-foreground">Price drop</span>}</div>
+    <div className="flex items-start justify-between gap-4"><p className="eyebrow text-gold">{toBeBuilt ? "To Be Built" : "Available now"}</p><RedHotBadge price={home.price} previousPrice={home.previousPrice} /></div>
     <ProtectedGallery photos={home.photos} />
     <h3 className="mt-3 text-3xl">{home.price ? money.format(home.price) : "Ask for current pricing"}</h3>
-    {dropped && home.previousPrice && <p className="mt-1 text-sm text-muted-foreground line-through">{money.format(home.previousPrice)}</p>}
+    <RedHotSavings price={home.price} previousPrice={home.previousPrice} />
     {details && (details.address || details.planName) && <p className="mt-3 text-sm text-foreground" data-deals-home-details="true">{[details.planName, details.address].filter(Boolean).join(" · ")}</p>}
     <p className="mt-4 text-sm text-muted-foreground">{[home.beds && `${home.beds} beds`, home.baths && `${home.baths} baths`, home.sqft && `${home.sqft.toLocaleString()} sq ft`].filter(Boolean).join(" · ")}</p>
     {home.moveInDate && <p className="mt-2 text-sm text-muted-foreground">Est. move-in: {home.moveInDate}</p>}

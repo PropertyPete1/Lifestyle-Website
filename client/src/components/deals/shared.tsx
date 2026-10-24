@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ImgHTMLAttributes } from "react";
 import { Link } from "wouter";
-import { Play, Send } from "lucide-react";
+import { Flame, Play, Send } from "lucide-react";
+import { redHotDeal } from "@shared/dealsFeatured";
 import { SITE } from "@shared/site";
 import { youtubeEmbedUrl, youtubeVideoId } from "@/lib/dealsVideo";
 
@@ -183,4 +184,19 @@ export function ExpiredHelp({ state }: { state: DealsContactState }) {
 export function InstagramHelp({ state }: { state: DealsContactState }) {
   const keyword = state?.commentKeyword || "HOME";
   return <div className="mt-5 space-y-3 text-sm leading-relaxed text-muted-foreground"><p>Comment {keyword} on any of our reels for the latest deals.</p><a href="https://www.instagram.com/lifestyledesignrealtytexas/" target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center border border-gold/45 px-4 text-xs uppercase tracking-widest text-gold hover:bg-gold/10">@lifestyledesignrealtytexas</a>{state?.textLine && <p>Or <BuyerTextLine state={state} verb="text" />.</p>}</div>;
+}
+
+export const RED_HOT_COPY = { badge: "Red Hot Deal", savings: "Extreme savings", save: (amount: number) => `Save ${money.format(amount)}` } as const;
+
+/** The red "Red Hot Deal" badge (a real price drop, see redHotDeal); nothing when the home is not one. */
+export function RedHotBadge({ price, previousPrice, className = "" }: { price?: number | null; previousPrice?: number | null; className?: string }) {
+  if (!redHotDeal(price, previousPrice)) return null;
+  return <span data-deals-red-hot="true" className={`inline-flex items-center gap-1 rounded-full bg-red-600 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white shadow ${className}`}><Flame className="h-3.5 w-3.5" />{RED_HOT_COPY.badge}</span>;
+}
+
+/** The price block of a Red Hot Deal: the original price crossed out, the savings in red. Null when the home is not one. */
+export function RedHotSavings({ price, previousPrice }: { price?: number | null; previousPrice?: number | null }) {
+  const deal = redHotDeal(price, previousPrice);
+  if (!deal) return null;
+  return <span data-deals-red-hot-savings="true" className="mt-1 flex flex-wrap items-baseline gap-x-2 text-sm"><span className="text-muted-foreground line-through">{money.format(deal.was)}</span><span className="font-semibold text-red-600">{RED_HOT_COPY.savings} · {RED_HOT_COPY.save(deal.savings)}</span></span>;
 }

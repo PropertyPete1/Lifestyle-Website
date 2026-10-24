@@ -1,4 +1,4 @@
-import { BIG_LOT_ACRES, homeLotAcres, lotAcres } from "@shared/dealsFeatured";
+import { BIG_LOT_ACRES, homeLotAcres, lotAcres, redHotDeal } from "@shared/dealsFeatured";
 
 /**
  * Browsing every community in the area: filters shared by the landing page and
@@ -14,11 +14,13 @@ export type BrowseFilters = {
   moveInReady: boolean;
   builderRate: boolean;
   bigLots: boolean;
+  /** Homes with a real price drop (see redHotDeal). */
+  redHot: boolean;
   /** Private list only: just the homes this buyer has saved. */
   savedOnly: boolean;
 };
 
-export const EMPTY_FILTERS: BrowseFilters = { area: "", maxPrice: null, minBeds: null, moveInReady: false, builderRate: false, bigLots: false, savedOnly: false };
+export const EMPTY_FILTERS: BrowseFilters = { area: "", maxPrice: null, minBeds: null, moveInReady: false, builderRate: false, bigLots: false, redHot: false, savedOnly: false };
 export const PRICE_CAPS = [200_000, 300_000, 400_000, 500_000, 600_000, 750_000, 1_000_000] as const;
 export const BED_MINIMUMS = [2, 3, 4, 5] as const;
 /** Communities shown before "Show more". */
@@ -27,7 +29,7 @@ export const BROWSE_PAGE = 12;
 export const OPEN_ALL_UP_TO = 3;
 
 export function activeFilterCount(filters: BrowseFilters): number {
-  return [filters.area, filters.maxPrice, filters.minBeds, filters.moveInReady, filters.builderRate, filters.bigLots, filters.savedOnly].filter(Boolean).length;
+  return [filters.area, filters.maxPrice, filters.minBeds, filters.moveInReady, filters.builderRate, filters.bigLots, filters.redHot, filters.savedOnly].filter(Boolean).length;
 }
 
 /** Areas present in the list, most communities first, for the area picker. */
@@ -55,6 +57,8 @@ export type LandingBrowseCommunity = {
   fromPrice?: number | null;
   homesAvailable: number;
   incentive?: { headlineRate?: string | null } | null;
+  /** Homes in the community that are Red Hot Deals. */
+  redHotDeals?: number;
 };
 
 /** A landing card matches on what it shows: area, starting price, homes ready now, a builder rate, big lots in its label. */
@@ -65,15 +69,16 @@ export function landingMatches(community: LandingBrowseCommunity, filters: Brows
   if (filters.moveInReady && community.homesAvailable <= 0) return false;
   if (filters.builderRate && !community.incentive?.headlineRate) return false;
   if (filters.bigLots && (lotAcres(community.label) ?? 0) < BIG_LOT_ACRES) return false;
+  if (filters.redHot && !(community.redHotDeals && community.redHotDeals > 0)) return false;
   return true;
 }
 
-export type GatedBrowseHome = { kind: string; price?: number | null; beds?: string | number | null; lotSize?: string | null; card?: string };
+export type GatedBrowseHome = { kind: string; price?: number | null; previousPrice?: number | null; beds?: string | number | null; lotSize?: string | null; card?: string };
 /** "Saved only" applies while the buyer has saved something; with nothing saved it narrows nothing (the toggle is hidden then). */
 const savedFilterOn = (filters: BrowseFilters, saved?: ReadonlySet<string>) => filters.savedOnly && Boolean(saved && saved.size > 0);
 /** True when any filter narrows the homes inside a community. */
 export function homeFiltersOn(filters: BrowseFilters, saved?: ReadonlySet<string>): boolean {
-  return filters.maxPrice !== null || filters.minBeds !== null || filters.moveInReady || filters.bigLots || savedFilterOn(filters, saved);
+  return filters.maxPrice !== null || filters.minBeds !== null || filters.moveInReady || filters.bigLots || filters.redHot || savedFilterOn(filters, saved);
 }
 export type GatedBrowseCommunity<Home extends GatedBrowseHome = GatedBrowseHome> = {
   area: string;
@@ -93,6 +98,7 @@ export function homesMatching<Home extends GatedBrowseHome>(community: GatedBrow
     if (filters.minBeds !== null && (bedsFrom(home.beds) ?? 0) < filters.minBeds) return false;
     if (filters.moveInReady && home.kind !== "quick_move_in") return false;
     if (filters.bigLots && (homeLotAcres(home.lotSize, communityLot) ?? 0) < BIG_LOT_ACRES) return false;
+    if (filters.redHot && !redHotDeal(home.price, home.previousPrice)) return false;
     if (savedOnly && !(home.card && saved!.has(home.card))) return false;
     return true;
   });

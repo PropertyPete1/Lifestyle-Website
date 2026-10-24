@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dealCommunities, dealHomes, dealIncentives, dealPhotos, dealSettings } from "../drizzle/schema";
-import { DEFAULT_PAYMENT_COSTS, acresFromText, builderExcluded, downPaymentPercentFrom, estimatedMonthlyPayment, homeLotAcres, loanTypeLabel, lotAcres, monthlyPrincipalAndInterest, mortgageRateFrom, percentFrom, priceBandLabel, rankFeatured, type FeaturedCandidate } from "../shared/dealsFeatured";
+import { DEFAULT_PAYMENT_COSTS, acresFromText, builderExcluded, downPaymentPercentFrom, estimatedMonthlyPayment, garageSpaces, homeLotAcres, loanTypeLabel, lotAcres, monthlyPrincipalAndInterest, mortgageRateFrom, percentFrom, priceBandLabel, rankFeatured, type FeaturedCandidate } from "../shared/dealsFeatured";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 
 /**
@@ -25,7 +25,7 @@ const NO_COSTS = { taxRatePercent: 0, insuranceRatePercent: 0, hoaMonthly: 0, mo
 const settings = { marketRatePercent: 7.4, defaultDownPercent: 5, costs: NO_COSTS };
 /** A builder offer at 7.4% that states no down payment (so the default 5% is used). */
 const at74 = { ratePercent: 7.4, firstYearRatePercent: null, loanType: null, downPercent: null };
-const candidate = (over: Partial<FeaturedCandidate>): FeaturedCandidate => ({ communityKey: "1", label: "Area | Label", area: "Area", price: 400_000, kind: "quick_move_in", offer: null, acres: null, excluded: false, ...over });
+const candidate = (over: Partial<FeaturedCandidate>): FeaturedCandidate => ({ communityKey: "1", label: "Area | Label", area: "Area", price: 400_000, kind: "quick_move_in", offer: null, acres: null, excluded: false, garage: "2", ...over });
 
 describe("the payment math", () => {
   it("figures principal and interest like a mortgage calculator", () => {
@@ -35,9 +35,12 @@ describe("the payment math", () => {
     expect(monthlyPrincipalAndInterest({ price: 100_000, ratePercent: 6, downPercent: 100 })).toBe(0);
   });
 
-  it("figures the whole monthly payment: principal and interest, mortgage insurance under 20% down, tax, insurance and HOA", () => {
-    // A $170K home at a 4.99% FHA builder rate with 3.5% down: $880 P&I, $75 mortgage insurance, $425 tax, $170 insurance, $60 HOA.
-    expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 3.5, costs: DEFAULT_PAYMENT_COSTS })).toBe(1610);
+  it("figures the mortgage payment: principal and interest plus mortgage insurance, never tax, insurance or HOA", () => {
+    // A $170K home at a 4.99% FHA builder rate with 3.5% down: $880 P&I and $75 mortgage insurance (Oct 24: taxes, insurance and HOA left out).
+    expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 3.5, costs: DEFAULT_PAYMENT_COSTS })).toBe(955);
+    // Peter's $225,105 home at 4.99% FHA, 3.5% down: $1,164 P&I + $100 MIP.
+    expect(estimatedMonthlyPayment({ price: 225_105, ratePercent: 4.99, downPercent: 3.5, loanType: "FHA", costs: DEFAULT_PAYMENT_COSTS })).toBe(1264);
+    expect(estimatedMonthlyPayment({ price: 225_105, ratePercent: 4.99, downPercent: 3.5, loanType: "FHA", costs: { ...DEFAULT_PAYMENT_COSTS, taxRatePercent: 6, insuranceRatePercent: 5, hoaMonthly: 2000 } })).toBe(1264);
     // 20% down carries no mortgage insurance.
     expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 20, costs: NO_COSTS })).toBe(monthlyPrincipalAndInterest({ price: 170_000, ratePercent: 4.99, downPercent: 20 }));
     expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 20, costs: { ...NO_COSTS, mortgageInsuranceRatePercent: 0.55 } })).toBe(monthlyPrincipalAndInterest({ price: 170_000, ratePercent: 4.99, downPercent: 20 }));
@@ -116,6 +119,18 @@ describe("the payment math", () => {
 });
 
 describe("the meeting table", () => {
+  it("never features a home without a garage, or one whose builder lists none (Peter, Oct 24)", () => {
+    const offer = { ratePercent: 4.99, firstYearRatePercent: null, loanType: "FHA", downPercent: 3.5, aprPercent: 5.735 };
+    const ranked = rankFeatured([
+      candidate({ communityKey: "1", price: 205_090, garage: null, offer }),
+      candidate({ communityKey: "2", price: 210_000, garage: "0", offer }),
+      candidate({ communityKey: "3", price: 225_105, garage: "2", offer }),
+      candidate({ communityKey: "4", price: 230_000, garage: "1 car", offer }),
+    ], { marketRatePercent: 7.4, defaultDownPercent: 5 });
+    expect(ranked.lowestPayment.map((deal) => deal.price)).toEqual([225_105, 230_000]);
+    expect([garageSpaces("2"), garageSpaces("2.5"), garageSpaces("3-car"), garageSpaces(2), garageSpaces(null), garageSpaces("")]).toEqual([2, 2.5, 3, 2, null, null]);
+  });
+
   it("picks the three lowest payments from three different communities, cheapest first", () => {
     const ranked = rankFeatured([
       candidate({ communityKey: "a", label: "A", price: 300_000, offer: at74 }),
@@ -179,7 +194,7 @@ describe("Best Deals from the database, by viewer", () => {
     builder: "Chesmar", privateName: "Sienna Lakes", sourceUrl: "https://www.chesmar.com/x/", privateAddress: "100 Sienna Lakes Blvd", publicLabel: "Southeast San Antonio | Half-Acre Lots and Lakes", areaLabel: "Southeast San Antonio",
     amenities: "[]", reelCode: "sl1", scrubList: JSON.stringify({ community: ["Sienna Lakes"], street: ["Sienna Lakes Blvd"] }), active: true, paused: false, manualMode: false, ...over,
   });
-  const home = (communityId: number, over: Partial<typeof dealHomes.$inferInsert>) => db.seed(dealHomes, { communityId, sourceKey: `home-${Math.random()}`, sourceUrl: "https://www.chesmar.com/x/h/", privateAddress: "118 Sienna Lakes Blvd", privatePlanName: "Brandon", kind: "quick_move_in", status: "available", origin: "official", price: 400_000, ...over });
+  const home = (communityId: number, over: Partial<typeof dealHomes.$inferInsert>) => db.seed(dealHomes, { communityId, sourceKey: `home-${Math.random()}`, sourceUrl: "https://www.chesmar.com/x/h/", privateAddress: "118 Sienna Lakes Blvd", privatePlanName: "Brandon", kind: "quick_move_in", status: "available", origin: "official", price: 400_000, garage: "2", ...over });
 
   beforeEach(() => {
     db = new FakeDealsDb();
@@ -373,7 +388,8 @@ describe("the Best Deals strip", () => {
     expect(html).toContain('data-deals-featured-tag="Best builder rate"');
     expect(html).toContain('data-deals-featured-tag="Big lot"');
     expect(html).not.toContain(">Best builder rate</p>");
-    expect(html).toContain("Estimated monthly payment on a 30-year loan: principal and interest, mortgage insurance under 20% down, property tax at 0% and home insurance at 0% of the price a year");
+    expect(html).toContain("Estimated monthly mortgage payment on a 30-year loan: principal and interest, plus mortgage insurance when the loan carries it. Property taxes, home insurance and HOA dues are not included");
+    expect(html).not.toMatch(/property tax at/i);
     expect(html).toContain("Builder rates apply to select homes with the builder's lender and qualifying credit. Not a commitment to lend.");
     expect(html).not.toContain("—");
     // A deal with a cover photo shows it on its card; one without shows none.
@@ -389,5 +405,18 @@ describe("the Best Deals strip", () => {
     expect(html).toMatch(/min-h-11/);
     expect(renderToStaticMarkup(React.createElement(FeaturedDeals, { featured: rankFeatured([], settings) }))).toBe("");
     expect(renderToStaticMarkup(React.createElement(FeaturedDeals, { featured: undefined }))).toBe("");
+  });
+});
+
+describe("Red Hot Deals (Oct 24, 2026)", () => {
+  it("is a real price drop of at least $5,000 or 2%, whichever is more", async () => {
+    const { redHotDeal } = await import("../shared/dealsFeatured");
+    // D.R. Horton's red event cards: $275,950 was $318,500; $161,000 was $165,000 (only $4,000: not red hot).
+    expect(redHotDeal(275_950, 318_500)).toEqual({ savings: 42_550, was: 318_500 });
+    expect(redHotDeal(161_000, 165_000)).toBeNull();
+    expect(redHotDeal(600_000, 610_000)).toBeNull(); // $10,000 is under 2% of $600,000
+    expect(redHotDeal(600_000, 612_000)).toEqual({ savings: 12_000, was: 612_000 });
+    expect(redHotDeal(300_000, null)).toBeNull();
+    expect(redHotDeal(300_000, 290_000)).toBeNull();
   });
 });

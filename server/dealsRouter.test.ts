@@ -272,7 +272,7 @@ describe("agent client links through the router", () => {
   beforeEach(() => {
     teamId = db.seed(dealTeamAllowlist, { name: "Tiffany Agent", phoneE164: "+12105550101", email: "tiffany@example.com", fubUserId: "77", source: "fub", active: true });
     const communityId = db.seed(dealCommunities, { builder: "Chesmar", privateName: "Fixture Lakes", sourceUrl: "https://www.chesmar.com/x/", privateAddress: "100 Fixture Blvd", publicLabel: "Southeast San Antonio | Lots", areaLabel: "Southeast San Antonio", amenities: "[]", reelCode: "sl1", scrubList: "{}", active: true, paused: false, manualMode: false });
-    db.seed(dealHomes, { communityId, sourceKey: "home-1", sourceUrl: "https://www.chesmar.com/x/plan/1/", privateAddress: "118 Fixture Blvd", privatePlanName: "Brandon", kind: "quick_move_in", status: "available", origin: "official", price: 489_990 });
+    db.seed(dealHomes, { communityId, sourceKey: "home-1", sourceUrl: "https://www.chesmar.com/x/plan/1/", privateAddress: "118 Fixture Blvd", privatePlanName: "Brandon", kind: "quick_move_in", status: "available", origin: "official", price: 489_990, garage: "2" });
     // Best Deals features only homes with a builder rate (and its APR).
     db.seed(dealIncentives, { communityId, normalizedText: "o", publicText: "o", headlineRate: "4.99%", apr: "5.6%", confirmedAt: new Date(), active: true, held: false, manual: false });
     db.seed(dealClientLinks, { token: TOKEN, agentTeamId: teamId, agentLeadId: 9, clientName: "Maria Lopez", expiresAt: new Date(Date.now() + 86_400_000) });

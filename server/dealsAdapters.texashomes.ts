@@ -156,10 +156,13 @@ export type TexasHomesPage = {
  * renders the same file through image styles (`/styles/<style>/public/…`)
  * and resized copies (`…-300x200.png`, `…-resized.png`), so the path's
  * style segment and a size suffix are set aside; null when it is elsewhere.
+ * The list's rows may name the site's own hosting origin for the same file
+ * (Ventana, Oct 24 2026: `https://live-texas-homes.pantheonsite.io/sites/default/files/…`).
  */
+export const TEXASHOMES_ORIGIN_HOST = "live-texas-homes.pantheonsite.io";
 function logoPath(src: string, base: URL): string | null {
   const url = asUrl(new URL(decodeHtmlEntities(src), base).toString());
-  if (!url || !sameOfficialHost(url, base.hostname)) return null;
+  if (!url || !(sameOfficialHost(url, base.hostname) || (url.protocol === "https:" && url.hostname.toLowerCase() === TEXASHOMES_ORIGIN_HOST))) return null;
   const path = comparablePath(url.pathname).replace(/\/styles\/[^/]+\/public\//, "/");
   return path.replace(/(-\d+x\d+|-resized|-scaled)(\.[a-z0-9]+)$/i, "$2");
 }

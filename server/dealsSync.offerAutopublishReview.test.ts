@@ -31,7 +31,7 @@ const at = (hours: number) => new Date(T0.getTime() + hours * 3_600_000);
 const DAY = 86_400_000;
 
 function item(sourceUrl: string, overrides: Partial<PrivatePlanOrHome> = {}): PrivatePlanOrHome {
-  return { sourceUrl, privateName: sourceUrl.split("/").pop()!, status: "Quick Move-In", price: 400_000, bedrooms: 4, bathrooms: 3, squareFeet: 2_300, gallery: [], ...overrides };
+  return { sourceUrl, privateName: sourceUrl.split("/").pop()!, status: "Quick Move-In", price: 400_000, bedrooms: 4, bathrooms: 3, squareFeet: 2_300, garage: 2, gallery: [], ...overrides };
 }
 type Read = { text: string | null; holds?: string[]; offerRead?: boolean; facts?: PromotionalRateFacts };
 function snapshot(read: Read): DealAdapterResult {
@@ -248,7 +248,7 @@ describe("F5: the admin-side reasons are judged on the state now", () => {
 describe("Reg Z on the buyer strip: a builder rate is printed with its APR", () => {
   it("the featured strip prints the APR beside the builder rate", async () => {
     const id = seedCommunity();
-    db.seed(dealHomes, { communityId: id, sourceKey: "home-a", sourceUrl: `${COMMUNITY_URL}/a`, privateAddress: "1 Fixture Patch", kind: "quick_move_in", status: "available", origin: "official", price: 400_000 });
+    db.seed(dealHomes, { communityId: id, sourceKey: "home-a", sourceUrl: `${COMMUNITY_URL}/a`, privateAddress: "1 Fixture Patch", kind: "quick_move_in", status: "available", origin: "official", price: 400_000, garage: "2" });
     db.seed(dealIncentives, { communityId: id, normalizedText: "live", publicText: "4.99% (5.62% APR) FHA", headlineRate: "4.99%", apr: "5.62%", loanType: "FHA", downPayment: "3.5%", confirmedAt: new Date(), active: true, held: false, manual: false });
     const { rateLine } = await import("../client/src/components/deals/FeaturedDeals");
     for (const featured of [await featuredDeals("public"), await featuredDeals({ view: "gated" })]) {
@@ -283,7 +283,7 @@ describe("Reg Z on every buyer surface: no rate without its stored APR", () => {
 
   it("the featured strip never uses or prints a builder rate with no APR: those homes are not featured (never at a market rate)", async () => {
     const id = seedCommunity();
-    db.seed(dealHomes, { communityId: id, sourceKey: "home-a", sourceUrl: `${COMMUNITY_URL}/a`, privateAddress: "1 Fixture Patch", kind: "quick_move_in", status: "available", origin: "official", price: 400_000 });
+    db.seed(dealHomes, { communityId: id, sourceKey: "home-a", sourceUrl: `${COMMUNITY_URL}/a`, privateAddress: "1 Fixture Patch", kind: "quick_move_in", status: "available", origin: "official", price: 400_000, garage: "2" });
     const none = await featuredDeals("public");
     db.seed(dealIncentives, { communityId: id, normalizedText: "legacy", publicText: NO_APR_TEXT, headlineRate: "4.99%", loanType: "FHA", downPayment: "3.5%", confirmedAt: new Date(), active: true, held: false, manual: false });
     const featured = await featuredDeals("public");

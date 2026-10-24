@@ -81,6 +81,12 @@ describe("area map geography", () => {
   it("geocodes the ZIP centroid on save and stores five-minute drive-time chips", async () => {
     expect(zipFromAddress("8106 Fixture Street, San Antonio, TX 78263")).toBe("78263");
     expect(zipFromAddress("no zip here")).toBeNull();
+    // Oct 24, 2026: builders that write the ZIP after the state without a space, or end with the country.
+    expect(zipFromAddress("8518 Partida San Antonio, TX78222")).toBe("78222");
+    expect(zipFromAddress("204 Seibel Way, Universal City, TX 78148, USA")).toBe("78148");
+    expect(zipFromAddress("10103 Zimmer, San Antonio, TX 78254, U.S.A.")).toBe("78254");
+    expect(zipFromAddress("181 Legend Park Drive Castroville, TX, 78009")).toBe("78009");
+    expect(zipFromAddress("San Antonio, TX")).toBeNull();
     expect(roundToFiveMinutes(1_480)).toBe(25);
     expect(roundToFiveMinutes(1_130)).toBe(20);
     expect(roundToFiveMinutes(90)).toBe(5);

@@ -120,20 +120,22 @@ describe("official refresh: homes", () => {
     expect(emails().filter((email) => email.category === "deals_sync_summary").at(-1)?.content).toContain("back on the market: 8305-b");
   });
 
-  it("records every observed price, derives the Price drop from 30-day history only, and ignores the card's was-price", async () => {
+  it("records every observed price; the original price is the higher of the 30-day history and the builder's own was-price (Oct 24: Red Hot Deals)", async () => {
     mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a"), price: 400_000, previousPrice: 450_000 }] }));
     await refreshOfficialDeals({ communityId, now: T0 });
     const row = () => db.rows(dealHomes).find((value) => value.sourceUrl === home("8301-a"))!;
-    expect(row()).toMatchObject({ price: 400_000, previousPrice: null });
+    // The builder publishes "was $450,000" on the card: that is the original price from the first read.
+    expect(row()).toMatchObject({ price: 400_000, previousPrice: 450_000 });
     expect(db.rows(dealHomePriceHistory).map((value) => value.price)).toEqual([400_000]);
 
     const dropDay = new Date(T0.getTime() + 40 * DAY);
     mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a"), price: 380_000, previousPrice: 450_000 }] }));
     await refreshOfficialDeals({ communityId, now: dropDay });
-    expect(row()).toMatchObject({ price: 380_000, previousPrice: 400_000 });
+    expect(row()).toMatchObject({ price: 380_000, previousPrice: 450_000 });
     expect(db.rows(dealHomePriceHistory).map((value) => value.price)).toEqual([400_000, 400_000, 380_000]);
     expect(emails().at(-1)?.content).toContain("price drop: 8301-a $400,000 to $380,000");
 
+    // The builder stops showing a was-price: the site's own 30-day history still shows the drop.
     mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a"), price: 380_000 }] }));
     await refreshOfficialDeals({ communityId, now: new Date(dropDay.getTime() + 3 * DAY) });
     expect(db.rows(dealHomePriceHistory)).toHaveLength(3);
@@ -227,6 +229,37 @@ describe("official refresh: holds", () => {
     mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));
     await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 15 * DAY) });
     expect(community()).toMatchObject({ catalogHoldReason: null, catalogHoldSeenAt: null, holdReason: null });
+  });
+
+  it("takes a community off the site when its page has failed for most of a day and now answers 404; a 500 or a fresh failure never does (Oct 24: Kinder Gale)", async () => {
+    mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));
+    await refreshOfficialDeals({ communityId, now: T0 });
+    const answers: number[] = [];
+    const fetcher = vi.fn(async () => new Response("gone", { status: answers.shift() ?? 404 }));
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      mocks.loadOfficialDeals.mockResolvedValue(snapshot({ catalogOk: false, holdReasons: ["community_fetch_failed"] }));
+      // First failure: recorded as a hold, nothing fetched.
+      await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + DAY) });
+      expect(fetcher).not.toHaveBeenCalled();
+      // Eight hours on: too soon.
+      await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + DAY + 8 * 3_600_000) });
+      expect(fetcher).not.toHaveBeenCalled();
+      // A day on, the page answers 500 (twice: one retry): kept.
+      answers.push(500, 500);
+      await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 2 * DAY) });
+      expect(fetcher).toHaveBeenCalled();
+      expect(db.rows(dealCommunities)[0].active).toBe(true);
+      expect(db.rows(dealHomes)[0].status).toBe("available");
+      // Then 404: off the site, its homes sold, one digest line.
+      const results = await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 3 * DAY) });
+      expect(results).toEqual([{ communityId, reelCode: "vg1", ok: false, reason: "community_removed" }]);
+      expect(db.rows(dealCommunities)[0].active).toBe(false);
+      expect(db.rows(dealHomes)[0].status).toBe("sold");
+      expect(emails().map((email) => email.content).join("\n")).toContain("community taken off the site");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("tells the admin in the hold e-mail when a builder's site refuses the reader, so the community is switched to Manual", async () => {

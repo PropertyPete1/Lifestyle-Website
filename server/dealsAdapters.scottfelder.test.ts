@@ -107,7 +107,9 @@ describe("Scott Felder reader: statuses and slugs", () => {
     expect(scottFelderStatus("Under Construction", null, NOW)).toEqual({ status: "Quick Move-In", readyNow: false, moveInDate: null });
     expect(scottFelderStatus("Sold", null, NOW)).toEqual({ status: "Sold", readyNow: false, moveInDate: null });
     expect(scottFelderStatus("Under Contract", "2026-11-01T05:00:00.000Z", NOW)).toEqual({ status: "Sold", readyNow: false, moveInDate: null });
-    for (const label of [null, "", "Pending", "Model", "Coming Soon", "Available"]) expect(scottFelderStatus(label, "2026-06-15T05:00:00.000Z", NOW).status).toBeNull();
+    for (const label of ["Pending", "Model", "Coming Soon", "Available"]) expect(scottFelderStatus(label, "2026-06-15T05:00:00.000Z", NOW).status).toBeNull();
+    // A blank status is rendered by its date, as "Active" (9822 Brivet Creek: "", August, "Ready Now!" on its page).
+    for (const label of [null, "", "  "]) expect(scottFelderStatus(label, "2026-08-27T05:00:00.000Z", NOW)).toEqual({ status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null });
     // A date decades out is not a move-in estimate.
     expect(scottFelderStatus("Active", "2099-01-01T00:00:00.000Z", NOW)).toEqual({ status: "Quick Move-In", readyNow: false, moveInDate: null });
     expect(scottFelderSlug("8157 Fixture Pt.")).toBe("8157-fixture-pt");

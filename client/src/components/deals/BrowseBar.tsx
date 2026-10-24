@@ -1,4 +1,4 @@
-import { SlidersHorizontal, X } from "lucide-react";
+import { SlidersHorizontal, X, Flame } from "lucide-react";
 import { BED_MINIMUMS, BROWSE_PAGE, EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, priceCapLabel, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export const BROWSE_COPY = {
@@ -12,6 +12,7 @@ export const BROWSE_COPY = {
   moveInReady: "Quick move-in",
   builderRate: "Builder rate offer",
   bigLots: "Half-acre+ lots",
+  redHot: "Red Hot Deals",
   saved: "Saved",
   noneSaved: "None of your saved homes match these filters. Clear a filter to see them all.",
   clear: "Clear filters",
@@ -43,9 +44,11 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, showBe
   const choices = areaChoices(areas);
   const active = activeFilterCount(filters);
   const set = (patch: Partial<BrowseFilters>) => onChange({ ...filters, ...patch });
-  return <section aria-label={BROWSE_COPY.heading} data-deals-browse="true" className="mt-10 min-w-0 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
+  return <section aria-label={BROWSE_COPY.heading} data-deals-browse="true" className="mt-6 min-w-0 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5 lg:py-4">
     <p className="flex items-center gap-2 text-xs uppercase tracking-widest text-gold"><SlidersHorizontal className="h-4 w-4" />{BROWSE_COPY.heading}</p>
-    <div className={`mt-3 grid min-w-0 grid-cols-2 gap-3 ${showBeds ? "sm:grid-cols-3" : ""}`}>
+    {/* On a wide screen the selects and the toggles share one row, so the map and the list start higher (Peter: see the map before scrolling). */}
+    <div className="min-w-0 lg:flex lg:items-end lg:gap-4">
+    <div className={`mt-3 grid min-w-0 grid-cols-2 gap-3 lg:shrink-0 ${showBeds ? "sm:grid-cols-3 lg:w-[36rem]" : "lg:w-[26rem]"}`}>
       <label className={`min-w-0 text-[11px] uppercase tracking-widest text-muted-foreground ${showBeds ? "col-span-2 sm:col-span-1" : ""}`}>{BROWSE_COPY.area}
         <select aria-label={BROWSE_COPY.area} value={filters.area} onChange={(event) => set({ area: event.target.value })} className={`mt-1 ${SELECT}`}>
           <option value="">{BROWSE_COPY.anyArea}</option>
@@ -65,12 +68,14 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, showBe
         </select>
       </label>}
     </div>
-    <div className="mt-3 flex min-w-0 flex-wrap gap-2">
+    <div className="mt-3 flex min-w-0 flex-wrap gap-2 lg:mt-0">
       {savedCount > 0 && <Toggle name="saved" on={filters.savedOnly} label={`${BROWSE_COPY.saved} (${savedCount})`} onChange={(value) => set({ savedOnly: value })} />}
+      <button type="button" aria-pressed={filters.redHot} data-deals-filter="red-hot" onClick={() => set({ redHot: !filters.redHot })} className={`inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-sm font-semibold transition-colors ${filters.redHot ? "border-red-600 bg-red-600 text-white" : "border-red-600/60 text-red-600 hover:bg-red-50"}`}><Flame className="h-4 w-4" />{BROWSE_COPY.redHot}</button>
       <Toggle name="move-in-ready" on={filters.moveInReady} label={BROWSE_COPY.moveInReady} onChange={(value) => set({ moveInReady: value })} />
       <Toggle name="builder-rate" on={filters.builderRate} label={BROWSE_COPY.builderRate} onChange={(value) => set({ builderRate: value })} />
       <Toggle name="big-lots" on={filters.bigLots} label={BROWSE_COPY.bigLots} onChange={(value) => set({ bigLots: value })} />
       {active > 0 && <button type="button" onClick={() => onChange(EMPTY_FILTERS)} className="inline-flex min-h-11 items-center gap-1 px-2 text-xs uppercase tracking-widest text-muted-foreground hover:text-gold"><X className="h-3.5 w-3.5" />{BROWSE_COPY.clear}</button>}
+    </div>
     </div>
     <p role="status" aria-live="polite" className="mt-3 text-xs text-muted-foreground" data-deals-browse-count="true">{active > 0 ? `${shown} of ${total} ${unit} match` : `${total} ${unit}`}</p>
   </section>;

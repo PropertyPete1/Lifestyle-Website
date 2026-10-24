@@ -100,11 +100,14 @@ describe("gated catalog stays inside a 375 px phone viewport (A19)", () => {
     expect(renderToStaticMarkup(createElement(ProtectedGallery, { photos: undefined }))).toContain(">Photos on request<");
   });
 
-  it("renders the countdown, price drop badge and buyer request controls", () => {
+  it("renders the countdown, Red Hot Deal badge and buyer request controls", () => {
     expect(html).toContain("23:14:05");
     expect(countdownLabel(new Date(NOW - 1000).toISOString(), NOW)).toBe("00:00:00");
-    expect(html.match(/Price drop/g)?.length).toBe(1);
+    // Oct 24 (Peter): a real price drop is a red "Red Hot Deal", the original price crossed out and the savings shown.
+    expect(html.match(/Red Hot Deal/g)?.length).toBe(1);
+    expect(html).not.toContain("Price drop");
     expect(html).toContain("$519,000");
+    expect(html).toContain("Extreme savings · Save $20,000");
     expect(html.match(/Tour this home with us/g)?.length).toBe(2);
     expect(html.match(/Ask about this one/g)?.length).toBe(1);
     expect(html).toContain("Add your name so we know who to text.");

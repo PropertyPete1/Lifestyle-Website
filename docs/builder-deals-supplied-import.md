@@ -81,6 +81,7 @@ Strict: unknown fields anywhere are refused (400).
       beds?: number | null,           // whole number
       baths?: number | null,          // 2.5 for two full and one half
       sqft?: number | null,           // whole number
+      garage?: number | null,         // garage spaces, 0 to 6 (2 for "2-car garage"); a home without one is never featured
       status: "available" | "under_construction" | "pending" | "sold",   // pending: shown but under contract ("Contract Pending")
       moveIn?: "ready now" | "Month YYYY" | null,   // e.g. "December 2026"
       photos?: string[]               // optional, up to 40, https on the builder's site or image host (Legend: assets.livelegendhomes.com)
@@ -118,7 +119,7 @@ listing the page no longer shows.
 | Older `capturedAt` than the import already stored | community `rejected`, `older_than_stored` |
 | `pageComplete` false, or homes for sale sent differ from `homesShownCount` | hold `supplied_import_incomplete` |
 | `capturedAt` more than 36 hours before the refresh | hold `supplied_import_stale` |
-| Price outside 50,000 to 5,000,000 (or not whole dollars), beds outside 1 to 10 (or not whole), baths outside 1 to 10 or not in steps of 0.5, sqft outside 400 to 15,000 | hold `supplied_import_out_of_bounds` |
+| Price outside 50,000 to 5,000,000 (or not whole dollars), beds outside 1 to 10 (or not whole), baths outside 1 to 10 or not in steps of 0.5, sqft outside 400 to 15,000, garage outside 0 to 6 (or not whole) | hold `supplied_import_out_of_bounds` |
 | Home link off the builder's site, the community page itself, or a link not under this community's page (a "nearby homes" card from another community), address without a house number and street, unreadable `moveIn`, an under-construction home "ready now", a photo off the builder's hosts | hold `supplied_import_invalid_home` |
 | No homes for sale, unless the previous import (captured earlier) also had none: a list that failed to load must not sweep every home to sold | hold `supplied_import_incomplete` (a sold-out community publishes on its second empty import) |
 | Two homes with the same link or the same street address | hold `supplied_import_duplicate_home` |
@@ -173,6 +174,7 @@ hold after this import, if any (it needs an admin's review, not a new import).
           "beds": 4,
           "baths": 2.5,
           "sqft": 2105,
+          "garage": 2,
           "status": "available",
           "moveIn": "ready now",
           "photos": ["https://assets.livelegendhomes.com/legend-cms-prod-assets/image/example-front.jpg"]

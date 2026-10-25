@@ -7,7 +7,7 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { ASHTON_HOST, CENTURY_HOST, DRB_HOST, DREES_HOST, LEGEND_HOST, VIEWHOMES_HOST, TEXASHOMES_HOST, HAKES_HOST, BEAZER_HOST, LENNAR_HOST, EMPIRE_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { ASHTON_HOST, PERRY_HOST, CENTURY_HOST, DRB_HOST, DREES_HOST, LEGEND_HOST, VIEWHOMES_HOST, TEXASHOMES_HOST, HAKES_HOST, BEAZER_HOST, LENNAR_HOST, EMPIRE_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
@@ -15,6 +15,7 @@ import { highlandRecord } from "./dealsAdapters.highland";
 import { kbRecord } from "./dealsAdapters.kbhome";
 import { tollListingEntries, tollListingUrl } from "./dealsAdapters.toll";
 import { WEEKLEY_MARKETS, weekleyListingEntries, weekleyListingUrl, weekleyRecord } from "./dealsAdapters.weekley";
+import { perryCommunityPath, perryCommunityRecord, perryMarketEntries } from "./dealsAdapters.perryDiscovery";
 import { ASHTON_AUSTIN_DIVISION_ID, ashtonListingEntries, ashtonListingUrl, ashtonRecord } from "./dealsAdapters.ashton";
 import { lgiListingEntries, lgiListingUrl, lgiRecord } from "./dealsAdapters.lgi";
 import { sitterleListingEntries, sitterleListingUrl, sitterleRecord } from "./dealsAdapters.sitterle";
@@ -76,8 +77,8 @@ export type DiscoveryReader = {
   index: DiscoveryIndex;
   /** Path of a community page in the builder's San Antonio market. */
   communityPath: RegExp;
-  /** Reads the community's record from its page when the site has no schema.org record (default: communityRecordFromHtml). */
-  record?: (html: string, pageUrl: string) => CommunityRecord | null;
+  /** Reads the community's record from its page when the site has no schema.org record (default: communityRecordFromHtml). A reader that needs more pages (Perry: the first home's address) gets the fetcher. */
+  record?: (html: string, pageUrl: string, fetcher: HtmlFetcher) => CommunityRecord | null | Promise<CommunityRecord | null>;
 };
 
 export type ListingEntry = { url: string; record: CommunityRecord | null };
@@ -125,7 +126,20 @@ export function pulteListingEntries(body: string, host: string, brand?: string):
  */
 const DRH_COMMUNITY_PATH = /^\/texas\/(?:(?:san-antonio|new-braunfels|san-marcos|austin)\/[a-z0-9-]+|killeen-temple-waco\/(?:georgetown|jarrell|florence|liberty-hill|leander|hutto|taylor|round-rock|thrall|granger))\/[a-z0-9-]+\/?$/i;
 
+/** Perry's communities in both markets; the pin is the ZIP centroid of the first home's address (Perry publishes no coordinates). */
+export function perryDiscoveryReader(geocodeZip: (zip: string) => Promise<{ lat: number; lng: number } | null> = (zip) => import("./dealsMap").then((map) => map.geocodeZipCentroid(zip))): DiscoveryReader {
+  return {
+    builder: "Perry Homes",
+    host: PERRY_HOST,
+    index: { kind: "reader", entries: (fetcher, now) => perryMarketEntries(fetcher, now, "san-antonio") },
+    communityPath: perryCommunityPath("san-antonio"),
+    more: [{ index: { kind: "reader", entries: (fetcher, now) => perryMarketEntries(fetcher, now, "austin") }, communityPath: perryCommunityPath("austin") }],
+    record: (html, pageUrl, fetcher) => perryCommunityRecord(html, pageUrl, fetcher, geocodeZip),
+  };
+}
+
 export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
+  perryDiscoveryReader(),
   // Chesmar files New Braunfels, Seguin, Austin, Kyle and Marble Falls under "central-texas-new-homes"; the market check
   // keeps the ones within either market (Meyer Ranch 45's and 60's were never found before; Austin's since Oct 25, 2026).
   { builder: "Chesmar", host: "www.chesmar.com", index: { kind: "sitemap", url: "https://www.chesmar.com/sitemap.xml" }, communityPath: /^\/texas\/(?:san-antonio|central-texas)-new-homes\/[a-z0-9-]+\/[^/]+\/?$/i },
@@ -474,7 +488,7 @@ export async function discoverBuilderCommunities(reader: DiscoveryReader, fetche
     if (!record || (reader.record && !record.street)) {
       const page = await getDocument(url, fetcher, "text/html,application/xhtml+xml", reader.host);
       if (!page.ok) { result.skipped.push({ url, reason: "page_unreadable" }); continue; }
-      const fromPage = reader.record ? reader.record(page.text, url) : communityRecordFromHtml(page.text);
+      const fromPage = reader.record ? await reader.record(page.text, url, fetcher) : communityRecordFromHtml(page.text);
       record = fromPage ? { ...fromPage, city: fromPage.city ?? listed?.city ?? null, geo: fromPage.geo ?? listed?.geo ?? null, phone: fromPage.phone ?? listed?.phone ?? null, priceFrom: fromPage.priceFrom ?? listed?.priceFrom ?? null } : null;
     }
     if (!record) { result.skipped.push({ url, reason: "no_community_record" }); continue; }

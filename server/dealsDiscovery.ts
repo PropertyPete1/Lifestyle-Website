@@ -126,15 +126,15 @@ export function pulteListingEntries(body: string, host: string, brand?: string):
  */
 const DRH_COMMUNITY_PATH = /^\/texas\/(?:(?:san-antonio|new-braunfels|san-marcos|austin)\/[a-z0-9-]+|killeen-temple-waco\/(?:georgetown|jarrell|florence|liberty-hill|leander|hutto|taylor|round-rock|thrall|granger))\/[a-z0-9-]+\/?$/i;
 
-/** Perry's communities in both markets; the pin is the ZIP centroid of the first home's address (Perry publishes no coordinates). */
-export function perryDiscoveryReader(geocodeZip: (zip: string) => Promise<{ lat: number; lng: number } | null> = (zip) => import("./dealsMap").then((map) => map.geocodeZipCentroid(zip))): DiscoveryReader {
+/** Perry's communities in both markets: the community page names and prices it; its first collection's sales-center page places it. */
+export function perryDiscoveryReader(): DiscoveryReader {
   return {
     builder: "Perry Homes",
     host: PERRY_HOST,
     index: { kind: "reader", entries: (fetcher, now) => perryMarketEntries(fetcher, now, "san-antonio") },
     communityPath: perryCommunityPath("san-antonio"),
     more: [{ index: { kind: "reader", entries: (fetcher, now) => perryMarketEntries(fetcher, now, "austin") }, communityPath: perryCommunityPath("austin") }],
-    record: (html, pageUrl, fetcher) => perryCommunityRecord(html, pageUrl, fetcher, geocodeZip),
+    record: (html, pageUrl, fetcher) => perryCommunityRecord(html, pageUrl, fetcher),
   };
 }
 

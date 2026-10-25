@@ -1,45 +1,47 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { discoverBuilderCommunities, perryDiscoveryReader } from "./dealsDiscovery";
-import { parsePerryCommunityPage, parsePerryHomeAddress, perryCommunityPath, resetPerryDiscoveryCache } from "./dealsAdapters.perryDiscovery";
+import { parsePerryCommunityPage, parsePerrySalesCenter, perryCommunityPath, resetPerryDiscoveryCache } from "./dealsAdapters.perryDiscovery";
 
 /**
- * Perry Homes in both markets (October 25, 2026, Peter: Austin). Perry's pages carry no schema.org record and no
- * coordinates: a community is placed from the street address on its first home's page and that ZIP's centroid.
- * Fixture names, streets and ZIP points are invented; the Flight shapes are Perry's.
+ * Perry Homes in both markets (October 25, 2026, Peter: Austin). The fixtures are trimmed excerpts of Perry's live
+ * Austin and San Antonio pages that day (Easton Park and Cibolo Valley Heights: each community page and its first
+ * collection's sales-center page), with the Flight shapes as served; the plans-only community is invented in the same shape.
  */
 vi.mock("./db", () => ({ getDb: async () => null }));
 
+const fixture = (name: string) => readFileSync(new URL(`./fixtures/deals/${name}.html`, import.meta.url), "utf8");
+const COMMUNITY = fixture("perry-austin-community");
+const SALES_CENTER = fixture("perry-austin-sales-center");
 const flight = (payload: string) => `<html><body><script>self.__next_f.push([1,${JSON.stringify(payload)}])</script></body></html>`;
-const communityPage = (market: string, slug: string, name: string, band: string) => flight(`e:["$","main",null,{"children":[["$","$L30",null,{"communityDisplayName":"${name}","marketDisplayName":"x","sections":[{"section_title":"${name} 50'","section_url":"/new-homes/texas/${market}/${slug}/${slug}-50","from_price":"From the $${band}s"},{"section_title":"${name} 60'","section_url":"/new-homes/texas/${market}/${slug}/${slug}-60","from_price":"From the $999s"}]}]]}]`);
-const homePage = (street: string, city: string, zip: string) => flight(`e:["$","main",null,{"children":[["$","$L29",null,{"address":{"address_1":"${street}","address_2":null,"city":"${city}","state":"TX","zip":"${zip}"},"home_details":{"price":400000}}]]}]`);
-const planOnlyCommunity = (market: string, slug: string) => flight(`e:["$","main",null,{"children":[["$","$L30",null,{"communityDisplayName":"Plans Only","sections":[{"section_title":"Plans Only 45'","section_url":"/new-homes/texas/${market}/${slug}/${slug}-45","from_price":"From the $300s"}]}]]}]`);
+const SA_COMMUNITY = fixture("perry-sa-community");
+const SA_SALES_CENTER = fixture("perry-sa-sales-center");
+/** A community listed before any collection has an office page: not placed yet. */
+const NEW_COMMUNITY = flight(`"community_name":"Fixture Grove","node":{"url":"/new-homes/texas/austin/fixture-grove/fixture-grove-45","ranges_from_price_sq_ft":{"from_price":300000}}`);
 
+const P = "https://www.perryhomes.com";
 const SITEMAP = `<?xml version="1.0"?><urlset>${[
-  "https://www.perryhomes.com/new-homes/texas/austin",
-  "https://www.perryhomes.com/new-homes/texas/austin/fixture-ridge",
-  "https://www.perryhomes.com/new-homes/texas/austin/fixture-ridge/fixture-ridge-50",
-  "https://www.perryhomes.com/new-homes/texas/austin/fixture-ridge/fixture-ridge-50/2206h",
-  "https://www.perryhomes.com/new-homes/texas/austin/fixture-ridge/fixture-ridge-50/sales-center",
-  "https://www.perryhomes.com/new-homes/texas/austin/fixture-ridge/fixture-ridge-50/204-fixture-pass",
-  "https://www.perryhomes.com/new-homes/texas/austin/fixture-ridge/fixture-ridge-60/118-fixture-way",
-  "https://www.perryhomes.com/new-homes/texas/austin/plans-only",
-  "https://www.perryhomes.com/new-homes/texas/austin/plans-only/plans-only-45/2401w",
-  "https://www.perryhomes.com/new-homes/texas/austin/promotion/x",
-  "https://www.perryhomes.com/new-homes/texas/san-antonio/fixture-heights",
-  "https://www.perryhomes.com/new-homes/texas/san-antonio/fixture-heights/fixture-heights-50/119-fixture-trail",
-  "https://www.perryhomes.com/new-homes/texas/houston/far-away",
-  "https://www.perryhomes.com/new-homes/texas/houston/far-away/far-away-50/1-far-st",
+  `${P}/new-homes/texas/austin`,
+  `${P}/new-homes/texas/austin/easton-park`,
+  `${P}/new-homes/texas/austin/easton-park/easton-park-40`,
+  `${P}/new-homes/texas/austin/easton-park/easton-park-40/sales-center`,
+  `${P}/new-homes/texas/austin/easton-park/easton-park-40/7006-ezra-brooks-bend`,
+  `${P}/new-homes/texas/austin/easton-park/easton-park-40/2206h`,
+  `${P}/new-homes/texas/austin/fixture-grove`,
+  `${P}/new-homes/texas/austin/promotion/x`,
+  `${P}/new-homes/texas/san-antonio/cibolo-valley-heights`,
+  `${P}/new-homes/texas/san-antonio/cibolo-valley-heights/cibolo-valley-heights-65/sales-center`,
+  `${P}/new-homes/texas/houston/far-away`,
 ].map((url) => `<url><loc>${url}</loc></url>`).join("")}</urlset>`;
 
 const PAGES: Record<string, string> = {
-  "https://www.perryhomes.com/sitemap.xml": SITEMAP,
-  "https://www.perryhomes.com/new-homes/texas/austin/fixture-ridge": communityPage("austin", "fixture-ridge", "Fixture Ridge", "380"),
-  "https://www.perryhomes.com/new-homes/texas/austin/fixture-ridge/fixture-ridge-50/204-fixture-pass": homePage("204 Fixture Pass", "Leander", "78641"),
-  "https://www.perryhomes.com/new-homes/texas/austin/plans-only": planOnlyCommunity("austin", "plans-only"),
-  "https://www.perryhomes.com/new-homes/texas/san-antonio/fixture-heights": communityPage("san-antonio", "fixture-heights", "Fixture Heights", "560"),
-  "https://www.perryhomes.com/new-homes/texas/san-antonio/fixture-heights/fixture-heights-50/119-fixture-trail": homePage("119 Fixture Trail", "Cibolo", "78108"),
+  [`${P}/sitemap.xml`]: SITEMAP,
+  [`${P}/new-homes/texas/austin/easton-park`]: COMMUNITY,
+  [`${P}/new-homes/texas/austin/easton-park/easton-park-40/sales-center`]: SALES_CENTER,
+  [`${P}/new-homes/texas/austin/fixture-grove`]: NEW_COMMUNITY,
+  [`${P}/new-homes/texas/san-antonio/cibolo-valley-heights`]: SA_COMMUNITY,
+  [`${P}/new-homes/texas/san-antonio/cibolo-valley-heights/cibolo-valley-heights-65/sales-center`]: SA_SALES_CENTER,
 };
-const ZIPS: Record<string, { lat: number; lng: number }> = { "78641": { lat: 30.56, lng: -97.86 }, "78108": { lat: 29.56, lng: -98.23 } };
 
 const fetched: string[] = [];
 const fetcher = vi.fn(async (input: string | URL | Request) => {
@@ -48,47 +50,54 @@ const fetcher = vi.fn(async (input: string | URL | Request) => {
   const body = PAGES[url.replace(/\/+$/, "")];
   return new Response(body ?? "not found", { status: body ? 200 : 404, headers: { "content-type": url.endsWith(".xml") ? "application/xml" : "text/html" } });
 }) as unknown as typeof fetch;
-const geocodeZip = vi.fn(async (zip: string) => ZIPS[zip] ?? null);
 
-beforeEach(() => { resetPerryDiscoveryCache(); fetched.length = 0; geocodeZip.mockClear(); });
+beforeEach(() => { resetPerryDiscoveryCache(); fetched.length = 0; });
 
 describe("Perry Homes discovery", () => {
-  it("reads the community page's name, collections and price band, and a home page's address", () => {
-    const page = parsePerryCommunityPage(PAGES["https://www.perryhomes.com/new-homes/texas/austin/fixture-ridge"]!, "https://www.perryhomes.com/new-homes/texas/austin/fixture-ridge")!;
-    expect(page).toEqual({ name: "Fixture Ridge", sections: ["/new-homes/texas/austin/fixture-ridge/fixture-ridge-50", "/new-homes/texas/austin/fixture-ridge/fixture-ridge-60"], priceFrom: 380_000 });
-    expect(parsePerryHomeAddress(PAGES["https://www.perryhomes.com/new-homes/texas/austin/fixture-ridge/fixture-ridge-50/204-fixture-pass"]!)).toEqual({ street: "204 Fixture Pass", city: "Leander", zip: "78641" });
-    expect(parsePerryHomeAddress("<html></html>")).toBeNull();
-    expect(perryCommunityPath("austin").test("/new-homes/texas/austin/fixture-ridge")).toBe(true);
-    expect(perryCommunityPath("austin").test("/new-homes/texas/austin/fixture-ridge/fixture-ridge-50")).toBe(false);
+  it("reads the live Austin community page: its name, its collections in order and the lowest collection price", () => {
+    expect(parsePerryCommunityPage(COMMUNITY, `${P}/new-homes/texas/austin/easton-park`)).toEqual({
+      name: "Easton Park",
+      sections: ["/new-homes/texas/austin/easton-park/easton-park-40", "/new-homes/texas/austin/easton-park/easton-park-50", "/new-homes/texas/austin/easton-park/easton-park-60"],
+      priceFrom: 400_000,
+    });
+    // A collection page is not a community page: nothing is listed under it.
+    expect(parsePerryCommunityPage(COMMUNITY, `${P}/new-homes/texas/austin/easton-park/easton-park-40`)).toBeNull();
+    expect(perryCommunityPath("austin").test("/new-homes/texas/austin/easton-park")).toBe(true);
+    expect(perryCommunityPath("austin").test("/new-homes/texas/austin/easton-park/easton-park-40")).toBe(false);
     expect(perryCommunityPath("austin").test("/new-homes/texas/austin/promotion")).toBe(false);
   });
 
-  it("finds both markets' communities from the sitemap and places each at its first home's ZIP centroid; plans-only and other markets are left out", async () => {
-    const found = await discoverBuilderCommunities(perryDiscoveryReader(geocodeZip), fetcher);
+  it("reads the live sales-center page: the office's street, city, ZIP, exact point and phone, never the model home's", () => {
+    expect(parsePerrySalesCenter(SALES_CENTER)).toEqual({ street: "7808 Skytree Drive", city: "Austin", zip: "78744", geo: { lat: 30.1559496, lng: -97.716514 }, phone: "+17372006053" });
+    expect(parsePerrySalesCenter("<html></html>")).toBeNull();
+  });
+
+  it("finds both markets' communities from the sitemap, each placed at its first collection's sales office; a new one with no office page yet and other markets are left out", async () => {
+    const found = await discoverBuilderCommunities(perryDiscoveryReader(), fetcher);
     expect(found.ok).toBe(true);
-    expect(found.communities.map((community) => [community.name, community.city, community.zip, community.address, community.priceFrom, community.sourceUrl])).toEqual([
-      ["Fixture Heights", "Cibolo", "78108", "119 Fixture Trail, Cibolo, TX 78108", 560_000, "https://www.perryhomes.com/new-homes/texas/san-antonio/fixture-heights"],
-      ["Fixture Ridge", "Leander", "78641", "204 Fixture Pass, Leander, TX 78641", 380_000, "https://www.perryhomes.com/new-homes/texas/austin/fixture-ridge"],
+    expect(found.communities.map((community) => [community.name, community.city, community.zip, community.address, community.salesPhone, community.priceFrom, community.sourceUrl])).toEqual([
+      ["Cibolo Valley Heights", "Cibolo", "78108", "222 Krueger Way, Cibolo, TX 78108", "+12104181442", 560_000, `${P}/new-homes/texas/san-antonio/cibolo-valley-heights`],
+      ["Easton Park", "Austin", "78744", "7808 Skytree Drive, Austin, TX 78744", "+17372006053", 400_000, `${P}/new-homes/texas/austin/easton-park`],
     ]);
-    // A community with plans only has no home page and so no address yet: skipped, found again once a home is listed.
-    expect(found.skipped).toEqual([{ url: "https://www.perryhomes.com/new-homes/texas/austin/plans-only", reason: "no_community_record" }]);
-    // The sitemap once, each community page once, and one home page per placed community; never a collection, plan, promotion or sales-center page.
+    expect(found.skipped).toEqual([{ url: `${P}/new-homes/texas/austin/fixture-grove`, reason: "no_community_record" }]);
+    // The sitemap once, each community page once and one sales-center page per placed community; never a home, plan or promotion page.
     expect(fetched.filter((url) => url.endsWith("sitemap.xml"))).toHaveLength(1);
-    expect(fetched.some((url) => /sales-center|2206h|2401w|promotion|far-away/.test(url))).toBe(false);
-    expect(geocodeZip.mock.calls.map(([zip]) => zip).sort()).toEqual(["78108", "78641"]);
+    expect(fetched.filter((url) => url.endsWith("/sales-center"))).toEqual([`${P}/new-homes/texas/san-antonio/cibolo-valley-heights/cibolo-valley-heights-65/sales-center`, `${P}/new-homes/texas/austin/easton-park/easton-park-40/sales-center`, `${P}/new-homes/texas/austin/fixture-grove/fixture-grove-45/sales-center`]);
+    expect(fetched.some((url) => /ezra-brooks|2206h|promotion|far-away/.test(url))).toBe(false);
   });
 
   it("skips the communities already in the database without reading their pages", async () => {
-    const known = new Set(["https://www.perryhomes.com/new-homes/texas/san-antonio/fixture-heights"]);
-    const found = await discoverBuilderCommunities(perryDiscoveryReader(geocodeZip), fetcher, known);
+    // The 30 San Antonio communities already in the database are stored by their community-page URL, as here.
+    const known = new Set([`${P}/new-homes/texas/san-antonio/cibolo-valley-heights`]);
+    const found = await discoverBuilderCommunities(perryDiscoveryReader(), fetcher, known);
     expect(found.known).toBe(1);
-    expect(found.communities.map((community) => community.name)).toEqual(["Fixture Ridge"]);
-    expect(fetched.some((url) => url.includes("san-antonio/fixture-heights"))).toBe(false);
+    expect(found.communities.map((community) => community.name)).toEqual(["Easton Park"]);
+    expect(fetched.some((url) => url.includes("san-antonio/cibolo-valley-heights"))).toBe(false);
   });
 
   it("reports the builder unreadable when the sitemap cannot be read, so the run moves on", async () => {
     const down = (async () => new Response("", { status: 503 })) as unknown as typeof fetch;
-    const found = await discoverBuilderCommunities(perryDiscoveryReader(geocodeZip), down);
+    const found = await discoverBuilderCommunities(perryDiscoveryReader(), down);
     expect(found.ok).toBe(false);
     expect(found.reason).toBe("sitemap_unreadable");
   });

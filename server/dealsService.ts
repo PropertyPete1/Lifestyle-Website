@@ -872,7 +872,8 @@ export async function publicDealsCatalog(src?: string | null) {
     if (await dropPrivateResidue(community.id, entry, communityScrubConfig(community), "public")) continue;
     result.push(entry);
   }
-  return result;
+  const { spreadStackedPins, publicCellMiles } = await import("./dealsRegionMap");
+  return spreadStackedPins(result, publicCellMiles(publicRadius));
 }
 
 /**

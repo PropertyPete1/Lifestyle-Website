@@ -132,8 +132,10 @@ export const REGION_VIEW = {
 /** The shaded area around a hovered community: a few miles across, as a share of the picture's width (never the exact spot). */
 export const AREA_DIAMETER = 0.04;
 /** On-screen marker spacing that groups markers, in CSS pixels. */
-const GROUP_PIXELS = 34;
-const MAX_ZOOM = 5;
+const GROUP_PIXELS = 28;
+const MAX_ZOOM = 7;
+/** The most communities one fanned-out ring shows (a ring of more covers the map). */
+const FAN_MAX = 6;
 
 type View = { z: number; tx: number; ty: number };
 
@@ -146,8 +148,9 @@ export function clusterView(pins: ReadonlyArray<{ x: number; y: number }>, w: nu
   const xs = pins.map((pin) => pin.x);
   const ys = pins.map((pin) => pin.y);
   const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-  const spanX = Math.max(maxX - minX, 0.06);
-  const spanY = Math.max((maxY - minY) / REGION_VIEW.aspect, 0.06 / REGION_VIEW.aspect);
+  // A group inside one grid cell (about 0.025 of the picture across) fills most of the map; maxZ caps it.
+  const spanX = Math.max(maxX - minX, 0.012);
+  const spanY = Math.max((maxY - minY) / REGION_VIEW.aspect, 0.012 / REGION_VIEW.aspect);
   // The closest the map goes is decided before centring, so the group stays in the middle at that zoom.
   const z = Math.min((w * 0.62) / spanX, (h * 0.62) / spanY, maxZ);
   const cx = (minX + maxX) / 2;
@@ -256,7 +259,10 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
     const target = clusterView(marker.keys.map((key) => items.find((item) => item.key === key)?.pin).filter((pin): pin is { x: number; y: number } => Boolean(pin)), now.w, now.h, minWidth(now.w, now.h) * MAX_ZOOM);
     const next = clamp(target, now.w, now.h);
     setView(next);
-    setFanned(stillStacked(marker.keys.map((key) => items.find((item) => item.key === key)?.pin ?? null), next.z) ? marker.keys : null);
+    const stacked = stillStacked(marker.keys.map((key) => items.find((item) => item.key === key)?.pin ?? null), next.z);
+    // A few that still overlap fan out in a ring. A bigger bubble zooms in and narrows the list beside the map (on a
+    // phone, "See the list" under it), and its smaller bubbles fan out in turn.
+    setFanned(stacked && marker.keys.length <= FAN_MAX ? marker.keys : null);
   };
   // The wheel zooms the map, not the page (a passive listener could not stop the page scrolling).
   useEffect(() => {
@@ -318,7 +324,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
           className="pointer-events-none absolute z-[5] aspect-square min-w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-gold/80 bg-gold/25 shadow-[0_0_0_6px_rgba(184,146,74,0.12)] transition-all duration-200" />}
         {markers.map((marker) => {
           const group = marker.keys.length > 1;
-          if (group && fanned && marker.keys.every((key) => fanned.includes(key))) {
+          if (group && fanned && marker.keys.length <= FAN_MAX && marker.keys.every((key) => fanned.includes(key))) {
             const offsets = fanOffsets(marker.keys.length);
             return <div key={marker.id} data-deals-fan="true" className="absolute z-30" style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }}>
               <span aria-hidden="true" className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-gold shadow" />
@@ -337,6 +343,8 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
             </div>;
           }
           const lit = (activeKey !== null && marker.keys.includes(activeKey)) || selectedId === marker.id;
+          // While a ring is open, the other markers step back so its pills read clearly.
+          const dim = Boolean(fanned) && !lit;
           // A group is a numbered bubble; a lone community is a dot that shows its price band when lit.
           const shape = group ? "min-h-7 min-w-7 px-1.5 text-[11px]" : lit ? "min-h-7 px-2 text-[11px]" : "h-4 w-4";
           return <button key={marker.id} type="button" data-deals-marker={group ? "group" : "single"} data-active={lit ? "true" : undefined}
@@ -349,7 +357,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
               onSelect({ id: marker.id, keys: marker.keys });
             }}
             style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }}
-            className={`absolute inline-flex -translate-x-1/2 -translate-y-1/2 before:absolute before:-inset-3 before:content-[''] items-center justify-center whitespace-nowrap rounded-full border-2 border-white font-semibold shadow-md transition-transform ${shape} ${lit ? "z-20 scale-110 bg-gold text-primary-foreground" : "z-10 bg-[oklch(0.25_0.02_260)] text-white hover:scale-110"}`}>
+            className={`absolute inline-flex -translate-x-1/2 -translate-y-1/2 before:absolute before:-inset-3 before:content-[''] items-center justify-center whitespace-nowrap rounded-full border-2 border-white font-semibold shadow-md transition-transform ${shape} ${lit ? "z-20 scale-110 bg-gold text-primary-foreground" : "z-10 bg-[oklch(0.25_0.02_260)] text-white hover:scale-110"} ${dim ? "opacity-30" : ""}`}>
             {group || lit ? marker.label : null}
           </button>;
         })}

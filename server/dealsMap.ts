@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { dealCommunities } from "../drizzle/schema";
 import { clientIpKey } from "../shared/deals";
 import { ENV } from "./_core/env";
+import { publicCellMiles } from "./dealsRegionMap";
 import { makeRequest, type DistanceMatrixResult, type GeocodingResult } from "./_core/map";
 import { getDb } from "./db";
 import { communityScrubConfig, getDealSettings, isLiveDealSession, publicNoPrivateNames } from "./dealsService";
@@ -199,8 +200,6 @@ export async function refreshCommunityGeography(communityId: number): Promise<{ 
   }
 }
 
-/** The landing card's image is centered on a coarse grid cell, never on the ZIP itself: a cell is about 4 miles. */
-const PUBLIC_GRID_MILES = 4;
 
 /**
  * The public map's center: the middle of the coarse grid cell the ZIP centroid
@@ -209,7 +208,7 @@ const PUBLIC_GRID_MILES = 4;
  * radius so the ZIP centroid always stays well inside the circle.
  */
 export function publicMapCenter(_communityId: number, centroid: Centroid, radiusMiles: number): Centroid {
-  const cellMiles = Math.min(PUBLIC_GRID_MILES, radiusMiles * 0.6);
+  const cellMiles = publicCellMiles(radiusMiles);
   const cellLat = cellMiles / 69.0;
   // One fixed grid for the whole area (sized at San Antonio's latitude), so neighbours never fall into different grids.
   const cellLng = cellMiles / (69.172 * Math.cos(29.4241 * Math.PI / 180));

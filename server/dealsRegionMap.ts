@@ -59,6 +59,47 @@ export function regionPin(point: Centroid, region: Region = SAN_ANTONIO_REGION):
   return { x: Math.round(x * 10000) / 10000, y: Math.round(y * 10000) / 10000 };
 }
 
+/** The landing card's image is centered on a coarse grid cell, never on the ZIP itself: a cell is about 4 miles. */
+export const PUBLIC_GRID_MILES = 4;
+/** The coarse public grid cell's size in miles for a given public circle radius (see publicMapCenter in dealsMap). */
+export function publicCellMiles(radiusMiles: number): number {
+  return Math.min(PUBLIC_GRID_MILES, radiusMiles * 0.6);
+}
+
+/**
+ * Communities in one coarse grid cell share its centre, so dozens stood on one spot and no zoom could pull them apart
+ * (Peter, Oct 25: "it's missing communities on the map"; 430 communities sat on 52 points). Each stack spreads out
+ * around its cell's centre on a sunflower pattern ordered by the communities' opaque keys, out to about one cell (4
+ * miles): the spot is arbitrary and says nothing finer about where a community is than the cell already did.
+ */
+export function spreadStackedPins<T extends { key: string; pin: RegionPin | null }>(items: T[], cellMiles: number, region: Region = SAN_ANTONIO_REGION): T[] {
+  const origin = { lat: 29.4241, lng: -98.4936 };
+  const base = regionPin(origin, region);
+  const east = regionPin({ lat: origin.lat, lng: origin.lng + cellMiles / (69.172 * Math.cos((origin.lat * Math.PI) / 180)) }, region);
+  const south = regionPin({ lat: origin.lat - cellMiles / 69.0, lng: origin.lng }, region);
+  if (!base || !east || !south) return items;
+  const cellX = east.x - base.x;
+  const cellY = south.y - base.y;
+  const stacks = new Map<string, T[]>();
+  for (const item of items) if (item.pin) {
+    const at = `${item.pin.x}:${item.pin.y}`;
+    stacks.set(at, [...(stacks.get(at) ?? []), item]);
+  }
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const spread = new Map<T, RegionPin>();
+  for (const stack of Array.from(stacks.values())) {
+    if (stack.length < 2) continue;
+    const ordered = [...stack].sort((a, b) => a.key.localeCompare(b.key));
+    ordered.forEach((item, index) => {
+      // Out to 90% of a cell from its centre, so a stack of dozens separates when the map is zoomed in.
+      const radius = 0.9 * Math.sqrt((index + 0.5) / ordered.length);
+      const angle = index * golden;
+      spread.set(item, { x: Math.round((item.pin!.x + radius * Math.cos(angle) * cellX) * 10000) / 10000, y: Math.round((item.pin!.y + radius * Math.sin(angle) * cellY) * 10000) / 10000 });
+    });
+  }
+  return items.map((item) => spread.has(item) ? { ...item, pin: spread.get(item)! } : item);
+}
+
 /** The page's opening view: the home point as fractions of the picture, and the span to show as a fraction of its width. */
 export function regionHomeView(region: Region & { home: { lat: number; lng: number; span: number } } = SAN_ANTONIO_REGION): { x: number; y: number; span: number; aspect: number } {
   const at = worldPixels(region.home, region.zoom);

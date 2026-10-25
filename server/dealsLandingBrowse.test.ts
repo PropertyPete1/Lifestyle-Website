@@ -15,7 +15,7 @@ vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }))
 
 import { publicCommunityHomes, publicDealsCatalog, resetPublicHomesCache } from "./dealsService";
 import { photoIdFromToken, publicPhotoAllowed, resetPublicPhotoLimits } from "./dealsPhotoToken";
-import { regionHomeView, regionPin, SAN_ANTONIO_REGION } from "./dealsRegionMap";
+import { regionHomeView, regionPin, spreadStackedPins, SAN_ANTONIO_REGION } from "./dealsRegionMap";
 
 (globalThis as { React?: typeof React }).React = React;
 const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW, clusterView, stillStacked, fanOffsets } = await import("../client/src/components/deals/LandingBrowse");
@@ -59,6 +59,23 @@ describe("the region map", () => {
       { key: "d", pin: null },
     ]);
     expect(markers.map((marker) => [marker.keys, marker.label])).toEqual([[["a", "b"], "2"], [["c"], "$250s"]]);
+  });
+});
+
+describe("communities that share a grid cell (Peter, Oct 25: 430 communities stood on 52 points)", () => {
+  it("spreads a stack around its cell, within a cell of its centre, the same way every time, and leaves a lone community where it is", () => {
+    const centre = regionPin({ lat: 29.55, lng: -98.6 })!;
+    const lone = regionPin({ lat: 29.3, lng: -98.2 })!;
+    const items = [...Array.from({ length: 30 }, (_, index) => ({ key: `k${String(index).padStart(2, "0")}`, pin: centre })), { key: "solo", pin: lone }, { key: "none", pin: null }];
+    const spread = spreadStackedPins(items, 4);
+    expect(spread.find((item) => item.key === "solo")!.pin).toEqual(lone);
+    expect(spread.find((item) => item.key === "none")!.pin).toBeNull();
+    const stacked = spread.filter((item) => item.key.startsWith("k")).map((item) => item.pin!);
+    expect(new Set(stacked.map((pin) => `${pin.x}:${pin.y}`)).size).toBe(30);
+    // A 4-mile cell on this picture, east-west and north-south.
+    const cellX = regionPin({ lat: 29.4241, lng: -98.4936 + 4 / (69.172 * Math.cos(29.4241 * Math.PI / 180)) })!.x - regionPin({ lat: 29.4241, lng: -98.4936 })!.x;
+    for (const pin of stacked) expect(Math.abs(pin.x - centre.x)).toBeLessThan(cellX);
+    expect(spreadStackedPins([...items].reverse(), 4).find((item) => item.key === "k07")!.pin).toEqual(spread.find((item) => item.key === "k07")!.pin);
   });
 });
 

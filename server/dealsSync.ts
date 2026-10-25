@@ -682,6 +682,20 @@ export async function retireIfCommunityGone(community: CommunityRow, reason: str
   return true;
 }
 
+/** True when a builder shows the same markdown (identical dollar savings) on at least 80% of a community's 4+ priced listings. */
+export function blanketMarkdown(items: ReadonlyArray<{ price?: number | null; previousPrice?: number | null }>): boolean {
+  const priced = items.filter((item) => typeof item.price === "number" && item.price > 0);
+  if (priced.length < 4) return false;
+  const savings = new Map<number, number>();
+  for (const item of priced) {
+    if (typeof item.previousPrice !== "number" || item.previousPrice <= (item.price as number)) continue;
+    const amount = Math.round((item.previousPrice - (item.price as number)) / 100) * 100;
+    savings.set(amount, (savings.get(amount) ?? 0) + 1);
+  }
+  const top = Math.max(0, ...Array.from(savings.values()));
+  return top >= Math.ceil(priced.length * 0.8);
+}
+
 async function refreshCommunity(community: CommunityRow, now: Date, summaries: CommunityChangeSummary[], holds: HoldNotice[], heartbeat?: () => Promise<void>): Promise<RefreshResult> {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
@@ -724,6 +738,11 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
   }
   const summary = emptySummary(community);
   const publishable = new Set<string>();
+  // A builder's struck-through price counts as a price drop only when it marks some homes, not the same markdown on
+  // nearly every listing (Lennar showed an identical $20,000 "was" price on every home: a standing promotion, and
+  // half the site turned Red Hot on Oct 25). Real drops still show through the 30-day price history.
+  const planWas = !blanketMarkdown(snapshot.private.plans);
+  const homeWas = !blanketMarkdown(snapshot.private.homes.filter((item) => !/sold/i.test(item.status ?? "")));
   const label = (item: { privateAddress?: string | null; privatePlanName?: string | null; privateName: string | null }) => item.privateAddress ?? item.privateName ?? item.privatePlanName ?? "unnamed";
   const record = (result: HomeUpsertResult, name: string) => {
     if (result.inserted) summary.added.push(name);
@@ -732,7 +751,7 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     if (result.statusChange?.to === "sold") summary.sold.push(name);
   };
   for (const plan of snapshot.private.plans) {
-    const result = await upsertHome({ communityId: community.id, sourceUrl: plan.sourceUrl, builderWasPrice: plan.previousPrice ?? null, privatePlanName: plan.privatePlanName ?? plan.privateName, privateAddress: plan.privateAddress ?? null, kind: "to_be_built", beds: plan.bedrooms === null ? null : String(plan.bedrooms), baths: plan.bathrooms === null ? null : String(plan.bathrooms), sqft: plan.squareFeet, price: plan.price, moveInDate: plan.moveInDate ?? null, garage: plan.garage ? String(plan.garage) : null, homesite: plan.homesite ?? null, readyNow: plan.readyNow ?? false, status: "available" }, now);
+    const result = await upsertHome({ communityId: community.id, sourceUrl: plan.sourceUrl, builderWasPrice: planWas && plan.previousPrice ? plan.previousPrice : null, privatePlanName: plan.privatePlanName ?? plan.privateName, privateAddress: plan.privateAddress ?? null, kind: "to_be_built", beds: plan.bedrooms === null ? null : String(plan.bedrooms), baths: plan.bathrooms === null ? null : String(plan.bathrooms), sqft: plan.squareFeet, price: plan.price, moveInDate: plan.moveInDate ?? null, garage: plan.garage ? String(plan.garage) : null, homesite: plan.homesite ?? null, readyNow: plan.readyNow ?? false, status: "available" }, now);
     publishable.add(normalizedDealSourceKey(plan.sourceUrl));
     record(result, label(plan));
     await upsertPhotos(result.id, plan.gallery);
@@ -754,7 +773,7 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     // Only publish a QMI when the official page explicitly labels it as such.
     const quickMoveIn = /quick\s+move|available\s+now/i.test(home.status ?? "");
     if (!sold && !quickMoveIn) continue; // A model or unlabeled card is treated as absent below.
-    const result = await upsertHome({ communityId: community.id, sourceUrl: home.sourceUrl, builderWasPrice: home.previousPrice ?? null, privatePlanName: home.privatePlanName ?? home.privateName, privateAddress: home.privateAddress ?? null, kind: "quick_move_in", beds: home.bedrooms === null ? null : String(home.bedrooms), baths: home.bathrooms === null ? null : String(home.bathrooms), sqft: home.squareFeet, price: home.price, moveInDate: home.moveInDate ?? null, garage: home.garage ? String(home.garage) : null, homesite: home.homesite ?? null, readyNow: home.readyNow ?? false, status: sold ? "sold" : "available" }, now);
+    const result = await upsertHome({ communityId: community.id, sourceUrl: home.sourceUrl, builderWasPrice: homeWas && home.previousPrice ? home.previousPrice : null, privatePlanName: home.privatePlanName ?? home.privateName, privateAddress: home.privateAddress ?? null, kind: "quick_move_in", beds: home.bedrooms === null ? null : String(home.bedrooms), baths: home.bathrooms === null ? null : String(home.bathrooms), sqft: home.squareFeet, price: home.price, moveInDate: home.moveInDate ?? null, garage: home.garage ? String(home.garage) : null, homesite: home.homesite ?? null, readyNow: home.readyNow ?? false, status: sold ? "sold" : "available" }, now);
     if (!sold) publishable.add(normalizedDealSourceKey(home.sourceUrl));
     record(result, label(home));
     if (!sold) await upsertPhotos(result.id, homeGallery(home));

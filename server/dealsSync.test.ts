@@ -27,7 +27,7 @@ vi.mock("./_core/heartbeat", () => ({
 }));
 
 import { parsePromotionalRate } from "./dealsAdapters";
-import { buildersInFlight, communityRefreshDue, leaseBuilder, leaseRenewingFetcher, refreshDueCommunitiesBatch, refreshOfficialDeals, revalidateDealIncentives, sendSyncDigestIfReady, storedScrubConfig } from "./dealsSync";
+import { blanketMarkdown, buildersInFlight, communityRefreshDue, leaseBuilder, leaseRenewingFetcher, refreshDueCommunitiesBatch, refreshOfficialDeals, revalidateDealIncentives, sendSyncDigestIfReady, storedScrubConfig } from "./dealsSync";
 import { DEALS_JOB_DEFINITIONS, ensureDealsCron } from "./registerCron";
 import { chicagoEndOfDay } from "./dealsService";
 
@@ -864,3 +864,19 @@ describe("catalog batch and the photo queue", () => {
   });
 });
 
+describe("builder was-prices (Oct 25: an identical markdown on every Lennar home turned half the site Red Hot)", () => {
+  it("treats the same savings on 80%+ of a community's listings as a standing promotion, and a few marked homes as real drops", () => {
+    const blanket = [300_000, 250_000, 220_000, 410_000, 199_000].map((price) => ({ price, previousPrice: price + 20_000 }));
+    expect(blanketMarkdown(blanket)).toBe(true);
+    const marked = [{ price: 300_000, previousPrice: 320_000 }, { price: 250_000, previousPrice: 262_000 }, { price: 220_000 }, { price: 410_000 }, { price: 199_000 }];
+    expect(blanketMarkdown(marked)).toBe(false);
+    expect(blanketMarkdown(blanket.slice(0, 3))).toBe(false);
+  });
+
+  it("does not record a blanket markdown as the original price", async () => {
+    const homes = ["9001-a", "9002-b", "9003-c", "9004-d"].map((slug, index) => ({ sourceUrl: home(slug), price: 300_000 + index * 10_000, previousPrice: 320_000 + index * 10_000 }));
+    mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes }));
+    await refreshOfficialDeals({ communityId, now: T0 });
+    expect(db.rows(dealHomes).map((row) => row.previousPrice)).toEqual([null, null, null, null]);
+  });
+});

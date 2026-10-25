@@ -18,7 +18,7 @@ import { photoIdFromToken, publicPhotoAllowed, resetPublicPhotoLimits } from "./
 import { regionHomeView, regionPin, SAN_ANTONIO_REGION } from "./dealsRegionMap";
 
 (globalThis as { React?: typeof React }).React = React;
-const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW } = await import("../client/src/components/deals/LandingBrowse");
+const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW, clusterView, stillStacked, fanOffsets } = await import("../client/src/components/deals/LandingBrowse");
 
 describe("the region map", () => {
   it("places a point by the map's own projection and leaves off anything outside the picture", () => {
@@ -59,6 +59,36 @@ describe("the region map", () => {
       { key: "d", pin: null },
     ]);
     expect(markers.map((marker) => [marker.keys, marker.label])).toEqual([[["a", "b"], "2"], [["c"], "$250s"]]);
+  });
+});
+
+describe("clicking a numbered bubble (Peter, Oct 25: it zooms into the neighborhoods, then each one opens)", () => {
+  it("zooms to fit the group's communities in the middle of the map", () => {
+    const pins = [{ x: 0.40, y: 0.50 }, { x: 0.46, y: 0.56 }];
+    const view = clusterView(pins, 800, 600);
+    const screen = (pin: { x: number; y: number }) => ({ x: pin.x * view.z + view.tx, y: pin.y * (view.z / REGION_VIEW.aspect) + view.ty });
+    for (const pin of pins) {
+      const point = screen(pin);
+      expect(point.x).toBeGreaterThan(0); expect(point.x).toBeLessThan(800);
+      expect(point.y).toBeGreaterThan(0); expect(point.y).toBeLessThan(600);
+    }
+    const middle = screen({ x: 0.43, y: 0.53 });
+    expect(Math.round(middle.x)).toBe(400);
+    expect(Math.round(middle.y)).toBe(300);
+    // Much closer in than the opening view of the whole market.
+    expect(view.z).toBeGreaterThan(800 / REGION_VIEW.home.span * 3);
+  });
+
+  it("fans out communities that still share one point after the zoom, each on its own spot", () => {
+    const same = [{ x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 }, { x: 0.5001, y: 0.5 }];
+    expect(stillStacked(same, 4000)).toBe(true);
+    expect(stillStacked([{ x: 0.40, y: 0.5 }, { x: 0.46, y: 0.5 }], 4000)).toBe(false);
+    const ring = fanOffsets(7);
+    expect(ring).toHaveLength(7);
+    const spots = new Set(ring.map((offset) => `${offset.dx}:${offset.dy}`));
+    expect(spots.size).toBe(7);
+    // Far enough apart to tap one (each bubble is about 30 pixels wide).
+    for (let i = 0; i < ring.length; i++) for (let j = i + 1; j < ring.length; j++) expect(Math.hypot(ring[i]!.dx - ring[j]!.dx, ring[i]!.dy - ring[j]!.dy)).toBeGreaterThanOrEqual(56);
   });
 });
 
@@ -116,6 +146,8 @@ describe("the landing catalog", () => {
     // The marker is the coarse public cell's point, never the ZIP centroid itself.
     expect(withCover.pin).not.toBeNull();
     expect(withCover.pin).not.toEqual(regionPin({ lat: 29.355424, lng: -98.319795 }));
+    // The filters read each shown home's public figures: [price, beds, baths, sqft, garage, kind, stories, previous price].
+    expect((withCover as unknown as { homeFacts: unknown[] }).homeFacts).toEqual([[300_000, 4, 3, 2_100, null, 0, null, null], [350_000, 4, 3, 2_100, null, 0, null, null]]);
     const without = entries.find((entry) => entry.label === "North San Antonio | Hills")!;
     expect(without.cover).toBeNull();
     expect(without.pin).toBeNull();

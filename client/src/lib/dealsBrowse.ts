@@ -8,10 +8,19 @@ import { BIG_LOT_ACRES, homeLotAcres, lotAcres, redHotDeal } from "@shared/deals
 export type BrowseFilters = {
   /** One area label ("Northwest San Antonio", "New Braunfels"), or "" for all. */
   area: string;
+  /** At least this price (a home at exactly this price matches). */
+  minPrice: number | null;
   maxPrice: number | null;
-  /** Private list only: the public cards carry no bedroom counts. */
   minBeds: number | null;
+  minBaths: number | null;
+  minSqft: number | null;
+  /** Garage spaces, at least. */
+  minGarage: number | null;
+  /** 1: single-story homes only; 2: two stories or more. */
+  stories: 1 | 2 | null;
   moveInReady: boolean;
+  /** Homes still to be built (pick your plan). */
+  toBeBuilt: boolean;
   builderRate: boolean;
   bigLots: boolean;
   /** Homes with a real price drop (see redHotDeal). */
@@ -20,16 +29,25 @@ export type BrowseFilters = {
   savedOnly: boolean;
 };
 
-export const EMPTY_FILTERS: BrowseFilters = { area: "", maxPrice: null, minBeds: null, moveInReady: false, builderRate: false, bigLots: false, redHot: false, savedOnly: false };
+export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, savedOnly: false };
 export const PRICE_CAPS = [200_000, 300_000, 400_000, 500_000, 600_000, 750_000, 1_000_000] as const;
+export const PRICE_FLOORS = [200_000, 250_000, 300_000, 350_000, 400_000, 500_000, 600_000, 750_000] as const;
 export const BED_MINIMUMS = [2, 3, 4, 5] as const;
+export const BATH_MINIMUMS = [2, 2.5, 3, 4] as const;
+export const SQFT_MINIMUMS = [1_200, 1_500, 1_800, 2_000, 2_500, 3_000, 3_500] as const;
+export const GARAGE_MINIMUMS = [2, 3] as const;
 /** Communities shown before "Show more". */
 export const BROWSE_PAGE = 12;
 /** A short list opens every community; a long one opens only the buyer's own. */
 export const OPEN_ALL_UP_TO = 3;
 
+/** The filters tucked behind "More filters" (counted on that button). */
+export function moreFilterCount(filters: BrowseFilters): number {
+  return [filters.minBaths, filters.minSqft, filters.minGarage, filters.stories, filters.toBeBuilt, filters.bigLots, filters.builderRate].filter(Boolean).length;
+}
+
 export function activeFilterCount(filters: BrowseFilters): number {
-  return [filters.area, filters.maxPrice, filters.minBeds, filters.moveInReady, filters.builderRate, filters.bigLots, filters.redHot, filters.savedOnly].filter(Boolean).length;
+  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.minGarage, filters.stories, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.savedOnly].filter(Boolean).length;
 }
 
 /** Areas present in the list, most communities first, for the area picker. */
@@ -51,6 +69,53 @@ export function bedsFrom(value: string | number | null | undefined): number | nu
   return numbers.length ? Math.max(...numbers) : null;
 }
 
+/** A number from a builder's text: "2.5" -> 2.5, "3-4" -> 4 (the most the plan offers), "2 car" -> 2. */
+export function numberFrom(value: string | number | null | undefined): number | null {
+  return bedsFrom(value);
+}
+
+/** The facts the home filters read, whatever list the home comes from. */
+export type FilterableHome = {
+  kind: string;
+  price?: number | null;
+  previousPrice?: number | null;
+  beds?: string | number | null;
+  baths?: string | number | null;
+  sqft?: number | null;
+  garage?: string | number | null;
+  stories?: number | null;
+  lotSize?: string | null;
+};
+
+/**
+ * One home against the home filters. A filter on a fact the builder does not publish (no garage or stories listed)
+ * leaves that home out: a buyer who asked for one story should not be shown a home that might have two.
+ */
+export function homePasses(home: FilterableHome, filters: BrowseFilters, communityLot: number | null = null): boolean {
+  // "Under $200K" means below the cap (a $200,000 home is not under $200K); "$300K+" includes $300,000.
+  if (filters.maxPrice !== null && !(home.price && home.price < filters.maxPrice)) return false;
+  if (filters.minPrice !== null && !(home.price && home.price >= filters.minPrice)) return false;
+  if (filters.minBeds !== null && (bedsFrom(home.beds) ?? 0) < filters.minBeds) return false;
+  if (filters.minBaths !== null && (numberFrom(home.baths) ?? 0) < filters.minBaths) return false;
+  if (filters.minSqft !== null && (home.sqft ?? 0) < filters.minSqft) return false;
+  if (filters.minGarage !== null && (numberFrom(home.garage) ?? 0) < filters.minGarage) return false;
+  if (filters.stories === 1 && home.stories !== 1) return false;
+  if (filters.stories === 2 && !(home.stories && home.stories >= 2)) return false;
+  // Move-in ready and to be built together mean either kind.
+  if (filters.moveInReady !== filters.toBeBuilt && home.kind !== (filters.moveInReady ? "quick_move_in" : "to_be_built")) return false;
+  if (filters.bigLots && (homeLotAcres(home.lotSize, communityLot) ?? 0) < BIG_LOT_ACRES) return false;
+  if (filters.redHot && !redHotDeal(home.price, home.previousPrice)) return false;
+  return true;
+}
+
+/** The landing card's homes, compact: [price, beds, baths, sqft, garage, kind (0 move-in ready, 1 to be built), stories, previous price]. */
+export type LandingHomeFacts = [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null];
+
+export function landingHome(facts: LandingHomeFacts): FilterableHome {
+  const [price, beds, baths, sqft, garage, kind, stories, previousPrice] = facts;
+  return { price, beds, baths, sqft, garage, kind: kind === 1 ? "to_be_built" : "quick_move_in", stories, previousPrice };
+}
+
 export type LandingBrowseCommunity = {
   area: string;
   label: string;
@@ -59,26 +124,35 @@ export type LandingBrowseCommunity = {
   incentive?: { headlineRate?: string | null } | null;
   /** Homes in the community that are Red Hot Deals. */
   redHotDeals?: number;
+  /** The homes the community card stands for (see LandingHomeFacts); older pages have none. */
+  homeFacts?: LandingHomeFacts[] | null;
 };
 
-/** A landing card matches on what it shows: area, starting price, homes ready now, a builder rate, big lots in its label. */
+const LANDING_HOME_FILTERS = (filters: BrowseFilters) => filters.minPrice !== null || filters.maxPrice !== null || filters.minBeds !== null || filters.minBaths !== null || filters.minSqft !== null || filters.minGarage !== null || filters.stories !== null || filters.moveInReady || filters.toBeBuilt || filters.redHot;
+
+/** A landing card matches when it is in the area, has the offer and lot asked for, and has a home that passes the home filters. */
 export function landingMatches(community: LandingBrowseCommunity, filters: BrowseFilters): boolean {
   if (filters.area && community.area !== filters.area) return false;
-  // The landing card carries a price band's low end ("From the $300s" is 300,000), so "Under $300K" means below the band.
-  if (filters.maxPrice !== null && !(community.fromPrice && community.fromPrice < filters.maxPrice)) return false;
-  if (filters.moveInReady && community.homesAvailable <= 0) return false;
   if (filters.builderRate && !community.incentive?.headlineRate) return false;
   if (filters.bigLots && (lotAcres(community.label) ?? 0) < BIG_LOT_ACRES) return false;
+  if (!LANDING_HOME_FILTERS(filters)) return true;
+  if (community.homeFacts?.length) {
+    const homeOnly = { ...filters, bigLots: false };
+    return community.homeFacts.some((facts) => homePasses(landingHome(facts), homeOnly));
+  }
+  // A page from before the home facts: the card's own figures.
+  if (filters.maxPrice !== null && !(community.fromPrice && community.fromPrice < filters.maxPrice)) return false;
+  if (filters.moveInReady && !filters.toBeBuilt && community.homesAvailable <= 0) return false;
   if (filters.redHot && !(community.redHotDeals && community.redHotDeals > 0)) return false;
   return true;
 }
 
-export type GatedBrowseHome = { kind: string; price?: number | null; previousPrice?: number | null; beds?: string | number | null; lotSize?: string | null; card?: string };
+export type GatedBrowseHome = FilterableHome & { card?: string };
 /** "Saved only" applies while the buyer has saved something; with nothing saved it narrows nothing (the toggle is hidden then). */
 const savedFilterOn = (filters: BrowseFilters, saved?: ReadonlySet<string>) => filters.savedOnly && Boolean(saved && saved.size > 0);
 /** True when any filter narrows the homes inside a community. */
 export function homeFiltersOn(filters: BrowseFilters, saved?: ReadonlySet<string>): boolean {
-  return filters.maxPrice !== null || filters.minBeds !== null || filters.moveInReady || filters.bigLots || filters.redHot || savedFilterOn(filters, saved);
+  return LANDING_HOME_FILTERS(filters) || filters.bigLots || savedFilterOn(filters, saved);
 }
 export type GatedBrowseCommunity<Home extends GatedBrowseHome = GatedBrowseHome> = {
   area: string;
@@ -88,20 +162,11 @@ export type GatedBrowseCommunity<Home extends GatedBrowseHome = GatedBrowseHome>
   homes: Home[];
 };
 
-/** The homes of a community that pass the home filters (price, beds, quick move-in, lot, saved). */
+/** The homes of a community that pass the home filters (price, beds, baths, size, garage, stories, kind, lot, saved). */
 export function homesMatching<Home extends GatedBrowseHome>(community: GatedBrowseCommunity<Home>, filters: BrowseFilters, saved?: ReadonlySet<string>): Home[] {
   const savedOnly = savedFilterOn(filters, saved);
   const communityLot = lotAcres(community.lotSizes, { field: true }) ?? lotAcres(community.label);
-  return community.homes.filter((home) => {
-    // "Under $200K" means below the cap, as on the landing page (a $200,000 home is not under $200K).
-    if (filters.maxPrice !== null && !(home.price && home.price < filters.maxPrice)) return false;
-    if (filters.minBeds !== null && (bedsFrom(home.beds) ?? 0) < filters.minBeds) return false;
-    if (filters.moveInReady && home.kind !== "quick_move_in") return false;
-    if (filters.bigLots && (homeLotAcres(home.lotSize, communityLot) ?? 0) < BIG_LOT_ACRES) return false;
-    if (filters.redHot && !redHotDeal(home.price, home.previousPrice)) return false;
-    if (savedOnly && !(home.card && saved!.has(home.card))) return false;
-    return true;
-  });
+  return community.homes.filter((home) => homePasses(home, filters, communityLot) && (!savedOnly || Boolean(home.card && saved!.has(home.card))));
 }
 
 /** A community stays on the private list when it is in the area, has the offer asked for, and has a home that matches. */

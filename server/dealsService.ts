@@ -685,6 +685,18 @@ export async function comingSoonCommunities(): Promise<ComingSoonEntry[]> {
   return result;
 }
 
+/** A number from a builder's text: "2.5" -> 2.5, "3-4" -> 4, "2 car" -> 2. */
+function factNumber(value: string | number | null | undefined): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const numbers = Array.from(String(value ?? "").matchAll(/\d+(?:\.\d+)?/g), (match) => Number(match[0])).filter(Number.isFinite);
+  return numbers.length ? Math.max(...numbers) : null;
+}
+
+/** [price, beds, baths, sqft, garage, kind (0 move-in ready, 1 to be built), stories, previous price]: see LandingHomeFacts. */
+export function landingHomeFacts(home: { kind: string; price: number | null; previousPrice: number | null; beds: string | null; baths: string | null; sqft: number | null; garage: string | null; stories?: number | null }): [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null] {
+  return [home.price, factNumber(home.beds), factNumber(home.baths), home.sqft, factNumber(home.garage), home.kind === "to_be_built" ? 1 : 0, home.stories ?? null, home.previousPrice];
+}
+
 export async function publicDealsCatalog(src?: string | null) {
   const db = await getDb();
   if (!db) return [];
@@ -695,13 +707,13 @@ export async function publicDealsCatalog(src?: string | null) {
   const { regionPin } = await import("./dealsRegionMap");
   const { publicPhotoUrl } = await import("./dealsPhotoToken");
   const publicRadius = areaMapRadius(settings, "public");
-  const result = [] as Array<{ key: string; label: string; area: string; fromPrice: number | null; fromPriceLabel: string | null; reelUrl: string | null; homesAvailable: number; incentive: (ReturnType<typeof publicIncentive> & { pending?: true }) | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean; cover: string | null; pin: { x: number; y: number } | null }>;
+  const result = [] as Array<{ key: string; label: string; area: string; fromPrice: number | null; fromPriceLabel: string | null; reelUrl: string | null; homesAvailable: number; incentive: (ReturnType<typeof publicIncentive> & { pending?: true }) | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean; cover: string | null; pin: { x: number; y: number } | null; homeFacts: ReturnType<typeof landingHomeFacts>[] }>;
   if (!communities.length) return result;
   const reelCode = src?.trim().toLowerCase() || null;
   // Two reads for the whole page, however many communities there are.
   const ids = communities.map((community) => community.id);
   const [availableHomes, incentives, heldLine] = await Promise.all([
-    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price, previousPrice: dealHomes.previousPrice }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
+    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price, previousPrice: dealHomes.previousPrice, beds: dealHomes.beds, baths: dealHomes.baths, sqft: dealHomes.sqft, garage: dealHomes.garage }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
     liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
     heldLineCommunities(db, ids, now, settings.incentiveLapseDays),
   ]);
@@ -742,6 +754,9 @@ export async function publicDealsCatalog(src?: string | null) {
       reelUrl: community.reelUrl,
       homesAvailable: availableCount.get(community.id) ?? 0,
       redHotDeals: redHotCount.get(community.id) ?? 0,
+      // The shown homes' public figures (the same ones the community sheet shows), so the filters match on real homes:
+      // price, beds, baths, square feet, garage, move-in ready or to be built, stories, and the price before a drop.
+      homeFacts: selectDealCatalogHomes(homesByCommunity.get(community.id) ?? []).map((home) => landingHomeFacts(home)),
       // The landing card shows the teaser and figures; the full wording and the deadlines wait for sign-up.
       // A held offer shows the neutral line only, never a figure or name from its text.
       // A rate never shows without its APR (rateDisclosedIncentive).
@@ -817,6 +832,7 @@ async function readPublicCommunityHomes(communityId: number, key: string): Promi
       beds: home.beds,
       baths: home.baths,
       sqft: home.sqft,
+      garage: home.garage,
       price: home.price,
       previousPrice: home.previousPrice,
       moveInDate: home.moveInDate,
@@ -944,6 +960,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
         beds: home.beds,
         baths: home.baths,
         sqft: home.sqft,
+        garage: home.garage,
         price: home.price,
         previousPrice: home.previousPrice,
         moveInDate: home.moveInDate,

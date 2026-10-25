@@ -5,7 +5,7 @@ import { AreaMap } from "./AreaMap";
 import { Incentive, RedHotBadge, RedHotSavings, ReelCard, RetryImage, money, type DealsIncentive } from "./shared";
 import { ProtectedGallery } from "./GatedCatalog";
 import { ShowMore } from "./BrowseBar";
-import { BROWSE_PAGE } from "@/lib/dealsBrowse";
+import { BROWSE_PAGE, homeFiltersOn, homePasses, numberFrom, type BrowseFilters } from "@/lib/dealsBrowse";
 
 /**
  * The landing page's list, laid out like a home search: photo cards beside one
@@ -42,6 +42,8 @@ export const LANDING_COPY = {
   redHot: (count: number) => count === 1 ? "Red Hot Deal" : `${count} Red Hot Deals`,
   areaFilter: (count: number) => `Showing ${count} in this part of town`,
   clearArea: "Show all",
+  sheetFiltered: (shown: number, total: number) => `${shown} of ${total} homes match your filters.`,
+  sheetShowAll: "Show every home",
   mapLabel: "Map of the communities",
   mapAttribution: "Map data and imagery from Google. Markers show the general area only, never the community.",
   showMap: "Show map",
@@ -134,6 +136,44 @@ const MAX_ZOOM = 5;
 
 type View = { z: number; tx: number; ty: number };
 
+/**
+ * The view that fits a group's communities with room around them: content width z (pixels for the picture's full
+ * width) and its offset. Communities on one public point get a close view of that point (a few miles across).
+ */
+export function clusterView(pins: ReadonlyArray<{ x: number; y: number }>, w: number, h: number, maxZ = Infinity): View {
+  if (!pins.length) return { z: w, tx: 0, ty: 0 };
+  const xs = pins.map((pin) => pin.x);
+  const ys = pins.map((pin) => pin.y);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const spanX = Math.max(maxX - minX, 0.06);
+  const spanY = Math.max((maxY - minY) / REGION_VIEW.aspect, 0.06 / REGION_VIEW.aspect);
+  // The closest the map goes is decided before centring, so the group stays in the middle at that zoom.
+  const z = Math.min((w * 0.62) / spanX, (h * 0.62) / spanY, maxZ);
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  return { z, tx: w / 2 - cx * z, ty: h / 2 - cy * (z / REGION_VIEW.aspect) };
+}
+
+/** True when, at this zoom, some of the communities would still share one bubble (their points are under GROUP_PIXELS apart). */
+export function stillStacked(pins: ReadonlyArray<{ x: number; y: number } | null>, z: number): boolean {
+  const placed = pins.filter((pin): pin is { x: number; y: number } => Boolean(pin));
+  for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) {
+    const a = placed[i]!; const b = placed[j]!;
+    if (Math.hypot((a.x - b.x) * z, (a.y - b.y) * (z / REGION_VIEW.aspect)) < GROUP_PIXELS) return true;
+  }
+  return false;
+}
+
+/** Where each fanned-out community sits around its shared point, in pixels: a ring that grows with the count. */
+export function fanOffsets(count: number): Array<{ dx: number; dy: number }> {
+  // Price pills are about 56 pixels wide: the ring keeps neighbours from touching.
+  const radius = Math.max(58, (count * 62) / (2 * Math.PI));
+  return Array.from({ length: count }, (_, index) => {
+    const angle = -Math.PI / 2 + (index * 2 * Math.PI) / count;
+    return { dx: Math.round(Math.cos(angle) * radius), dy: Math.round(Math.sin(angle) * radius) };
+  });
+}
+
 export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, className = "" }: {
   items: ReadonlyArray<{ key: string; pin?: { x: number; y: number } | null; fromPriceLabel?: string | null }>;
   activeKey: string | null;
@@ -159,7 +199,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
     return { z, tx: Math.min(0, Math.max(w - z, next.tx)), ty: Math.min(0, Math.max(h - height, next.ty)) };
   };
   const goTo = (spot: { x: number; y: number; span: number }, w: number, h: number) => {
-    const z = w / spot.span;
+    const z = Math.min(Math.max(w / spot.span, minWidth(w, h)), minWidth(w, h) * MAX_ZOOM);
     return clamp({ z, tx: w / 2 - spot.x * z, ty: h / 2 - spot.y * (z / REGION_VIEW.aspect) }, w, h);
   };
   // Until the visitor moves the map, a change of box size re-centres it on San Antonio (the box settles after the list loads).
@@ -201,7 +241,21 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
     const now = measure();
     if (!now) return;
     touched.current = true;
+    setFanned(null);
     setView(goTo(spot, now.w, now.h));
+  };
+  // Communities whose public points sit on top of each other even fully zoomed in fan out around that point.
+  const [fanned, setFanned] = useState<string[] | null>(null);
+  /** A numbered bubble zooms in to fit its communities (New Home Buddy style); the ones that still overlap fan out. */
+  const openGroup = (marker: Marker) => {
+    const now = measure();
+    const current = viewRef.current;
+    if (!now || !current) return;
+    touched.current = true;
+    const target = clusterView(marker.keys.map((key) => items.find((item) => item.key === key)?.pin).filter((pin): pin is { x: number; y: number } => Boolean(pin)), now.w, now.h, minWidth(now.w, now.h) * MAX_ZOOM);
+    const next = clamp(target, now.w, now.h);
+    setView(next);
+    setFanned(stillStacked(marker.keys.map((key) => items.find((item) => item.key === key)?.pin ?? null), next.z) ? marker.keys : null);
   };
   // The wheel zooms the map, not the page (a passive listener could not stop the page scrolling).
   useEffect(() => {
@@ -255,21 +309,44 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
   const zoomButton = (factor: number) => () => { const now = measure(); if (now) zoomAt(factor, now.w / 2, now.h / 2); };
   return <figure aria-label={LANDING_COPY.mapLabel} data-deals-region-map="true" className={`relative min-w-0 overflow-hidden rounded-xl border border-border bg-[#e8eaed] shadow-sm ${className}`}>
     <div ref={box} className="absolute inset-0 cursor-grab touch-none select-none active:cursor-grabbing" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
-      onClickCapture={(event) => { if (gesture.current.moved > 6) { event.stopPropagation(); event.preventDefault(); } }}>
+      onClickCapture={(event) => { if (gesture.current.moved > 6) { event.stopPropagation(); event.preventDefault(); } }}
+      onClick={(event) => { if (!(event.target as HTMLElement).closest("button")) setFanned(null); }}>
       {view && <div data-deals-map-content="true" className="absolute left-0 top-0" style={{ width: view.z, height: view.z / REGION_VIEW.aspect, transform: `translate(${view.tx}px, ${view.ty}px)` }}>
         <img src="/deals/maps/region.webp" alt="" decoding="async" draggable={false} onError={() => setFailed(true)} className="pointer-events-none block h-full w-full select-none" />
         {activePin && <span aria-hidden="true" data-deals-map-area="true" style={{ left: `${activePin.x * 100}%`, top: `${activePin.y * 100}%`, width: `${AREA_DIAMETER * 100}%` }}
           className="pointer-events-none absolute z-[5] aspect-square min-w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-gold/80 bg-gold/25 shadow-[0_0_0_6px_rgba(184,146,74,0.12)] transition-all duration-200" />}
         {markers.map((marker) => {
-          const lit = (activeKey !== null && marker.keys.includes(activeKey)) || selectedId === marker.id;
           const group = marker.keys.length > 1;
+          if (group && fanned && marker.keys.every((key) => fanned.includes(key))) {
+            const offsets = fanOffsets(marker.keys.length);
+            return <div key={marker.id} data-deals-fan="true" className="absolute z-30" style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }}>
+              <span aria-hidden="true" className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-gold shadow" />
+              <svg aria-hidden="true" className="pointer-events-none absolute overflow-visible" width="1" height="1">{offsets.map((offset, index) => <line key={index} x1="0" y1="0" x2={offset.dx} y2={offset.dy} stroke="rgba(30,35,45,0.45)" strokeWidth="1.5" />)}</svg>
+              {marker.keys.map((key, index) => {
+                const item = items.find((entry) => entry.key === key);
+                const lit = activeKey === key;
+                const label = (item?.fromPriceLabel ?? "").replace(/^From the /, "") || "View";
+                return <button key={key} type="button" data-deals-marker="fan" data-active={lit ? "true" : undefined} aria-label={`Community ${label}. Open it`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onMouseEnter={() => onHover(key)} onMouseLeave={() => onHover(null)}
+                  onClick={() => onSelect({ id: `fan:${key}`, keys: [key] })}
+                  style={{ left: offsets[index]!.dx, top: offsets[index]!.dy }}
+                  className={`absolute inline-flex min-h-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center whitespace-nowrap rounded-full border-2 border-white px-2 text-[11px] font-semibold shadow-md transition-transform before:absolute before:-inset-1.5 before:content-[''] ${lit ? "z-20 scale-110 bg-gold text-primary-foreground" : "bg-[oklch(0.25_0.02_260)] text-white hover:scale-110"}`}>{label}</button>;
+              })}
+            </div>;
+          }
+          const lit = (activeKey !== null && marker.keys.includes(activeKey)) || selectedId === marker.id;
           // A group is a numbered bubble; a lone community is a dot that shows its price band when lit.
           const shape = group ? "min-h-7 min-w-7 px-1.5 text-[11px]" : lit ? "min-h-7 px-2 text-[11px]" : "h-4 w-4";
           return <button key={marker.id} type="button" data-deals-marker={group ? "group" : "single"} data-active={lit ? "true" : undefined}
-            aria-label={group ? `${marker.keys.length} communities here. Show them` : `Community ${marker.label}. Show it`}
+            aria-label={group ? `${marker.keys.length} communities here. Zoom in and show them` : `Community ${marker.label}. Show it`}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseEnter={() => onHover(group ? null : marker.keys[0]!)} onMouseLeave={() => onHover(null)}
-            onClick={() => onSelect(selectedId === marker.id ? null : { id: marker.id, keys: marker.keys })}
+            onClick={() => {
+              if (!group) { onSelect({ id: marker.id, keys: marker.keys }); return; }
+              openGroup(marker);
+              onSelect({ id: marker.id, keys: marker.keys });
+            }}
             style={{ left: `${marker.x * 100}%`, top: `${marker.y * 100}%` }}
             className={`absolute inline-flex -translate-x-1/2 -translate-y-1/2 before:absolute before:-inset-3 before:content-[''] items-center justify-center whitespace-nowrap rounded-full border-2 border-white font-semibold shadow-md transition-transform ${shape} ${lit ? "z-20 scale-110 bg-gold text-primary-foreground" : "z-10 bg-[oklch(0.25_0.02_260)] text-white hover:scale-110"}`}>
             {group || lit ? marker.label : null}
@@ -291,7 +368,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
 /** How the sheet reads a community's homes (the page passes the server query; a preview passes fixed homes). */
 export type UseCommunityHomes = (key: string | undefined) => { isLoading: boolean; data?: readonly PublicHome[] | null };
 
-export function CommunitySheet({ community, onClose, onUnlock, useHomes }: { community: LandingCommunity; onClose: () => void; onUnlock: () => void; useHomes: UseCommunityHomes }) {
+export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters }: { community: LandingCommunity; onClose: () => void; onUnlock: () => void; useHomes: UseCommunityHomes; /** The page's filters: the homes that match come first, the rest one tap away. */ filters?: BrowseFilters }) {
   const dialog = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   // The latest close handler, so the effect below runs once per opening (not on every parent render).
@@ -317,7 +394,11 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes }: { com
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = overflow; opener?.focus(); };
   }, []);
   const homes = useHomes(community.key);
-  const list = homes.data ?? [];
+  const all = homes.data ?? [];
+  const [showAll, setShowAll] = useState(false);
+  const narrowed = filters && homeFiltersOn(filters) && !showAll ? all.filter((home) => homePasses(home, filters)) : null;
+  // When no home passes (the community matched on its offer or area), every home shows rather than an empty sheet.
+  const list = narrowed && narrowed.length ? narrowed : all;
   // On document.body, so no section's stacking (or the page's floating button) can sit over the sheet.
   return createPortal(<div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 sm:items-center sm:p-6" onClick={onClose}>
     <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="deals-community-title" data-deals-community-sheet="true" onClick={(event) => event.stopPropagation()} className="deals-light relative max-h-[94vh] w-full max-w-6xl overflow-y-auto rounded-t-2xl bg-background shadow-2xl sm:rounded-2xl">
@@ -337,6 +418,7 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes }: { com
       </div>
       <div className="border-t border-border px-5 pb-8 pt-6 sm:px-6" data-deals-public-homes="true">
         <h3 className="text-xl font-semibold">{homes.isLoading ? LANDING_COPY.homesLoading : list.length ? LANDING_COPY.homesHeading(list.length) : LANDING_COPY.homesNone}</h3>
+        {narrowed && narrowed.length > 0 && narrowed.length < all.length && <p role="status" className="mt-2 flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground" data-deals-sheet-filtered="true">{LANDING_COPY.sheetFiltered(narrowed.length, all.length)}<button type="button" onClick={() => setShowAll(true)} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.sheetShowAll}</button></p>}
         {list.length > 0 && <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2 lg:grid-cols-3">{list.map((home) => <PublicHomeCard key={home.card} home={home} onAddress={onUnlock} />)}</div>}
       </div>
     </section>
@@ -344,7 +426,7 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes }: { com
 }
 
 /** A home on the landing page: the same facts as the private list, with no address, plan, builder or community name. */
-export type PublicHome = { card: string; kind: string; beds?: string | number | null; baths?: string | number | null; sqft?: number | null; price?: number | null; previousPrice?: number | null; moveInDate?: string | null; lotSize?: string | null; photos?: string[] };
+export type PublicHome = { card: string; kind: string; beds?: string | number | null; baths?: string | number | null; sqft?: number | null; garage?: string | null; stories?: number | null; price?: number | null; previousPrice?: number | null; moveInDate?: string | null; lotSize?: string | null; photos?: string[] };
 
 export function PublicHomeCard({ home, onAddress }: { home: PublicHome; onAddress: () => void }) {
   return <article data-deals-public-home="true" className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
@@ -356,7 +438,7 @@ export function PublicHomeCard({ home, onAddress }: { home: PublicHome; onAddres
       </div>
       <p className="mt-2 text-2xl font-semibold leading-tight">{home.price ? money.format(home.price) : "Ask for current pricing"}</p>
       <RedHotSavings price={home.price} previousPrice={home.previousPrice} />
-      <p className="mt-1 text-sm text-foreground">{[home.beds && `${home.beds} beds`, home.baths && `${home.baths} baths`, home.sqft && `${home.sqft.toLocaleString()} sq ft`].filter(Boolean).join(" · ")}</p>
+      <p className="mt-1 text-sm text-foreground">{[home.beds && `${home.beds} beds`, home.baths && `${home.baths} baths`, home.sqft && `${home.sqft.toLocaleString()} sq ft`, numberFrom(home.garage) && `${numberFrom(home.garage)}-car garage`, home.stories && `${home.stories} ${home.stories === 1 ? "story" : "stories"}`].filter(Boolean).join(" · ")}</p>
       {home.moveInDate && <p className="mt-1 text-xs text-muted-foreground">Est. move-in: {home.moveInDate}</p>}
       {home.lotSize && <p className="mt-0.5 text-xs text-muted-foreground">Lot: {home.lotSize}</p>}
       <button type="button" onClick={onAddress} className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-gold/50 px-4 text-sm font-semibold text-gold hover:bg-gold/10">{LANDING_COPY.homeAddress}</button>
@@ -380,7 +462,7 @@ function AutoMore({ active, onNear }: { active: boolean; onNear: () => void }) {
 }
 
 /** The list and the map side by side (the map stays in view on a wide screen; a phone opens it with a button). */
-export function LandingBrowse({ communities, onUnlock, useHomes, top }: { communities: readonly LandingCommunity[]; onUnlock: () => void; useHomes: UseCommunityHomes; /** Shown at the top of the list column (the featured row). */ top?: ReactNode }) {
+export function LandingBrowse({ communities, onUnlock, useHomes, top, filters }: { communities: readonly LandingCommunity[]; onUnlock: () => void; useHomes: UseCommunityHomes; /** Shown at the top of the list column (the featured row). */ top?: ReactNode; filters?: BrowseFilters }) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ id: string; keys: string[] } | null>(null);
   const [open, setOpen] = useState<LandingCommunity | null>(null);
@@ -426,6 +508,6 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top }: { commun
       {/* The map fills the side of the screen and stays there while the list scrolls (no empty space under it). */}
       <aside className="hidden min-w-0 lg:block"><div className="sticky top-0 h-[100dvh] py-4"><RegionMap {...mapProps} className="h-full w-full" /></div></aside>
     </div>
-    {open && <CommunitySheet community={open} useHomes={useHomes} onClose={() => setOpen(null)} onUnlock={() => { setOpen(null); onUnlock(); }} />}
+    {open && <CommunitySheet community={open} useHomes={useHomes} filters={filters} onClose={() => setOpen(null)} onUnlock={() => { setOpen(null); onUnlock(); }} />}
   </>;
 }

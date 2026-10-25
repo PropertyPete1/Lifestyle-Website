@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
-import { EMPTY_FILTERS, PRICE_CAPS, areaChoices, bedsFrom, dealSelection, gatedCommunityVisible, homesMatching, landingMatches, priceCapLabel } from "../client/src/lib/dealsBrowse";
+import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingMatches, moreFilterCount, priceCapLabel, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
 import type { GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
 import { browseOrder } from "./dealsService";
 
@@ -21,6 +21,51 @@ const home = (card: string, over: Partial<GatedCommunity["homes"][number]> = {})
 const community = (index: number, over: Partial<GatedCommunity> = {}): GatedCommunity => ({
   key: `k${index}`, label: `Area ${index % 3} | Homes ${index}`, area: ["North San Antonio", "New Braunfels", "Southeast San Antonio"][index % 3]!, reelUrl: null, incentive: null, areaMap: null, driveTimes: [],
   homes: [home(`h${index}a`, { price: 300_000 + index * 10_000 }), home(`h${index}b`, { kind: "to_be_built", beds: "3-5", price: 450_000 + index * 10_000 })], ...over,
+});
+
+describe("New Home Buddy style filters (Peter, Oct 25: price range, beds, baths, size, garage, stories, home type)", () => {
+  // [price, beds, baths, sqft, garage, kind, stories, previous price]
+  const oneStory: LandingHomeFacts = [329_990, 3, 2, 1_650, 2, 0, 1, null];
+  const twoStory: LandingHomeFacts = [419_990, 5, 3.5, 2_900, 3, 0, 2, 459_990];
+  const plan: LandingHomeFacts = [289_990, 4, 2, 1_900, 2, 1, null, null];
+  const card = (homeFacts: LandingHomeFacts[], over: Record<string, unknown> = {}) => ({ area: "New Braunfels", label: "New Braunfels | Hill Country Views", fromPrice: 289_990, homesAvailable: 2, homeFacts, ...over });
+
+  it("matches a community when one of its homes passes every home filter together", () => {
+    const community = card([oneStory, twoStory]);
+    expect(landingMatches(community, { ...EMPTY_FILTERS, stories: 1 })).toBe(true);
+    expect(landingMatches(community, { ...EMPTY_FILTERS, stories: 1, minBeds: 4 })).toBe(false);
+    expect(landingMatches(community, { ...EMPTY_FILTERS, stories: 2, minBeds: 4, minBaths: 3, minGarage: 3, minSqft: 2_500 })).toBe(true);
+    expect(landingMatches(community, { ...EMPTY_FILTERS, minPrice: 400_000, maxPrice: 500_000 })).toBe(true);
+    expect(landingMatches(community, { ...EMPTY_FILTERS, minPrice: 450_000 })).toBe(false);
+    expect(landingMatches(community, { ...EMPTY_FILTERS, maxPrice: 300_000 })).toBe(false);
+    // A Red Hot Deal only counts when that same home passes the other filters.
+    expect(landingMatches(community, { ...EMPTY_FILTERS, redHot: true })).toBe(true);
+    expect(landingMatches(community, { ...EMPTY_FILTERS, redHot: true, stories: 1 })).toBe(false);
+  });
+
+  it("tells move-in ready homes from homes to be built, and both together mean either", () => {
+    expect(landingMatches(card([plan]), { ...EMPTY_FILTERS, moveInReady: true })).toBe(false);
+    expect(landingMatches(card([plan]), { ...EMPTY_FILTERS, toBeBuilt: true })).toBe(true);
+    expect(landingMatches(card([oneStory]), { ...EMPTY_FILTERS, toBeBuilt: true })).toBe(false);
+    expect(landingMatches(card([oneStory]), { ...EMPTY_FILTERS, moveInReady: true, toBeBuilt: true })).toBe(true);
+  });
+
+  it("never shows a home whose builder does not list the fact asked for (no stories listed is not one story)", () => {
+    expect(homePasses({ kind: "to_be_built", price: 300_000 }, { ...EMPTY_FILTERS, stories: 1 })).toBe(false);
+    expect(homePasses({ kind: "to_be_built", price: 300_000 }, { ...EMPTY_FILTERS, minGarage: 2 })).toBe(false);
+    expect(homePasses({ kind: "quick_move_in", price: 300_000, garage: "2 car", baths: "2.5" }, { ...EMPTY_FILTERS, minGarage: 2, minBaths: 2.5 })).toBe(true);
+  });
+
+  it("falls back to the card's own figures on a page from before the home facts", () => {
+    expect(landingMatches(card([], { homeFacts: undefined }), { ...EMPTY_FILTERS, maxPrice: 300_000 })).toBe(true);
+    expect(landingMatches(card([], { homeFacts: undefined, homesAvailable: 0 }), { ...EMPTY_FILTERS, moveInReady: true })).toBe(false);
+  });
+
+  it("counts the filters, and the ones under More filters on that button", () => {
+    const filters = { ...EMPTY_FILTERS, minPrice: 300_000, stories: 1 as const, minGarage: 3, toBeBuilt: true };
+    expect(activeFilterCount(filters)).toBe(4);
+    expect(moreFilterCount(filters)).toBe(3);
+  });
 });
 
 describe("browse filters", () => {

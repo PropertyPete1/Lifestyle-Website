@@ -1,6 +1,7 @@
 import {
   HOMEFINITI_HOSTS, asUrl, cardAroundLink, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 
 /**
@@ -252,7 +253,7 @@ function cardSpecs(text: string): { bedrooms: number; bathrooms: number; squareF
   return { bedrooms: Number(match[1]), bathrooms: Number(match[2]) + half * 0.5, squareFeet: Number(match[4]!.replace(/,/g, "")) };
 }
 
-type CardHome = { path: string; street: string; city: string | null; price: number; bedrooms: number; bathrooms: number; squareFeet: number; image: string | null };
+type CardHome = { path: string; street: string; city: string | null; price: number; bedrooms: number; bathrooms: number; squareFeet: number; stories: number | null; image: string | null };
 
 /**
  * The page's home cards (`article.card-spec`, Coventry's markup in October 2026): link, `data-price`, the
@@ -275,7 +276,7 @@ function parseCardHomes(html: string, root: HtmlElement, community: URL): Map<st
     const place = address ? elementText(address, html).split("·")[0]!.split(",").map((part) => part.trim()) : [];
     const image = inner.find((item) => item.tag === "img" && item.attributes.src)?.attributes.src ?? null;
     const card: CardHome | null = specs && price && price > 0 && shownPrice && num(shownPrice) === price && num(article.attributes["data-square-feet"]) === specs.squareFeet && place[0]
-      ? { path, street: place[0], city: place[1] || null, price, ...specs, image }
+      ? { path, street: place[0], city: place[1] || null, price, ...specs, stories: null, image }
       : null;
     if (out.has(path)) { const known = out.get(path); if (!known || !card || JSON.stringify(known) !== JSON.stringify(card)) out.set(path, null); }
     else out.set(path, card);
@@ -294,12 +295,13 @@ function parseCardHomes(html: string, root: HtmlElement, community: URL): Map<st
     const beds = stat(/^(\d{1,2})\s*Beds?$/i);
     const baths = stat(/^(\d{1,2}(?:\.\d)?)\s*Baths?$/i);
     const sqft = stat(/^([\d,]{3,6})\s*Sq\.?\s*Ft\.?$/i);
+    const stories = stat(/^(\d(?:\.\d)?)\s*Stor(?:y|ies)$/i);
     const address = inner.find((item) => elementClass(item, "address"));
     const lines = address ? html.slice(address.contentStart, address.contentEnd).replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").split("\n").map((line) => decodeHtmlEntities(line).replace(/\s+/g, " ").trim()).filter(Boolean) : [];
     const image = inner.find((item) => item.tag === "img" && item.attributes.src)?.attributes.src ?? null;
     const consistent = price !== null && price > 0 && prices.every((value) => value === price);
     const card: CardHome | null = consistent && beds && baths && sqft && lines[0]
-      ? { path, street: lines[0], city: lines[1]?.split(",")[0]?.trim() || null, price, bedrooms: Number(beds[1]), bathrooms: Number(baths[1]), squareFeet: Number(sqft[1]!.replace(/,/g, "")), image }
+      ? { path, street: lines[0], city: lines[1]?.split(",")[0]?.trim() || null, price, bedrooms: Number(beds[1]), bathrooms: Number(baths[1]), squareFeet: Number(sqft[1]!.replace(/,/g, "")), stories: stories ? storiesFrom(stories[1]) : null, image }
       : null;
     if (out.has(path)) { const known = out.get(path); if (!known || !card || JSON.stringify(known) !== JSON.stringify(card)) out.set(path, null); }
     else out.set(path, card);
@@ -370,7 +372,7 @@ function readHomefinitiPage(html: string, community: URL, host: string): Homefin
       for (const path of unrecorded) {
         const card = cardHomes.get(path)!;
         const url = new URL(path.replace(/\/?$/, "/"), community.origin);
-        fromCards.push({ kind: "home", sourceUrl: url.toString(), privateName: card.street, privateAddress: [card.street, card.city, "TX"].filter(Boolean).join(", "), privatePlanName: planNameFromPath(url.pathname.split("/").filter(Boolean).at(-2) ?? ""), status: null, price: card.price, bedrooms: card.bedrooms, bathrooms: card.bathrooms, squareFeet: card.squareFeet, readyNow: false, gallery: card.image ? gallery([card.image], false) : [] });
+        fromCards.push({ kind: "home", sourceUrl: url.toString(), privateName: card.street, privateAddress: [card.street, card.city, "TX"].filter(Boolean).join(", "), privatePlanName: planNameFromPath(url.pathname.split("/").filter(Boolean).at(-2) ?? ""), status: null, price: card.price, bedrooms: card.bedrooms, bathrooms: card.bathrooms, squareFeet: card.squareFeet, stories: card.stories, readyNow: false, gallery: card.image ? gallery([card.image], false) : [] });
       }
     }
   }

@@ -1,6 +1,7 @@
 import {
   SCOTTFELDER_HOST, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 
 /**
@@ -283,6 +284,7 @@ export function parseScottFelderCommunity(html: string, pageUrl: string, now: Da
       bathrooms: full === null ? null : full + (num(home.bathsHalf) ?? 0) * 0.5,
       squareFeet: num(home.sqft),
       garage: num(home.garages),
+      stories: storiesFrom(home.stories),
       readyNow: model ? false : status.readyNow,
       moveInDate: model ? null : status.moveInDate,
       geo: geo ? { latitude: geo.lat, longitude: geo.lng } : null,
@@ -326,6 +328,7 @@ export function parseScottFelderCommunity(html: string, pageUrl: string, now: Da
       bathrooms: full === null ? null : full + (num(plan.bathsHalf) ?? 0) * 0.5,
       squareFeet: num(plan.sqftLow) ?? num(plan.sqft),
       garage: num(plan.garagesLow) ?? num(plan.garages),
+      stories: storiesFrom(plan.storiesLow ?? plan.stories),
       readyNow: false,
       gallery: gallery(placedIn, "Representative image", plan.elevationPhotos, plan.photos),
     });

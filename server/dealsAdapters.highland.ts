@@ -1,6 +1,7 @@
 import {
   HIGHLAND_HOST, asUrl, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlElement, type HtmlFetcher, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 
 /**
@@ -127,6 +128,7 @@ export function parseHighlandCards(html: string, communityUrl: string, now: Date
       bathrooms: details.has("baths") ? highlandBaths(details.get("baths")!) : null,
       squareFeet: sqft ? Number(sqft.replace(/,/g, "")) || null : null,
       garage: details.has("garages") ? Number(details.get("garages")) || null : null,
+      stories: storiesFrom(details.get("stories") ?? details.get("story") ?? null),
       readyNow: status.readyNow,
       moveInDate: status.moveInDate,
       gallery: image && /^https:\/\/media\.hhomesltd\.com\//.test(decodeHtmlEntities(image)) ? [{ sourceUrl: decodeHtmlEntities(image), caption: null, width: null, height: null, srcSet: null }] : [],
@@ -164,6 +166,7 @@ function highlandHomeCard(card: HtmlElement, html: string, community: URL, place
   const beds = leadingFigure(read("home-bedrooms"));
   const baths = leadingFigure(read("home-baths"));
   const garages = leadingFigure(read("home-garages"));
+  const stories = storiesFrom(read("home-stories"));
   const sqft = leadingFigure(read("home-squarefootage"));
   const image = inner.find((element) => element.tag === "img");
   const imageUrl = image ? decodeHtmlEntities(image.attributes.src ?? image.attributes["data-src"] ?? "") : "";
@@ -178,6 +181,7 @@ function highlandHomeCard(card: HtmlElement, html: string, community: URL, place
     bathrooms: baths ? highlandBaths(baths) : null,
     squareFeet: sqft ? Number(sqft.replace(/,/g, "")) || null : null,
     garage: garages ? Number(garages) || null : null,
+    stories,
     readyNow: status.readyNow,
     moveInDate: status.moveInDate,
     gallery: /^https:\/\/media\.hhomesltd\.com\//.test(imageUrl) ? [{ sourceUrl: imageUrl, caption: null, width: null, height: null, srcSet: null }] : [],

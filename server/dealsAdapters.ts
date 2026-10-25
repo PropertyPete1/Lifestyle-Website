@@ -162,6 +162,17 @@ export interface PrivateGalleryImage {
   srcSet: string | null;
 }
 
+/**
+ * Floors from a builder's value: 1, "2", "2.0", "1 Story", "2 Stories". A 1.5-story plan counts as two (it has stairs).
+ * Null when absent or out of range (nothing above 4 is a house).
+ */
+export function storiesFrom(value: unknown): number | null {
+  const match = typeof value === "number" ? value : /(\d+(?:\.\d+)?)/.exec(String(value ?? ""))?.[1];
+  const number = typeof match === "number" ? match : match === undefined ? NaN : Number(match);
+  if (!Number.isFinite(number) || number < 1 || number > 4) return null;
+  return Math.ceil(number);
+}
+
 export interface PrivatePlanOrHome {
   sourceUrl: string;
   privateName: string | null;
@@ -178,6 +189,8 @@ export interface PrivatePlanOrHome {
   readyNow?: boolean;
   moveInDate?: string | null;
   garage?: number | null;
+  /** Floors as the builder lists them (1 or 2); null when the source does not say. See storiesFrom. */
+  stories?: number | null;
   homesite?: string | null;
   geo?: { latitude: number; longitude: number } | null;
   gallery?: PrivateGalleryImage[];
@@ -2301,6 +2314,7 @@ function miCardProperty(card: HtmlElement, html: string, product: Record<string,
     readyNow,
     moveInDate,
     garage: schemaNumber(meta.get("garage")),
+    stories: storiesFrom(meta.get("stories") ?? meta.get("story") ?? null),
     homesite: meta.get("homesite") ?? null,
     geo: latitude !== null && longitude !== null && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180 ? { latitude, longitude } : null,
     gallery: [],

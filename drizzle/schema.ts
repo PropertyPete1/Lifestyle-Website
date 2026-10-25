@@ -359,6 +359,8 @@ export const dealHomes = mysqlTable(
     moveInDate: varchar("move_in_date", { length: 100 }),
     lotSize: varchar("lot_size", { length: 100 }),
     garage: varchar("garage", { length: 30 }),
+    /** Floors (1 or 2) when the builder lists them; null when it does not. */
+    stories: int("stories"),
     homesite: varchar("homesite", { length: 100 }),
     readyNow: boolean("ready_now").default(false).notNull(),
     origin: mysqlEnum("origin", ["official", "manual"]).default("official").notNull(),

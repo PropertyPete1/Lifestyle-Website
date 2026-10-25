@@ -1,0 +1,1 @@
+ALTER TABLE `deal_homes` ADD `stories` int;

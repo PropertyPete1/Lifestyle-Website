@@ -169,6 +169,13 @@
       "when": 1792596459905,
       "tag": "0023_supplied_import",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1792938144874,
+      "tag": "0024_deal_home_stories",
+      "breakpoints": true
     }
   ]
 }

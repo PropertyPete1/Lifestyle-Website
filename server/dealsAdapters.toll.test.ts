@@ -113,6 +113,13 @@ describe("Toll Brothers reader: page data", () => {
     expect(odd.foreignHome).toBe(false);
   });
 
+  it("reads stories (\"1.0\") on plans and homes", () => {
+    const parsed = parseTollCommunity(communityPage(), COMMUNITY, NOW)!;
+    expect(parsed.homes.every((home) => home.stories === 1)).toBe(true);
+    expect(parsed.plans.length).toBeGreaterThan(0);
+    expect(parsed.plans.every((plan) => plan.stories === 1)).toBe(true);
+  });
+
   it("lists the metro's communities from the search page, collections of a master community included, never another host", () => {
     const entries = tollListingEntries(listingPage, "www.tollbrothers.com")!;
     expect(entries.map((entry) => [entry.url, entry.record.name, entry.record.street, entry.record.city, entry.record.zip, entry.record.phone, entry.record.priceFrom, entry.record.geo])).toEqual([

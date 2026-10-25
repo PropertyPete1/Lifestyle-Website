@@ -1,6 +1,7 @@
 import {
   KBHOME_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 import { jsonLdRecords } from "./dealsAdapters.homefiniti";
 
@@ -210,6 +211,7 @@ export function parseKbCommunity(html: string, pageUrl: string, now: Date = new 
       bathrooms: num(plan.bathroomsMin),
       squareFeet: num(plan.size),
       garage: num(plan.garagesMin),
+      stories: storiesFrom(plan.stories),
       readyNow: false,
       gallery: gallery(plan.thumbnailImage, host, true),
     });
@@ -240,6 +242,7 @@ export function parseKbCommunity(html: string, pageUrl: string, now: Date = new 
       bathrooms: num(home.bathrooms),
       squareFeet: num(home.size),
       garage: num(home.garages),
+      stories: storiesFrom(home.stories),
       homesite: lot ? `Lot ${lot.replace(/^0+(?=\d)/, "")}` : null,
       readyNow: status.readyNow,
       moveInDate: status.moveInDate,

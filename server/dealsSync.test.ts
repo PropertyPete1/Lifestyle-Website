@@ -146,6 +146,16 @@ describe("official refresh: homes", () => {
     expect(row().previousPrice).toBeNull();
   });
 
+  it("stores each home's and plan's stories, and a later read without them keeps the known count", async () => {
+    mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a"), stories: 2 }, { sourceUrl: home("8305-b") }], plans: [{ sourceUrl: plan("fixture-a"), stories: 1 }] }));
+    await refreshOfficialDeals({ communityId, now: T0 });
+    const stories = () => Object.fromEntries(db.rows(dealHomes).map((row) => [row.sourceUrl, row.stories ?? null]));
+    expect(stories()).toEqual({ [home("8301-a")]: 2, [home("8305-b")]: null, [plan("fixture-a")]: 1 });
+    mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }, { sourceUrl: home("8305-b"), stories: 1 }], plans: [{ sourceUrl: plan("fixture-a"), stories: 2 }] }));
+    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 3 * DAY) });
+    expect(stories()).toEqual({ [home("8301-a")]: 2, [home("8305-b")]: 1, [plan("fixture-a")]: 2 });
+  });
+
   it("writes community facts and merges discovered plan and street names into the categorized scrub list", async () => {
     mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({
       homes: [{ sourceUrl: home("8301-a") }],

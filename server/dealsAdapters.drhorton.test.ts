@@ -149,6 +149,11 @@ describe("D.R. Horton reader: page shapes", () => {
     expect(homes.some((home) => /Other Fixture|footer/i.test(home.privateName ?? ""))).toBe(false);
   });
 
+  it("keeps each card's stories (1 or 2) for the stories filter", () => {
+    const homes = parseDrhCommunityCards(communityPage(), COMMUNITY)!.filter((card) => card.kind === "home");
+    expect(homes.map((home) => home.stories)).toEqual([1, 2, 1]);
+  });
+
   it("reads every plan card: name, the low end of its starting band, specs, and a labelled representative image", () => {
     const plans = parseDrhCommunityCards(communityPage(), COMMUNITY)!.filter((card) => card.kind === "plan");
     expect(plans.map((plan) => [plan.privatePlanName, plan.price, plan.bedrooms, plan.bathrooms, plan.squareFeet, plan.status])).toEqual([

@@ -1,6 +1,7 @@
 import {
   NMLS_ID_PATTERN_ALL, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 
 /**
@@ -164,6 +165,7 @@ export function parsePulteQmi(entry: Record<string, unknown>, host: string, now:
     bathrooms: num(entry.totalBaths) ?? num(entry.bathrooms),
     squareFeet: num(entry.squareFeet),
     garage: num(entry.garages),
+    stories: storiesFrom(entry.stories ?? entry.numberOfStories ?? null),
     homesite: lot ? `Homesite ${lot}` : null,
     readyNow: moveIn.readyNow,
     moveInDate: moveIn.moveInDate,
@@ -189,6 +191,7 @@ export function parsePultePlan(entry: Record<string, unknown>, host: string): Pu
     bathrooms: num(entry.maxTotalBaths) ?? num(entry.bathrooms),
     squareFeet: num(entry.squareFeet),
     garage: num(entry.garages),
+    stories: storiesFrom(entry.stories ?? entry.numberOfStories ?? null),
     readyNow: false,
     gallery: gallery(entry.images, true),
   };

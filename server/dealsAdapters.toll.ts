@@ -1,6 +1,7 @@
 import {
   NMLS_ID_PATTERN_ALL, TOLL_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 import { parseNextData } from "./dealsAdapters.davidson";
 
@@ -239,6 +240,7 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
         bathrooms: num(model.minBath) === null ? null : (num(model.minBath) ?? 0) + (num(model.minHalfBath) ?? 0) * 0.5,
         squareFeet: num(model.minSqft),
         garage: num(model.minGarage),
+        stories: storiesFrom(model.stories),
         readyNow: false,
         gallery: gallery(model.headShot, model.elevations).map((image) => ({ ...image, caption: "Representative image" })),
       });
@@ -272,6 +274,7 @@ export function parseTollCommunity(html: string, pageUrl: string, now: Date = ne
         bathrooms: num(home.minBath) === null ? null : (num(home.minBath) ?? 0) + (num(home.minHalfBath) ?? 0) * 0.5,
         squareFeet: num(home.minSqft),
         garage: num(home.minGarage),
+        stories: storiesFrom(home.stories),
         homesite: lot ? `Lot ${lot}` : null,
         readyNow: status.readyNow,
         moveInDate: status.moveInDate,

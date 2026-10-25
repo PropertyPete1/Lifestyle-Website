@@ -1,6 +1,7 @@
 import {
   CENTURY_HOST, asUrl, cardAroundLink, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlElement, type HtmlFetcher, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 import { jsonLdRecords } from "./dealsAdapters.homefiniti";
 
@@ -183,6 +184,7 @@ export function parseCenturyCards(html: string, root: HtmlElement, pageUrl: stri
       bathrooms: spec(/^baths?$/),
       squareFeet: spec(/^sq\.?\s*ft/),
       garage: spec(/^cars?$|garage/),
+      stories: storiesFrom(spec(/^stor(?:y|ies)$/)),
       readyNow: status.readyNow,
       moveInDate: status.moveInDate,
       // The card photo is often another lot's elevation of the plan: shown as representative.

@@ -1,6 +1,7 @@
 import {
   EMPIRE_HOST, NMLS_ID_PATTERN_ALL, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 
 /**
@@ -278,6 +279,7 @@ export function empireHomes(listing: EmpireListing, pageUrl: string, record: Emp
       bathrooms: baths === null ? null : baths + (positive(row.halfbaths) ?? 0) * 0.5,
       squareFeet: positive(row.size),
       garage: positive(row.unit_garages),
+      stories: storiesFrom(row.unit_stories),
       homesite: lot && /^\d+[A-Za-z]?$/.test(lot) ? `Lot ${lot}` : null,
       readyNow: status.readyNow,
       moveInDate: status.moveInDate,
@@ -321,6 +323,7 @@ export function empirePlans(listing: EmpireListing, pageUrl: string): { plans: P
       bathrooms: baths === null ? null : baths + (positive(row.halfbaths) ?? 0) * 0.5,
       squareFeet,
       garage: positive(row.unit_garages),
+      stories: storiesFrom(row.unit_stories),
       readyNow: false,
       gallery: gallery(row, host),
     });

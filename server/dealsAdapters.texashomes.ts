@@ -1,6 +1,7 @@
 import {
   NMLS_ID_PATTERN_ALL, TEXASHOMES_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 
 /**
@@ -263,6 +264,7 @@ export function parseTexasHomesCommunity(html: string, pageUrl: string): TexasHo
       bathrooms: baths === null ? null : baths + (half ? half * 0.5 : 0),
       squareFeet: feature(inner, html, "sqft"),
       garage: feature(inner, html, "garage"),
+      stories: storiesFrom(feature(inner, html, "stories")),
       readyNow: false,
       gallery: gallery(inner, "field--name-field-main-elevation", community),
     });
@@ -353,6 +355,7 @@ export function parseTexasHomesListing(html: string, listUrl: string, now: Date,
       bathrooms: baths,
       squareFeet: feature(parts, html, "sqft"),
       garage: feature(parts, html, "garage"),
+      stories: storiesFrom(feature(parts, html, "stories")),
       readyNow: status.readyNow,
       moveInDate: status.moveInDate,
       gallery: gallery(parts, "field--name-field-images", page),

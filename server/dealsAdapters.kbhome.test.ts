@@ -113,6 +113,16 @@ describe("KB Home reader: page data", () => {
   });
 });
 
+describe("KB Home reader: stories", () => {
+  it("reads the plans' and the homes' stories from their string values", () => {
+    const parsed = parseKbCommunity(communityPage(), COMMUNITY, NOW)!;
+    expect(parsed.homes.length).toBeGreaterThan(0);
+    expect(parsed.homes.every((entry) => entry.stories === 2)).toBe(true);
+    expect(parsed.plans.length).toBeGreaterThan(0);
+    expect(parsed.plans.every((entry) => entry.stories === 1)).toBe(true);
+  });
+});
+
 describe("KB Home reader: a community", () => {
   it("reads the page once and publishes homes and plans scrubbed; an empty move-in list is a community with plans only", async () => {
     const result = await loadOfficialDeals(config, { fetcher });

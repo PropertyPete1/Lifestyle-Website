@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { normalizedDealSourceKey, normalizedText } from "../shared/deals";
 import {
-  asUrl, emptyPrivate, failedResult, looksLikeStreetAddress, makePublicSnapshot, officialHostFor, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  asUrl, emptyPrivate, failedResult, looksLikeStreetAddress, makePublicSnapshot, officialHostFor, parsePromotionalRate, sameOfficialHost, sourcePage, storiesFrom, successfulResult,
   type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PrivateGalleryImage, type PrivatePlanOrHome,
 } from "./dealsAdapters";
 import { cleanOfferText } from "./dealsAdapters.ndg";
@@ -54,6 +54,8 @@ export const suppliedHomeSchema = z.strictObject({
   sqft: z.number().finite().nullable().optional(),
   /** Garage spaces as the page shows them (2 for a two-car garage); featured homes need one (Oct 24, Peter). */
   garage: z.number().finite().nullable().optional(),
+  /** Floors (1 or 2) when the page shows them. */
+  stories: z.number().finite().nullable().optional(),
   /** `pending`: the page still shows the home but marks it under contract (Legend's "Contract Pending"): off the market, not sold. */
   status: z.enum(["available", "under_construction", "pending", "sold"]),
   /** "ready now", "Month YYYY" (e.g. "December 2026"), or null when the page gives none. */
@@ -213,6 +215,7 @@ export function checkSuppliedCommunity(builder: string, stored: Pick<StoredSuppl
       bathrooms: home.baths ?? null,
       squareFeet: home.sqft ?? null,
       garage: home.garage ?? null,
+      stories: storiesFrom(home.stories ?? null),
       readyNow: status.readyNow,
       moveInDate: status.moveInDate,
       gallery,

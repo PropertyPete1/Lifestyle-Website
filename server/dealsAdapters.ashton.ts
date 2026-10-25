@@ -1,6 +1,7 @@
 import {
   ASHTON_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 import { jsonLdRecords } from "./dealsAdapters.homefiniti";
 
@@ -153,6 +154,7 @@ export function parseAshtonCommunity(html: string, pageUrl: string, now: Date = 
     const baths = fullBaths ? [fullBaths[0], String(Number(fullBaths[1]) + (halfBaths ? Number(halfBaths[1]) * 0.5 : 0))] as const : null;
     const sqft = find(/([\d,]{3,6})\s*sq\.?\s*ft/i);
     const garage = find(/(\d+(?:\.\d)?)(?:\s*[–—-]\s*\d+(?:\.\d)?)?\s*car\s+garage/i);
+    const stories = find(/(\d+(?:\.\d)?)(?:\s*[–—-]\s*\d+(?:\.\d)?)?\s*stor(?:y|ies)\b/i);
     const priceText = classText(inner, html, "property-card__price") ?? "";
     const strike = classText(inner, html, "property-card__price--strike");
     const reduced = classText(inner, html, "property-card__price--red");
@@ -165,7 +167,7 @@ export function parseAshtonCommunity(html: string, pageUrl: string, now: Date = 
       plans.push({
         sourceUrl: link.toString(), privateName: planName, privatePlanName: planName, status: null,
         price: current && current > 0 ? current : null,
-        bedrooms: beds ? Number(beds[1]) : null, bathrooms: baths ? Number(baths[1]) : null, squareFeet: sqft ? Number(sqft[1]!.replace(/,/g, "")) : null, garage: garage ? Number(garage[1]) : null,
+        bedrooms: beds ? Number(beds[1]) : null, bathrooms: baths ? Number(baths[1]) : null, squareFeet: sqft ? Number(sqft[1]!.replace(/,/g, "")) : null, garage: garage ? Number(garage[1]) : null, stories: stories ? storiesFrom(stories[1]) : null,
         readyNow: false, gallery: images.map((image) => ({ ...image, caption: "Representative image" })),
       });
       continue;
@@ -186,7 +188,7 @@ export function parseAshtonCommunity(html: string, pageUrl: string, now: Date = 
       price: current && current > 0 ? current : null,
       previousPrice: previous && current && previous > current ? previous : null,
       priceDrop: previous && current && previous > current ? previous - current : null,
-      bedrooms: beds ? Number(beds[1]) : null, bathrooms: baths ? Number(baths[1]) : null, squareFeet: sqft ? Number(sqft[1]!.replace(/,/g, "")) : null, garage: garage ? Number(garage[1]) : null,
+      bedrooms: beds ? Number(beds[1]) : null, bathrooms: baths ? Number(baths[1]) : null, squareFeet: sqft ? Number(sqft[1]!.replace(/,/g, "")) : null, garage: garage ? Number(garage[1]) : null, stories: stories ? storiesFrom(stories[1]) : null,
       readyNow: status.readyNow, moveInDate: status.moveInDate, gallery: images,
     });
   }

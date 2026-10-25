@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   DEAL_ADAPTERS,
+  storiesFrom,
   categorizedPrivateTerms,
   loadOfficialDeals,
   looksLikeStreetAddress,
@@ -635,5 +636,12 @@ describe("deals adapters", () => {
     expect(result.ok).toBe(false);
     expect(result.holdReasons).toEqual(["expected_community_container_not_found"]);
     expect(JSON.stringify(result.public)).not.toContain(sourceUrl);
+  });
+});
+
+describe("storiesFrom", () => {
+  it("reads 1, \"2\", \"2.0\", \"1 Story\" and \"2 Stories\"; a 1.5-story plan is two; nothing or nonsense is unknown", () => {
+    expect([1, "2", "2.0", "1 Story", "2 Stories", 1.5, "1.0"].map(storiesFrom)).toEqual([1, 2, 2, 1, 2, 2, 1]);
+    expect([null, undefined, "", 0, "0", 9, "Single Family"].map(storiesFrom)).toEqual([null, null, null, null, null, null, null]);
   });
 });

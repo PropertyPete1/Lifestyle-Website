@@ -1,6 +1,7 @@
 import {
   PERRY_HOST, asUrl, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseSitemapUrls, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 
 /**
@@ -111,6 +112,7 @@ export function parsePerryDetail(html: string, pageUrl: string): PerryHome | nul
   const beds = int(before, "bedrooms");
   const baths = int(before, "baths");
   const garage = int(before, "garage");
+  const stories = storiesFrom(int(before, "story"));
   const badge = str(after, "badge") ?? str(before, "move_in_ready_display_status");
   const homeTitle = str(after, "home_title") ?? str(before, "home_title");
   const designTitle = str(after, "designTitle");
@@ -144,6 +146,7 @@ export function parsePerryDetail(html: string, pageUrl: string): PerryHome | nul
     bathrooms: baths,
     squareFeet: sqft,
     garage,
+    stories,
     readyNow,
     moveInDate: moveIn ? titleCase(badge!.trim().replace(/\s+move[- ]?in$/i, "")) : null,
     gallery,

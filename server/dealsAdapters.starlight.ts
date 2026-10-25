@@ -1,6 +1,7 @@
 import {
   NMLS_ID_PATTERN_ALL, STARLIGHT_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 import { jsonLdRecords } from "./dealsAdapters.homefiniti";
 
@@ -210,6 +211,7 @@ export function parseStarlightCommunity(html: string, pageUrl: string, now: Date
       bathrooms: spec("specs__item--baths", /(\d+(?:\.\d)?)/),
       squareFeet: spec("specs__item--area", /([\d,]{3,6})/),
       garage: spec("specs__item--garage", /(\d+(?:\.\d)?)/),
+      stories: storiesFrom(spec("specs__item--stories", /(\d+(?:\.\d)?)/)),
       readyNow: false,
       gallery: gallery(inner),
     });

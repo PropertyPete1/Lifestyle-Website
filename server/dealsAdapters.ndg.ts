@@ -1,6 +1,7 @@
 import {
   asUrl, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
   NMLS_ID_PATTERN_ALL, type AdapterRunOptions, type BuilderId, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 
 /**
@@ -208,6 +209,7 @@ export function parseNdgHomes(brand: NdgBrand, body: string, communityId: number
       bathrooms: full === null ? null : full + (num(home.halfBaths) ?? 0) * 0.5,
       squareFeet: num(home.sqFt),
       garage: num(home.garageSpaces),
+      stories: storiesFrom(home.stories),
       homesite: homesite ? `Homesite ${homesite}` : null,
       readyNow: home.isModel === true ? false : status.readyNow,
       moveInDate: home.isModel === true ? null : status.moveInDate,
@@ -242,6 +244,7 @@ export function parseNdgPlans(brand: NdgBrand, body: string, communityPage: stri
       bathrooms: full === null ? null : full + (num(plan.bathsHalfMin) ?? 0) * 0.5,
       squareFeet: num(plan.sqFtMin),
       garage: num(plan.garageSpacesMin),
+      stories: storiesFrom(plan.stories),
       readyNow: false,
       gallery: gallery(brand.assetHost, plan.images, plan.elevationImages).map((image) => ({ ...image, caption: "Representative image" })),
     });

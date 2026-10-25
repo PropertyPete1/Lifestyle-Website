@@ -72,6 +72,10 @@ describe("Highland Homes reader: cards", () => {
     expect(highlandStatus("Coming Soon", new Date("2026-10-22T20:00:00Z"))).toEqual({ status: "Coming Soon", readyNow: false, moveInDate: null });
   });
 
+  it("reads each card's stories", () => {
+    expect(parseHighlandCards(communityPage(), COMMUNITY)!.map((home) => home.stories)).toEqual([1, 1, 1]);
+  });
+
   it("reads every card: price, street with the office's city and ZIP, plan, beds, baths from full/half, square feet, garage, status tag, photo", () => {
     const homes = parseHighlandCards(communityPage(), COMMUNITY)!;
     expect(homes.map((home) => [home.privateAddress, home.privatePlanName, home.status, home.price, home.bedrooms, home.bathrooms, home.squareFeet, home.garage, home.readyNow, home.moveInDate])).toEqual([

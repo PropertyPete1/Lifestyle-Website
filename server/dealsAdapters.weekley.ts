@@ -1,6 +1,7 @@
 import {
   WEEKLEY_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, makePublicSnapshot, parsePromotionalRate, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 
 /**
@@ -206,6 +207,7 @@ export function parseWeekleyCommunity(html: string, pageUrl: string, now: Date =
       bathrooms: full === null ? null : full + (minimum(plan.HalfBaths) ?? 0) * 0.5,
       squareFeet: minimum(plan.SquareFootage),
       garage: minimum(plan.Garages),
+      stories: storiesFrom(minimum(plan.Stories)),
       readyNow: false,
       gallery: gallery(host, "Representative image", ...arr(plan.Elevations).map((elevation) => obj(elevation)?.Renderings), plan.ExteriorPhotos),
     });
@@ -245,6 +247,7 @@ export function parseWeekleyCommunity(html: string, pageUrl: string, now: Date =
       bathrooms: full === null ? null : full + (num(home.HalfBaths) ?? 0) * 0.5,
       squareFeet: num(home.SquareFootage),
       garage: num(home.Garages),
+      stories: storiesFrom(minimum(home.Stories)),
       homesite: str(home.JobNumber) ? `Job ${str(home.JobNumber)}` : null,
       readyNow: status.readyNow,
       moveInDate: status.moveInDate,

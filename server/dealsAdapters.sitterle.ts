@@ -1,6 +1,7 @@
 import {
   SITTERLE_HOST, asUrl, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 
 /**
@@ -133,6 +134,7 @@ export function parseSitterleCommunity(html: string, pageUrl: string, now: Date 
     const beds = stat(statsText, /Beds?/);
     const baths = stat(statsText, /Baths?/);
     const garage = stat(statsText, /Car\s+Garage/);
+    const stories = storiesFrom(stat(statsText, /Stor(?:y|ies)/));
     const sqft = stat(statsText, /Sq\.?\s*Ft/);
     const images = inner.filter((element) => element.tag === "img" && element.attributes.src).map((element) => asUrl(decodeHtmlEntities(element.attributes.src!))).filter((url): url is URL => Boolean(url && sameOfficialHost(url, host)));
     const gallery: PrivateGalleryImage[] = images.map((url) => { url.search = ""; return { sourceUrl: url.toString(), caption: null, width: null, height: null, srcSet: null }; });
@@ -141,7 +143,7 @@ export function parseSitterleCommunity(html: string, pageUrl: string, now: Date 
       if (!planName || !link) continue;
       plans.push({
         sourceUrl: link.toString(), privateName: planName, privatePlanName: planName, status: null,
-        price: listedPrice && listedPrice > 0 ? listedPrice : null, bedrooms: beds, bathrooms: baths, squareFeet: sqft, garage, readyNow: false,
+        price: listedPrice && listedPrice > 0 ? listedPrice : null, bedrooms: beds, bathrooms: baths, squareFeet: sqft, garage, stories, readyNow: false,
         gallery: gallery.map((image) => ({ ...image, caption: "Representative image" })),
       });
       continue;
@@ -162,7 +164,7 @@ export function parseSitterleCommunity(html: string, pageUrl: string, now: Date 
       price: current && current > 0 ? current : null,
       previousPrice: previous && current && previous > current ? previous : null,
       priceDrop: previous && current && previous > current ? previous - current : null,
-      bedrooms: beds, bathrooms: baths, squareFeet: sqft, garage,
+      bedrooms: beds, bathrooms: baths, squareFeet: sqft, garage, stories,
       readyNow: status.readyNow, moveInDate: status.moveInDate, gallery,
     });
   }

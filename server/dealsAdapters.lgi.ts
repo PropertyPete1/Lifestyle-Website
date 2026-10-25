@@ -1,6 +1,7 @@
 import {
   LGI_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  storiesFrom,
 } from "./dealsAdapters";
 import { parseNextData } from "./dealsAdapters.davidson";
 
@@ -158,6 +159,7 @@ export function parseLgiCommunity(html: string, pageUrl: string): LgiPage | null
       bathrooms: num(field(plan.numberofBathrooms)),
       squareFeet: num(field(plan.sizeSqft)),
       garage: num(field(plan.numberofCarGarage)),
+      stories: storiesFrom(field(plan.numberofStories)),
       readyNow: false,
       gallery,
     });

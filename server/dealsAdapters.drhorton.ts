@@ -231,7 +231,7 @@ export class DrHortonAdapter implements DealAdapter {
     const forSale = homes.filter((card) => card.detailPath);
     if (forSale.length > DRHORTON_MAX_DETAIL_PAGES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     for (const card of homes) {
-      const { kind: _kind, detailPath, stories: _stories, ...home } = card;
+      const { kind: _kind, detailPath, ...home } = card;
       if (detailPath) {
         const detail = await getDocument(home.sourceUrl, fetcher, "text/html,application/xhtml+xml", DRHORTON_HOST);
         if (!detail.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(detail, "detail_fetch_failed")]);
@@ -244,7 +244,7 @@ export class DrHortonAdapter implements DealAdapter {
       privateSnapshot.homes.push(home);
     }
     for (const card of cards.filter((item) => item.kind === "plan")) {
-      const { kind: _kind, detailPath: _detailPath, stories: _stories, ...plan } = card;
+      const { kind: _kind, detailPath: _detailPath, ...plan } = card;
       privateSnapshot.plans.push(plan);
     }
     // D.R. Horton's promotions are site-wide event banners with their own terms pages; none is read as a community incentive here.

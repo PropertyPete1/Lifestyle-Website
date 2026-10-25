@@ -409,13 +409,14 @@ describe("the Best Deals strip", () => {
 });
 
 describe("Red Hot Deals (Oct 24, 2026)", () => {
-  it("is a real price drop of at least $5,000 or 2%, whichever is more", async () => {
+  it("is a real price drop of at least $10,000 or 3%, whichever is more (Oct 25: raised so the badge stays special)", async () => {
     const { redHotDeal } = await import("../shared/dealsFeatured");
     // D.R. Horton's red event cards: $275,950 was $318,500; $161,000 was $165,000 (only $4,000: not red hot).
     expect(redHotDeal(275_950, 318_500)).toEqual({ savings: 42_550, was: 318_500 });
     expect(redHotDeal(161_000, 165_000)).toBeNull();
-    expect(redHotDeal(600_000, 610_000)).toBeNull(); // $10,000 is under 2% of $600,000
-    expect(redHotDeal(600_000, 612_000)).toEqual({ savings: 12_000, was: 612_000 });
+    expect(redHotDeal(250_000, 259_000)).toBeNull(); // $9,000: under $10,000
+    expect(redHotDeal(600_000, 615_000)).toBeNull(); // $15,000 is under 3% of $600,000
+    expect(redHotDeal(600_000, 618_000)).toEqual({ savings: 18_000, was: 618_000 });
     expect(redHotDeal(300_000, null)).toBeNull();
     expect(redHotDeal(300_000, 290_000)).toBeNull();
   });

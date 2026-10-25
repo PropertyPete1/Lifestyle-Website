@@ -150,7 +150,7 @@ export async function classifyDealsAccess(input: {
     // agent" answer and the realtor screening do not apply; an explicit admin
     // block (any reason other than the has-agent answer) still does.
     const block = await getActiveBlock({ phone: input.phone, email: email ?? undefined, deviceHash: input.deviceHash, ignoreHasAgent: true });
-    if (block) return { allowed: false, team: false, blockedBy: "blocklist", matchOn: block.phoneE164 ? "phone" : block.email ? "email" : "device", flags: ["blocked", "agent_client"] };
+    if (block) return { allowed: false, team: false, blockedBy: "blocklist", blockReason: block.reason, matchOn: block.phoneE164 ? "phone" : block.email ? "email" : "device", flags: ["blocked", "agent_client"] };
     return { allowed: true, team: false, flags: ["agent_client"] };
   }
   if (input.choice === "has_agent") return { allowed: false, team: false, blockedBy: "has_agent", flags: ["has_agent"] };

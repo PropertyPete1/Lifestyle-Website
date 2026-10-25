@@ -14,6 +14,9 @@ export type GateSheetState = {
   commentKeyword?: string | null;
   textLine?: string | null;
   blockedMessage?: string | null;
+  /** An admin turned this buyer off: the sheet opens on "access is paused". */
+  paused?: boolean;
+  pausedMessage?: string | null;
   consentText?: string | null;
   googleEnabled?: boolean;
   /** The visitor opened an LDR agent's client link: the agent question is skipped and the sheet names the agent. */
@@ -36,6 +39,12 @@ export const GATE_REALTOR_COPY = {
   body: "Agents on our team get these deals for their clients. Taking you to our agent page.",
   button: "See our agent page",
   path: "/join?from=builder-deals",
+} as const;
+
+/** Oct 25, 2026 (Peter): a buyer an admin turned off is told access is paused, never why. */
+export const GATE_PAUSED_COPY = {
+  heading: "Your access is paused",
+  body: "Your Builder Deals access is paused right now. Reach out to us and we'll help you get back in.",
 } as const;
 
 /** Oct 24, 2026 (Peter): a realtor answers for themselves and is sent to recruiting; a buyer with an agent is told the page is for buyers. */
@@ -97,6 +106,7 @@ export function GateSheetView({ gate, state, phone, name = "", email = "", onNam
       ? <><p className="eyebrow text-gold" data-deals-shared-by="true">Shared by {shared.agentName}</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Your list access ended.</h2><p className="mt-3 text-sm text-muted-foreground">Verify your number again to reopen the list {shared.agentName} shared with you. Your saved homes are still there.</p><Button onClick={() => onGo("gate")} className="mt-6 w-full bg-gold py-6 text-primary-foreground">Reopen my list <ArrowRight className="ml-2 h-4 w-4" /></Button></>
       : <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Your list has expired.</h2><ExpiredHelp state={state} /></>)}
     {step === "blocked" && <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">{state?.clientLink ? "We can't open this list" : "Buyer access only"}</h2><p role="alert" className="mt-4 text-sm leading-relaxed text-muted-foreground">{gate.message || state?.blockedMessage || "This page is for buyers who are not working with an agent yet."}</p><InstagramHelp state={state} /></>}
+    {step === "paused" && <><p className="eyebrow text-gold">Builder Deals</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">{GATE_PAUSED_COPY.heading}</h2><p role="status" data-deals-paused="true" className="mt-4 text-sm leading-relaxed text-muted-foreground">{gate.message || state?.pausedMessage || GATE_PAUSED_COPY.body}</p></>}
     {step === "confirm-agent" && <><p className="eyebrow text-gold">One quick confirmation</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">Just to confirm: you're already working with an agent?</h2><div className="mt-6 grid gap-3"><Button onClick={onConfirmAgent} disabled={starting} className="bg-gold py-6 text-primary-foreground">Yes, that's right</Button><Button variant="outline" onClick={() => onGo("gate")} className="py-6">No, go back</Button></div></>}
     {step === "confirm-realtor" && <><p className="eyebrow text-gold">One quick confirmation</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">Just to confirm: you're a licensed real estate agent?</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{GATE_REALTOR_COPY.confirmNote}</p><div className="mt-6 grid gap-3"><Button onClick={onConfirmRealtor} disabled={starting} className="bg-gold py-6 text-primary-foreground">Yes, I'm an agent</Button><Button variant="outline" onClick={() => onGo("gate")} className="py-6">No, go back</Button></div></>}
     {step === "realtor" && <><p className="eyebrow text-gold">For agents</p><h2 id="deals-gate-title" className="mt-2 text-3xl leading-tight">{GATE_REALTOR_COPY.heading}</h2><p role="status" className="mt-3 text-sm leading-relaxed text-muted-foreground">{gate.message ?? GATE_REALTOR_COPY.body}</p><a href={GATE_REALTOR_COPY.path} data-deals-recruit-link="true" className="mt-6 inline-flex min-h-12 w-full items-center justify-center bg-gold px-5 text-sm font-medium uppercase tracking-[0.14em] text-primary-foreground">{GATE_REALTOR_COPY.button}</a></>}

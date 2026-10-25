@@ -42,7 +42,7 @@ describe("Builder Deals first-unlock alert content", () => {
     expect(content).toContain("already assigned to Jane Agent");
     expect(content).toContain("Previously opted out, do not text manually.");
     expect(content).toContain("FUB contact: https://app.followupboss.com/2/people/view/9001");
-    expect(content).toContain("Block and kill link (opens admin, login required, confirm button): https://lifestyledesignrealty.com/admin/deals?lead=31");
+    expect(content).toContain("Turn off access (opens admin, login required, confirm button): https://lifestyledesignrealty.com/admin/deals?lead=31");
     expect(content).not.toMatch(/\/deals\/v\//);
   });
 
@@ -128,7 +128,7 @@ describe("alerts for an agent's client", () => {
       expect(content).toContain("Phone: (210) 555-0123");
       expect(content).toContain("Your clients and their activity: https://lifestyledesignrealty.com/deals/team");
       // Agents have no admin login: their copy never points at admin, the retry queue or the block link.
-      expect(content).not.toMatch(/admin|Admin|retry queue|Block and kill/);
+      expect(content).not.toMatch(/admin|Admin|retry queue|Block and kill|Turn off access/);
       expect(content).not.toContain(EM_DASH);
     }
   });

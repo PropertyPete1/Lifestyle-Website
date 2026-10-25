@@ -116,7 +116,7 @@ export function funnelTable(rows: readonly FunnelRow[]): Array<{ sourceCode: str
     .map((row) => ({ sourceCode: row.sourceCode, cells: FUNNEL_COLUMNS.map((column) => Number(row.counts[column.kind] ?? 0)) }));
 }
 
-/** /admin/deals?lead=42 opens that lead's row and the Block and kill link dialog. */
+/** /admin/deals?lead=42 opens that lead's row and the Turn off access dialog. */
 export function leadIdFromSearch(search: string): number | null {
   const value = new URLSearchParams(search.startsWith("?") ? search : `?${search}`).get("lead");
   if (!value || !/^\d{1,9}$/.test(value)) return null;

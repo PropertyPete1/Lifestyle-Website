@@ -40,7 +40,7 @@ import {
   createPendingVerification,
 } from "./dealsService";
 import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
-import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, browserIsRealtorBlocked, staleSessionLeadId } from "./dealsService";
+import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, adminTurnedOffLeadIds, browserIsAdminPaused, browserIsRealtorBlocked, pausedAccessMessage, staleSessionLeadId, turnOffBuyerAccess, turnOnBuyerAccess } from "./dealsService";
 /** What a realtor sees for the moment before the recruiting page opens. */
 /**
  * The landing's two public reads (every community, the featured row) are the same for every visitor: kept for a minute
@@ -311,7 +311,9 @@ export const dealsRouter = router({
     // An agent's client whose access lapsed keeps their agent's link on the bare
     // landing page too (a new tab, a bookmark): this browser's lapsed session
     // names the link. Only a live link is used, so a dead one never traps them.
-    const lapsed = !input?.c && !session ? await lapsedSession(ctx.req) : null;
+    // A buyer an admin turned off sees "access is paused" (never the expired or recruiting screens).
+    const paused = !session && await browserIsAdminPaused(ctx.req).catch(() => false);
+    const lapsed = !input?.c && !session && !paused ? await lapsedSession(ctx.req) : null;
     const remembered = lapsed?.token ?? null;
     const rememberedLive = remembered ? (await presentClientLink(remembered))?.state === "live" : false;
     const token = input?.c ?? (rememberedLive ? remembered! : undefined);
@@ -327,7 +329,10 @@ export const dealsRouter = router({
       textLine: settings.textLine,
       blockedMessage: clientLink ? linkClientBlockedMessage(clientLink.agentName, settings.textLine) : safeBlockedMessage(settings),
       /** This browser belongs to an agent kept off Builder Deals: the page sends it to recruiting (never for a team member or an agent's client). */
-      realtorRedirect: !session && !clientLink && await browserIsRealtorBlocked(ctx.req) ? REALTOR_RECRUIT_PATH : null,
+      realtorRedirect: !session && !clientLink && !paused && await browserIsRealtorBlocked(ctx.req) ? REALTOR_RECRUIT_PATH : null,
+      /** An admin turned this buyer off: the gate shows the neutral paused screen with how to reach us. */
+      paused,
+      pausedMessage: paused ? pausedAccessMessage(settings.textLine) : null,
       clientLink,
       /** The link found from this browser's lapsed session, for the gate to post with the code. */
       clientLinkToken: rememberedLive ? remembered : null,
@@ -355,6 +360,7 @@ export const dealsRouter = router({
         return { ok: false as const, kind: "blocked", message: linkClientBlockedMessage(shown?.agentName, settings.textLine) };
       }
       if (result.kind === "realtor") return { ok: false as const, kind: "realtor", message: REALTOR_GATE_MESSAGE, redirect: REALTOR_RECRUIT_PATH };
+      if (result.kind === "paused") return { ok: false as const, kind: "paused", message: pausedAccessMessage(settings.textLine) };
       if (result.kind === "has_agent" || result.kind === "blocked") return { ok: false as const, kind: "blocked", message: safeBlockedMessage(settings) };
       if (result.kind === "cookie_blocked") return { ok: false as const, kind: "cookie_blocked", message: `Your browser is blocking cookies. Open this link in Safari or Chrome. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
       if (result.kind === "outside_us") return { ok: false as const, kind: "outside_us", message: `US mobile numbers only for now. Outside the US? Text ${settings.commentKeyword} to ${settings.textLine} and we'll help you directly.` };
@@ -635,7 +641,8 @@ export const dealsRouter = router({
       const pattern = `%${input.search.replace(/[\\%_]/g, "\\$&")}%`;
       const where = and(input.search ? or(like(dealLeads.name, pattern), like(dealLeads.phoneE164, pattern), like(dealLeads.email, pattern), like(dealLeads.instagramHandle, pattern), like(dealLeads.sourceCode, pattern)) : undefined, input.status === "all" ? undefined : eq(dealLeads.status, input.status), input.fubStatus === "all" ? undefined : eq(dealLeads.fubStatus, input.fubStatus));
       const [rows, count] = await Promise.all([db.select().from(dealLeads).where(where).orderBy(desc(dealLeads.createdAt), desc(dealLeads.id)).limit(input.pageSize).offset((input.page - 1) * input.pageSize), db.select({ n: sql<number>`count(*)` }).from(dealLeads).where(where)]);
-      return { rows: rows.map(({ consentText, consentIp, deviceHash, ...lead }) => lead), total: Number(count[0]?.n ?? 0), page: input.page, pageSize: input.pageSize };
+      const turnedOff = new Set(await adminTurnedOffLeadIds(rows).catch(() => []));
+      return { rows: rows.map(({ consentText, consentIp, deviceHash, ...lead }) => ({ ...lead, turnedOff: turnedOff.has(lead.id) })), total: Number(count[0]?.n ?? 0), page: input.page, pageSize: input.pageSize };
     }),
     leadDetail: adminProcedure.input(z.object({ id: z.number().int().positive() })).query(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -865,6 +872,18 @@ export const dealsRouter = router({
       await db.update(dealLeads).set({ status: "blocked" }).where(eq(dealLeads.id, lead.id));
       await db.update(dealAccessTokens).set({ revokedAt: new Date() }).where(eq(dealAccessTokens.leadId, lead.id));
       return { ok: true as const };
+    }),
+    /** "Turn off access" (Oct 25, Peter): the buyer's links end now; their phone, email and browsers stay off until "Turn back on". */
+    turnOffBuyer: adminProcedure.input(z.object({ leadId: z.number().int().positive(), note: z.string().trim().max(200).optional() })).mutation(async ({ input, ctx }) => {
+      const result = await turnOffBuyerAccess({ leadId: input.leadId, note: input.note, by: ctx.user?.name || ctx.user?.email || "admin" });
+      if (!result.ok && result.kind === "not_found") throw new TRPCError({ code: "NOT_FOUND" });
+      if (!result.ok) throw new TRPCError({ code: "BAD_REQUEST", message: "Team members can't be turned off. Remove them from the team list first." });
+      return result;
+    }),
+    turnOnBuyer: adminProcedure.input(z.object({ leadId: z.number().int().positive() })).mutation(async ({ input, ctx }) => {
+      const result = await turnOnBuyerAccess({ leadId: input.leadId, by: ctx.user?.name || ctx.user?.email || "admin" });
+      if (!result.ok) throw new TRPCError({ code: "NOT_FOUND" });
+      return result;
     }),
     unblock: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });

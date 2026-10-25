@@ -5,7 +5,7 @@
  * Server copy (blocked, outside US, rate limited, cannot receive) is rendered
  * verbatim; this module only owns the wording for client-side situations.
  */
-export type GateStep = "gate" | "confirm-agent" | "confirm-realtor" | "realtor" | "code" | "blocked" | "expired" | "cookie-blocked";
+export type GateStep = "gate" | "confirm-agent" | "confirm-realtor" | "realtor" | "code" | "blocked" | "paused" | "expired" | "cookie-blocked";
 
 export type GateParams = {
   src?: string;
@@ -22,7 +22,8 @@ export type GateParams = {
 
 /** Pending verification as deals.state reports it; the display phone is already masked by the server. */
 export type GatePending = { displayPhone: string; expiresAt: string };
-export type GateDealsState = { pending: GatePending | null } | undefined;
+/** `paused`: an admin turned this buyer off (Oct 25, 2026); the sheet opens on the neutral paused screen. */
+export type GateDealsState = { pending: GatePending | null; paused?: boolean } | undefined;
 
 export type GateStartResult =
   | { ok: true; displayPhone: string }
@@ -178,7 +179,7 @@ export function stripTransientGateParams(href: string): string {
 }
 
 export function initialGateState(params: GateParams, state: GateDealsState): GateState {
-  const step: GateStep = params.cookieBlocked ? "cookie-blocked" : params.expired ? "expired" : params.blocked ? "blocked" : state?.pending ? "code" : "gate";
+  const step: GateStep = state?.paused ? "paused" : params.cookieBlocked ? "cookie-blocked" : params.expired ? "expired" : params.blocked ? "blocked" : state?.pending ? "code" : "gate";
   return {
     step,
     message: params.error ? GATE_COPY.somethingWrong : params.google === "failed" ? GATE_COPY.googleFailed : null,
@@ -194,6 +195,7 @@ export function gateReducer(gate: GateState, action: GateAction): GateState {
   switch (action.type) {
     case "state_changed": {
       const pending = action.state?.pending;
+      if (action.state?.paused && gate.step !== "paused") return { ...gate, step: "paused", codeError: null, cannotReceive: false };
       if (!pending || pending.expiresAt === gate.dismissedPending) return gate;
       if (gate.step !== "gate" && gate.step !== "code") return gate;
       // The server-side pending record wins over a reload: resume at the code
@@ -210,6 +212,7 @@ export function gateReducer(gate: GateState, action: GateAction): GateState {
       if (result.ok) return { ...gate, step: "code", message: null, codeError: null, cannotReceive: false, pendingDisplayPhone: result.displayPhone, dismissedPending: null };
       if (result.kind === "cookie_blocked") return { ...gate, step: "cookie-blocked", message: result.message, codeError: null, cannotReceive: false };
       if (result.kind === "blocked") return { ...gate, step: "blocked", message: result.message, codeError: null, cannotReceive: false };
+      if (result.kind === "paused") return { ...gate, step: "paused", message: result.message, codeError: null, cannotReceive: false };
       // A realtor is sent to the recruiting page (the sheet opens it); this step shows the note and a link meanwhile.
       if (result.kind === "realtor") return { ...gate, step: "realtor", message: result.message, codeError: null, cannotReceive: false };
       if (result.kind === "cannot_receive") {

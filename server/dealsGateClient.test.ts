@@ -333,3 +333,18 @@ describe("gate controls: consent before Continue, pressed pills, tap targets, vo
     expect(confirm).not.toContain("you are already");
   });
 });
+
+describe("a buyer an admin turned off (Oct 25, Peter)", () => {
+  const PAUSED = "Your Builder Deals access is paused right now. Text (512) 542-1477 and we'll help you get back in.";
+  it("opens on the paused screen from the state, and goes there from a paused start, never to recruiting or the agent wording", () => {
+    const opened = fresh("", { pending: null, paused: true });
+    expect(opened.step).toBe("paused");
+    const html = render(opened, { pending: null, paused: true, pausedMessage: PAUSED } as GateDealsState);
+    expect(html).toContain("Your access is paused");
+    expect(html).toContain(PAUSED.replace("'", "&#x27;"));
+    expect(html).not.toMatch(/agent|recruit|Buyer access only/i);
+    const started = gateReducer(fresh(), { type: "start_result", result: { ok: false, kind: "paused", message: PAUSED } });
+    expect(started).toMatchObject({ step: "paused", message: PAUSED });
+    expect(gateReducer(fresh(), { type: "state_changed", state: { pending: null, paused: true } }).step).toBe("paused");
+  });
+});

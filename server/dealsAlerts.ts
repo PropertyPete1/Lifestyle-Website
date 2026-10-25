@@ -177,7 +177,7 @@ export async function queueFirstUnlockAlert(lead: AlertLead, details: FirstUnloc
       details.fubPersonId
         ? `FUB contact: ${fubPersonLink(details.fubPersonId)}`
         : `FUB contact: not synced yet${details.fubIssue ? ` (${details.fubIssue})` : ""}. The retry queue is in Admin, Builder Deals.`,
-      `Block and kill link (opens admin, login required, confirm button): ${adminLeadLink(lead.id)}`,
+      `Turn off access (opens admin, login required, confirm button): ${adminLeadLink(lead.id)}`,
     ].join("\n"),
   });
 }
@@ -291,7 +291,7 @@ export async function queueClientLinkAttachedAlert(lead: AlertLead, agent: Alert
       `They already had a Builder Deals contact, so the FUB contact keeps its current assignment; a note on it names ${agent.name}.`,
       "",
       ...privateLeadLines(lead),
-      `Block and kill link (opens admin, login required, confirm button): ${adminLeadLink(lead.id)}`,
+      `Turn off access (opens admin, login required, confirm button): ${adminLeadLink(lead.id)}`,
     ].join("\n"),
   });
 }
@@ -317,7 +317,7 @@ export async function queueProfileFlagAlert(
       ...flags.map((flag) => `- ${flag}`),
       "",
       "This alert does not revoke buyer access. The flag was added as a FUB tag.",
-      `Block and kill link (opens admin, login required, confirm button): ${adminLeadLink(lead.id)}`,
+      `Turn off access (opens admin, login required, confirm button): ${adminLeadLink(lead.id)}`,
     ].join("\n"),
   });
 }

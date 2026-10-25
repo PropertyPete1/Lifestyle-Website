@@ -14,6 +14,7 @@ import {
   dealPendingVerifications,
   dealPhotos,
   dealSettings,
+  dealTeamAllowlist,
   dealTourRequests,
 } from "../drizzle/schema";
 import {
@@ -538,6 +539,101 @@ export async function blockDealAccess(input: { phone?: string | null; email?: st
     reason: input.reason,
     expiresAt: input.expiresAt ?? null,
   });
+}
+
+/**
+ * "Turn off access" (Oct 25, 2026, Peter): a buyer who ghosts us after signing up can be switched off Builder Deals from
+ * Admin. Their phone, email and every browser we know for them are kept off until an admin turns them back on; the
+ * buyer is told, neutrally, that access is paused and how to reach us.
+ */
+export const ADMIN_TURN_OFF_REASON = "Turned off by admin";
+export function isAdminTurnOffReason(reason?: string | null): boolean {
+  return Boolean(reason && reason.startsWith(ADMIN_TURN_OFF_REASON));
+}
+export function pausedAccessMessage(textLine: string): string {
+  return `Your Builder Deals access is paused right now. Text ${textLine} and we'll help you get back in.`;
+}
+
+/** Every browser this lead used: the one they verified on, their session links, their logged events. */
+async function leadDeviceHashes(db: any, lead: { id: number; deviceHash: string }): Promise<string[]> {
+  const [tokens, events] = await Promise.all([
+    db.select({ deviceHash: dealAccessTokens.deviceHash }).from(dealAccessTokens).where(eq(dealAccessTokens.leadId, lead.id)),
+    db.select({ deviceHash: dealEvents.deviceHash }).from(dealEvents).where(eq(dealEvents.leadId, lead.id)),
+  ]);
+  return Array.from(new Set([lead.deviceHash, ...tokens.map((row: { deviceHash: string | null }) => row.deviceHash), ...events.map((row: { deviceHash: string | null }) => row.deviceHash)].filter((value): value is string => Boolean(value))));
+}
+
+/** The admin turn-off rows that cover this lead (phone, email or one of their browsers). */
+async function adminTurnOffRows(db: any, lead: { phoneE164: string; email: string | null }, devices: string[]) {
+  const matches = [eq(dealBlocklist.phoneE164, lead.phoneE164), lead.email ? eq(dealBlocklist.email, lead.email.toLowerCase()) : undefined, devices.length ? inArray(dealBlocklist.deviceHash, devices) : undefined].filter(Boolean) as any[];
+  const rows: Array<typeof dealBlocklist.$inferSelect> = await db.select().from(dealBlocklist).where(or(...matches));
+  return rows.filter((row) => isAdminTurnOffReason(row.reason));
+}
+
+export type TurnOffResult = { ok: true; devices: number } | { ok: false; kind: "not_found" | "team" };
+
+/** Ends the lead's access now and keeps their phone, email and browsers off Builder Deals until turned back on. */
+export async function turnOffBuyerAccess(input: { leadId: number; by: string; note?: string | null }): Promise<TurnOffResult> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, input.leadId)).limit(1))[0];
+  if (!lead) return { ok: false, kind: "not_found" };
+  // A team member (or a test team number) is never switched off by this button.
+  const settings = await getDealSettings();
+  const email = lead.email?.toLowerCase() ?? null;
+  const team = lead.status === "team" || settings.testTeamNumbers.includes(lead.phoneE164) || (await db.select({ id: dealTeamAllowlist.id }).from(dealTeamAllowlist).where(and(eq(dealTeamAllowlist.active, true), or(eq(dealTeamAllowlist.phoneE164, lead.phoneE164), ...(email ? [eq(dealTeamAllowlist.email, email)] : [])))).limit(1)).length > 0;
+  if (team) return { ok: false, kind: "team" };
+  const devices = await leadDeviceHashes(db, lead);
+  const note = input.note?.trim();
+  const reason = (note ? `${ADMIN_TURN_OFF_REASON}: ${note}` : ADMIN_TURN_OFF_REASON).slice(0, 255);
+  const now = new Date();
+  await db.transaction(async (tx: any) => {
+    await tx.insert(dealBlocklist).values({ phoneE164: lead.phoneE164, email, reason });
+    for (const deviceHash of devices) await tx.insert(dealBlocklist).values({ deviceHash, reason });
+    // Every lead row on this phone or email loses its links now (a buyer can have signed up twice).
+    const others: Array<{ id: number; status: string }> = await tx.select({ id: dealLeads.id, status: dealLeads.status }).from(dealLeads).where(or(eq(dealLeads.phoneE164, lead.phoneE164), ...(email ? [eq(dealLeads.email, email)] : [])));
+    const ids = Array.from(new Set([lead.id, ...others.filter((row) => row.status !== "team").map((row) => row.id)]));
+    await tx.update(dealLeads).set({ status: "blocked", revokedAt: now }).where(inArray(dealLeads.id, ids));
+    await tx.update(dealAccessTokens).set({ revokedAt: now }).where(and(inArray(dealAccessTokens.leadId, ids), isNull(dealAccessTokens.revokedAt)));
+    await tx.insert(dealEvents).values({ leadId: lead.id, kind: "admin_turned_off", sourceCode: lead.sourceCode, phoneE164: lead.phoneE164, detail: JSON.stringify({ by: input.by, note: note || null, devices: devices.length }) });
+  });
+  return { ok: true, devices: devices.length };
+}
+
+/** Lifts an admin turn-off: the rows it wrote go, and the buyer signs back in with their number (a fresh code). */
+export async function turnOnBuyerAccess(input: { leadId: number; by: string }): Promise<{ ok: true; removed: number } | { ok: false; kind: "not_found" }> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, input.leadId)).limit(1))[0];
+  if (!lead) return { ok: false, kind: "not_found" };
+  const rows = await adminTurnOffRows(db, lead, await leadDeviceHashes(db, lead));
+  await db.transaction(async (tx: any) => {
+    if (rows.length) await tx.delete(dealBlocklist).where(inArray(dealBlocklist.id, rows.map((row) => row.id)));
+    if (lead.status === "blocked") await tx.update(dealLeads).set({ status: "expired" }).where(eq(dealLeads.id, lead.id));
+    await tx.insert(dealEvents).values({ leadId: lead.id, kind: "admin_turned_on", sourceCode: lead.sourceCode, phoneE164: lead.phoneE164, detail: JSON.stringify({ by: input.by, removed: rows.length }) });
+  });
+  return { ok: true, removed: rows.length };
+}
+
+/** Which of these leads an admin has turned off (for the Leads table's pill and its "Turn back on" button). */
+export async function adminTurnedOffLeadIds(leads: ReadonlyArray<{ id: number; phoneE164: string; email: string | null; status: string }>): Promise<number[]> {
+  const db = await getDb();
+  const blocked = leads.filter((lead) => lead.status === "blocked");
+  if (!db || !blocked.length) return [];
+  const rows: Array<{ phoneE164: string | null; email: string | null; reason: string }> = await db.select({ phoneE164: dealBlocklist.phoneE164, email: dealBlocklist.email, reason: dealBlocklist.reason }).from(dealBlocklist)
+    .where(or(inArray(dealBlocklist.phoneE164, blocked.map((lead) => lead.phoneE164)), ...(blocked.some((lead) => lead.email) ? [inArray(dealBlocklist.email, blocked.flatMap((lead) => lead.email ? [lead.email.toLowerCase()] : []))] : [])));
+  const off = rows.filter((row) => isAdminTurnOffReason(row.reason));
+  return blocked.filter((lead) => off.some((row) => row.phoneE164 === lead.phoneE164 || Boolean(lead.email && row.email === lead.email.toLowerCase()))).map((lead) => lead.id);
+}
+
+/** This browser was turned off by an admin: the page shows the neutral "access is paused" screen. */
+export async function browserIsAdminPaused(req: Request): Promise<boolean> {
+  const device = parseCookie(req.headers.cookie || "")[DEALS_COOKIE.device];
+  const db = await getDb();
+  if (!device || !db) return false;
+  const now = new Date();
+  const rows: Array<{ reason: string }> = await db.select({ reason: dealBlocklist.reason }).from(dealBlocklist).where(and(eq(dealBlocklist.deviceHash, hashSecret(device)), or(isNull(dealBlocklist.expiresAt), gt(dealBlocklist.expiresAt, now))));
+  return rows.some((row) => isAdminTurnOffReason(row.reason));
 }
 
 /** Private per-community scrub categories (admin-excluded false positives removed); a legacy flat list lands in "other". */
@@ -1163,6 +1259,8 @@ export async function createPendingVerification(input: { req: Request; res: Resp
       await blockDealAccess({ deviceHash, reason: `${eligibility.blockedBy ?? "realtor screening"} device cooldown`, expiresAt: isRealtorBlockReason(eligibility.blockedBy) ? null : new Date(Date.now() + 24 * 60 * 60_000) });
     }
     await logDealEvent({ kind: "blocked", sourceCode, deviceHash, ip, detail: eligibility.blockedBy ?? "screening" });
+    // A buyer an admin turned off is told access is paused (no agent wording, no recruiting).
+    if (eligibility.blockedBy === "blocklist" && isAdminTurnOffReason(eligibility.blockReason)) return { ok: false as const, kind: "paused" as const };
     // An agent the screening (or an earlier answer) caught is sent to recruiting too; an agent's own client never is.
     if (!clientLink && isRealtorBlockReason(eligibility.blockedBy === "blocklist" ? eligibility.blockReason : eligibility.blockedBy)) return { ok: false as const, kind: "realtor" as const };
     return { ok: false as const, kind: "blocked" };

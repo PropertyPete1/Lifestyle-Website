@@ -792,6 +792,33 @@ describe("admin.blockLeadAndKillLink", () => {
   });
 });
 
+describe("admin.turnOffBuyer / turnOnBuyer (Oct 25, Peter)", () => {
+  const seedLead = (id: number, phoneE164: string, status: "verified" | "team" = "verified") => db.seed(dealLeads, { id, phoneE164, email: null, name: "Buyer", instagramHandle: null, sourceCode: "sl1", timeline: null, status, flags: "[]", consentText: "x", consentAt: new Date(), consentIp: "203.0.113.9", deviceHash: "d".repeat(64), expiresAt: new Date(Date.now() + 3600_000), revokedAt: null, fubPersonId: null, fubStatus: "synced" });
+  it("turns a buyer off with the admin's name, shows the pill in the Leads list, and turns them back on", async () => {
+    seedLead(5, "+12105550123");
+    db.seed(dealAccessTokens, { leadId: 5, tokenHash: "t".repeat(64), deviceHash: "d".repeat(64), kind: "session", expiresAt: new Date(Date.now() + 3600_000), consumedAt: null, revokedAt: null });
+    await expect(admin().turnOffBuyer({ leadId: 5, note: "ghosted" })).resolves.toEqual({ ok: true, devices: 1 });
+    expect(db.rows(dealAccessTokens)[0].revokedAt).toBeInstanceOf(Date);
+    expect(db.rows(dealEvents).find((row) => row.kind === "admin_turned_off")?.detail).toContain("Peter");
+    expect((await admin().leads({})).rows[0]).toMatchObject({ id: 5, status: "blocked", turnedOff: true });
+    await expect(admin().turnOnBuyer({ leadId: 5 })).resolves.toEqual({ ok: true, removed: 2 });
+    expect((await admin().leads({})).rows[0]).toMatchObject({ id: 5, status: "expired", turnedOff: false });
+  });
+  it("refuses a team member and a missing lead, and is admin-only", async () => {
+    seedLead(6, "+12105550124", "team");
+    await expect(admin().turnOffBuyer({ leadId: 6 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(admin().turnOffBuyer({ leadId: 99 })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(dealsRouter.createCaller(makeCtx("user")).admin.turnOffBuyer({ leadId: 6 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(db.rows(dealBlocklist)).toEqual([]);
+  });
+  it("tells a turned-off buyer at the gate that access is paused, with our number", async () => {
+    mocks.createPendingVerification.mockResolvedValueOnce({ ok: false, kind: "paused" });
+    const result = await visitor().start({ phone: "(210) 555-0123", choice: "buyer", src: "sl1" });
+    expect(result).toMatchObject({ ok: false, kind: "paused" });
+    expect("message" in result ? result.message : "").toMatch(/^Your Builder Deals access is paused right now\. Text .+ and we'll help you get back in\.$/);
+  });
+});
+
 describe("gate focus analytics", () => {
   it("writes nothing for a caller without the probe cookie, once an hour per device for a browser, and at most the per-address cap", async () => {
     const events = () => db.rows(dealEvents).filter((row) => row.kind === "started_gate");

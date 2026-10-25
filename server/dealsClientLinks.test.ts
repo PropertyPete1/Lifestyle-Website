@@ -631,3 +631,58 @@ describe("agents stay off for good; the team is exempt (Oct 25, Peter)", () => {
     expect(db.rows(dealBlocklist).filter((row) => row.deviceHash === hashSecret(device))).toEqual([]);
   });
 });
+
+describe("turning a buyer off from Admin (Oct 25, Peter: turn the website off on a buyer who ghosts us)", () => {
+  it("ends their session now, keeps their phone, email and browsers off with a neutral paused answer, and turns back on", async () => {
+    testSettings({ testNumbersSkipChecks: false });
+    const { ADMIN_TURN_OFF_REASON, browserIsAdminPaused, isLiveDealSession, turnOffBuyerAccess, turnOnBuyerAccess, adminTurnedOffLeadIds } = await import("./dealsService");
+    const { dealAccessTokens } = await import("../drizzle/schema");
+    const BUYER = "+12105550606";
+    const laptop = "buyer-laptop";
+    const phone = "buyer-phone";
+    const buyer = lead({ phoneE164: BUYER, email: "ghost@example.com", deviceHash: hashSecret(laptop) });
+    db.seed(dealAccessTokens, { leadId: buyer.id, tokenHash: hashSecret("session-1"), deviceHash: hashSecret(phone), kind: "session", expiresAt: new Date(Date.now() + HOUR) });
+    const onPhone = request({ [DEALS_COOKIE.device]: phone, [DEALS_COOKIE.session]: "session-1" });
+    expect(await isLiveDealSession(onPhone)).toMatchObject({ leadId: buyer.id });
+
+    expect(await turnOffBuyerAccess({ leadId: buyer.id, by: "Peter", note: "ghosted" })).toEqual({ ok: true, devices: 2 });
+    expect(await isLiveDealSession(onPhone)).toBeNull();
+    expect(db.rows(dealLeads).find((row) => row.id === buyer.id)).toMatchObject({ status: "blocked" });
+    const rows = db.rows(dealBlocklist);
+    expect(rows.every((row) => row.reason === `${ADMIN_TURN_OFF_REASON}: ghosted` && (row.expiresAt ?? null) === null)).toBe(true);
+    expect(rows.map((row) => row.phoneE164 ?? row.deviceHash)).toEqual([BUYER, hashSecret(laptop), hashSecret(phone)]);
+    expect(rows[0]).toMatchObject({ email: "ghost@example.com" });
+    expect(db.rows(dealEvents).find((row) => row.kind === "admin_turned_off")).toMatchObject({ leadId: buyer.id, detail: expect.stringContaining("\"by\":\"Peter\"") });
+    expect(await adminTurnedOffLeadIds(db.rows(dealLeads) as Array<typeof dealLeads.$inferSelect>)).toEqual([buyer.id]);
+
+    // Both browsers see the paused screen; the gate says paused for their number on a new browser and for a new number on their browser.
+    expect(await browserIsAdminPaused(request({ [DEALS_COOKIE.device]: phone }))).toBe(true);
+    expect(await browserIsAdminPaused(request({ [DEALS_COOKIE.device]: laptop }))).toBe(true);
+    expect(await browserIsAdminPaused(request({ [DEALS_COOKIE.device]: "stranger" }))).toBe(false);
+    expect(await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: "library-pc", [DEALS_COOKIE.probe]: "p" }), res: responseRecorder().response, rawPhone: BUYER, choice: "buyer" })).toEqual({ ok: false, kind: "paused" });
+    expect(await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: phone, [DEALS_COOKIE.probe]: "p" }), res: responseRecorder().response, rawPhone: "+12105550616", choice: "buyer" })).toEqual({ ok: false, kind: "paused" });
+
+    // Turned back on: the rows the turn-off wrote are gone and the number can start again (a fresh code).
+    expect(await turnOnBuyerAccess({ leadId: buyer.id, by: "Peter" })).toEqual({ ok: true, removed: 3 });
+    expect(db.rows(dealBlocklist)).toEqual([]);
+    expect(db.rows(dealLeads).find((row) => row.id === buyer.id)).toMatchObject({ status: "expired" });
+    expect(await browserIsAdminPaused(request({ [DEALS_COOKIE.device]: phone }))).toBe(false);
+    expect(await getActiveBlock({ phone: BUYER })).toBeUndefined();
+  });
+
+  it("never turns off a team member, and leaves other blocks alone when turning a buyer back on", async () => {
+    testSettings({ testNumbersSkipChecks: false });
+    const { turnOffBuyerAccess, turnOnBuyerAccess } = await import("./dealsService");
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "verified", deviceHash: "a".repeat(64) });
+    expect(await turnOffBuyerAccess({ leadId: agent.id, by: "Peter" })).toEqual({ ok: false, kind: "team" });
+    expect(db.rows(dealBlocklist)).toEqual([]);
+    expect(db.rows(dealLeads).find((row) => row.id === agent.id)).toMatchObject({ status: "verified" });
+    expect(await turnOffBuyerAccess({ leadId: 9_999, by: "Peter" })).toEqual({ ok: false, kind: "not_found" });
+
+    const buyer = lead({ phoneE164: "+12105550626", deviceHash: "b".repeat(64) });
+    db.seed(dealBlocklist, { phoneE164: "+12105550626", reason: "known_agent" });
+    await turnOffBuyerAccess({ leadId: buyer.id, by: "Peter" });
+    await turnOnBuyerAccess({ leadId: buyer.id, by: "Peter" });
+    expect(db.rows(dealBlocklist).map((row) => row.reason)).toEqual(["known_agent"]);
+  });
+});

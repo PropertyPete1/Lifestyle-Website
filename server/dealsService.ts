@@ -518,6 +518,15 @@ export async function browserIsRealtorBlocked(req: Request): Promise<boolean> {
   return isRealtorBlockReason(block?.reason);
 }
 
+/** Removes this browser's agent blocks (its own answer or the screening): a team member is never sent to recruiting. */
+export async function clearAgentBlocksForBrowser(deviceHash: string) {
+  const db = await getDb();
+  if (!db) return;
+  const rows = await db.select({ id: dealBlocklist.id, reason: dealBlocklist.reason }).from(dealBlocklist).where(eq(dealBlocklist.deviceHash, deviceHash));
+  const ids = rows.filter((row) => isRealtorBlockReason(row.reason)).map((row) => row.id);
+  if (ids.length) await db.delete(dealBlocklist).where(inArray(dealBlocklist.id, ids));
+}
+
 export async function blockDealAccess(input: { phone?: string | null; email?: string | null; deviceHash?: string | null; searchPhone?: string | null; reason: string; expiresAt?: Date | null }) {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
@@ -1106,6 +1115,8 @@ export async function createPendingVerification(input: { req: Request; res: Resp
     brokerageDomains: settings.brokerageDomains, fubRealtorTags: settings.fubRealtorTags,
     fubRealtorSources: settings.fubRealtorSources, choice: input.clientLinkToken || input.choice === "realtor" ? "buyer" : input.choice, clientLink: Boolean(clientLink),
   });
+  // Peter and his agents are exempt: a team member's browser drops any agent block it picked up (testing the gate, say).
+  if (eligibility.team) await clearAgentBlocksForBrowser(deviceHash).catch(() => undefined);
   // A realtor (by their own answer) goes to recruiting and stays off Builder Deals: the number they typed and this browser,
   // with no end date. Joining the team lifts it (team members pass before any block). FUB hears about them as a recruit.
   if (input.choice === "realtor" && !input.clientLinkToken && !eligibility.team) {
@@ -1131,7 +1142,8 @@ export async function createPendingVerification(input: { req: Request; res: Resp
       // Before SMS verification, never permanently block an unverified typed
       // phone because of an email-only match. A matching phone can be blocked.
       await blockDealAccess({ phone: eligibility.matchOn === "phone" ? normalized.e164 : null, email: eligibility.matchOn === "email" ? screeningEmail : null, reason: eligibility.blockedBy ?? "realtor screening" });
-      await blockDealAccess({ deviceHash, reason: `${eligibility.blockedBy ?? "realtor screening"} device cooldown`, expiresAt: new Date(Date.now() + 24 * 60 * 60_000) });
+      // Oct 25 (Peter): an agent's browser is kept off for good, like the agent; other screening reasons cool down in a day.
+      await blockDealAccess({ deviceHash, reason: `${eligibility.blockedBy ?? "realtor screening"} device cooldown`, expiresAt: isRealtorBlockReason(eligibility.blockedBy) ? null : new Date(Date.now() + 24 * 60 * 60_000) });
     }
     await logDealEvent({ kind: "blocked", sourceCode, deviceHash, ip, detail: eligibility.blockedBy ?? "screening" });
     // An agent the screening (or an earlier answer) caught is sent to recruiting too; an agent's own client never is.
@@ -1194,7 +1206,7 @@ export async function blockVerifiedDealsIdentity(input: { phone: string; email?:
   const db = connection ?? await getDb();
   if (!db) throw new Error("Database unavailable");
   await db.insert(dealBlocklist).values({ phoneE164: input.phone, email: input.email?.toLowerCase() ?? null, reason: input.reason });
-  await db.insert(dealBlocklist).values({ deviceHash: input.deviceHash, reason: `${input.reason} device cooldown`, expiresAt: new Date(Date.now() + 24 * 60 * 60_000) });
+  await db.insert(dealBlocklist).values({ deviceHash: input.deviceHash, reason: `${input.reason} device cooldown`, expiresAt: isRealtorBlockReason(input.reason) ? null : new Date(Date.now() + 24 * 60 * 60_000) });
   const { revokeNonTeamMatchingDealLinks } = await import("./dealsEligibility");
   await revokeNonTeamMatchingDealLinks(db as never, { phoneE164: input.phone, email: input.email, deviceHash: input.deviceHash });
 }

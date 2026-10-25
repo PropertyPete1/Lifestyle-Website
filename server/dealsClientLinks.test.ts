@@ -613,3 +613,21 @@ describe("the name and email typed on the gate (Oct 24, Peter: we want their nam
     expect(typedIdentity("M", "not-an-email")).toEqual({ name: null, email: null });
   });
 });
+
+describe("agents stay off for good; the team is exempt (Oct 25, Peter)", () => {
+  it("keeps a screened agent's browser blocked with no end date, and clears a team member's browser when they use the gate", async () => {
+    testSettings({ testNumbersSkipChecks: false });
+    const AGENT = "+12105550717";
+    db.seed(dealKnownAgents, { phoneE164: AGENT, source: "csv", active: true });
+    const device = "agent-browser";
+    const first = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.probe]: "p" }), res: responseRecorder().response, rawPhone: AGENT, choice: "buyer" });
+    expect(first).toEqual({ ok: false, kind: "realtor" });
+    const deviceBlock = db.rows(dealBlocklist).find((row) => row.deviceHash === hashSecret(device));
+    expect(deviceBlock).toMatchObject({ reason: "known_agent device cooldown" });
+    expect(deviceBlock?.expiresAt ?? null).toBeNull();
+    // The same browser used by a team member: the agent block is cleared and the team member goes on.
+    const team = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.probe]: "p" }), res: responseRecorder().response, rawPhone: AGENT_PHONE, choice: "buyer" });
+    expect(team.ok).toBe(true);
+    expect(db.rows(dealBlocklist).filter((row) => row.deviceHash === hashSecret(device))).toEqual([]);
+  });
+});

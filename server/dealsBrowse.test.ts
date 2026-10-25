@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
-import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingMatches, moreFilterCount, priceCapLabel, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
+import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingMatches, moreFilterCount, priceCapLabel, storiesKnown, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
 import type { GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
 import { browseOrder } from "./dealsService";
 
@@ -59,6 +59,13 @@ describe("New Home Buddy style filters (Peter, Oct 25: price range, beds, baths,
   it("falls back to the card's own figures on a page from before the home facts", () => {
     expect(landingMatches(card([], { homeFacts: undefined }), { ...EMPTY_FILTERS, maxPrice: 300_000 })).toBe(true);
     expect(landingMatches(card([], { homeFacts: undefined, homesAvailable: 0 }), { ...EMPTY_FILTERS, moveInReady: true })).toBe(false);
+  });
+
+  it("shows the stories filter only once some home on the list has its stories from the builder", () => {
+    expect(storiesKnown([card([plan])])).toBe(false);
+    expect(storiesKnown([card([plan]), card([oneStory])])).toBe(true);
+    expect(storiesKnown([{ homes: [{ stories: null }] }])).toBe(false);
+    expect(storiesKnown([{ homes: [{ stories: 2 }] }])).toBe(true);
   });
 
   it("counts the filters, and the ones under More filters on that button", () => {

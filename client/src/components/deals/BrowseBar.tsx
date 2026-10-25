@@ -54,7 +54,7 @@ function NumberSelect({ label, value, options, any, format, onChange }: { label:
  * baths, size, garage, stories and home type under "More filters". The landing page filters on each community's
  * public home figures; the private list filters the homes themselves.
  */
-export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedCount = 0 }: {
+export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedCount = 0, showStories = true }: {
   filters: BrowseFilters;
   onChange: (filters: BrowseFilters) => void;
   areas: ReadonlyArray<{ area: string }>;
@@ -66,6 +66,8 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
   showBeds?: boolean;
   /** Private list only: how many homes the buyer has saved (the "Saved" toggle shows when there are any). */
   savedCount?: number;
+  /** Off until some home on the list has its stories from the builder (a stories filter would match nothing). */
+  showStories?: boolean;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const choices = areaChoices(areas);
@@ -105,11 +107,11 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
         <NumberSelect label={BROWSE_COPY.baths} value={filters.minBaths} options={BATH_MINIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `${value}+ baths`} onChange={(minBaths) => set({ minBaths })} />
         <NumberSelect label={BROWSE_COPY.sqft} value={filters.minSqft} options={SQFT_MINIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `${value.toLocaleString("en-US")}+ sq ft`} onChange={(minSqft) => set({ minSqft })} />
         <NumberSelect label={BROWSE_COPY.garage} value={filters.minGarage} options={GARAGE_MINIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `${value}+ car`} onChange={(minGarage) => set({ minGarage })} />
-        <div className={LABEL} role="group" aria-label={BROWSE_COPY.stories}>{BROWSE_COPY.stories}
+        {(showStories || filters.stories !== null) && <div className={LABEL} role="group" aria-label={BROWSE_COPY.stories}>{BROWSE_COPY.stories}
           <div className="mt-1 grid min-h-11 grid-cols-3 overflow-hidden rounded-lg border border-input text-xs normal-case tracking-normal sm:text-sm">
             {([[null, BROWSE_COPY.anyStories], [1, BROWSE_COPY.oneStory], [2, BROWSE_COPY.twoStory]] as const).map(([value, label]) => <button key={label} type="button" aria-pressed={filters.stories === value} data-deals-filter={`stories-${value ?? "any"}`} onClick={() => set({ stories: value })} className={`min-w-0 px-1 ${filters.stories === value ? "bg-gold text-primary-foreground" : "bg-background text-foreground hover:text-gold"}`}>{label}</button>)}
           </div>
-        </div>
+        </div>}
       </div>
       <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2">
         <span className="mr-1 text-[11px] uppercase tracking-widest text-muted-foreground">{BROWSE_COPY.homeType}</span>

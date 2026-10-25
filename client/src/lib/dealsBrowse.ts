@@ -128,6 +128,11 @@ export type LandingBrowseCommunity = {
   homeFacts?: LandingHomeFacts[] | null;
 };
 
+/** True when some home on the list has its stories from the builder (the stories filter shows only then). */
+export function storiesKnown(items: ReadonlyArray<{ homeFacts?: LandingHomeFacts[] | null; homes?: ReadonlyArray<{ stories?: number | null }> }>): boolean {
+  return items.some((item) => item.homeFacts?.some((facts) => facts[6] !== null) || item.homes?.some((home) => typeof home.stories === "number"));
+}
+
 const LANDING_HOME_FILTERS = (filters: BrowseFilters) => filters.minPrice !== null || filters.maxPrice !== null || filters.minBeds !== null || filters.minBaths !== null || filters.minSqft !== null || filters.minGarage !== null || filters.stories !== null || filters.moveInReady || filters.toBeBuilt || filters.redHot;
 
 /** A landing card matches when it is in the area, has the offer and lot asked for, and has a home that passes the home filters. */

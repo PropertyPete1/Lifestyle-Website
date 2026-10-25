@@ -112,6 +112,8 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
       candidates.push({
         communityKey: String(community.id),
         key,
+        // The landing page's own key for this community (its card and map marker), so the home opens its sheet.
+        ...(view === "public" ? { landingKey: dealsHandle(`deals-landing:${community.id}`, 12) } : {}),
         label,
         area,
         ...(card ? { card } : {}),

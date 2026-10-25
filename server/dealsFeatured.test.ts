@@ -131,6 +131,12 @@ describe("the meeting table", () => {
     expect([garageSpaces("2"), garageSpaces("2.5"), garageSpaces("3-car"), garageSpaces(2), garageSpaces(null), garageSpaces("")]).toEqual([2, 2.5, 3, 2, null, null]);
   });
 
+  it("carries the community's landing key, so a featured home opens its community's details (Peter, Oct 25)", () => {
+    const offer = { ratePercent: 4.99, firstYearRatePercent: null, loanType: "FHA", downPercent: 3.5, aprPercent: 5.735 };
+    const ranked = rankFeatured([candidate({ communityKey: "1", landingKey: "964aa32c87c5", offer }), candidate({ communityKey: "2", offer })], { marketRatePercent: 7.4, defaultDownPercent: 5 });
+    expect(ranked.lowestPayment.map((deal) => deal.landingKey ?? null)).toEqual(["964aa32c87c5", null]);
+  });
+
   it("picks the three lowest payments from three different communities, cheapest first", () => {
     const ranked = rankFeatured([
       candidate({ communityKey: "a", label: "A", price: 300_000, offer: at74 }),

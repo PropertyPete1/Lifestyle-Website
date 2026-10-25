@@ -14,6 +14,7 @@ export const FEATURED_COPY = {
   bigLots: "Big lots",
   see: "See this home",
   unlock: "Schedule a tour",
+  details: "See details",
   perMonth: "/mo est.",
   updated: "Updated every time the builders' sites are checked.",
 } as const;
@@ -78,7 +79,14 @@ export function featuredInOrder(featured: FeaturedDealsData): Array<{ deal: Feat
  * The landing page's featured row (October 24, 2026, Peter): one compact, swipeable row across the top of the list, so
  * the search bar and the map are on screen before anyone scrolls. Tapping a home opens the gate.
  */
-export function FeaturedStrip({ featured, onSelect }: { featured: FeaturedDealsData | null | undefined; onSelect?: (deal: FeaturedDeal) => void }) {
+export function FeaturedStrip({ featured, onSelect, onHover, opens = false }: {
+  featured: FeaturedDealsData | null | undefined;
+  onSelect?: (deal: FeaturedDeal) => void;
+  /** Lights the home's area on the map while the pointer is on it (null when it leaves). */
+  onHover?: (deal: FeaturedDeal | null) => void;
+  /** Tapping opens the home's details (its community's sheet) rather than the gate. */
+  opens?: boolean;
+}) {
   const row = useRef<HTMLOListElement>(null);
   if (!featured) return null;
   const items = featuredInOrder(featured);
@@ -97,7 +105,7 @@ export function FeaturedStrip({ featured, onSelect }: { featured: FeaturedDealsD
     </div>
     <ol ref={row} className="mt-3 flex min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-width:thin]">
       {items.map(({ deal, tags }, index) => <li key={`${dealKey(deal)}-${index}`} className="w-[78%] max-w-[270px] shrink-0 snap-start overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md sm:w-[250px]">
-        <button type="button" onClick={() => onSelect?.(deal)} className="block h-full w-full min-w-0 text-left" data-deals-featured={deal.reason} aria-label={`${FEATURED_COPY.unlock}: ${deal.label}, ${money.format(deal.estMonthly)} a month estimated`}>
+        <button type="button" onClick={() => onSelect?.(deal)} onMouseEnter={() => onHover?.(deal)} onMouseLeave={() => onHover?.(null)} onFocus={() => onHover?.(deal)} onBlur={() => onHover?.(null)} className="block h-full w-full min-w-0 text-left" data-deals-featured={deal.reason} aria-label={`${opens ? FEATURED_COPY.details : FEATURED_COPY.unlock}: ${deal.label}, ${money.format(deal.estMonthly)} a month estimated`}>
           <span className="relative block aspect-[16/10] w-full overflow-hidden bg-secondary">
             {deal.photo && <RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />}
             <span className="pointer-events-none absolute left-2 top-2 flex flex-wrap gap-1">{redHotDeal(deal.price, deal.previousPrice) && <span data-deals-featured-tag="red-hot" className="rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white shadow">{RED_HOT_COPY.badge}</span>}{tags.map((tag) => <span key={tag} data-deals-featured-tag={tag} className="rounded-full bg-gold px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary-foreground shadow">{tag}</span>)}</span>
@@ -108,7 +116,7 @@ export function FeaturedStrip({ featured, onSelect }: { featured: FeaturedDealsD
             <span className="mt-0.5 block truncate text-xs text-muted-foreground">{homeLine(deal)}</span>
             <RedHotSavings price={deal.price} previousPrice={deal.previousPrice} />
             <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{rateLine(deal)}{deal.acres ? ` · ${Number(deal.acres.toFixed(2))} acre lot` : ""}</span>
-            <span className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-widest text-gold"><LockKeyhole className="h-3 w-3" />{FEATURED_COPY.unlock}</span>
+            <span className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-widest text-gold">{opens ? <>{FEATURED_COPY.details}<ArrowRight className="h-3 w-3" /></> : <><LockKeyhole className="h-3 w-3" />{FEATURED_COPY.unlock}</>}</span>
           </span>
         </button>
       </li>)}

@@ -185,6 +185,8 @@ export type FeaturedCandidate = {
   communityKey: string;
   /** Opaque per-home handle carried onto the deal (see FeaturedDeal.key). */
   key?: string;
+  /** Landing page only: the community's landing key, so a featured home opens its community's sheet. */
+  landingKey?: string;
   label: string;
   area: string;
   /** The home's opaque card handle on the private list (never on the landing page). */
@@ -234,6 +236,8 @@ export type FeaturedDeal = {
   sqftLabel?: string | null;
   /** Opaque, per-deal: lets the strip tell two deals with the same label and band apart. Never an id. */
   key?: string;
+  /** Landing page only: the community's landing key (the same opaque key as its card and map marker). */
+  landingKey?: string;
   /** The home's cover photo (the landing page's public render, or the lead's own on a private list); absent when it has none yet. */
   photo?: string;
   /** The original price when the home is a Red Hot Deal (a real price drop). */
@@ -263,6 +267,7 @@ function priced(candidate: FeaturedCandidate, settings: FeaturedSettings): Featu
     area: candidate.area,
     ...(candidate.card ? { card: candidate.card } : {}),
     ...(candidate.key ? { key: candidate.key } : {}),
+    ...(candidate.landingKey ? { landingKey: candidate.landingKey } : {}),
     ...(candidate.detail !== undefined ? { detail: candidate.detail } : {}),
     price: candidate.price,
     kind: candidate.kind,

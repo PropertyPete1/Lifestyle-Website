@@ -18,7 +18,7 @@ import { photoIdFromToken, publicPhotoAllowed, resetPublicPhotoLimits } from "./
 import { regionHomeView, regionPin, spreadStackedPins, SAN_ANTONIO_REGION } from "./dealsRegionMap";
 
 (globalThis as { React?: typeof React }).React = React;
-const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW, clusterView, stillStacked, fanOffsets } = await import("../client/src/components/deals/LandingBrowse");
+const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW, clusterView, stillStacked, fanOffsets, isFocusHome } = await import("../client/src/components/deals/LandingBrowse");
 
 describe("the region map", () => {
   it("places a point by the map's own projection and leaves off anything outside the picture", () => {
@@ -59,6 +59,17 @@ describe("the region map", () => {
       { key: "d", pin: null },
     ]);
     expect(markers.map((marker) => [marker.keys, marker.label])).toEqual([[["a", "b"], "2"], [["c"], "$250s"]]);
+  });
+});
+
+describe("a featured home opens its community (Peter, Oct 25: make the featured homes clickable)", () => {
+  it("finds the featured home among the community's homes by kind, price and size", () => {
+    const home = (price: number, sqft: number, kind = "quick_move_in") => ({ card: `c${price}`, kind, price, sqft });
+    const focus = { price: 225_105, sqft: 1_276, kind: "quick_move_in" };
+    expect(isFocusHome(home(225_105, 1_276), focus)).toBe(true);
+    expect(isFocusHome(home(225_105, 1_400), focus)).toBe(false);
+    expect(isFocusHome(home(225_105, 1_276, "to_be_built"), focus)).toBe(false);
+    expect(isFocusHome(home(225_105, 1_276), undefined)).toBe(false);
   });
 });
 

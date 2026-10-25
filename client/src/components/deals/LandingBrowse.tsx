@@ -43,6 +43,7 @@ export const LANDING_COPY = {
   areaFilter: (count: number) => `Showing ${count} in this part of town`,
   clearArea: "Show all",
   seeList: "See the list",
+  featuredHome: "Featured deal",
   sheetFiltered: (shown: number, total: number) => `${shown} of ${total} homes match your filters.`,
   sheetShowAll: "Show every home",
   mapLabel: "Map of the communities",
@@ -312,13 +313,33 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
   const markers = useMemo(() => groupMarkers(items, 2 ** (bucket / 4)), [items, bucket]);
   // Hovering a card shades its general area on the map (New Home Buddy style), around the same coarse point its marker uses.
   const activePin = activeKey ? items.find((item) => item.key === activeKey)?.pin ?? null : null;
+  // A card whose area is off the visible map (Peter, Oct 25: "some homes don't highlight on the map") glides the map
+  // over to it after a moment, so the shaded area is always in view. A drag in progress is never interrupted.
+  const [gliding, setGliding] = useState(false);
+  useEffect(() => {
+    if (!activePin) return;
+    const timer = window.setTimeout(() => {
+      const current = viewRef.current;
+      const now = measure();
+      if (!current || !now || pointers.current.size) return;
+      const x = activePin.x * current.z + current.tx;
+      const y = activePin.y * (current.z / REGION_VIEW.aspect) + current.ty;
+      const margin = 48;
+      if (x >= margin && x <= now.w - margin && y >= margin && y <= now.h - margin) return;
+      touched.current = true;
+      setGliding(true);
+      setView(clamp({ ...current, tx: now.w / 2 - activePin.x * current.z, ty: now.h / 2 - activePin.y * (current.z / REGION_VIEW.aspect) }, now.w, now.h));
+      window.setTimeout(() => setGliding(false), 450);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [activePin?.x, activePin?.y]); // eslint-disable-line react-hooks/exhaustive-deps
   if (failed) return null;
   const zoomButton = (factor: number) => () => { const now = measure(); if (now) zoomAt(factor, now.w / 2, now.h / 2); };
   return <figure aria-label={LANDING_COPY.mapLabel} data-deals-region-map="true" className={`relative min-w-0 overflow-hidden rounded-xl border border-border bg-[#e8eaed] shadow-sm ${className}`}>
     <div ref={box} className="absolute inset-0 cursor-grab touch-none select-none active:cursor-grabbing" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
       onClickCapture={(event) => { if (gesture.current.moved > 6) { event.stopPropagation(); event.preventDefault(); } }}
       onClick={(event) => { if (!(event.target as HTMLElement).closest("button")) setFanned(null); }}>
-      {view && <div data-deals-map-content="true" className="absolute left-0 top-0" style={{ width: view.z, height: view.z / REGION_VIEW.aspect, transform: `translate(${view.tx}px, ${view.ty}px)` }}>
+      {view && <div data-deals-map-content="true" className="absolute left-0 top-0" style={{ width: view.z, height: view.z / REGION_VIEW.aspect, transform: `translate(${view.tx}px, ${view.ty}px)`, transition: gliding ? "transform 400ms ease-out" : undefined }}>
         <img src="/deals/maps/region.webp" alt="" decoding="async" draggable={false} onError={() => setFailed(true)} className="pointer-events-none block h-full w-full select-none" />
         {activePin && <span aria-hidden="true" data-deals-map-area="true" style={{ left: `${activePin.x * 100}%`, top: `${activePin.y * 100}%`, width: `${AREA_DIAMETER * 100}%` }}
           className="pointer-events-none absolute z-[5] aspect-square min-w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-gold/80 bg-gold/25 shadow-[0_0_0_6px_rgba(184,146,74,0.12)] transition-all duration-200" />}
@@ -377,7 +398,16 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
 /** How the sheet reads a community's homes (the page passes the server query; a preview passes fixed homes). */
 export type UseCommunityHomes = (key: string | undefined) => { isLoading: boolean; data?: readonly PublicHome[] | null };
 
-export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters }: { community: LandingCommunity; onClose: () => void; onUnlock: () => void; useHomes: UseCommunityHomes; /** The page's filters: the homes that match come first, the rest one tap away. */ filters?: BrowseFilters }) {
+/** The home a featured card stands for, by its public figures (the sheet's homes carry no shared key). */
+export type SheetFocus = { price?: number | null; sqft?: number | null; beds?: string | number | null; kind?: string };
+
+/** True when a sheet home is the featured one: same kind, price and size. */
+export function isFocusHome(home: PublicHome, focus: SheetFocus | undefined): boolean {
+  if (!focus || !focus.price) return false;
+  return home.price === focus.price && (!focus.sqft || home.sqft === focus.sqft) && (!focus.kind || home.kind === focus.kind);
+}
+
+export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters, focus }: { community: LandingCommunity; onClose: () => void; onUnlock: () => void; useHomes: UseCommunityHomes; /** The page's filters: the homes that match come first, the rest one tap away. */ filters?: BrowseFilters; /** A featured home: shown first and marked. */ focus?: SheetFocus }) {
   const dialog = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   // The latest close handler, so the effect below runs once per opening (not on every parent render).
@@ -407,7 +437,12 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
   const [showAll, setShowAll] = useState(false);
   const narrowed = filters && homeFiltersOn(filters) && !showAll ? all.filter((home) => homePasses(home, filters)) : null;
   // When no home passes (the community matched on its offer or area), every home shows rather than an empty sheet.
-  const list = narrowed && narrowed.length ? narrowed : all;
+  const base = narrowed && narrowed.length ? narrowed : all;
+  // A featured home leads the sheet, whatever the filters say.
+  const featuredHome = all.find((home) => isFocusHome(home, focus));
+  const list = featuredHome ? [featuredHome, ...base.filter((home) => home !== featuredHome)] : base;
+  const homesTop = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (featuredHome) window.setTimeout(() => homesTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 250); }, [featuredHome]);
   // On document.body, so no section's stacking (or the page's floating button) can sit over the sheet.
   return createPortal(<div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 sm:items-center sm:p-6" onClick={onClose}>
     <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="deals-community-title" data-deals-community-sheet="true" onClick={(event) => event.stopPropagation()} className="deals-light relative max-h-[94vh] w-full max-w-6xl overflow-y-auto rounded-t-2xl bg-background shadow-2xl sm:rounded-2xl">
@@ -425,10 +460,10 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
           <p className="mt-2 text-xs text-muted-foreground">{LANDING_COPY.privacy}</p>
         </div>
       </div>
-      <div className="border-t border-border px-5 pb-8 pt-6 sm:px-6" data-deals-public-homes="true">
+      <div ref={homesTop} className="scroll-mt-2 border-t border-border px-5 pb-8 pt-6 sm:px-6" data-deals-public-homes="true">
         <h3 className="text-xl font-semibold">{homes.isLoading ? LANDING_COPY.homesLoading : list.length ? LANDING_COPY.homesHeading(list.length) : LANDING_COPY.homesNone}</h3>
         {narrowed && narrowed.length > 0 && narrowed.length < all.length && <p role="status" className="mt-2 flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground" data-deals-sheet-filtered="true">{LANDING_COPY.sheetFiltered(narrowed.length, all.length)}<button type="button" onClick={() => setShowAll(true)} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.sheetShowAll}</button></p>}
-        {list.length > 0 && <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2 lg:grid-cols-3">{list.map((home) => <PublicHomeCard key={home.card} home={home} onAddress={onUnlock} />)}</div>}
+        {list.length > 0 && <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2 lg:grid-cols-3">{list.map((home) => <PublicHomeCard key={home.card} home={home} onAddress={onUnlock} featured={home === featuredHome} />)}</div>}
       </div>
     </section>
   </div>, document.body);
@@ -437,8 +472,9 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
 /** A home on the landing page: the same facts as the private list, with no address, plan, builder or community name. */
 export type PublicHome = { card: string; kind: string; beds?: string | number | null; baths?: string | number | null; sqft?: number | null; garage?: string | null; stories?: number | null; price?: number | null; previousPrice?: number | null; moveInDate?: string | null; lotSize?: string | null; photos?: string[] };
 
-export function PublicHomeCard({ home, onAddress }: { home: PublicHome; onAddress: () => void }) {
-  return <article data-deals-public-home="true" className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+export function PublicHomeCard({ home, onAddress, featured = false }: { home: PublicHome; onAddress: () => void; featured?: boolean }) {
+  return <article data-deals-public-home="true" data-deals-featured-home={featured ? "true" : undefined} className={`relative min-w-0 overflow-hidden rounded-xl border bg-card shadow-sm ${featured ? "border-gold ring-2 ring-gold/60" : "border-border"}`}>
+    {featured && <span className="absolute left-2 top-2 z-10 rounded-full bg-gold px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-primary-foreground shadow">{LANDING_COPY.featuredHome}</span>}
     <div className="[&>*]:mt-0"><ProtectedGallery photos={home.photos} /></div>
     <div className="p-4">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -471,10 +507,21 @@ function AutoMore({ active, onNear }: { active: boolean; onNear: () => void }) {
 }
 
 /** The list and the map side by side (the map stays in view on a wide screen; a phone opens it with a button). */
-export function LandingBrowse({ communities, onUnlock, useHomes, top, filters }: { communities: readonly LandingCommunity[]; onUnlock: () => void; useHomes: UseCommunityHomes; /** Shown at the top of the list column (the featured row). */ top?: ReactNode; filters?: BrowseFilters }) {
+/** What the featured row can do on the landing page: open a community's sheet on one of its homes, and light its area on the map. */
+export type LandingActions = { openHome: (key: string, focus?: SheetFocus) => boolean; hover: (key: string | null) => void };
+
+export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup }: {
+  communities: readonly LandingCommunity[]; onUnlock: () => void; useHomes: UseCommunityHomes;
+  /** Shown at the top of the list column (the featured row); a function gets the actions above. */
+  top?: ReactNode | ((actions: LandingActions) => ReactNode);
+  filters?: BrowseFilters;
+  /** Every community on the page, filtered or not, so a featured home opens even when the filters hide its card. */
+  lookup?: readonly LandingCommunity[];
+}) {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ id: string; keys: string[] } | null>(null);
   const [open, setOpen] = useState<LandingCommunity | null>(null);
+  const [focus, setFocus] = useState<SheetFocus | undefined>(undefined);
   const [mapOnPhone, setMapOnPhone] = useState(false);
   const [pages, setPages] = useState(1);
   const keyed = useMemo(() => communities.map((community, index) => ({ ...community, key: keyOf(community, index) })), [communities]);
@@ -489,12 +536,22 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters }:
   const selectMarker = (marker: { id: string; keys: string[] } | null) => {
     if (marker && marker.keys.length === 1) {
       const community = keyed.find((item) => item.key === marker.keys[0]);
-      if (community) { setOpen(community); return; }
+      if (community) { setFocus(undefined); setOpen(community); return; }
     }
     setSelected(marker);
     // On a wide screen the map stays put beside the list, so the list scrolls to its top. On a phone the map sits
     // above the list: scrolling away would hide the zoom and the fanned-out communities the visitor just asked for.
     if (marker && window.matchMedia?.("(min-width: 1024px)").matches) window.setTimeout(() => listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+  const actions: LandingActions = {
+    openHome: (key, homeFocus) => {
+      const community = keyed.find((item) => item.key === key) ?? lookup?.find((item) => item.key === key);
+      if (!community) return false;
+      setFocus(homeFocus);
+      setOpen(community);
+      return true;
+    },
+    hover: setActiveKey,
   };
   const mapProps = { items: keyed, activeKey, onHover: setActiveKey, onSelect: selectMarker, selectedId: selected?.id ?? null };
   const map = <RegionMap {...mapProps} className="h-[65vh] w-full" />;
@@ -509,11 +566,11 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters }:
           {/* The bubble the visitor tapped narrows the list below; on a phone that is said right under the map. */}
           {selected && <div role="status" data-deals-phone-area="true" className="mt-2 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-1 text-sm"><span>{LANDING_COPY.areaFilter(matching.length)}</span><button type="button" onClick={() => listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" })} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.seeList}</button><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-muted-foreground underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
         </div>}
-        {top && <div className="mb-6 min-w-0">{top}</div>}
+        {top && <div className="mb-6 min-w-0">{typeof top === "function" ? top(actions) : top}</div>}
         <div ref={listTop} className="scroll-mt-4" />
         {selected && <div role="status" className="mb-4 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-2 text-sm"><span>{LANDING_COPY.areaFilter(matching.length)}</span><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
-          {shown.map((community) => <CommunityCard key={community.key} community={community} active={activeKey === community.key} onHover={(on) => setActiveKey(on ? community.key : null)} onOpen={() => setOpen(community)} />)}
+          {shown.map((community) => <CommunityCard key={community.key} community={community} active={activeKey === community.key} onHover={(on) => setActiveKey(on ? community.key : null)} onOpen={() => { setFocus(undefined); setOpen(community); }} />)}
         </div>
         {/* The next page loads as the visitor nears the end of the list (the button stays for keyboards and old browsers). */}
         <AutoMore key={shown.length} active={matching.length > shown.length} onNear={() => setPages((value) => value + 1)} />
@@ -522,6 +579,6 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters }:
       {/* The map fills the side of the screen and stays there while the list scrolls (no empty space under it). */}
       <aside className="hidden min-w-0 lg:block"><div className="sticky top-0 h-[100dvh] py-4"><RegionMap {...mapProps} className="h-full w-full" /></div></aside>
     </div>
-    {open && <CommunitySheet community={open} useHomes={useHomes} filters={filters} onClose={() => setOpen(null)} onUnlock={() => { setOpen(null); onUnlock(); }} />}
+    {open && <CommunitySheet community={open} useHomes={useHomes} filters={filters} focus={focus} onClose={() => setOpen(null)} onUnlock={() => { setOpen(null); onUnlock(); }} />}
   </>;
 }

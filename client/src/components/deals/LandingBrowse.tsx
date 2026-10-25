@@ -176,7 +176,9 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
   const settle = () => {
     const now = measure();
     if (!now) return;
-    setView((current) => !current || !touched.current ? goTo(REGION_VIEW.home, now.w, now.h) : clamp(current, now.w, now.h));
+    // A phone's narrow box opens closer in on San Antonio, so its markers spread out instead of piling up.
+    const home = now.w < 560 ? { ...REGION_VIEW.home, span: REGION_VIEW.home.span * 0.62 } : REGION_VIEW.home;
+    setView((current) => !current || !touched.current ? goTo(home, now.w, now.h) : clamp(current, now.w, now.h));
   };
   useEffect(() => {
     settle();

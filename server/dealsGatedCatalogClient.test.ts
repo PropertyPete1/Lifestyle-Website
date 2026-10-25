@@ -32,7 +32,7 @@ const communities: GatedCommunity[] = [
     driveTimes: ["about 25 min to downtown San Antonio", "about 20 min to Randolph AFB", "not a chip"], areaMap, fromPrice: 499000, reelUrl: null, updatedAt: "2026-10-18T12:00:00.000Z",
     incentive: { text: "Demo incentive wording.", headlineRate: "4.25%", followOnRate: "6.25%", followOnPeriod: "Years 2 to 30", apr: "6.051%", loanType: "FHA 30-yr fixed", downPayment: null, repaymentTerms: null, contractBy: null, closeBy: null },
     homes: [
-      { card: "a".repeat(20), kind: "quick_move_in", beds: "4", baths: "3", sqft: 2500, price: 499000, previousPrice: 519000, moveInDate: "Nov 2026", lotSize: "0.5 acre", photos: ["/deals/mine/img/1", "/deals/mine/img/2", "/deals/mine/img/3"] },
+      { card: "a".repeat(20), kind: "quick_move_in", beds: "4", baths: "3", sqft: 2500, price: 499000, previousPrice: 549000, moveInDate: "Nov 2026", lotSize: "0.5 acre", photos: ["/deals/mine/img/1", "/deals/mine/img/2", "/deals/mine/img/3"] },
       { card: "b".repeat(20), kind: "quick_move_in", beds: "3", baths: "2", sqft: 1800, price: 389000, previousPrice: null, photos: ["/deals/mine/img/4"] },
     ],
   },
@@ -107,8 +107,8 @@ describe("gated catalog stays inside a 375 px phone viewport (A19)", () => {
     // Oct 24 (Peter): a real price drop is a red "Red Hot Deal", the original price crossed out and the savings shown.
     expect(html.match(/Red Hot Deal/g)?.length).toBe(1);
     expect(html).not.toContain("Price drop");
-    expect(html).toContain("$519,000");
-    expect(html).toContain("Extreme savings · Save $20,000");
+    expect(html).toContain("$549,000");
+    expect(html).toContain("Extreme savings · Save $50,000");
     expect(html.match(/Tour this home with us/g)?.length).toBe(2);
     expect(html.match(/Ask about this one/g)?.length).toBe(1);
     expect(html).toContain("Add your name so we know who to text.");

@@ -369,13 +369,14 @@ export function roundFeaturedForPublic(featured: FeaturedDeals): FeaturedDeals {
 }
 
 /**
- * RED HOT DEALS (October 24, 2026, Peter): a home whose price really came down, by at least $10,000 or 3% of the price,
- * whichever is more (raised from $5,000 / 2% on Oct 25, when 4 in 10 communities carried the badge). The original price is the builder's own published "was" price (D.R. Horton's red event cards) or
+ * RED HOT DEALS (October 24, 2026, Peter): a home whose price really came down, by at least $15,000 or 8% of the price,
+ * whichever is more (raised from $5,000 / 2% on Oct 25: builders show a "was" price on most homes, and 4 in 10
+ * communities carried the badge; 8% keeps it to about the top fifth, the real markdowns). The original price is the builder's own published "was" price (D.R. Horton's red event cards) or
  * the highest price this site saw in the last 30 days. The badge says "Red Hot Deal" and shows the savings; it never
  * says why a home is promoted.
  */
-export const RED_HOT_MIN_SAVINGS = 10_000;
-export const RED_HOT_MIN_PERCENT = 3;
+export const RED_HOT_MIN_SAVINGS = 15_000;
+export const RED_HOT_MIN_PERCENT = 8;
 export function redHotDeal(price: number | null | undefined, previousPrice: number | null | undefined): { savings: number; was: number } | null {
   if (!price || !previousPrice || !Number.isFinite(price) || !Number.isFinite(previousPrice) || previousPrice <= price) return null;
   const savings = previousPrice - price;

@@ -43,6 +43,7 @@ vi.mock("./dealsAlerts", () => ({
   queueFirstUnlockAlert: (...args: unknown[]) => mocks.queueFirstUnlockAlert(...args),
   queueProfileFlagAlert: (...args: unknown[]) => mocks.queueProfileFlagAlert(...args),
   queueAgentRequestAlert: (...args: unknown[]) => mocks.queueAgentRequestAlert(...args),
+  adminLeadLink: (leadId: number) => `https://lifestyledesignrealty.com/admin/deals?lead=${leadId}`,
 }));
 vi.mock("./dealsEmail", () => ({ sendBuilderDealsEmail: (...args: unknown[]) => mocks.sendBuilderDealsEmail(...args) }));
 
@@ -56,6 +57,7 @@ import {
   enqueueDealsRequestJobs,
   handleDealsProfileUpdate,
   previousChicagoDay,
+  requestPingText,
   requestTestMode,
   runPendingDealsFubJobs,
   waitingForDeferredCheck,
@@ -101,6 +103,17 @@ beforeEach(() => {
   mocks.blockVerifiedDealsIdentity.mockResolvedValue(undefined);
 });
 afterEach(() => { vi.useRealTimers(); });
+
+describe("the phone ping on a save or tour request (Peter, Oct 25: like New Home Buddy's favourite alert)", () => {
+  it("leads with who and their number, says what they did, and links the admin lead page", () => {
+    const ping = requestPingText({ lead: { id: 42, name: "Jane Doe", phoneE164: "+12105550101", isTest: false, agent: null }, request: { requestType: "save" }, privateDescription: "123 Elm St · Perry Homes / Fixture Lakes" });
+    expect(ping.title).toBe("Jane Doe saved a home");
+    expect(ping.content.split("\n")).toEqual(["Jane Doe (210) 555-0101", "saved: 123 Elm St · Perry Homes / Fixture Lakes", expect.stringMatching(/\/admin\/deals\?lead=42$/)]);
+    const tour = requestPingText({ lead: { id: 7, name: null, phoneE164: "+15125550199", isTest: true, agent: { name: "Tiffany" } }, request: { requestType: "tour" }, privateDescription: "x" });
+    expect(tour.title).toBe("TEST: A buyer wants to tour a home (Tiffany's client)");
+    expect(tour.content).toContain("A buyer (512) 555-0199");
+  });
+});
 
 describe("Builder Deals same-day FUB outbox serialization", () => {
   it("uses one lead/Chicago-day operation key for task and note work across requests", async () => {

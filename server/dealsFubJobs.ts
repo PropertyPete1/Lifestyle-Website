@@ -17,6 +17,7 @@ import {
   updateBuilderDealsProfileInFub,
 } from "./dealsFub";
 import { sendBuilderDealsEmail } from "./dealsEmail";
+import { adminLeadLink } from "./dealsAlerts";
 import { blockVerifiedDealsIdentity, chicagoDay, chicagoDayStart, getDealSettings } from "./dealsService";
 
 export type FubOperation =
@@ -403,7 +404,26 @@ async function executeRequestEmail(job: typeof dealFubJobs.$inferSelect): Promis
   });
   if (!sent.ok) return { ok: false, error: sent.error ?? "Builder Deals email was not accepted" };
   await db.update(dealTourRequests).set({ emailSentAt: new Date() }).where(eq(dealTourRequests.id, loaded.request.id));
+  // October 25, 2026 (Peter: New Home Buddy pings us the moment a buyer favourites a home): a short push to the
+  // owner's phone with who, their number and the home, so the call happens while they are still looking. Best effort
+  // and after the email, so a push outage never holds up or repeats the email.
+  void pushRequestPing(loaded).catch((error) => console.error("[deals] request push failed", error instanceof Error ? error.message : error));
   return { ok: true, records: [] };
+}
+
+/** "Jane Doe (210) 555-0101 saved: 123 Elm St · Perry Homes / Fixture Lakes" — the first line is what shows on the lock screen. */
+export function requestPingText(loaded: { lead: { id: number; name: string | null; phoneE164: string; isTest: boolean; agent: { name: string } | null }; request: { requestType: string }; privateDescription: string }): { title: string; content: string } {
+  const phone = loaded.lead.phoneE164.replace(/^\+1(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3");
+  const who = loaded.lead.name?.trim() || "A buyer";
+  const verb = loaded.request.requestType === "save" ? "saved" : loaded.request.requestType === "tour" ? "wants to tour" : "asked about";
+  const title = `${loaded.lead.isTest ? "TEST: " : ""}${who} ${verb} a home${loaded.lead.agent ? ` (${loaded.lead.agent.name}'s client)` : ""}`;
+  return { title, content: `${who} ${phone}\n${verb}: ${loaded.privateDescription}\n${adminLeadLink(loaded.lead.id)}` };
+}
+
+async function pushRequestPing(loaded: Parameters<typeof requestPingText>[0]) {
+  const { notifyOwner } = await import("./_core/notification");
+  const { title, content } = requestPingText(loaded);
+  await notifyOwner({ title, content });
 }
 
 type DeferredCheckOutcome = "clear" | "blocked" | "team" | "unavailable";

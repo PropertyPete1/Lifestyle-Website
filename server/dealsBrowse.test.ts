@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
-import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingMatches, moreFilterCount, monthsUntilMoveIn, priceCapLabel, storiesKnown, builderChoices, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
+import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, areaGroups, areaMatches, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingMatches, moreFilterCount, monthsUntilMoveIn, priceCapLabel, storiesKnown, builderChoices, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
 import type { GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
 import { browseOrder } from "./dealsService";
 
@@ -114,6 +114,27 @@ describe("the builder filter (Peter, Oct 25: team only, like New Home Buddy for 
     expect(team).toContain('data-deals-builder-filter="true"');
     expect(team).toContain("D.R. Horton (7)");
     expect(buyer).not.toContain("data-deals-builder-filter");
+  });
+});
+
+describe("the area picker with two markets (Oct 25: Austin joined San Antonio)", () => {
+  const items = [{ area: "Georgetown" }, { area: "Kyle" }, { area: "Kyle" }, { area: "North Austin" }, { area: "West San Antonio" }, { area: "Boerne" }, { area: "Northwest San Antonio" }, { area: "Southeast of Austin" }];
+  it("groups areas by market, the city's own sides first then towns A to Z, with a whole-market choice", () => {
+    const groups = areaGroups(items);
+    expect(groups.map((group) => group.market)).toEqual(["San Antonio", "Austin"]);
+    expect(groups[0]!.choices.map((choice) => choice.area)).toEqual(["Northwest San Antonio", "West San Antonio", "Boerne"]);
+    expect(groups[1]!.choices.map((choice) => choice.area)).toEqual(["North Austin", "Southeast of Austin", "Georgetown", "Kyle"]);
+    expect(groups[1]!.total).toBe(5);
+    expect(areaGroups([{ area: "Boerne" }]).map((group) => group.market)).toEqual(["San Antonio"]);
+  });
+  it("matches a whole market or one area", () => {
+    expect(areaMatches("Kyle", "market:Austin")).toBe(true);
+    expect(areaMatches("Boerne", "market:Austin")).toBe(false);
+    expect(areaMatches("Boerne", "market:San Antonio")).toBe(true);
+    expect(areaMatches("Kyle", "Kyle")).toBe(true);
+    expect(areaMatches("Kyle", "Buda")).toBe(false);
+    expect(areaMatches("Kyle", "")).toBe(true);
+    expect(landingMatches({ area: "Kyle", label: "Kyle | x", homesAvailable: 1 }, { ...EMPTY_FILTERS, area: "market:Austin" })).toBe(true);
   });
 });
 

@@ -39,6 +39,16 @@ export const MAJOR_TOWNS = ["New Braunfels", "Seguin", "Boerne", "Floresville", 
   "Fredericksburg", "Kerrville", "Gonzales", "Luling",
   "Round Rock", "Pflugerville", "Georgetown", "Leander", "Cedar Park", "Hutto", "Manor", "Kyle", "Buda", "San Marcos", "Dripping Springs", "Liberty Hill", "Lockhart", "Bastrop", "Taylor", "Elgin", "Jarrell", "Florence", "Bee Cave", "Lakeway", "Lago Vista", "Wimberley", "Maxwell"] as const;
 
+/** The towns of the Austin market, for grouping area labels (every other town is San Antonio's). */
+export const AUSTIN_TOWNS: ReadonlySet<string> = new Set(["Round Rock", "Pflugerville", "Georgetown", "Leander", "Cedar Park", "Hutto", "Manor", "Kyle", "Buda", "San Marcos", "Dripping Springs", "Liberty Hill", "Lockhart", "Bastrop", "Taylor", "Elgin", "Jarrell", "Florence", "Bee Cave", "Lakeway", "Lago Vista", "Wimberley", "Maxwell"]);
+
+/** Which market an area label belongs to: "Austin" for a side of Austin, "Greater Austin" or an Austin-market town; otherwise "San Antonio". */
+export function areaMarketName(area: string): "San Antonio" | "Austin" {
+  const label = area.trim();
+  if (/\bAustin\b/i.test(label) || AUSTIN_TOWNS.has(label)) return "Austin";
+  return "San Antonio";
+}
+
 /** Each town's centre (approximate). Outside the metro, a community whose builder lists "San Antonio" (Perry's
  * Esperanza, 3 miles from Boerne) takes the name of a town within TOWN_MILES of its ZIP centre (Peter, Oct 24: "where
  * are all the communities in Boerne"). */

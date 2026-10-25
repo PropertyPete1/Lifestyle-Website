@@ -1,4 +1,5 @@
 import { BIG_LOT_ACRES, homeLotAcres, lotAcres, redHotDeal } from "@shared/dealsFeatured";
+import { areaMarketName } from "@shared/dealsArea";
 
 /**
  * Browsing every community in the area: filters shared by the landing page and
@@ -63,6 +64,31 @@ export function areaChoices(items: ReadonlyArray<{ area: string }>): Array<{ are
   const counts = new Map<string, number>();
   for (const item of items) if (item.area?.trim()) counts.set(item.area, (counts.get(item.area) ?? 0) + 1);
   return Array.from(counts, ([area, count]) => ({ area, count })).sort((a, b) => b.count - a.count || a.area.localeCompare(b.area));
+}
+
+/** The area filter's value for a whole market ("every Austin-area community"), never a real area label. */
+export const MARKET_AREA_PREFIX = "market:";
+
+/**
+ * The area picker grouped by market (Oct 25, 2026: with Austin on the page, 55 mixed towns sorted by count were a hunt):
+ * each market a group, "All of the Austin area" first, then the sides of the city, then its towns A to Z. A market
+ * with no communities on the list is left out.
+ */
+export function areaGroups(items: ReadonlyArray<{ area: string }>): Array<{ market: "San Antonio" | "Austin"; total: number; choices: Array<{ area: string; count: number }> }> {
+  const all = areaChoices(items);
+  return (["San Antonio", "Austin"] as const).map((market) => {
+    const choices = all.filter((choice) => areaMarketName(choice.area) === market);
+    const side = (area: string) => new RegExp(`\\b${market}\\b|^Greater `, "i").test(area) ? 0 : 1;
+    choices.sort((a, b) => side(a.area) - side(b.area) || a.area.localeCompare(b.area));
+    return { market, total: choices.reduce((sum, choice) => sum + choice.count, 0), choices };
+  }).filter((group) => group.choices.length > 0);
+}
+
+/** True when the community is in the picked area, or in the picked market when the whole market was picked. */
+export function areaMatches(area: string, picked: string): boolean {
+  if (!picked) return true;
+  if (picked.startsWith(MARKET_AREA_PREFIX)) return areaMarketName(area) === picked.slice(MARKET_AREA_PREFIX.length);
+  return area === picked;
 }
 
 /** "$400K", "$1M". */
@@ -177,7 +203,7 @@ const LANDING_HOME_FILTERS = (filters: BrowseFilters) => filters.minPrice !== nu
 
 /** A landing card matches when it is in the area, has the offer and lot asked for, and has a home that passes the home filters. */
 export function landingMatches(community: LandingBrowseCommunity, filters: BrowseFilters): boolean {
-  if (filters.area && community.area !== filters.area) return false;
+  if (!areaMatches(community.area, filters.area)) return false;
   if (filters.builderRate && !community.incentive?.headlineRate) return false;
   if (filters.bigLots && (lotAcres(community.label) ?? 0) < BIG_LOT_ACRES) return false;
   if (!LANDING_HOME_FILTERS(filters)) return true;
@@ -218,7 +244,7 @@ export function homesMatching<Home extends GatedBrowseHome>(community: GatedBrow
 
 /** A community stays on the private list when it is in the area, has the offer asked for, and has a home that matches. */
 export function gatedCommunityVisible<Home extends GatedBrowseHome>(community: GatedBrowseCommunity<Home>, filters: BrowseFilters, saved?: ReadonlySet<string>): boolean {
-  if (filters.area && community.area !== filters.area) return false;
+  if (!areaMatches(community.area, filters.area)) return false;
   if (filters.builderRate && !community.incentive?.headlineRate) return false;
   if (filters.builder && community.details?.builderName !== filters.builder) return false;
   return !homeFiltersOn(filters, saved) || homesMatching(community, filters, saved).length > 0;

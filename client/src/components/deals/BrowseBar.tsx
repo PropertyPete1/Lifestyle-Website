@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { SlidersHorizontal, X, Flame, ChevronDown } from "lucide-react";
-import { AVAILABLE_BY, BATH_MINIMUMS, BED_MINIMUMS, BROWSE_PAGE, EMPTY_FILTERS, GARAGE_MINIMUMS, PRICE_CAPS, PRICE_FLOORS, SQFT_MAXIMUMS, SQFT_MINIMUMS, activeFilterCount, areaChoices, moreFilterCount, priceCapLabel, type BrowseFilters } from "@/lib/dealsBrowse";
+import { AVAILABLE_BY, BATH_MINIMUMS, BED_MINIMUMS, BROWSE_PAGE, EMPTY_FILTERS, GARAGE_MINIMUMS, PRICE_CAPS, PRICE_FLOORS, SQFT_MAXIMUMS, SQFT_MINIMUMS, activeFilterCount, areaGroups, MARKET_AREA_PREFIX, moreFilterCount, priceCapLabel, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export const BROWSE_COPY = {
   heading: "Find your community",
   area: "Area",
   anyArea: "All areas",
+  marketGroup: (market: string) => `${market} area`,
+  wholeMarket: (market: string) => `All of the ${market} area`,
   minPrice: "Min price",
   noMin: "No min",
   price: "Max price",
@@ -78,7 +80,7 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
   builders?: ReadonlyArray<{ builder: string; count: number }>;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
-  const choices = areaChoices(areas);
+  const groups = areaGroups(areas);
   const active = activeFilterCount(filters);
   const more = moreFilterCount(filters);
   const set = (patch: Partial<BrowseFilters>) => onChange({ ...filters, ...patch });
@@ -93,7 +95,12 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
       <label className={`${LABEL} col-span-2 sm:col-span-1`}>{BROWSE_COPY.area}
         <select aria-label={BROWSE_COPY.area} value={filters.area} onChange={(event) => set({ area: event.target.value })} className={`mt-1 ${SELECT}`}>
           <option value="">{BROWSE_COPY.anyArea}</option>
-          {choices.map((choice) => <option key={choice.area} value={choice.area}>{choice.area} ({choice.count})</option>)}
+          {groups.length === 1
+            ? groups[0]!.choices.map((choice) => <option key={choice.area} value={choice.area}>{choice.area} ({choice.count})</option>)
+            : groups.map((group) => <optgroup key={group.market} label={BROWSE_COPY.marketGroup(group.market)}>
+              <option value={`${MARKET_AREA_PREFIX}${group.market}`}>{BROWSE_COPY.wholeMarket(group.market)} ({group.total})</option>
+              {group.choices.map((choice) => <option key={choice.area} value={choice.area}>{choice.area} ({choice.count})</option>)}
+            </optgroup>)}
         </select>
       </label>
       <NumberSelect label={BROWSE_COPY.minPrice} value={filters.minPrice} options={PRICE_FLOORS} any={BROWSE_COPY.noMin} format={(value) => `${priceCapLabel(value)}+`} onChange={setMin} />

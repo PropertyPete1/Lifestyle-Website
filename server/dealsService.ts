@@ -793,8 +793,9 @@ function factNumber(value: string | number | null | undefined): number | null {
 }
 
 /** [price, beds, baths, sqft, garage, kind (0 move-in ready, 1 to be built), stories, previous price]: see LandingHomeFacts. */
-export function landingHomeFacts(home: { kind: string; price: number | null; previousPrice: number | null; beds: string | null; baths: string | null; sqft: number | null; garage: string | null; stories?: number | null }): [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null] {
-  return [home.price, factNumber(home.beds), factNumber(home.baths), home.sqft, factNumber(home.garage), home.kind === "to_be_built" ? 1 : 0, home.stories ?? null, home.previousPrice];
+export function landingHomeFacts(home: { kind: string; price: number | null; previousPrice: number | null; beds: string | null; baths: string | null; sqft: number | null; garage: string | null; stories?: number | null; moveInDate?: string | null }): [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null, string | null] {
+  // The move-in text is a month at most ("Nov 2026"), never a date that could be matched to a listing.
+  return [home.price, factNumber(home.beds), factNumber(home.baths), home.sqft, factNumber(home.garage), home.kind === "to_be_built" ? 1 : 0, home.stories ?? null, home.previousPrice, home.moveInDate ?? null];
 }
 
 export async function publicDealsCatalog(src?: string | null) {
@@ -813,7 +814,7 @@ export async function publicDealsCatalog(src?: string | null) {
   // Two reads for the whole page, however many communities there are.
   const ids = communities.map((community) => community.id);
   const [availableHomes, incentives, heldLine] = await Promise.all([
-    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price, previousPrice: dealHomes.previousPrice, beds: dealHomes.beds, baths: dealHomes.baths, sqft: dealHomes.sqft, garage: dealHomes.garage, stories: dealHomes.stories }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
+    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price, previousPrice: dealHomes.previousPrice, beds: dealHomes.beds, baths: dealHomes.baths, sqft: dealHomes.sqft, garage: dealHomes.garage, stories: dealHomes.stories, moveInDate: dealHomes.moveInDate }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
     liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
     heldLineCommunities(db, ids, now, settings.incentiveLapseDays),
   ]);

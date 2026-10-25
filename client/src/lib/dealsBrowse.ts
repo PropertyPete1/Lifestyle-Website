@@ -14,6 +14,9 @@ export type BrowseFilters = {
   minBeds: number | null;
   minBaths: number | null;
   minSqft: number | null;
+  maxSqft: number | null;
+  /** Move in by this month, as months from now (0: ready now, 3: within three months). */
+  availableBy: number | null;
   /** Garage spaces, at least. */
   minGarage: number | null;
   /** 1: single-story homes only; 2: two stories or more. */
@@ -31,12 +34,15 @@ export type BrowseFilters = {
   builder: string;
 };
 
-export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, savedOnly: false, builder: "" };
+export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, maxSqft: null, availableBy: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, savedOnly: false, builder: "" };
 export const PRICE_CAPS = [200_000, 300_000, 400_000, 500_000, 600_000, 750_000, 1_000_000] as const;
 export const PRICE_FLOORS = [200_000, 250_000, 300_000, 350_000, 400_000, 500_000, 600_000, 750_000] as const;
 export const BED_MINIMUMS = [2, 3, 4, 5] as const;
 export const BATH_MINIMUMS = [2, 2.5, 3, 4] as const;
 export const SQFT_MINIMUMS = [1_200, 1_500, 1_800, 2_000, 2_500, 3_000, 3_500] as const;
+export const SQFT_MAXIMUMS = [1_500, 1_800, 2_000, 2_500, 3_000, 3_500, 4_000] as const;
+/** "Available by": ready now, or within this many months. */
+export const AVAILABLE_BY = [0, 1, 3, 6, 12] as const;
 export const GARAGE_MINIMUMS = [2, 3] as const;
 /** Communities shown before "Show more". */
 export const BROWSE_PAGE = 12;
@@ -45,11 +51,11 @@ export const OPEN_ALL_UP_TO = 3;
 
 /** The filters tucked behind "More filters" (counted on that button). */
 export function moreFilterCount(filters: BrowseFilters): number {
-  return [filters.minBaths, filters.minSqft, filters.minGarage, filters.stories, filters.toBeBuilt, filters.bigLots, filters.builderRate].filter(Boolean).length;
+  return [filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.toBeBuilt, filters.bigLots, filters.builderRate].filter((value) => value !== null && value !== false && value !== undefined).length;
 }
 
 export function activeFilterCount(filters: BrowseFilters): number {
-  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.minGarage, filters.stories, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.savedOnly, filters.builder].filter(Boolean).length;
+  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.savedOnly, filters.builder].filter((value) => value !== null && value !== false && value !== "" && value !== undefined).length;
 }
 
 /** Areas present in the list, most communities first, for the area picker. */
@@ -87,7 +93,26 @@ export type FilterableHome = {
   garage?: string | number | null;
   stories?: number | null;
   lotSize?: string | null;
+  moveInDate?: string | null;
 };
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+/**
+ * A builder's move-in text as months from now: "Available Now" / "Move-in ready" -> 0, "Nov 2026" or
+ * "Est. Completion - Nov '26" -> months until that month, "4 - 6 month build" -> 6. Null when it says nothing datable.
+ */
+export function monthsUntilMoveIn(value: string | null | undefined, now: Date = new Date()): number | null {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  if (/\b(now|ready|immediate|complete[d]?)\b/i.test(text) && !/est\.?\s*complet/i.test(text)) return 0;
+  const build = /(\d+)\s*(?:-|to)\s*(\d+)\s*month/i.exec(text) ?? /(\d+)\s*month/i.exec(text);
+  if (build) return Number(build[2] ?? build[1]);
+  const month = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,?\s*'?(\d{2}|\d{4})\b/i.exec(text);
+  if (!month) return null;
+  const year = month[2]!.length === 2 ? 2000 + Number(month[2]) : Number(month[2]);
+  const index = MONTHS.indexOf(month[1]!.slice(0, 3).toLowerCase());
+  return Math.max(0, (year - now.getFullYear()) * 12 + (index - now.getMonth()));
+}
 
 /**
  * One home against the home filters. A filter on a fact the builder does not publish (no garage or stories listed)
@@ -100,6 +125,12 @@ export function homePasses(home: FilterableHome, filters: BrowseFilters, communi
   if (filters.minBeds !== null && (bedsFrom(home.beds) ?? 0) < filters.minBeds) return false;
   if (filters.minBaths !== null && (numberFrom(home.baths) ?? 0) < filters.minBaths) return false;
   if (filters.minSqft !== null && (home.sqft ?? 0) < filters.minSqft) return false;
+  if (filters.maxSqft !== null && !(home.sqft && home.sqft <= filters.maxSqft)) return false;
+  if (filters.availableBy !== null) {
+    // A move-in-ready home with no date is ready now; a plan to be built with no date is not datable, so it is out.
+    const months = monthsUntilMoveIn(home.moveInDate) ?? (home.kind === "quick_move_in" ? 0 : null);
+    if (months === null || months > filters.availableBy) return false;
+  }
   if (filters.minGarage !== null && (numberFrom(home.garage) ?? 0) < filters.minGarage) return false;
   if (filters.stories === 1 && home.stories !== 1) return false;
   if (filters.stories === 2 && !(home.stories && home.stories >= 2)) return false;
@@ -110,12 +141,12 @@ export function homePasses(home: FilterableHome, filters: BrowseFilters, communi
   return true;
 }
 
-/** The landing card's homes, compact: [price, beds, baths, sqft, garage, kind (0 move-in ready, 1 to be built), stories, previous price]. */
-export type LandingHomeFacts = [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null];
+/** The landing card's homes, compact: [price, beds, baths, sqft, garage, kind (0 move-in ready, 1 to be built), stories, previous price, move-in text]. */
+export type LandingHomeFacts = [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null, (string | null)?];
 
 export function landingHome(facts: LandingHomeFacts): FilterableHome {
-  const [price, beds, baths, sqft, garage, kind, stories, previousPrice] = facts;
-  return { price, beds, baths, sqft, garage, kind: kind === 1 ? "to_be_built" : "quick_move_in", stories, previousPrice };
+  const [price, beds, baths, sqft, garage, kind, stories, previousPrice, moveInDate] = facts;
+  return { price, beds, baths, sqft, garage, kind: kind === 1 ? "to_be_built" : "quick_move_in", stories, previousPrice, moveInDate: moveInDate ?? null };
 }
 
 export type LandingBrowseCommunity = {
@@ -142,7 +173,7 @@ export function storiesKnown(items: ReadonlyArray<{ homeFacts?: LandingHomeFacts
   return items.some((item) => item.homeFacts?.some((facts) => facts[6] !== null) || item.homes?.some((home) => typeof home.stories === "number"));
 }
 
-const LANDING_HOME_FILTERS = (filters: BrowseFilters) => filters.minPrice !== null || filters.maxPrice !== null || filters.minBeds !== null || filters.minBaths !== null || filters.minSqft !== null || filters.minGarage !== null || filters.stories !== null || filters.moveInReady || filters.toBeBuilt || filters.redHot;
+const LANDING_HOME_FILTERS = (filters: BrowseFilters) => filters.minPrice !== null || filters.maxPrice !== null || filters.minBeds !== null || filters.minBaths !== null || filters.minSqft !== null || filters.maxSqft !== null || filters.availableBy !== null || filters.minGarage !== null || filters.stories !== null || filters.moveInReady || filters.toBeBuilt || filters.redHot;
 
 /** A landing card matches when it is in the area, has the offer and lot asked for, and has a home that passes the home filters. */
 export function landingMatches(community: LandingBrowseCommunity, filters: BrowseFilters): boolean {

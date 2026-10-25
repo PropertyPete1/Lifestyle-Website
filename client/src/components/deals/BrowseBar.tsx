@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { SlidersHorizontal, X, Flame, ChevronDown } from "lucide-react";
-import { BATH_MINIMUMS, BED_MINIMUMS, BROWSE_PAGE, EMPTY_FILTERS, GARAGE_MINIMUMS, PRICE_CAPS, PRICE_FLOORS, SQFT_MINIMUMS, activeFilterCount, areaChoices, moreFilterCount, priceCapLabel, type BrowseFilters } from "@/lib/dealsBrowse";
+import { AVAILABLE_BY, BATH_MINIMUMS, BED_MINIMUMS, BROWSE_PAGE, EMPTY_FILTERS, GARAGE_MINIMUMS, PRICE_CAPS, PRICE_FLOORS, SQFT_MAXIMUMS, SQFT_MINIMUMS, activeFilterCount, areaChoices, moreFilterCount, priceCapLabel, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export const BROWSE_COPY = {
   heading: "Find your community",
@@ -13,7 +13,11 @@ export const BROWSE_COPY = {
   beds: "Bedrooms",
   anyBeds: "Any",
   baths: "Bathrooms",
-  sqft: "Square feet",
+  sqft: "Min sq ft",
+  maxSqft: "Max sq ft",
+  availableBy: "Move in by",
+  readyNow: "Ready now",
+  withinMonths: (months: number) => `Within ${months} month${months === 1 ? "" : "s"}`,
   garage: "Garage",
   stories: "Stories",
   anyStories: "Any",
@@ -113,9 +117,11 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
     </div>
     </div>
     {moreOpen && <div data-deals-more-filters="true" className="mt-4 min-w-0 border-t border-border pt-4">
-      <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <NumberSelect label={BROWSE_COPY.baths} value={filters.minBaths} options={BATH_MINIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `${value}+ baths`} onChange={(minBaths) => set({ minBaths })} />
-        <NumberSelect label={BROWSE_COPY.sqft} value={filters.minSqft} options={SQFT_MINIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `${value.toLocaleString("en-US")}+ sq ft`} onChange={(minSqft) => set({ minSqft })} />
+        <NumberSelect label={BROWSE_COPY.sqft} value={filters.minSqft} options={SQFT_MINIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `${value.toLocaleString("en-US")}+ sq ft`} onChange={(minSqft) => set({ minSqft, ...(minSqft !== null && filters.maxSqft !== null && filters.maxSqft <= minSqft ? { maxSqft: null } : {}) })} />
+        <NumberSelect label={BROWSE_COPY.maxSqft} value={filters.maxSqft} options={SQFT_MAXIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `Up to ${value.toLocaleString("en-US")}`} onChange={(maxSqft) => set({ maxSqft, ...(maxSqft !== null && filters.minSqft !== null && filters.minSqft >= maxSqft ? { minSqft: null } : {}) })} />
+        <NumberSelect label={BROWSE_COPY.availableBy} value={filters.availableBy} options={AVAILABLE_BY} any={BROWSE_COPY.anyBeds} format={(value) => value === 0 ? BROWSE_COPY.readyNow : BROWSE_COPY.withinMonths(value)} onChange={(availableBy) => set({ availableBy })} />
         <NumberSelect label={BROWSE_COPY.garage} value={filters.minGarage} options={GARAGE_MINIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `${value}+ car`} onChange={(minGarage) => set({ minGarage })} />
         {(showStories || filters.stories !== null) && <div className={LABEL} role="group" aria-label={BROWSE_COPY.stories}>{BROWSE_COPY.stories}
           <div className="mt-1 grid min-h-11 grid-cols-3 overflow-hidden rounded-lg border border-input text-xs normal-case tracking-normal sm:text-sm">

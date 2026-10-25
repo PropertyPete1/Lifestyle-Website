@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
-import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingMatches, moreFilterCount, priceCapLabel, storiesKnown, builderChoices, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
+import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingMatches, moreFilterCount, monthsUntilMoveIn, priceCapLabel, storiesKnown, builderChoices, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
 import type { GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
 import { browseOrder } from "./dealsService";
 
@@ -66,6 +66,29 @@ describe("New Home Buddy style filters (Peter, Oct 25: price range, beds, baths,
     expect(storiesKnown([card([plan]), card([oneStory])])).toBe(true);
     expect(storiesKnown([{ homes: [{ stories: null }] }])).toBe(false);
     expect(storiesKnown([{ homes: [{ stories: 2 }] }])).toBe(true);
+  });
+
+  it("reads a builder's move-in text as months from now, and filters homes by max size and move-in month", () => {
+    const now = new Date(2026, 9, 25);
+    expect(monthsUntilMoveIn("Available Now", now)).toBe(0);
+    expect(monthsUntilMoveIn("Move-In Ready", now)).toBe(0);
+    expect(monthsUntilMoveIn("Nov 2026", now)).toBe(1);
+    expect(monthsUntilMoveIn("Est. Completion - Feb '27", now)).toBe(4);
+    expect(monthsUntilMoveIn("December, 2026", now)).toBe(2);
+    expect(monthsUntilMoveIn("4 - 6 month build", now)).toBe(6);
+    expect(monthsUntilMoveIn("Call for details", now)).toBeNull();
+    expect(monthsUntilMoveIn(null, now)).toBeNull();
+    const ready = { kind: "quick_move_in", price: 300_000, sqft: 1_800 };
+    const later = { kind: "quick_move_in", price: 300_000, sqft: 2_600, moveInDate: `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][(new Date().getMonth() + 5) % 12]} ${new Date().getFullYear() + (new Date().getMonth() + 5 >= 12 ? 1 : 0)}` };
+    const plan = { kind: "to_be_built", price: 280_000, sqft: 2_000 };
+    expect(homePasses(ready, { ...EMPTY_FILTERS, maxSqft: 2_000 })).toBe(true);
+    expect(homePasses(later, { ...EMPTY_FILTERS, maxSqft: 2_000 })).toBe(false);
+    expect(homePasses(ready, { ...EMPTY_FILTERS, availableBy: 0 })).toBe(true);
+    expect(homePasses(later, { ...EMPTY_FILTERS, availableBy: 3 })).toBe(false);
+    expect(homePasses(later, { ...EMPTY_FILTERS, availableBy: 6 })).toBe(true);
+    expect(homePasses(plan, { ...EMPTY_FILTERS, availableBy: 12 })).toBe(false);
+    expect(activeFilterCount({ ...EMPTY_FILTERS, availableBy: 0 })).toBe(1);
+    expect(moreFilterCount({ ...EMPTY_FILTERS, availableBy: 0, maxSqft: 2_000 })).toBe(2);
   });
 
   it("counts the filters, and the ones under More filters on that button", () => {

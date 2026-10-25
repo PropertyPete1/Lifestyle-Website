@@ -473,6 +473,15 @@ describe("round 3: what a returning client, the nightly screening and team chang
     expect(await getActiveBlock({ deviceHash: device, ignoreHasAgent: true })).toMatchObject({ reason: "Admin block" });
   });
 
+  it("lets the block that decides the screen win when one browser has several: agent, then turned off, then the rest", async () => {
+    const device = "e".repeat(64);
+    db.seed(dealBlocklist, { deviceHash: device, reason: HAS_AGENT_BLOCK_REASON, expiresAt: new Date(Date.now() + HOUR) });
+    db.seed(dealBlocklist, { deviceHash: device, reason: "Turned off by admin" });
+    expect(await getActiveBlock({ deviceHash: device })).toMatchObject({ reason: "Turned off by admin" });
+    db.seed(dealBlocklist, { deviceHash: device, reason: "Said they are a realtor" });
+    expect(await getActiveBlock({ deviceHash: device })).toMatchObject({ reason: "Said they are a realtor" });
+  });
+
   it("asks a buyer with a live list to connect only to a new link that is theirs", async () => {
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
     const open = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });

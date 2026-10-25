@@ -508,7 +508,11 @@ export async function getActiveBlock(input: { phone?: string; email?: string; de
   const now = new Date();
   // An agent's client: the screening reasons are excluded in SQL, so no number of them can hide an admin block.
   const screening = input.ignoreHasAgent ? [notInArray(dealBlocklist.reason, SCREENING_REASON_VALUES)] : [];
-  return (await db.select().from(dealBlocklist).where(and(or(...matches), or(isNull(dealBlocklist.expiresAt), gt(dealBlocklist.expiresAt, now)), ...screening)).limit(1))[0];
+  const rows = await db.select().from(dealBlocklist).where(and(or(...matches), or(isNull(dealBlocklist.expiresAt), gt(dealBlocklist.expiresAt, now)), ...screening)).limit(50);
+  // When several blocks match, the one that decides what the visitor sees wins every time: an agent goes to
+  // recruiting, then a buyer an admin turned off sees "access is paused", then any other block.
+  const rank = (reason: string | null | undefined) => isRealtorBlockReason(reason) ? 0 : isAdminTurnOffReason(reason) ? 1 : 2;
+  return rows.sort((a, b) => rank(a.reason) - rank(b.reason) || a.id - b.id)[0];
 }
 
 /** This browser is kept off Builder Deals as an agent (its own answer or the screening): the page sends it to recruiting. */
@@ -809,7 +813,7 @@ export async function publicDealsCatalog(src?: string | null) {
   // Two reads for the whole page, however many communities there are.
   const ids = communities.map((community) => community.id);
   const [availableHomes, incentives, heldLine] = await Promise.all([
-    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price, previousPrice: dealHomes.previousPrice, beds: dealHomes.beds, baths: dealHomes.baths, sqft: dealHomes.sqft, garage: dealHomes.garage }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
+    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price, previousPrice: dealHomes.previousPrice, beds: dealHomes.beds, baths: dealHomes.baths, sqft: dealHomes.sqft, garage: dealHomes.garage, stories: dealHomes.stories }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
     liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
     heldLineCommunities(db, ids, now, settings.incentiveLapseDays),
   ]);
@@ -929,6 +933,7 @@ async function readPublicCommunityHomes(communityId: number, key: string): Promi
       baths: home.baths,
       sqft: home.sqft,
       garage: home.garage,
+      stories: home.stories,
       price: home.price,
       previousPrice: home.previousPrice,
       moveInDate: home.moveInDate,
@@ -1057,6 +1062,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
         baths: home.baths,
         sqft: home.sqft,
         garage: home.garage,
+        stories: home.stories,
         price: home.price,
         previousPrice: home.previousPrice,
         moveInDate: home.moveInDate,

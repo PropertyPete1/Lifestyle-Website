@@ -131,7 +131,7 @@ describe("the landing catalog", () => {
   it("gives each community an opaque key, its exact starting price, its cheapest home's first shown photo as the cover, and a coarse map marker", async () => {
     const lakes = community({});
     const cheap = home(lakes, 300_000);
-    home(lakes, 350_000);
+    home(lakes, 350_000, { garage: "2", stories: 2 });
     photo(cheap, 0, { automaticHidden: true });
     const cover = photo(cheap, 1);
     photo(cheap, 2);
@@ -147,7 +147,7 @@ describe("the landing catalog", () => {
     expect(withCover.pin).not.toBeNull();
     expect(withCover.pin).not.toEqual(regionPin({ lat: 29.355424, lng: -98.319795 }));
     // The filters read each shown home's public figures: [price, beds, baths, sqft, garage, kind, stories, previous price].
-    expect((withCover as unknown as { homeFacts: unknown[] }).homeFacts).toEqual([[300_000, 4, 3, 2_100, null, 0, null, null], [350_000, 4, 3, 2_100, null, 0, null, null]]);
+    expect((withCover as unknown as { homeFacts: unknown[] }).homeFacts).toEqual([[300_000, 4, 3, 2_100, null, 0, null, null], [350_000, 4, 3, 2_100, 2, 0, 2, null]]);
     const without = entries.find((entry) => entry.label === "North San Antonio | Hills")!;
     expect(without.cover).toBeNull();
     expect(without.pin).toBeNull();

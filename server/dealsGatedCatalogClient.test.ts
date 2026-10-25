@@ -79,7 +79,8 @@ describe("gated catalog stays inside a 375 px phone viewport (A19)", () => {
     const cards = openingTags(html, /^<article\b/);
     expect(cards.length).toBe(3);
     for (const tag of cards) expect(tag).toMatch(/class="[^"]*\bmin-w-0\b/);
-    const galleryImages = openingTags(html, /^<img\b[^>]*src="\/deals\/mine\/img\//);
+    // The community photo standing in for a missing video (Oct 24) is not a gallery image.
+    const galleryImages = openingTags(html, /^<img\b[^>]*src="\/deals\/mine\/img\//).filter((tag) => !tag.includes('alt="Photo of a home in'));
     expect(galleryImages.length).toBe(4);
     for (const tag of galleryImages) {
       expect(tag).toContain('loading="lazy"');

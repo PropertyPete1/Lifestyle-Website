@@ -106,7 +106,7 @@ function PosterCard({ poster, label }: { poster: string; label: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) return <div className="deals-chrome mx-auto flex aspect-[4/5] w-full max-w-[540px] flex-col items-center justify-center bg-[linear-gradient(150deg,oklch(0.2_0.01_285),oklch(0.09_0.005_285))] px-6 text-center"><span className="eyebrow text-gold">Video coming soon</span><span className="mt-3 max-w-[16rem] font-serif text-2xl leading-tight">{label}</span></div>;
   return <div data-deals-poster="true" className="relative mx-auto aspect-[4/5] w-full max-w-[540px] overflow-hidden bg-secondary">
-    <RetryImage src={poster} alt={`Photo of a home in ${label}`} decoding="async" draggable={false} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className="absolute inset-0 h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
+    <RetryImage src={poster} alt={`Photo of a home in ${label}`} loading="lazy" decoding="async" draggable={false} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className="absolute inset-0 h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
     <span className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/55 to-transparent" />
     <span className="pointer-events-none absolute bottom-3 left-3 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium uppercase tracking-widest text-white">Video tour coming soon</span>
   </div>;

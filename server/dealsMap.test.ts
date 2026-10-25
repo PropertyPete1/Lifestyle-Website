@@ -16,7 +16,7 @@ const env = vi.hoisted(() => ({ ENV: { forgeApiUrl: "https://forge.example", for
 vi.mock("./_core/env", () => env);
 vi.mock("./dealsService", async (importOriginal) => ({ ...(await importOriginal<typeof import("./dealsService")>()), isLiveDealSession: (...args: unknown[]) => mocks.isLiveDealSession(...args) }));
 
-import { PUBLIC_MAP_REQUESTS_PER_WINDOW, areaMapRadius, communityAreaMap, publicMapCenter, publicMapHandle, zoomForRadius, dealsMapImageHandler, driveTimeChips, mapCommunityIdFromPath, refreshCommunityGeography, resetAreaMapCache, roundToFiveMinutes, zipFromAddress } from "./dealsMap";
+import { PUBLIC_MAP_REQUESTS_PER_WINDOW, areaMapRadius, communityAreaMap, publicMapCenter, publicMapHandle, zoomForRadius, dealsMapImageHandler, driveTimeChips, mapCommunityIdFromPath, refreshCommunityGeography, resetAreaMapCache, roundToFiveMinutes, zipForCommunityName, zipFromAddress } from "./dealsMap";
 import { gatedDealsCatalog } from "./dealsService";
 
 /** Synthetic points: a ZIP centroid and a home about 1.6 miles away from it. */
@@ -285,5 +285,17 @@ describe("area map image route", () => {
     const v6 = responseRecorder();
     await dealsMapImageHandler({ ...request, ip: "2001:db8:abcd:1234:ffff::1" } as unknown as Request, v6.response, "public");
     expect(v6.raw.status).toHaveBeenCalledWith(429);
+  });
+});
+
+describe("a ZIP from the community's name when the builder gives no street (Oct 24: 25 Coventry communities without a pin)", () => {
+  it("looks up the name and city and keeps only the ZIP; a street address or no city is not asked", async () => {
+    mocks.makeRequest.mockResolvedValueOnce({ status: "OK", results: [{ types: ["neighborhood"], geometry: { location: { lat: 29.6, lng: -98.27 } }, address_components: [{ short_name: "78154", types: ["postal_code"] }] }] });
+    expect(await zipForCommunityName("Fixture Ridge", "Schertz, TX")).toBe("78154");
+    expect(mocks.makeRequest).toHaveBeenLastCalledWith("/maps/api/geocode/json", { address: "Fixture Ridge, Schertz, TX", components: "country:US|administrative_area:TX" });
+    const calls = mocks.makeRequest.mock.calls.length;
+    expect(await zipForCommunityName("Fixture Ridge", "")).toBeNull();
+    expect(await zipForCommunityName("Fixture Ridge", "8106 Fixture Street, San Antonio, TX")).toBeNull();
+    expect(mocks.makeRequest.mock.calls.length).toBe(calls);
   });
 });

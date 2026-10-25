@@ -81,6 +81,18 @@ export async function zipForAddress(address: string): Promise<string | null> {
   return postal && /^\d{5}$/.test(postal) ? postal : null;
 }
 
+/**
+ * A community whose builder gives only "San Antonio, TX" (Coventry, 25 communities without a pin on Oct 24): the
+ * subdivision's name and city are looked up instead, and only the ZIP code of the answer is kept.
+ */
+export async function zipForCommunityName(name: string, address: string): Promise<string | null> {
+  const city = address.split(";")[0]!.split(",").map((part) => part.trim()).filter(Boolean)[0];
+  if (!name.trim() || !city || /\d/.test(city)) return null;
+  const result = await makeRequest<GeocodingResult>("/maps/api/geocode/json", { address: `${name.trim()}, ${city}, TX`, components: "country:US|administrative_area:TX" });
+  const postal = result.results?.[0]?.address_components?.find((part) => part.types?.includes("postal_code"))?.short_name;
+  return postal && /^\d{5}$/.test(postal) ? postal : null;
+}
+
 function finiteCoordinate(value: unknown, limit: number): number | null {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number.parseFloat(value) : NaN;
   return Number.isFinite(parsed) && Math.abs(parsed) <= limit ? parsed : null;
@@ -137,7 +149,7 @@ export async function refreshCommunityGeography(communityId: number): Promise<{ 
   const community = (await db.select().from(dealCommunities).where(eq(dealCommunities.id, communityId)).limit(1))[0];
   if (!community) return { ok: false, reason: "not_found" };
   try {
-    const zip = zipFromAddress(community.privateAddress) ?? await zipForAddress(community.privateAddress);
+    const zip = zipFromAddress(community.privateAddress) ?? await zipForAddress(community.privateAddress) ?? await zipForCommunityName(community.privateName, community.privateAddress);
     if (!zip) return { ok: false, reason: "no_zip_in_private_address" };
     const centroid = await geocodeZipCentroid(zip);
     if (!centroid) return { ok: false, reason: "zip_not_geocoded" };

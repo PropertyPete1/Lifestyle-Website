@@ -16,7 +16,7 @@ const env = vi.hoisted(() => ({ ENV: { forgeApiUrl: "https://forge.example", for
 vi.mock("./_core/env", () => env);
 vi.mock("./dealsService", async (importOriginal) => ({ ...(await importOriginal<typeof import("./dealsService")>()), isLiveDealSession: (...args: unknown[]) => mocks.isLiveDealSession(...args) }));
 
-import { PUBLIC_MAP_REQUESTS_PER_WINDOW, areaMapRadius, communityAreaMap, publicMapCenter, publicMapHandle, zoomForRadius, dealsMapImageHandler, driveTimeChips, mapCommunityIdFromPath, refreshCommunityGeography, resetAreaMapCache, roundToFiveMinutes, zipForCommunityName, zipFromAddress } from "./dealsMap";
+import { PUBLIC_MAP_REQUESTS_PER_WINDOW, areaMapRadius, communityAreaMap, publicMapCenter, publicMapHandle, zoomForRadius, dealsMapImageHandler, driveTimeChips, mapCommunityIdFromPath, refreshCommunityGeography, resetAreaMapCache, roundToFiveMinutes, locateByCommunityName, zipFromAddress } from "./dealsMap";
 import { gatedDealsCatalog } from "./dealsService";
 
 /** Synthetic points: a ZIP centroid and a home about 1.6 miles away from it. */
@@ -288,14 +288,17 @@ describe("area map image route", () => {
   });
 });
 
-describe("a ZIP from the community's name when the builder gives no street (Oct 24: 25 Coventry communities without a pin)", () => {
-  it("looks up the name and city and keeps only the ZIP; a street address or no city is not asked", async () => {
-    mocks.makeRequest.mockResolvedValueOnce({ status: "OK", results: [{ types: ["neighborhood"], geometry: { location: { lat: 29.6, lng: -98.27 } }, address_components: [{ short_name: "78154", types: ["postal_code"] }] }] });
-    expect(await zipForCommunityName("Fixture Ridge", "Schertz, TX")).toBe("78154");
-    expect(mocks.makeRequest).toHaveBeenLastCalledWith("/maps/api/geocode/json", { address: "Fixture Ridge, Schertz, TX", components: "country:US|administrative_area:TX" });
-    const calls = mocks.makeRequest.mock.calls.length;
-    expect(await zipForCommunityName("Fixture Ridge", "")).toBeNull();
-    expect(await zipForCommunityName("Fixture Ridge", "8106 Fixture Street, San Antonio, TX")).toBeNull();
-    expect(mocks.makeRequest.mock.calls.length).toBe(calls);
+describe("a ZIP from the community's name when the builder gives no street (Oct 24: Coventry and KB communities without a pin)", () => {
+  const geocodeBy = (answers: Record<string, unknown>) => mocks.makeRequest.mockImplementation(async (_endpoint: string, params: Record<string, string>) => ({ status: "OK", results: answers[params.address] ? [answers[params.address]] : [] }));
+  it("keeps the ZIP of a name lookup near the city, falls back to the city's centre when it lands far away, and skips street addresses", async () => {
+    const schertz = { geometry: { location: { lat: 29.552, lng: -98.269 } }, address_components: [] };
+    geocodeBy({ "Fixture Ridge, Schertz, TX": { geometry: { location: { lat: 29.58, lng: -98.28 } }, address_components: [{ short_name: "78154", types: ["postal_code"] }] }, "Schertz, TX": schertz });
+    expect(await locateByCommunityName("Fixture Ridge", "Schertz, TX")).toEqual({ zip: "78154" });
+    geocodeBy({ "Fixture Parks, Schertz, TX": { geometry: { location: { lat: 29.87, lng: -98.26 } }, address_components: [{ short_name: "78133", types: ["postal_code"] }] }, "Schertz, TX": schertz });
+    expect(await locateByCommunityName("Fixture Parks", "Schertz, TX")).toEqual({ center: { lat: 29.552, lng: -98.269 } });
+    mocks.makeRequest.mockClear();
+    expect(await locateByCommunityName("Fixture Ridge", "")).toBeNull();
+    expect(await locateByCommunityName("Fixture Ridge", "8106 Fixture Street, San Antonio, TX")).toBeNull();
+    expect(mocks.makeRequest).not.toHaveBeenCalled();
   });
 });

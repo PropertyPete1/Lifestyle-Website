@@ -693,7 +693,8 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
   // Discovered communities wait quietly (no hold, no email) until their builder has a reader.
   if (community.awaitingFirstSync && !hasBuilderReader(community.builder)) return { ...base, ok: false, skipped: "no_builder_reader" };
   await db.update(dealCommunities).set({ lastAttemptAt: now }).where(eq(dealCommunities.id, community.id));
-  if (!community.zipCentroidLat || !community.zipCentroidLng) await refreshCommunityGeography(community.id).catch(() => null);
+  // A community without a street address was placed by its name: that lookup is checked again on every run.
+  if (!community.zipCentroidLat || !community.zipCentroidLng || !/\d/.test(community.privateAddress.split(";")[0] ?? "")) await refreshCommunityGeography(community.id).catch(() => null);
   // A generated area label catches up with the centroid and the town list (Castroville homes were "Greater San Antonio").
   await import("./dealsOnboarding").then(({ refreshLiveAreaLabel }) => refreshLiveAreaLabel(community.id)).catch(() => null);
   const sourceConfig = communitySourceConfig(community);

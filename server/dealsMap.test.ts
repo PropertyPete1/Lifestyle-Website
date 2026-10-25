@@ -16,7 +16,7 @@ const env = vi.hoisted(() => ({ ENV: { forgeApiUrl: "https://forge.example", for
 vi.mock("./_core/env", () => env);
 vi.mock("./dealsService", async (importOriginal) => ({ ...(await importOriginal<typeof import("./dealsService")>()), isLiveDealSession: (...args: unknown[]) => mocks.isLiveDealSession(...args) }));
 
-import { PUBLIC_MAP_REQUESTS_PER_WINDOW, areaMapRadius, communityAreaMap, publicMapCenter, publicMapHandle, zoomForRadius, dealsMapImageHandler, driveTimeChips, mapCommunityIdFromPath, refreshCommunityGeography, resetAreaMapCache, roundToFiveMinutes, locateByCommunityName, zipFromAddress } from "./dealsMap";
+import { PUBLIC_MAP_REQUESTS_PER_WINDOW, areaMapRadius, communityAreaMap, publicMapCenter, publicMapHandle, zoomForRadius, dealsMapImageHandler, driveTimeChips, mapCommunityIdFromPath, refreshCommunityGeography, resetAreaMapCache, roundToFiveMinutes, placeByCommunityName, zipFromAddress } from "./dealsMap";
 import { gatedDealsCatalog } from "./dealsService";
 
 /** Synthetic points: a ZIP centroid and a home about 1.6 miles away from it. */
@@ -288,17 +288,25 @@ describe("area map image route", () => {
   });
 });
 
-describe("a ZIP from the community's name when the builder gives no street (Oct 24: Coventry and KB communities without a pin)", () => {
-  const geocodeBy = (answers: Record<string, unknown>) => mocks.makeRequest.mockImplementation(async (_endpoint: string, params: Record<string, string>) => ({ status: "OK", results: answers[params.address] ? [answers[params.address]] : [] }));
-  it("keeps the ZIP of a name lookup near the city, falls back to the city's centre when it lands far away, and skips street addresses", async () => {
+describe("placing a community by its name when the builder gives no street (Oct 24: Coventry and KB communities without a pin)", () => {
+  const geocodeBy = (answers: Record<string, unknown>) => mocks.makeRequest.mockImplementation(async (_endpoint: string, params: Record<string, string>) => {
+    const key = params.address ?? params.components;
+    return { status: "OK", results: answers[key] ? [answers[key]] : [] };
+  });
+  const zipAnswer = (zip: string, lat: number, lng: number) => ({ types: ["postal_code"], geometry: { location: { lat, lng } }, address_components: [{ short_name: zip, types: ["postal_code"] }] });
+  it("keeps the ZIP centroid of a name lookup near the city; a far ZIP gives the town's centre; San Antonio is never downtown", async () => {
     const schertz = { geometry: { location: { lat: 29.552, lng: -98.269 } }, address_components: [] };
-    geocodeBy({ "Fixture Ridge, Schertz, TX": { geometry: { location: { lat: 29.58, lng: -98.28 } }, address_components: [{ short_name: "78154", types: ["postal_code"] }] }, "Schertz, TX": schertz });
-    expect(await locateByCommunityName("Fixture Ridge", "Schertz, TX")).toEqual({ zip: "78154" });
-    geocodeBy({ "Fixture Parks, Schertz, TX": { geometry: { location: { lat: 29.87, lng: -98.26 } }, address_components: [{ short_name: "78133", types: ["postal_code"] }] }, "Schertz, TX": schertz });
-    expect(await locateByCommunityName("Fixture Parks", "Schertz, TX")).toEqual({ center: { lat: 29.552, lng: -98.269 } });
+    geocodeBy({ "Fixture Ridge, Schertz, TX": zipAnswer("78154", 29.58, -98.28), "Schertz, TX": schertz, "postal_code:78154|country:US": zipAnswer("78154", 29.57, -98.27) });
+    expect(await placeByCommunityName("Fixture Ridge", "Schertz, TX")).toEqual({ lat: 29.57, lng: -98.27 });
+    // The answer is in Schertz but its ZIP is centred 17 miles away: Schertz itself.
+    geocodeBy({ "Fixture Parks, Schertz, TX": zipAnswer("78132", 29.6, -98.26), "Schertz, TX": schertz, "postal_code:78132|country:US": zipAnswer("78132", 29.79, -98.2) });
+    expect(await placeByCommunityName("Fixture Parks", "Schertz, TX")).toEqual({ lat: 29.552, lng: -98.269 });
+    // San Antonio: a far answer leaves the community unplaced rather than downtown.
+    geocodeBy({ "Fixture Ranch, San Antonio, TX": zipAnswer("78006", 29.9, -98.9), "San Antonio, TX": { geometry: { location: { lat: 29.4252, lng: -98.4946 } }, address_components: [] } });
+    expect(await placeByCommunityName("Fixture Ranch", "San Antonio, TX")).toBeNull();
     mocks.makeRequest.mockClear();
-    expect(await locateByCommunityName("Fixture Ridge", "")).toBeNull();
-    expect(await locateByCommunityName("Fixture Ridge", "8106 Fixture Street, San Antonio, TX")).toBeNull();
+    expect(await placeByCommunityName("Fixture Ridge", "")).toBeNull();
+    expect(await placeByCommunityName("Fixture Ridge", "8106 Fixture Street, San Antonio, TX")).toBeNull();
     expect(mocks.makeRequest).not.toHaveBeenCalled();
   });
 });

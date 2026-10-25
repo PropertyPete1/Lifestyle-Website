@@ -83,29 +83,35 @@ export async function zipForAddress(address: string): Promise<string | null> {
 }
 
 /**
- * A community whose builder gives only "San Antonio, TX" (Coventry, KB: no pin on Oct 24): the subdivision's name and
- * city are looked up and only the ZIP code of the answer is kept. The answer must sit near the city the builder names
- * ("The Parklands, Schertz" once came back near Canyon Lake); otherwise the city's own centre stands in (coarser still).
+ * A community whose builder gives only "San Antonio, TX" (Coventry, KB: no pin on Oct 24) is placed by its name and
+ * city: the ZIP code of that answer gives the centroid, and only the ZIP centroid is kept. The answer and its ZIP
+ * centroid must sit near the city the builder names ("The Parklands, Schertz" came back in a ZIP centred near Canyon
+ * Lake); otherwise a smaller town's own centre stands in. San Antonio is never replaced by downtown (that would read
+ * "Central San Antonio" for a community on the edge of town): it stays unplaced instead.
  */
-export async function locateByCommunityName(name: string, address: string): Promise<{ zip: string } | { center: Centroid } | null> {
+export async function placeByCommunityName(name: string, address: string): Promise<Centroid | null> {
   const city = address.split(";")[0]!.split(",").map((part) => part.trim()).filter(Boolean)[0];
   if (!name.trim() || !city || /\d/.test(city)) return null;
+  const bigCity = city.toLowerCase() === "san antonio";
+  const limit = bigCity ? 28 : 12;
   const [found, town] = await Promise.all([
     makeRequest<GeocodingResult>("/maps/api/geocode/json", { address: `${name.trim()}, ${city}, TX`, components: "country:US|administrative_area:TX" }),
     makeRequest<GeocodingResult>("/maps/api/geocode/json", { address: `${city}, TX`, components: "country:US|administrative_area:TX" }),
   ]);
   const townRaw = town.results?.[0]?.geometry?.location;
-  const townAt = townRaw ? { lat: finiteCoordinate(townRaw.lat, 90), lng: finiteCoordinate(townRaw.lng, 180) } : null;
-  const center = townAt && townAt.lat !== null && townAt.lng !== null ? { lat: townAt.lat, lng: townAt.lng } : null;
+  const townLat = townRaw ? finiteCoordinate(townRaw.lat, 90) : null;
+  const townLng = townRaw ? finiteCoordinate(townRaw.lng, 180) : null;
+  const center = townLat !== null && townLng !== null ? { lat: townLat, lng: townLng } : null;
   const hit = found.results?.[0];
   const postal = hit?.address_components?.find((part) => part.types?.includes("postal_code"))?.short_name;
   const at = hit?.geometry?.location;
-  const near = !center || !at || milesBetween({ lat: Number(at.lat), lng: Number(at.lng) }, center) <= NAME_LOOKUP_MAX_MILES;
-  if (postal && /^\d{5}$/.test(postal) && near) return { zip: postal };
-  return center ? { center } : null;
+  const near = (point: { lat: number; lng: number } | null | undefined) => !center || !point || milesBetween({ lat: Number(point.lat), lng: Number(point.lng) }, center) <= limit;
+  if (postal && /^\d{5}$/.test(postal) && near(at)) {
+    const centroid = await geocodeZipCentroid(postal);
+    if (centroid && near(centroid)) return centroid;
+  }
+  return bigCity ? null : center;
 }
-/** How far a name lookup may land from the city the builder lists (San Antonio itself spans about 20 miles). */
-const NAME_LOOKUP_MAX_MILES = 15;
 
 function finiteCoordinate(value: unknown, limit: number): number | null {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number.parseFloat(value) : NaN;
@@ -164,9 +170,13 @@ export async function refreshCommunityGeography(communityId: number): Promise<{ 
   if (!community) return { ok: false, reason: "not_found" };
   try {
     const zip = zipFromAddress(community.privateAddress) ?? await zipForAddress(community.privateAddress);
-    const byName = zip ? null : await locateByCommunityName(community.privateName, community.privateAddress);
-    if (!zip && !byName) return { ok: false, reason: "no_zip_in_private_address" };
-    const centroid = zip ? await geocodeZipCentroid(zip) : byName && "zip" in byName ? await geocodeZipCentroid(byName.zip) : byName?.center ?? null;
+    const byName = zip ? null : await placeByCommunityName(community.privateName, community.privateAddress);
+    if (!zip && !byName) {
+      // A community placed by name that can no longer be placed loses its pin rather than keep a wrong one.
+      if (!/\d/.test(community.privateAddress.split(";")[0] ?? "") && community.zipCentroidLat) await db.update(dealCommunities).set({ zipCentroidLat: null, zipCentroidLng: null }).where(eq(dealCommunities.id, communityId));
+      return { ok: false, reason: "no_zip_in_private_address" };
+    }
+    const centroid = zip ? await geocodeZipCentroid(zip) : byName;
     if (!centroid) return { ok: false, reason: "zip_not_geocoded" };
     let chips: string[] = [];
     try {

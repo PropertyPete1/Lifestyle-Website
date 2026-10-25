@@ -27,9 +27,11 @@ export type BrowseFilters = {
   redHot: boolean;
   /** Private list only: just the homes this buyer has saved. */
   savedOnly: boolean;
+  /** Team only (Peter and his agents): one builder, or "" for all. Buyers never see builder names. */
+  builder: string;
 };
 
-export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, savedOnly: false };
+export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, savedOnly: false, builder: "" };
 export const PRICE_CAPS = [200_000, 300_000, 400_000, 500_000, 600_000, 750_000, 1_000_000] as const;
 export const PRICE_FLOORS = [200_000, 250_000, 300_000, 350_000, 400_000, 500_000, 600_000, 750_000] as const;
 export const BED_MINIMUMS = [2, 3, 4, 5] as const;
@@ -47,7 +49,7 @@ export function moreFilterCount(filters: BrowseFilters): number {
 }
 
 export function activeFilterCount(filters: BrowseFilters): number {
-  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.minGarage, filters.stories, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.savedOnly].filter(Boolean).length;
+  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.minGarage, filters.stories, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.savedOnly, filters.builder].filter(Boolean).length;
 }
 
 /** Areas present in the list, most communities first, for the area picker. */
@@ -128,6 +130,13 @@ export type LandingBrowseCommunity = {
   homeFacts?: LandingHomeFacts[] | null;
 };
 
+/** The builders on a team list, most communities first (the builder filter); empty when the list carries no names. */
+export function builderChoices(items: ReadonlyArray<{ details?: { builderName?: string | null } | null }>): Array<{ builder: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const item of items) { const name = item.details?.builderName?.trim(); if (name) counts.set(name, (counts.get(name) ?? 0) + 1); }
+  return Array.from(counts, ([builder, count]) => ({ builder, count })).sort((a, b) => b.count - a.count || a.builder.localeCompare(b.builder));
+}
+
 /** True when some home on the list has its stories from the builder (the stories filter shows only then). */
 export function storiesKnown(items: ReadonlyArray<{ homeFacts?: LandingHomeFacts[] | null; homes?: ReadonlyArray<{ stories?: number | null }> }>): boolean {
   return items.some((item) => item.homeFacts?.some((facts) => facts[6] !== null) || item.homes?.some((home) => typeof home.stories === "number"));
@@ -161,6 +170,8 @@ export function homeFiltersOn(filters: BrowseFilters, saved?: ReadonlySet<string
 }
 export type GatedBrowseCommunity<Home extends GatedBrowseHome = GatedBrowseHome> = {
   area: string;
+  /** The full view's names (team and agent clients); a buyer's list has none. */
+  details?: { builderName?: string | null } | null;
   label: string;
   lotSizes?: string | null;
   incentive?: { headlineRate?: string | null } | null;
@@ -178,6 +189,7 @@ export function homesMatching<Home extends GatedBrowseHome>(community: GatedBrow
 export function gatedCommunityVisible<Home extends GatedBrowseHome>(community: GatedBrowseCommunity<Home>, filters: BrowseFilters, saved?: ReadonlySet<string>): boolean {
   if (filters.area && community.area !== filters.area) return false;
   if (filters.builderRate && !community.incentive?.headlineRate) return false;
+  if (filters.builder && community.details?.builderName !== filters.builder) return false;
   return !homeFiltersOn(filters, saved) || homesMatching(community, filters, saved).length > 0;
 }
 

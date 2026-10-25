@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
-import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingMatches, moreFilterCount, priceCapLabel, storiesKnown, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
+import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingMatches, moreFilterCount, priceCapLabel, storiesKnown, builderChoices, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
 import type { GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
 import { browseOrder } from "./dealsService";
 
@@ -72,6 +72,25 @@ describe("New Home Buddy style filters (Peter, Oct 25: price range, beds, baths,
     const filters = { ...EMPTY_FILTERS, minPrice: 300_000, stories: 1 as const, minGarage: 3, toBeBuilt: true };
     expect(activeFilterCount(filters)).toBe(4);
     expect(moreFilterCount(filters)).toBe(3);
+  });
+});
+
+describe("the builder filter (Peter, Oct 25: team only, like New Home Buddy for agents)", () => {
+  const named = (index: number, builderName: string | null) => community(index, { details: builderName ? { builderName, communityName: `C${index}`, address: null } as never : null });
+  it("narrows a team list to one builder and lists the builders by how many communities they have", () => {
+    const list = [named(1, "D.R. Horton"), named(2, "Perry Homes"), named(3, "D.R. Horton"), named(4, null)];
+    expect(builderChoices(list)).toEqual([{ builder: "D.R. Horton", count: 2 }, { builder: "Perry Homes", count: 1 }]);
+    expect(list.filter((item) => gatedCommunityVisible(item, { ...EMPTY_FILTERS, builder: "D.R. Horton" })).length).toBe(2);
+    expect(activeFilterCount({ ...EMPTY_FILTERS, builder: "Perry Homes" })).toBe(1);
+  });
+
+  it("shows the builder picker on a team list only, never on a buyer's list", () => {
+    const many = Array.from({ length: 14 }, (_, index) => named(index, index % 2 ? "D.R. Horton" : "Perry Homes"));
+    const team = renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead: { ...lead, teamPreview: true }, communities: many, now: NOW })));
+    const buyer = renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead, communities: many.map((item) => ({ ...item, details: null })), now: NOW })));
+    expect(team).toContain('data-deals-builder-filter="true"');
+    expect(team).toContain("D.R. Horton (7)");
+    expect(buyer).not.toContain("data-deals-builder-filter");
   });
 });
 

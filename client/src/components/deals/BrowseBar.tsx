@@ -20,6 +20,8 @@ export const BROWSE_COPY = {
   oneStory: "1 story",
   twoStory: "2 story+",
   homeType: "Home type",
+  builder: "Builder (team only)",
+  anyBuilder: "All builders",
   more: "More filters",
   done: "Done",
   moveInReady: "Quick move-in",
@@ -54,7 +56,7 @@ function NumberSelect({ label, value, options, any, format, onChange }: { label:
  * baths, size, garage, stories and home type under "More filters". The landing page filters on each community's
  * public home figures; the private list filters the homes themselves.
  */
-export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedCount = 0, showStories = true }: {
+export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedCount = 0, showStories = true, builders = [] }: {
   filters: BrowseFilters;
   onChange: (filters: BrowseFilters) => void;
   areas: ReadonlyArray<{ area: string }>;
@@ -68,6 +70,8 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
   savedCount?: number;
   /** Off until some home on the list has its stories from the builder (a stories filter would match nothing). */
   showStories?: boolean;
+  /** Team lists only (Peter and his agents): the builder picker. Never passed on a buyer's list or the landing page. */
+  builders?: ReadonlyArray<{ builder: string; count: number }>;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const choices = areaChoices(areas);
@@ -91,6 +95,12 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
       <NumberSelect label={BROWSE_COPY.minPrice} value={filters.minPrice} options={PRICE_FLOORS} any={BROWSE_COPY.noMin} format={(value) => `${priceCapLabel(value)}+`} onChange={setMin} />
       <NumberSelect label={BROWSE_COPY.price} value={filters.maxPrice} options={PRICE_CAPS} any={BROWSE_COPY.anyPrice} format={(value) => `Under ${priceCapLabel(value)}`} onChange={setMax} />
       <NumberSelect label={BROWSE_COPY.beds} value={filters.minBeds} options={BED_MINIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `${value}+ beds`} onChange={(minBeds) => set({ minBeds })} />
+      {builders.length > 0 && <label className={`${LABEL} col-span-2 sm:col-span-4 xl:col-span-4`} data-deals-builder-filter="true">{BROWSE_COPY.builder}
+        <select aria-label={BROWSE_COPY.builder} value={filters.builder} onChange={(event) => set({ builder: event.target.value })} className={`mt-1 ${SELECT}`}>
+          <option value="">{BROWSE_COPY.anyBuilder}</option>
+          {builders.map((choice) => <option key={choice.builder} value={choice.builder}>{choice.builder} ({choice.count})</option>)}
+        </select>
+      </label>}
     </div>
     <div className="mt-3 flex min-w-0 flex-wrap gap-2 xl:mt-0">
       {savedCount > 0 && <Toggle name="saved" on={filters.savedOnly} label={`${BROWSE_COPY.saved} (${savedCount})`} onChange={(value) => set({ savedOnly: value })} />}

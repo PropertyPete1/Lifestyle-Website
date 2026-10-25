@@ -46,8 +46,15 @@ export const WEEKLEY_MAX_HOMES = 150;
 export const WEEKLEY_MAX_SERIES = 6;
 export const WEEKLEY_ASSET_HOST = "assetcontentdeliveryapi.davidweekleyhomes.com";
 export const WEEKLEY_MARKET_ID = "markets/3";
-export const weekleyListingUrl = () => `https://${WEEKLEY_HOST}/search/CommunityData?marketId=${WEEKLEY_MARKET_ID}`;
-export const weekleyPromotionsUrl = () => `https://${WEEKLEY_HOST}/promotion/marketpromotionslist?marketId=${WEEKLEY_MARKET_ID}`;
+/** The site's market ids by the market segment of a community path (/new-homes/tx/<market>/…): San Antonio 3, Austin 4 ("AUS", Oct 25, 2026). */
+export const WEEKLEY_MARKETS: Readonly<Record<string, string>> = { "san-antonio": WEEKLEY_MARKET_ID, austin: "markets/4" };
+export const weekleyListingUrl = (marketId: string = WEEKLEY_MARKET_ID) => `https://${WEEKLEY_HOST}/search/CommunityData?marketId=${marketId}`;
+export const weekleyPromotionsUrl = (marketId: string = WEEKLEY_MARKET_ID) => `https://${WEEKLEY_HOST}/promotion/marketpromotionslist?marketId=${marketId}`;
+/** The market a community page belongs to, from its path; San Antonio when the path names no known market. */
+export function weekleyMarketFor(url: string): string {
+  const slug = /^\/new-homes\/tx\/([a-z-]+)\//i.exec(asUrl(url)?.pathname ?? "")?.[1]?.toLowerCase();
+  return (slug && WEEKLEY_MARKETS[slug]) || WEEKLEY_MARKET_ID;
+}
 const PROMO_CACHE_MS = 60 * 60 * 1000;
 
 type Json = Record<string, unknown>;
@@ -63,9 +70,10 @@ const num = (value: unknown): number | null => {
 const minimum = (value: unknown): number | null => num(obj(value)?.Minimum ?? value);
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-let promoCache: { fetchedAt: number; promotions: WeekleyPromotion[] } | null = null;
-let listingCache: { fetchedAt: number; counts: Map<string, number> } | null = null;
-export function resetWeekleyCaches(): void { promoCache = null; listingCache = null; }
+/** Each market's lists, read once an hour. */
+const promoCaches = new Map<string, { fetchedAt: number; promotions: WeekleyPromotion[] }>();
+const listingCaches = new Map<string, { fetchedAt: number; counts: Map<string, number> }>();
+export function resetWeekleyCaches(): void { promoCaches.clear(); listingCaches.clear(); }
 
 /** The page's `window.pageData= {...}` object, read by matching braces outside strings; null when absent or not JSON. */
 export function parseWeekleyPageData(html: string): Json | null {
@@ -417,7 +425,7 @@ export class DavidWeekleyAdapter implements DealAdapter {
       // A series page must show at least the homes its neighborhood listing counts.
       if (entry.expectedHomes !== null && parsed.homes.filter((home) => home.status !== "Model").length < entry.expectedHomes) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
       // The market list counts each community's homes for sale; fewer homes on the page than that is a changed page, not homes sold. With the list unreachable, an empty page is not trusted.
-      const showcase = await showcaseCount(fetcher, now().getTime(), privateSnapshot, parsed.communityId);
+      const showcase = await showcaseCount(fetcher, now().getTime(), privateSnapshot, parsed.communityId, weekleyMarketFor(config.sourceUrl));
       if (showcase === "unavailable" ? parsed.homes.length === 0 : showcase !== null && parsed.homes.length < showcase) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
       read.push(parsed);
     }
@@ -431,44 +439,47 @@ export class DavidWeekleyAdapter implements DealAdapter {
     }
     const incentiveHolds: DealHoldReason[] = [];
     const offers: Array<{ text: string | null } | { hold: DealHoldReason }> = [];
-    for (const parsed of read) offers.push(await promotions(fetcher, now().getTime(), privateSnapshot, parsed.communityId));
+    for (const parsed of read) offers.push(await promotions(fetcher, now().getTime(), privateSnapshot, parsed.communityId, weekleyMarketFor(config.sourceUrl)));
     const failed = offers.find((offer): offer is { hold: DealHoldReason } => "hold" in offer);
     const texts = Array.from(new Set(offers.map((offer) => "hold" in offer ? null : offer.text)));
     if (failed) incentiveHolds.push(failed.hold);
     // Series of one neighborhood with different promotions: one would be published as the other's; the admin reads them instead.
     else if (texts.length > 1) incentiveHolds.push("expected_incentive_container_not_found");
     else privateSnapshot.offerRead = true;
-    if (!failed && texts.length === 1 && texts[0]) privateSnapshot.incentive = { sourceUrl: weekleyPromotionsUrl(), text: texts[0], facts: parsePromotionalRate(texts[0]) };
+    if (!failed && texts.length === 1 && texts[0]) privateSnapshot.incentive = { sourceUrl: weekleyPromotionsUrl(weekleyMarketFor(config.sourceUrl)), text: texts[0], facts: parsePromotionalRate(texts[0]) };
     return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, incentiveHolds));
   }
 }
 
 /** The market list, read once an hour; this community's `ShowcaseCount`, null when it is not listed or counts nothing, "unavailable" when the list cannot be read. */
-async function showcaseCount(fetcher: HtmlFetcher, now: number, snapshot: PrivateDealSnapshot, communityId: string | null): Promise<number | null | "unavailable"> {
+async function showcaseCount(fetcher: HtmlFetcher, now: number, snapshot: PrivateDealSnapshot, communityId: string | null, marketId: string = WEEKLEY_MARKET_ID): Promise<number | null | "unavailable"> {
   if (communityId === null) return null;
-  if (!listingCache || now - listingCache.fetchedAt >= PROMO_CACHE_MS) {
-    const page = await getDocument(weekleyListingUrl(), fetcher, "application/json", WEEKLEY_HOST);
+  let listing = listingCaches.get(marketId);
+  if (!listing || now - listing.fetchedAt >= PROMO_CACHE_MS) {
+    const page = await getDocument(weekleyListingUrl(marketId), fetcher, "application/json", WEEKLEY_HOST);
     const counts = page.ok ? weekleyShowcaseCounts(page.text) : null;
     if (!counts) return "unavailable";
-    listingCache = { fetchedAt: now, counts };
+    listing = { fetchedAt: now, counts };
+    listingCaches.set(marketId, listing);
   }
-  snapshot.pages.push(sourcePage("community", weekleyListingUrl(), null));
-  return listingCache.counts.get(communityId) ?? null;
+  snapshot.pages.push(sourcePage("community", weekleyListingUrl(marketId), null));
+  return listing.counts.get(communityId) ?? null;
 }
 
 /** The market's promotion list, read once an hour; the offer is ONE promotion naming this community (or the whole site): the one that states a rate, else the first for the community, else the first site-wide. */
-async function promotions(fetcher: HtmlFetcher, now: number, snapshot: PrivateDealSnapshot, communityId: string | null): Promise<{ text: string | null } | { hold: DealHoldReason }> {
+async function promotions(fetcher: HtmlFetcher, now: number, snapshot: PrivateDealSnapshot, communityId: string | null, marketId: string = WEEKLEY_MARKET_ID): Promise<{ text: string | null } | { hold: DealHoldReason }> {
   let list: WeekleyPromotion[];
-  if (promoCache && now - promoCache.fetchedAt < PROMO_CACHE_MS) list = promoCache.promotions;
+  const cached = promoCaches.get(marketId);
+  if (cached && now - cached.fetchedAt < PROMO_CACHE_MS) list = cached.promotions;
   else {
-    const page = await getDocument(weekleyPromotionsUrl(), fetcher, "application/json", WEEKLEY_HOST);
+    const page = await getDocument(weekleyPromotionsUrl(marketId), fetcher, "application/json", WEEKLEY_HOST);
     if (!page.ok) return { hold: page.redirectedOffOfficialHost ? "unsupported_official_host" : "incentive_fetch_failed" };
     const parsed = parseWeekleyPromotions(page.text);
     if (!parsed) return { hold: "expected_incentive_container_not_found" };
     list = parsed;
-    promoCache = { fetchedAt: now, promotions: list };
+    promoCaches.set(marketId, { fetchedAt: now, promotions: list });
   }
-  snapshot.pages.push(sourcePage("incentive", weekleyPromotionsUrl(), null));
+  snapshot.pages.push(sourcePage("incentive", weekleyPromotionsUrl(marketId), null));
   const today = new Date(now).toISOString().slice(0, 10);
   const current = list.filter((promotion) => (promotion.siteWide || (communityId !== null && promotion.communityIds.includes(communityId))) && (!promotion.end || promotion.end.slice(0, 10) >= today) && (!promotion.start || promotion.start.slice(0, 10) <= today));
   // One promotion only: joining two would publish one's deadline or down payment as a term of the other's rate.

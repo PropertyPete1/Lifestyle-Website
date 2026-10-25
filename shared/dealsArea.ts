@@ -1,23 +1,43 @@
 /**
  * Public area labels and headlines for communities the system adds by itself.
- * Only coarse, generic words: a side of San Antonio or a larger nearby town,
+ * Only coarse, generic words: a side of San Antonio or Austin or a larger nearby town,
  * and a short feature phrase built from a fixed vocabulary, so a generated
  * label can never carry a builder, community, street or plan name.
  */
 
 export const DOWNTOWN_SAN_ANTONIO = { lat: 29.4241, lng: -98.4936 } as const;
-/** Inside this distance a community is "Central San Antonio". */
+export const DOWNTOWN_AUSTIN = { lat: 30.2672, lng: -97.7431 } as const;
+/** Inside this distance a community is "Central San Antonio" (or "Central Austin"). */
 const CENTRAL_MILES = 4;
 /** Beyond this distance the label names the nearby town (when it is a larger one) instead of a side of San Antonio. */
 const METRO_MILES = 22;
 const EARTH_MILES = 3958.8;
 
 /**
+ * The two markets (October 25, 2026, Peter: Austin, Kyle, San Marcos, Georgetown and their towns, asked for more than
+ * once). A point takes the nearer market's labels: a side of that city inside its metro, else a listed town, else "a side
+ * of" the city. Austin's metro is smaller, so its suburbs (Pflugerville, Round Rock, Cedar Park, Buda) keep their names.
+ */
+export const MARKETS = [
+  { name: "San Antonio", center: DOWNTOWN_SAN_ANTONIO, metroMiles: METRO_MILES },
+  { name: "Austin", center: DOWNTOWN_AUSTIN, metroMiles: 12 },
+] as const;
+export type MarketName = (typeof MARKETS)[number]["name"];
+
+/** The market whose downtown is nearer the point. */
+export function marketOf(point: { lat: number; lng: number }): (typeof MARKETS)[number] {
+  return milesBetween(point, DOWNTOWN_AUSTIN) < milesBetween(point, DOWNTOWN_SAN_ANTONIO) ? MARKETS[1] : MARKETS[0];
+}
+
+/**
  * Towns a label may name (outside the metro only); a town not listed falls back to the side of San Antonio. October 24,
  * 2026 (Peter): the outskirt towns buyers search by name (Castroville, Mico, Lytle and the rest) are named too; each has
- * several communities, so the name never points at one.
+ * several communities, so the name never points at one. October 25: the Austin market's towns, and the far outskirts
+ * (Fredericksburg, Kerrville, Gonzales, Luling).
  */
-export const MAJOR_TOWNS = ["New Braunfels", "Seguin", "Boerne", "Floresville", "Pleasanton", "Bulverde", "Spring Branch", "Canyon Lake", "Castroville", "Mico", "Hondo", "Lytle", "Devine", "La Vernia", "Marion", "Bandera", "Poteet", "Comfort"] as const;
+export const MAJOR_TOWNS = ["New Braunfels", "Seguin", "Boerne", "Floresville", "Pleasanton", "Bulverde", "Spring Branch", "Canyon Lake", "Castroville", "Mico", "Hondo", "Lytle", "Devine", "La Vernia", "Marion", "Bandera", "Poteet", "Comfort",
+  "Fredericksburg", "Kerrville", "Gonzales", "Luling",
+  "Round Rock", "Pflugerville", "Georgetown", "Leander", "Cedar Park", "Hutto", "Manor", "Kyle", "Buda", "San Marcos", "Dripping Springs", "Liberty Hill", "Lockhart", "Bastrop", "Taylor", "Elgin", "Jarrell", "Florence", "Bee Cave", "Lakeway", "Lago Vista", "Wimberley", "Maxwell"] as const;
 
 /** Each town's centre (approximate). Outside the metro, a community whose builder lists "San Antonio" (Perry's
  * Esperanza, 3 miles from Boerne) takes the name of a town within TOWN_MILES of its ZIP centre (Peter, Oct 24: "where
@@ -29,6 +49,16 @@ const TOWN_CENTERS: Record<(typeof MAJOR_TOWNS)[number], { lat: number; lng: num
   Mico: { lat: 29.5466, lng: -98.9083 }, Hondo: { lat: 29.3475, lng: -99.1417 }, Lytle: { lat: 29.2333, lng: -98.7964 },
   Devine: { lat: 29.1394, lng: -98.9031 }, "La Vernia": { lat: 29.3566, lng: -98.1156 }, Marion: { lat: 29.5713, lng: -98.142 },
   Bandera: { lat: 29.7266, lng: -99.0737 }, Poteet: { lat: 29.0408, lng: -98.5681 }, Comfort: { lat: 29.9677, lng: -98.905 },
+  Fredericksburg: { lat: 30.2752, lng: -98.8720 }, Kerrville: { lat: 30.0474, lng: -99.1403 }, Gonzales: { lat: 29.5016, lng: -97.4525 },
+  Luling: { lat: 29.6805, lng: -97.6475 },
+  "Round Rock": { lat: 30.5083, lng: -97.6789 }, Pflugerville: { lat: 30.4394, lng: -97.62 }, Georgetown: { lat: 30.6333, lng: -97.6772 },
+  Leander: { lat: 30.5788, lng: -97.8531 }, "Cedar Park": { lat: 30.5052, lng: -97.8203 }, Hutto: { lat: 30.5427, lng: -97.5467 },
+  Manor: { lat: 30.3408, lng: -97.5569 }, Kyle: { lat: 29.9891, lng: -97.8772 }, Buda: { lat: 30.0852, lng: -97.8403 },
+  "San Marcos": { lat: 29.8833, lng: -97.9414 }, "Dripping Springs": { lat: 30.1902, lng: -98.0867 }, "Liberty Hill": { lat: 30.6649, lng: -97.9225 },
+  Lockhart: { lat: 29.8849, lng: -97.67 }, Bastrop: { lat: 30.1105, lng: -97.3153 }, Taylor: { lat: 30.5708, lng: -97.4094 },
+  Elgin: { lat: 30.3497, lng: -97.3703 }, Jarrell: { lat: 30.8249, lng: -97.6045 }, Florence: { lat: 30.8413, lng: -97.7939 },
+  "Bee Cave": { lat: 30.3085, lng: -97.945 }, Lakeway: { lat: 30.3638, lng: -97.9797 }, "Lago Vista": { lat: 30.4602, lng: -97.9883 },
+  Wimberley: { lat: 29.9974, lng: -98.0986 }, Maxwell: { lat: 29.8819, lng: -97.7969 },
 };
 const TOWN_MILES = 9;
 
@@ -56,18 +86,18 @@ export function milesBetween(a: { lat: number; lng: number }, b: { lat: number; 
   return EARTH_MILES * 2 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-/** Compass bearing from downtown, 0 = north, clockwise. */
-export function bearingFromDowntown(point: { lat: number; lng: number }): number {
-  const lat1 = toRad(DOWNTOWN_SAN_ANTONIO.lat);
+/** Compass bearing from a downtown (San Antonio's unless given), 0 = north, clockwise. */
+export function bearingFromDowntown(point: { lat: number; lng: number }, downtown: { lat: number; lng: number } = DOWNTOWN_SAN_ANTONIO): number {
+  const lat1 = toRad(downtown.lat);
   const lat2 = toRad(point.lat);
-  const dLng = toRad(point.lng - DOWNTOWN_SAN_ANTONIO.lng);
+  const dLng = toRad(point.lng - downtown.lng);
   const y = Math.sin(dLng) * Math.cos(lat2);
   const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
-export function sectorOf(point: { lat: number; lng: number }): Sector {
-  return SECTORS[Math.round(bearingFromDowntown(point) / 45) % 8]!;
+export function sectorOf(point: { lat: number; lng: number }, downtown: { lat: number; lng: number } = DOWNTOWN_SAN_ANTONIO): Sector {
+  return SECTORS[Math.round(bearingFromDowntown(point, downtown) / 45) % 8]!;
 }
 
 function townName(city: string | null | undefined): string | null {
@@ -76,25 +106,26 @@ function townName(city: string | null | undefined): string | null {
 }
 
 /**
- * "Southeast San Antonio", "Central San Antonio", "New Braunfels" or "South of
- * San Antonio", from the ZIP code centroid (never the community) and the city
- * the builder lists. Without a centroid only a larger town's name, else the metro.
+ * "Southeast San Antonio", "Central San Antonio", "New Braunfels", "North Austin", "Round Rock" or "South of San
+ * Antonio", from the ZIP code centroid (never the community) and the city the builder lists. Without a centroid only a
+ * larger town's name, else the market the city names, else San Antonio's.
  */
 export function areaLabelFor(input: { centroid?: { lat: number; lng: number } | null; city?: string | null }): string {
   const town = townName(input.city);
-  if (!input.centroid) return town ?? "Greater San Antonio";
-  const miles = milesBetween(DOWNTOWN_SAN_ANTONIO, input.centroid);
-  if (miles <= CENTRAL_MILES) return "Central San Antonio";
-  const sector = sectorOf(input.centroid);
+  if (!input.centroid) return town ?? (/^\s*austin\s*$/i.test(input.city ?? "") ? "Greater Austin" : "Greater San Antonio");
+  const market = marketOf(input.centroid);
+  const miles = milesBetween(market.center, input.centroid);
+  if (miles <= CENTRAL_MILES) return `Central ${market.name}`;
+  const sector = sectorOf(input.centroid, market.center);
   // Inside the metro, a side of town is coarse enough; a suburb's own name would point at too few communities.
-  if (miles <= METRO_MILES) return `${sector} San Antonio`;
-  return town ?? nearestTown(input.centroid) ?? `${sector} of San Antonio`;
+  if (miles <= market.metroMiles) return `${sector} ${market.name}`;
+  return town ?? nearestTown(input.centroid) ?? `${sector} of ${market.name}`;
 }
 
-/** True for an area label this module generates (a side of San Antonio, a listed town, or the metro). */
+/** True for an area label this module generates (a side of San Antonio or Austin, a listed town, or the market). */
 export function isGeneratedArea(area: string): boolean {
-  return area === "Greater San Antonio" || area === "Central San Antonio" || (MAJOR_TOWNS as readonly string[]).includes(area)
-    || SECTORS.some((sector) => area === `${sector} San Antonio` || area === `${sector} of San Antonio`);
+  return (MAJOR_TOWNS as readonly string[]).includes(area) || MARKETS.some(({ name }) => area === `Greater ${name}` || area === `Central ${name}`
+    || SECTORS.some((sector) => area === `${sector} ${name}` || area === `${sector} of ${name}`));
 }
 
 /**

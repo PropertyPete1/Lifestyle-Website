@@ -34,7 +34,7 @@ import { jsonLdRecords } from "./dealsAdapters.homefiniti";
 /** A community with more homes for sale than this is held, never truncated. */
 export const STARLIGHT_MAX_HOMES = 150;
 export const STARLIGHT_PHOTO_HOST = "awh.widen.net";
-export const starlightListingUrl = () => `https://${STARLIGHT_HOST}/san-antonio`;
+export const starlightListingUrl = (market = "san-antonio") => `https://${STARLIGHT_HOST}/${market}`;
 const MONTHS: Record<string, string> = { january: "January", february: "February", march: "March", april: "April", may: "May", june: "June", july: "July", august: "August", september: "September", october: "October", november: "November", december: "December" };
 
 type Json = Record<string, unknown>;
@@ -237,9 +237,9 @@ export function parseStarlightCommunity(html: string, pageUrl: string, now: Date
 }
 
 /** The market page's community links; null when there are none. Each page is read for its record. */
-export function starlightListingEntries(html: string, host: string): Array<{ url: string; record: null }> | null {
+export function starlightListingEntries(html: string, host: string, market = "san-antonio"): Array<{ url: string; record: null }> | null {
   const out = new Map<string, { url: string; record: null }>();
-  for (const match of Array.from(html.matchAll(/href="(\/san-antonio\/(?!areas\/)[a-z0-9-]+)\/?"/gi))) {
+  for (const match of Array.from(html.matchAll(new RegExp(`href="(/${market}/(?!areas/)[a-z0-9-]+)/?"`, "gi")))) {
     const url = asUrl(new URL(decodeHtmlEntities(match[1]!), `https://${host}/`).toString());
     if (!url || !sameOfficialHost(url, host)) continue;
     const key = `${url.origin}${url.pathname}`;

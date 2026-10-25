@@ -32,7 +32,9 @@ import { jsonLdRecords } from "./dealsAdapters.homefiniti";
 export const ASHTON_MAX_HOMES = 150;
 export const ASHTON_PHOTO_HOST = "awh.widen.net";
 export const ASHTON_DIVISION_ID = "13";
-export const ashtonListingUrl = () => `https://${ASHTON_HOST}/ashton-woods/get-division-community-map/${ASHTON_DIVISION_ID}`;
+/** The Austin division (data-division-id 3 on /austin, Oct 25, 2026). */
+export const ASHTON_AUSTIN_DIVISION_ID = "3";
+export const ashtonListingUrl = (division = ASHTON_DIVISION_ID) => `https://${ASHTON_HOST}/ashton-woods/get-division-community-map/${division}`;
 
 type Json = Record<string, unknown>;
 const obj = (value: unknown): Json | null => value && typeof value === "object" && !Array.isArray(value) ? value as Json : null;

@@ -65,8 +65,15 @@ export function parsePulteListing(body: string): Listing[] | null {
   return listings;
 }
 
-export function pulteListingUrl(host: string, brand: PulteGroupBrand): string {
-  return `https://${host}/API/Community/Search?State=Texas&Region=${encodeURIComponent("San Antonio")}&Brand=${encodeURIComponent(brand)}&JsonFormat=true&pageSize=0`;
+export function pulteListingUrl(host: string, brand: PulteGroupBrand, region = "San Antonio"): string {
+  return `https://${host}/API/Community/Search?State=Texas&Region=${encodeURIComponent(region)}&Brand=${encodeURIComponent(brand)}&JsonFormat=true&pageSize=0`;
+}
+
+/** The site's region names by a community path's region segment (/homes/texas/<region>/…); San Antonio when unknown. */
+export const PULTE_REGIONS: Readonly<Record<string, string>> = { "san-antonio": "San Antonio", austin: "Austin" };
+export function pulteRegionFor(pathname: string): string {
+  const slug = /^\/homes\/texas\/([a-z-]+)\//i.exec(pathname)?.[1]?.toLowerCase();
+  return (slug && PULTE_REGIONS[slug]) || "San Antonio";
 }
 
 /** The community id at the end of a community path: /homes/texas/san-antonio/san-antonio/bison-ridge-210867 -> 210867. */
@@ -234,21 +241,25 @@ function cleanDisclaimer(attr: string): string {
     .trim();
 }
 
-async function marketListings(host: string, brand: PulteGroupBrand, fetcher: HtmlFetcher, now: number, snapshot: PrivateDealSnapshot): Promise<{ listings: Listing[] } | { hold: DealHoldReason }> {
-  const cached = listingCache.get(host);
+async function marketListings(host: string, brand: PulteGroupBrand, fetcher: HtmlFetcher, now: number, snapshot: PrivateDealSnapshot, region = "San Antonio"): Promise<{ listings: Listing[] } | { hold: DealHoldReason }> {
+  // Each market's listing is its own (an Austin community is not in the San Antonio list).
+  const cacheKey = `${host}|${region}`;
+  const cached = listingCache.get(cacheKey);
   if (cached && now - cached.fetchedAt < CACHE_MS) return { listings: cached.listings };
-  const url = pulteListingUrl(host, brand);
+  const url = pulteListingUrl(host, brand, region);
   const page = await getDocument(url, fetcher, "application/json", host);
   if (!page.ok) return { hold: fetchFailureHold(page, "inventory_fetch_failed") };
   snapshot.pages.push(sourcePage("inventory", url, null));
   const listings = parsePulteListing(page.text);
   if (!listings) return { hold: "invalid_inventory_response" };
-  listingCache.set(host, { listings, fetchedAt: now });
+  listingCache.set(cacheKey, { listings, fetchedAt: now });
   return { listings };
 }
 
-async function marketOffer(host: string, pageUrl: string, fetcher: HtmlFetcher, now: number, snapshot: PrivateDealSnapshot): Promise<{ offer: { text: string; sourceUrl: string } | null } | { hold: DealHoldReason }> {
-  const cached = offersCache.get(host);
+async function marketOffer(host: string, pageUrl: string, fetcher: HtmlFetcher, now: number, snapshot: PrivateDealSnapshot, region = "San Antonio"): Promise<{ offer: { text: string; sourceUrl: string } | null } | { hold: DealHoldReason }> {
+  // A market's offers are its own: Austin's carousel is never shown on a San Antonio community.
+  const cacheKey = `${host}|${region}`;
+  const cached = offersCache.get(cacheKey);
   if (cached && now - cached.fetchedAt < CACHE_MS) return { offer: cached.offer };
   const page = await getDocument(pageUrl, fetcher, "text/html,application/xhtml+xml", host);
   if (!page.ok) return { hold: page.redirectedOffOfficialHost ? "unsupported_official_host" : "incentive_fetch_failed" };
@@ -256,7 +267,7 @@ async function marketOffer(host: string, pageUrl: string, fetcher: HtmlFetcher, 
   if (!offers) return { hold: "expected_incentive_container_not_found" };
   snapshot.pages.push(sourcePage("incentive", pageUrl, null));
   const offer = offers.rateOffer ? { text: offers.rateOffer, sourceUrl: pageUrl } : null;
-  offersCache.set(host, { offer, fetchedAt: now });
+  offersCache.set(cacheKey, { offer, fetchedAt: now });
   return { offer };
 }
 
@@ -280,7 +291,8 @@ export class PulteGroupAdapter implements DealAdapter {
     if (id === null) return failedResult(config, fetchedAt, privateSnapshot, ["missing_community_guid"]);
     const fetcher: HtmlFetcher = options.fetcher ?? fetch;
     // The market listing says whether this community is still listed, and carries its facts.
-    const market = await marketListings(this.host, this.builder, fetcher, now().getTime(), privateSnapshot);
+    const region = pulteRegionFor(community.pathname);
+    const market = await marketListings(this.host, this.builder, fetcher, now().getTime(), privateSnapshot, region);
     if ("hold" in market) return failedResult(config, fetchedAt, privateSnapshot, [market.hold]);
     const listing = market.listings.find((entry) => entry.id === id);
     if (!listing) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
@@ -315,7 +327,7 @@ export class PulteGroupAdapter implements DealAdapter {
     const incentiveHolds: DealHoldReason[] = [];
     let offerHold: DealHoldReason | null = null;
     for (const offerPage of candidates) {
-      const offer = await marketOffer(this.host, offerPage, fetcher, now().getTime(), privateSnapshot);
+      const offer = await marketOffer(this.host, offerPage, fetcher, now().getTime(), privateSnapshot, region);
       // A page that was read but carries no carousel says more than one that could not be read; a redirect off the host ends the search.
       if ("hold" in offer) { if (offerHold !== "expected_incentive_container_not_found") offerHold = offer.hold; if (offer.hold === "unsupported_official_host") break; continue; }
       offerHold = null;
@@ -326,7 +338,7 @@ export class PulteGroupAdapter implements DealAdapter {
     if (offerHold) incentiveHolds.push(offerHold);
     // A community with nothing listed has no page of its own to read; the brand's offer read within the hour still applies to it.
     if (!candidates.length) {
-      const cached = offersCache.get(this.host);
+      const cached = offersCache.get(`${this.host}|${region}`);
       // The brand's page read within the hour is a read of the offer, whether it showed one or showed none.
       if (cached && now().getTime() - cached.fetchedAt < CACHE_MS) {
         privateSnapshot.offerRead = true;

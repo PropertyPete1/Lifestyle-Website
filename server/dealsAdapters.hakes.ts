@@ -35,7 +35,7 @@ import { jsonLdRecords } from "./dealsAdapters.homefiniti";
  */
 /** A community with more homes for sale than this is held, never truncated. */
 export const HAKES_MAX_HOMES = 150;
-export const hakesListingUrl = () => `https://${HAKES_HOST}/san-antonio`;
+export const hakesListingUrl = (market = "san-antonio") => `https://${HAKES_HOST}/${market}`;
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const monthIndex = (name: string): number | null => {
   const key = name.toLowerCase().replace(/\.$/, "");
@@ -322,11 +322,11 @@ export function parseHakesCommunity(html: string, pageUrl: string, now: Date = n
 }
 
 /** The market page's community links; null when there are none. Each page is read for its record. */
-export function hakesListingEntries(html: string, host: string): Array<{ url: string; record: null }> | null {
+export function hakesListingEntries(html: string, host: string, market = "san-antonio"): Array<{ url: string; record: null }> | null {
   const out = new Map<string, { url: string; record: null }>();
-  for (const match of Array.from(html.matchAll(/href="(https?:\/\/[^"]+\/san-antonio\/[a-z0-9-]+|\/san-antonio\/[a-z0-9-]+)\/?"/gi))) {
+  for (const match of Array.from(html.matchAll(new RegExp(`href="(https?://[^"]+/${market}/[a-z0-9-]+|/${market}/[a-z0-9-]+)/?"`, "gi")))) {
     const url = asUrl(new URL(decodeHtmlEntities(match[1]!), `https://${host}/`).toString());
-    if (!url || !sameOfficialHost(url, host) || !/^\/san-antonio\/[a-z0-9-]+$/i.test(url.pathname.replace(/\/+$/, ""))) continue;
+    if (!url || !sameOfficialHost(url, host) || !new RegExp(`^/${market}/[a-z0-9-]+$`, "i").test(url.pathname.replace(/\/+$/, ""))) continue;
     const key = pageUrlOf(url);
     if (!out.has(key)) out.set(key, { url: key, record: null });
   }

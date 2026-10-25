@@ -40,7 +40,7 @@ import {
  */
 /** A community with more homes for sale than this is held, never truncated. */
 export const LENNAR_MAX_HOMES = 150;
-export const lennarListingUrl = () => `https://${LENNAR_HOST}/new-homes/texas/san-antonio`;
+export const lennarListingUrl = (market = "san-antonio") => `https://${LENNAR_HOST}/new-homes/texas/${market}`;
 export const LENNAR_PHOTO_HOSTS = ["cdn.lennar.com"] as const;
 
 type Json = Record<string, unknown>;

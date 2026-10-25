@@ -44,6 +44,12 @@ import {
 /** A community with more homes for sale than this is held, never truncated. */
 export const DREES_MAX_HOMES = 150;
 export const DREES_AREA_NAME = "San Antonio";
+/** The site's area names by a community path's market segment (/new-homes-<market>/…); San Antonio when unknown. */
+export const DREES_AREAS: Readonly<Record<string, string>> = { "san-antonio": DREES_AREA_NAME, austin: "Austin" };
+export function dreesAreaFor(pathname: string): string {
+  const slug = /^\/new-homes-([a-z-]+?)\//i.exec(pathname)?.[1]?.toLowerCase();
+  return (slug && DREES_AREAS[slug]) || DREES_AREA_NAME;
+}
 export const dreesApiUrl = (path: string) => `https://${DREES_HOST}/api/en/dreeshomes/${path}`;
 export const dreesListingUrl = () => dreesApiUrl("areas");
 const LIST_CACHE_MS = 60 * 60 * 1000;
@@ -73,8 +79,8 @@ const bathCount = (full: unknown, half: unknown): number | null => {
   return fullBaths + halfBaths * 0.5;
 };
 
-let listCache: { fetchedAt: number; neighborhoods: Json[] } | null = null;
-export function resetDreesCaches(): void { listCache = null; detailCache.clear(); }
+const listCaches = new Map<string, { fetchedAt: number; neighborhoods: Json[] }>();
+export function resetDreesCaches(): void { listCaches.clear(); detailCache.clear(); }
 
 /** The page's own ids from its inline script; null when the page does not name a neighborhood or parent community. */
 export function parseDreesPage(html: string): { contentId: number; parent: boolean; url: string | null } | null {
@@ -230,10 +236,10 @@ export async function fillDreesGalleries(items: PrivatePlanOrHome[], fetcher: Ht
 }
 
 /** The San Antonio market's page id from the areas body; null when the body is not the list or names no such market. */
-export function parseDreesAreaId(body: string): number | null {
+export function parseDreesAreaId(body: string, areaName: string = DREES_AREA_NAME): number | null {
   let parsed: unknown;
   try { parsed = JSON.parse(body); } catch { return null; }
-  const area = arr(obj(parsed)?.data).map(obj).find((row) => row && (str(row.areaName) ?? "").toLowerCase() === DREES_AREA_NAME.toLowerCase());
+  const area = arr(obj(parsed)?.data).map(obj).find((row) => row && (str(row.areaName) ?? "").toLowerCase() === areaName.toLowerCase());
   const id = num(area?.pageId);
   return id !== null && Number.isInteger(id) && id > 0 ? id : null;
 }
@@ -340,11 +346,12 @@ export function dreesOfferText(promos: unknown): string | null {
 }
 
 /** The San Antonio market's neighborhoods, read once an hour (areas, then the community list). */
-async function marketNeighborhoods(fetcher: HtmlFetcher, now: number): Promise<{ neighborhoods: Json[] } | { hold: DealHoldReason }> {
-  if (listCache && now - listCache.fetchedAt < LIST_CACHE_MS) return { neighborhoods: listCache.neighborhoods };
+async function marketNeighborhoods(fetcher: HtmlFetcher, now: number, areaName: string = DREES_AREA_NAME): Promise<{ neighborhoods: Json[] } | { hold: DealHoldReason }> {
+  const cached = listCaches.get(areaName);
+  if (cached && now - cached.fetchedAt < LIST_CACHE_MS) return { neighborhoods: cached.neighborhoods };
   const areas = await getDocument(dreesListingUrl(), fetcher, "application/json", DREES_HOST);
   if (!areas.ok) return { hold: fetchFailureHold(areas, "community_fetch_failed") };
-  const areaId = parseDreesAreaId(areas.text);
+  const areaId = parseDreesAreaId(areas.text, areaName);
   if (areaId === null) return { hold: "expected_community_container_not_found" };
   const list = await postJsonDocument(dreesApiUrl("community"), fetcher, { contentId: areaId, ...PAGE }, DREES_HOST);
   if (!list.ok) return { hold: fetchFailureHold(list, "community_fetch_failed") };
@@ -353,7 +360,7 @@ async function marketNeighborhoods(fetcher: HtmlFetcher, now: number): Promise<{
   const rows = obj(obj(parsed)?.data)?.neighborhoods;
   if (!Array.isArray(rows)) return { hold: "expected_community_container_not_found" };
   const neighborhoods = rows.map(obj).filter((row): row is Json => row !== null);
-  listCache = { fetchedAt: now, neighborhoods };
+  listCaches.set(areaName, { fetchedAt: now, neighborhoods });
   return { neighborhoods };
 }
 
@@ -379,7 +386,7 @@ export class DreesAdapter implements DealAdapter {
       const ownUrl = asUrl(new URL(own.url, community).toString());
       if (!ownUrl || comparablePath(ownUrl.pathname.replace(/\/+$/, "")) !== comparablePath(community.pathname.replace(/\/+$/, ""))) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
     }
-    const market = await marketNeighborhoods(fetcher, now().getTime());
+    const market = await marketNeighborhoods(fetcher, now().getTime(), dreesAreaFor(community.pathname));
     if ("hold" in market) return failedResult(config, fetchedAt, privateSnapshot, [market.hold]);
     const listed = withParentAddress(parseDreesNeighborhoods(JSON.stringify({ data: { neighborhoods: market.neighborhoods } }), DREES_HOST) ?? []);
     const row = listed.find((item) => item.contentId === own.contentId);
@@ -417,8 +424,8 @@ export class DreesAdapter implements DealAdapter {
 }
 
 /** The market's neighborhoods for discovery: every listed neighborhood or parent community with its record (parents' sub-neighborhoods are their own pages too). */
-export async function dreesDiscoveryEntries(fetcher: HtmlFetcher, now: number): Promise<Array<{ url: string; record: DreesCommunityRecord | null }> | null> {
-  const market = await marketNeighborhoods(fetcher, now);
+export async function dreesDiscoveryEntries(fetcher: HtmlFetcher, now: number, areaName: string = DREES_AREA_NAME): Promise<Array<{ url: string; record: DreesCommunityRecord | null }> | null> {
+  const market = await marketNeighborhoods(fetcher, now, areaName);
   if ("hold" in market) return null;
   const listed = withParentAddress(parseDreesNeighborhoods(JSON.stringify({ data: { neighborhoods: market.neighborhoods } }), DREES_HOST) ?? []);
   // Each neighborhood is its own page; a parent community's page would show the same homes a second time (and the research list carries the

@@ -55,6 +55,21 @@ export const DRB_BRAND: NdgBrand = {
   slug: drbSlug,
 };
 
+/** The Austin region (24 communities on the API, October 25, 2026): the same brand, its own listing and page paths. */
+export const DRB_AUSTIN_REGION = { state: "texas", region: "austin", searchValue: "Austin" };
+export const DRB_AUSTIN_BRAND: NdgBrand = {
+  builder: "DRB Homes",
+  get host() { return DRB_HOST; },
+  apiHost: DRB_API_HOST,
+  assetHost: DRB_ASSET_HOST,
+  listingUrl: () => ndgApiUrl(DRB_BRAND, `public-drb/community?searchField=communityRegion&searchValue=${encodeURIComponent(DRB_AUSTIN_REGION.searchValue)}&state=${DRB_AUSTIN_REGION.state}&region=${DRB_AUSTIN_REGION.region}&page=1&limit=1000`),
+  parsePath: (url) => DRB_BRAND.parsePath(url),
+  pageUrlFor: (row) => typeof row.name === "string" && row.name.trim() ? `https://${DRB_HOST}/drbhomes/find-your-home/communities/${DRB_AUSTIN_REGION.state}/${DRB_AUSTIN_REGION.region}/${drbSlug(row.name)}` : null,
+  slug: drbSlug,
+};
+export const drbAustinListingUrl = () => DRB_AUSTIN_BRAND.listingUrl();
+export const drbAustinListingEntries = (body: string, host: string): Array<{ url: string; record: NdgCommunityRecord | null }> | null => ndgListingEntries(DRB_AUSTIN_BRAND, body, host);
+
 export const drbApiUrl = (path: string) => ndgApiUrl(DRB_BRAND, path);
 export const drbListingUrl = () => DRB_BRAND.listingUrl();
 export const drbListingEntries = (body: string, host: string): Array<{ url: string; record: NdgCommunityRecord | null }> | null => ndgListingEntries(DRB_BRAND, body, host);

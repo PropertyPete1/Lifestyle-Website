@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { dealCommunities, dealJobRuns, dealSettings } from "../drizzle/schema";
-import { DOWNTOWN_SAN_ANTONIO, milesBetween } from "../shared/dealsArea";
+import { DOWNTOWN_AUSTIN, DOWNTOWN_SAN_ANTONIO, milesBetween } from "../shared/dealsArea";
 import { normalizedDealSourceKey } from "../shared/deals";
 import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
@@ -14,15 +14,15 @@ import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
 import { highlandRecord } from "./dealsAdapters.highland";
 import { kbRecord } from "./dealsAdapters.kbhome";
 import { tollListingEntries, tollListingUrl } from "./dealsAdapters.toll";
-import { weekleyListingEntries, weekleyListingUrl, weekleyRecord } from "./dealsAdapters.weekley";
-import { ashtonListingEntries, ashtonListingUrl, ashtonRecord } from "./dealsAdapters.ashton";
+import { WEEKLEY_MARKETS, weekleyListingEntries, weekleyListingUrl, weekleyRecord } from "./dealsAdapters.weekley";
+import { ASHTON_AUSTIN_DIVISION_ID, ashtonListingEntries, ashtonListingUrl, ashtonRecord } from "./dealsAdapters.ashton";
 import { lgiListingEntries, lgiListingUrl, lgiRecord } from "./dealsAdapters.lgi";
 import { sitterleListingEntries, sitterleListingUrl, sitterleRecord } from "./dealsAdapters.sitterle";
 import { scottFelderListingEntries, scottFelderListingUrl, scottFelderRecord } from "./dealsAdapters.scottfelder";
-import { DRB_API_HOST, drbListingEntries, drbListingUrl } from "./dealsAdapters.drb";
+import { DRB_API_HOST, drbAustinListingEntries, drbAustinListingUrl, drbListingEntries, drbListingUrl } from "./dealsAdapters.drb";
 import { starlightListingEntries, starlightListingUrl, starlightRecord } from "./dealsAdapters.starlight";
 import { LEGEND_API_HOST, legendListingEntries, legendListingUrl } from "./dealsAdapters.legend";
-import { dreesDiscoveryEntries } from "./dealsAdapters.drees";
+import { DREES_AREAS, dreesDiscoveryEntries } from "./dealsAdapters.drees";
 import { viewHomesListingEntries, viewHomesListingUrl } from "./dealsAdapters.viewhomes";
 import { texasHomesListingEntries, texasHomesListingUrl, texasHomesRecord } from "./dealsAdapters.texashomes";
 import { hakesDiscoveryRecord, hakesListingEntries, hakesListingUrl } from "./dealsAdapters.hakes";
@@ -40,22 +40,40 @@ import { onboardDiscoveredCommunities, type DiscoveredCommunity, type Onboarding
  * community: a builder's sitemap missing one is not proof it closed.
  */
 
-/** Communities farther than this from downtown are outside the area we cover (San Marcos is). */
-export const DISCOVERY_RADIUS_MILES = 45;
+/**
+ * The markets we cover: a community counts when it is within the radius of either downtown. October 25, 2026 (Peter):
+ * Austin and its towns (Georgetown and Jarrell north, Lockhart and San Marcos south, Bastrop east, Dripping Springs and
+ * Liberty Hill west), and San Antonio out to its far outskirts ("zoom out, there is more on the outskirts":
+ * Fredericksburg, Kerrville, Hondo, Pleasanton, Floresville, Gonzales).
+ */
+export const DISCOVERY_MARKETS = [
+  { name: "San Antonio", center: DOWNTOWN_SAN_ANTONIO, radiusMiles: 70 },
+  { name: "Austin", center: DOWNTOWN_AUSTIN, radiusMiles: 42 },
+] as const;
+/** San Antonio's radius (kept for callers that name one figure). */
+export const DISCOVERY_RADIUS_MILES = DISCOVERY_MARKETS[0].radiusMiles;
+/** True when a point is inside one of the markets. */
+export function inDiscoveryArea(point: { lat: number; lng: number }): boolean {
+  return DISCOVERY_MARKETS.some((market) => milesBetween(market.center, point) <= market.radiusMiles);
+}
 /** Community pages read per builder per run, one at a time. */
 const MAX_COMMUNITY_PAGES = 120;
 /** Sitemap documents read per builder per run. */
 const MAX_SITEMAP_DOCUMENTS = 32;
 
+type DiscoveryIndex = { kind: "sitemap"; url: string } | { kind: "listing"; url: string; accept: string; /** The listing's own host when the builder's API is not its site (default: the site). */ host?: string; entries: (body: string, host: string) => ListingEntry[] | null } | { kind: "reader"; /** The reader lists the market itself (several reads); null when it cannot. */ entries: (fetcher: HtmlFetcher, now: number) => Promise<ListingEntry[] | null> };
+
 export type DiscoveryReader = {
   builder: Exclude<BuilderId, "Manual">;
   host: string;
+  /** The builder's other markets (Austin): each its own index and community path, read in the same run. */
+  more?: ReadonlyArray<{ index: DiscoveryIndex; communityPath: RegExp }>;
   /**
    * Where the builder lists its community pages: its sitemap, or (when the
    * sitemap is too large or missing) its own market listing. A listing entry
    * may carry the community's record itself; then its page is not read.
    */
-  index: { kind: "sitemap"; url: string } | { kind: "listing"; url: string; accept: string; /** The listing's own host when the builder's API is not its site (default: the site). */ host?: string; entries: (body: string, host: string) => ListingEntry[] | null } | { kind: "reader"; /** The reader lists the market itself (several reads); null when it cannot. */ entries: (fetcher: HtmlFetcher, now: number) => Promise<ListingEntry[] | null> };
+  index: DiscoveryIndex;
   /** Path of a community page in the builder's San Antonio market. */
   communityPath: RegExp;
   /** Reads the community's record from its page when the site has no schema.org record (default: communityRecordFromHtml). */
@@ -100,25 +118,37 @@ export function pulteListingEntries(body: string, host: string, brand?: string):
   }));
 }
 
+/**
+ * D.R. Horton's community pages in the divisions around our markets: /texas/<division>/<city>/<community>. The
+ * Killeen-Temple-Waco division is read only for its towns north of Austin (its other 25 pages are far out and would be
+ * read every run just to be left out).
+ */
+const DRH_COMMUNITY_PATH = /^\/texas\/(?:(?:san-antonio|new-braunfels|san-marcos|austin)\/[a-z0-9-]+|killeen-temple-waco\/(?:georgetown|jarrell|florence|liberty-hill|leander|hutto|taylor|round-rock|thrall|granger))\/[a-z0-9-]+\/?$/i;
+
 export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
-  // Chesmar files New Braunfels and Seguin under "central-texas-new-homes" (with Austin, Kyle and Marble Falls); the
-  // distance check keeps only the San Antonio area's (Meyer Ranch 45's and 60's were never found before).
+  // Chesmar files New Braunfels, Seguin, Austin, Kyle and Marble Falls under "central-texas-new-homes"; the market check
+  // keeps the ones within either market (Meyer Ranch 45's and 60's were never found before; Austin's since Oct 25, 2026).
   { builder: "Chesmar", host: "www.chesmar.com", index: { kind: "sitemap", url: "https://www.chesmar.com/sitemap.xml" }, communityPath: /^\/texas\/(?:san-antonio|central-texas)-new-homes\/[a-z0-9-]+\/[^/]+\/?$/i },
   {
     builder: "M/I Homes", host: "www.mihomes.com", index: { kind: "sitemap", url: "https://www.mihomes.com/Sitemap/sitemap.xml" },
-    communityPath: /^\/new-homes\/texas\/greater-san-antonio\/(?!communities\/|plans-ready-to-build\/|quick-move-in-homes\/|model-homes-to-tour\/)[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
+    communityPath: /^\/new-homes\/texas\/greater-(?:san-antonio|austin)\/(?!communities\/|plans-ready-to-build\/|quick-move-in-homes\/|model-homes-to-tour\/)[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
   },
   {
     // The sitemap is a 17 MB file of 40,000 URLs; the market listing the community finder reads is 70 KB and complete.
     builder: "D.R. Horton", host: "www.drhorton.com", index: { kind: "listing", url: "https://www.drhorton.com/api/comms/direct/texas/san-antonio", accept: "application/json", entries: drhListingEntries },
-    communityPath: /^\/texas\/san-antonio\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
+    // The listing mixes divisions (San Antonio's names its New Braunfels, San Marcos and Austin communities too, Oct 25,
+    // 2026: those were dropped before); every division in our markets is read, and the market check keeps the near ones.
+    communityPath: DRH_COMMUNITY_PATH,
+    more: ["austin", "san-marcos", "new-braunfels", "killeen-temple-waco"].map((division) => ({ index: { kind: "listing" as const, url: `https://www.drhorton.com/api/comms/direct/texas/${division}`, accept: "application/json", entries: drhListingEntries }, communityPath: DRH_COMMUNITY_PATH })),
   },
-  { builder: "First America Homes", host: HOMEFINITI_HOSTS["First America Homes"], index: { kind: "sitemap", url: "https://www.firstamericahomes.com/sitemap.xml" }, communityPath: /^\/new-homes\/tx\/san-antonio-metro\/(?!floorplans\/)[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
+  { builder: "First America Homes", host: HOMEFINITI_HOSTS["First America Homes"], index: { kind: "sitemap", url: "https://www.firstamericahomes.com/sitemap.xml" }, communityPath: /^\/new-homes\/tx\/(?:san-antonio|austin)-metro\/(?!floorplans\/)[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
   {
     // Coventry builds across Texas; its San Antonio market page lists the area's communities, so the sitemap's 270 community pages are not all read.
     builder: "Coventry Homes", host: HOMEFINITI_HOSTS["Coventry Homes"],
     index: { kind: "listing", url: "https://www.coventryhomes.com/new-homes/tx/san-antonio/", accept: "text/html,application/xhtml+xml", entries: (body, host) => homefinitiMarketLinks(body, host).map((url) => ({ url, record: null })) },
     communityPath: /^\/new-homes\/tx\/[a-z0-9-]+\/(?!available-homes\/|floorplans\/|build-on-your-lot)[a-z0-9-]+\/?$/i,
+    // Coventry is Dream Finders Homes' Austin brand (dreamfindershomes.com/new-homes/tx/austin/ redirects here).
+    more: [{ index: { kind: "listing", url: "https://www.coventryhomes.com/new-homes/tx/austin/", accept: "text/html,application/xhtml+xml", entries: (body, host) => homefinitiMarketLinks(body, host).map((url) => ({ url, record: null })) }, communityPath: /^\/new-homes\/tx\/[a-z0-9-]+\/(?!available-homes\/|floorplans\/|build-on-your-lot)[a-z0-9-]+\/?$/i }],
   },
   {
     // Davidson's market page lists the area's communities in its Next.js data; the community page (no schema.org record) gives the sales address.
@@ -130,13 +160,13 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
   {
     // Highland's community list is rendered from a search index; the sitemap names the San Antonio market's community pages, which carry the sales office line and a map link.
     builder: "Highland Homes", host: HIGHLAND_HOST, index: { kind: "sitemap", url: `https://${HIGHLAND_HOST}/sitemap.xml` },
-    communityPath: /^\/san-antonio\/[a-z0-9-]+\/(?!new-home-concierge$|homesites$)[a-z0-9-]+$/i,
+    communityPath: /^\/(?:san-antonio|austin)\/[a-z0-9-]+\/(?!new-home-concierge$|homesites$)[a-z0-9-]+$/i,
     record: (html) => highlandRecord(html),
   },
   {
     // KB Home: the sitemap names the San Antonio market's community pages (plan pages sit a segment deeper); each page carries a Place record with the office address and coordinates.
     builder: "KB Home", host: KBHOME_HOST, index: { kind: "sitemap", url: `https://${KBHOME_HOST}/sitemap.xml` },
-    communityPath: /^\/new-homes-san-antonio\/[a-z0-9-]+\/?$/i,
+    communityPath: /^\/new-homes-(?:san-antonio|austin)\/[a-z0-9-]+\/?$/i,
     record: (html) => kbRecord(html),
   },
   {
@@ -144,12 +174,14 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "Toll Brothers", host: TOLL_HOST,
     index: { kind: "listing", url: tollListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => tollListingEntries(body, host) },
     communityPath: /^\/luxury-homes-for-sale\/Texas\/[A-Za-z0-9%'.-]+(?:\/[A-Za-z0-9%'.-]+)?\/?$/,
+    more: [{ index: { kind: "listing", url: tollListingUrl("Austin-TX"), accept: "text/html,application/xhtml+xml", entries: (body, host) => tollListingEntries(body, host) }, communityPath: /^\/luxury-homes-for-sale\/Texas\/[A-Za-z0-9%'.-]+(?:\/[A-Za-z0-9%'.-]+)?\/?$/ }],
   },
   {
     // David Weekley: the market's community list is a JSON endpoint on the site (no address); each community page gives the sales office and coordinates.
     builder: "David Weekley Homes", host: WEEKLEY_HOST,
     index: { kind: "listing", url: weekleyListingUrl(), accept: "application/json", entries: (body, host) => weekleyListingEntries(body, host) },
     communityPath: /^\/new-homes\/tx\/san-antonio\/[a-z-]+\/(?!build-on-your-lot)[a-z0-9-]+\/?$/i,
+    more: [{ index: { kind: "listing", url: weekleyListingUrl(WEEKLEY_MARKETS.austin), accept: "application/json", entries: (body, host) => weekleyListingEntries(body, host) }, communityPath: /^\/new-homes\/tx\/austin\/[a-z-]+\/(?!build-on-your-lot)[a-z0-9-]+\/?$/i }],
     record: weekleyRecord,
   },
   {
@@ -157,6 +189,7 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "Ashton Woods", host: ASHTON_HOST,
     index: { kind: "listing", url: ashtonListingUrl(), accept: "application/json", entries: (body, host) => ashtonListingEntries(body, host) },
     communityPath: /^\/san-antonio\/(?!all-home-plans$|quick-move-ins$)[a-z0-9'%-]+\/?$/i,
+    more: [{ index: { kind: "listing", url: ashtonListingUrl(ASHTON_AUSTIN_DIVISION_ID), accept: "application/json", entries: (body, host) => ashtonListingEntries(body, host) }, communityPath: /^\/austin\/(?!all-home-plans$|quick-move-ins$)[a-z0-9'%-]+\/?$/i }],
     record: (html) => ashtonRecord(html),
   },
   {
@@ -164,6 +197,7 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "LGI Homes", host: LGI_HOST,
     index: { kind: "listing", url: lgiListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => lgiListingEntries(body, host) },
     communityPath: /^\/texas\/san-antonio\/[a-z0-9-]+\/?$/i,
+    more: [{ index: { kind: "listing", url: lgiListingUrl("austin"), accept: "text/html,application/xhtml+xml", entries: (body, host) => lgiListingEntries(body, host) }, communityPath: /^\/texas\/austin\/[a-z0-9-]+\/?$/i }],
     record: lgiRecord,
   },
   {
@@ -185,6 +219,7 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "DRB Homes", host: DRB_HOST,
     index: { kind: "listing", url: drbListingUrl(), accept: "application/json", host: DRB_API_HOST, entries: (body, host) => drbListingEntries(body, host) },
     communityPath: /^\/drbhomes\/find-your-home\/communities\/texas\/san-antonio\/[a-z0-9-]+(?:\/(?:overview|home-plans|quick-move-in-homes))?\/?$/i,
+    more: [{ index: { kind: "listing", url: drbAustinListingUrl(), accept: "application/json", host: DRB_API_HOST, entries: (body, host) => drbAustinListingEntries(body, host) }, communityPath: /^\/drbhomes\/find-your-home\/communities\/texas\/austin\/[a-z0-9-]+(?:\/(?:overview|home-plans|quick-move-in-homes))?\/?$/i }],
     // The page is an app shell with no record: a listing row is kept on its pin even without a street (no page is read).
   },
   {
@@ -192,6 +227,7 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "Starlight Homes", host: STARLIGHT_HOST,
     index: { kind: "listing", url: starlightListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => starlightListingEntries(body, host) },
     communityPath: /^\/san-antonio\/(?!areas\/)[a-z0-9-]+\/?$/i,
+    more: [{ index: { kind: "listing", url: starlightListingUrl("austin"), accept: "text/html,application/xhtml+xml", entries: (body, host) => starlightListingEntries(body, host, "austin") }, communityPath: /^\/austin\/(?!areas\/)[a-z0-9-]+\/?$/i }],
     record: (html) => starlightRecord(html),
   },
   {
@@ -205,6 +241,7 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "Drees Custom Homes", host: DREES_HOST,
     index: { kind: "reader", entries: (fetcher, now) => dreesDiscoveryEntries(fetcher, now) },
     communityPath: /^\/new-homes-san-antonio\/[a-z0-9-]+\/[a-z0-9-]+(?:\/[a-z0-9-]+)?\/?$/i,
+    more: [{ index: { kind: "reader", entries: (fetcher, now) => dreesDiscoveryEntries(fetcher, now, DREES_AREAS.austin!) }, communityPath: /^\/new-homes-austin\/[a-z0-9-]+\/[a-z0-9-]+(?:\/[a-z0-9-]+)?\/?$/i }],
   },
   {
     // View Homes: the Texas region page embeds the roster with every record (the 45-mile rule leaves El Paso out), so no page is read.
@@ -224,6 +261,7 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "Hakes Brothers", host: HAKES_HOST,
     index: { kind: "listing", url: hakesListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => hakesListingEntries(body, host) },
     communityPath: /^\/san-antonio\/[a-z0-9-]+\/?$/i,
+    more: [{ index: { kind: "listing", url: hakesListingUrl("austin"), accept: "text/html,application/xhtml+xml", entries: (body, host) => hakesListingEntries(body, host, "austin") }, communityPath: /^\/austin\/[a-z0-9-]+\/?$/i }],
     record: (html) => hakesDiscoveryRecord(html),
   },
   {
@@ -238,6 +276,8 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "Lennar", host: LENNAR_HOST,
     index: { kind: "listing", url: lennarListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => lennarListingEntries(body, host) },
     communityPath: /^\/new-homes\/texas\/san-antonio\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i,
+    // The Austin page lists its masterplans under /new-homes/texas/austin-central-texas/<city>/<community>.
+    more: [{ index: { kind: "listing", url: lennarListingUrl("austin"), accept: "text/html,application/xhtml+xml", entries: (body, host) => lennarListingEntries(body, host) }, communityPath: /^\/new-homes\/texas\/austin(?:-central-texas)?\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i }],
     record: lennarRecord,
   },
   {
@@ -245,12 +285,14 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     builder: "Empire Homes", host: EMPIRE_HOST,
     index: { kind: "listing", url: empireRegionUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => empireRegionLinks(body, host)?.map((url) => ({ url, record: null })) ?? null },
     communityPath: /^\/us\/texas\/san-antonio\/(?:[a-z0-9-]+\/)?[a-z0-9-]+\/?$/i,
+    more: [{ index: { kind: "listing", url: empireRegionUrl("austin"), accept: "text/html,application/xhtml+xml", entries: (body, host) => empireRegionLinks(body, host, "austin")?.map((url) => ({ url, record: null })) ?? null }, communityPath: /^\/us\/texas\/austin\/(?:[a-z0-9-]+\/)?[a-z0-9-]+\/?$/i }],
     record: empireRecord,
   },
-  { builder: "Century Communities", host: CENTURY_HOST, index: { kind: "sitemap", url: `https://${CENTURY_HOST}/sitemap.xml` }, communityPath: /^\/find-your-new-home\/texas\/san-antonio-metro\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
+  { builder: "Century Communities", host: CENTURY_HOST, index: { kind: "sitemap", url: `https://${CENTURY_HOST}/sitemap.xml` }, communityPath: /^\/find-your-new-home\/texas\/(?:san-antonio|austin)-metro\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({
     builder: brand, host: PULTEGROUP_HOSTS[brand], index: { kind: "listing", url: pulteListingUrl(PULTEGROUP_HOSTS[brand], brand), accept: "application/json", entries: (body, host) => pulteListingEntries(body, host, brand) },
     communityPath: /^\/homes\/texas\/san-antonio\/[a-z0-9-]+\/[a-z0-9-]+-\d{4,8}\/?$/i,
+    more: [{ index: { kind: "listing", url: pulteListingUrl(PULTEGROUP_HOSTS[brand], brand, "Austin"), accept: "application/json", entries: (body, host) => pulteListingEntries(body, host, brand) }, communityPath: /^\/homes\/texas\/austin\/[a-z0-9-]+\/[a-z0-9-]+-\d{4,8}\/?$/i }],
   })),
 ];
 
@@ -378,32 +420,48 @@ export type BuilderDiscovery = {
   communities: DiscoveredCommunity[];
   /** Community pages skipped: no record, outside the area, unreadable, or past the per-run page cap (read on a later run once the first ones are onboarded). */
   skipped: Array<{ url: string; reason: "no_community_record" | "outside_area" | "page_unreadable" | "index_truncated" }>;
+  /** Communities in the index that are already in the database (their pages are not read). */
+  known: number;
+  /** Another market's index (Austin's) that could not be read this run; that market is read again next run. */
+  unreadMarkets: string[];
 };
 
-/** One builder's San Antonio area communities, read from its own site, one page at a time. */
 /** The builder's community pages from its index (with the record when the index carries it); null when the index cannot be read whole. */
-async function indexedEntries(reader: DiscoveryReader, fetcher: HtmlFetcher): Promise<ListingEntry[] | null> {
-  if (reader.index.kind === "reader") return reader.index.entries(fetcher, Date.now());
-  if (reader.index.kind === "sitemap") {
-    const urls = await officialSitemapUrls(reader.index.url, reader.host, fetcher);
+async function indexedEntries(index: DiscoveryIndex, host: string, fetcher: HtmlFetcher): Promise<ListingEntry[] | null> {
+  if (index.kind === "reader") return index.entries(fetcher, Date.now());
+  if (index.kind === "sitemap") {
+    const urls = await officialSitemapUrls(index.url, host, fetcher);
     return urls ? urls.map((url) => ({ url, record: null })) : null;
   }
-  const page = await getDocument(reader.index.url, fetcher, reader.index.accept, reader.index.host ?? reader.host);
+  const page = await getDocument(index.url, fetcher, index.accept, index.host ?? host);
   if (!page.ok) return null;
-  return reader.index.entries(page.text, reader.host);
+  return index.entries(page.text, host);
 }
 
-export async function discoverBuilderCommunities(reader: DiscoveryReader, fetcher: HtmlFetcher = fetch): Promise<BuilderDiscovery> {
-  const result: BuilderDiscovery = { builder: reader.builder, ok: false, communities: [], skipped: [] };
-  const entries = await indexedEntries(reader, fetcher);
+/**
+ * One builder's communities in our markets, read from its own site. `known` holds the source keys already in the
+ * database: those pages are not read again (onboarding would only count them), so the per-run page cap goes to new ones.
+ */
+export async function discoverBuilderCommunities(reader: DiscoveryReader, fetcher: HtmlFetcher = fetch, known: ReadonlySet<string> = new Set()): Promise<BuilderDiscovery> {
+  const result: BuilderDiscovery = { builder: reader.builder, ok: false, communities: [], skipped: [], known: 0, unreadMarkets: [] };
+  const entries = await indexedEntries(reader.index, reader.host, fetcher);
   if (!entries) return { ...result, reason: "sitemap_unreadable" };
+  const indexed: Array<{ entry: ListingEntry; communityPath: RegExp }> = entries.map((entry) => ({ entry, communityPath: reader.communityPath }));
+  // Another market's index that cannot be read leaves that market for the next run; the first market's communities still count.
+  for (const market of reader.more ?? []) {
+    const more = await indexedEntries(market.index, reader.host, fetcher);
+    if (!more) { result.unreadMarkets.push("url" in market.index ? market.index.url : reader.host); continue; }
+    indexed.push(...more.map((entry) => ({ entry, communityPath: market.communityPath })));
+  }
   // One page per community however the index spells it (trailing slash, case): the first spelling is the one read.
   const pages = new Map<string, { url: string; record: CommunityRecord | null }>();
   const truncated = new Map<string, string>();
-  for (const entry of entries) {
+  const seenKnown = new Set<string>();
+  for (const { entry, communityPath } of indexed) {
     const url = asUrl(entry.url);
-    if (!url || !sameOfficialHost(url, reader.host) || !reader.communityPath.test(url.pathname)) continue;
+    if (!url || !sameOfficialHost(url, reader.host) || !communityPath.test(url.pathname)) continue;
     const key = normalizedDealSourceKey(`${url.origin}${url.pathname}`);
+    if (known.has(key)) { if (!seenKnown.has(key)) { seenKnown.add(key); result.known += 1; } continue; }
     if (pages.has(key) || truncated.has(key)) continue;
     // Past the cap a page is counted, not dropped silently: the run's e-mail says how many were left for later.
     if (pages.size >= MAX_COMMUNITY_PAGES) { truncated.set(key, `${url.origin}${url.pathname}`); continue; }
@@ -422,7 +480,7 @@ export async function discoverBuilderCommunities(reader: DiscoveryReader, fetche
     if (!record) { result.skipped.push({ url, reason: "no_community_record" }); continue; }
     // Every record must place the community: one without coordinates cannot pass the area check and is not added on faith.
     if (!record.geo) { result.skipped.push({ url, reason: "no_community_record" }); continue; }
-    if (milesBetween(DOWNTOWN_SAN_ANTONIO, record.geo) > DISCOVERY_RADIUS_MILES) { result.skipped.push({ url, reason: "outside_area" }); continue; }
+    if (!inDiscoveryArea(record.geo)) { result.skipped.push({ url, reason: "outside_area" }); continue; }
     const address = [record.street, record.city, record.zip ? `TX ${record.zip}` : "TX"].filter(Boolean).join(", ");
     result.communities.push({
       builder: reader.builder,
@@ -468,6 +526,12 @@ export async function discoverAndOnboardAll(fetcher: HtmlFetcher = fetch, reader
   const saved = async () => { await options.onBuilder?.(run, createdIds).catch(() => undefined); };
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const now = options.now ?? (() => Date.now());
+  // Communities already in the database: their pages are not read again (see discoverBuilderCommunities).
+  let known = new Set<string>();
+  try {
+    const db = await getDb();
+    if (db) known = new Set((await db.select({ sourceUrl: dealCommunities.sourceUrl }).from(dealCommunities)).map((row) => normalizedDealSourceKey(row.sourceUrl)));
+  } catch { known = new Set(); }
   for (const reader of readers) {
     if (!hasBuilderReader(reader.builder) || finished.has(reader.builder)) continue;
     const failed = (reason: string) => { run.builders.push({ builder: reader.builder, ok: false, reason, found: 0, skipped: 0, created: 0, existing: 0 }); return saved(); };
@@ -482,7 +546,7 @@ export async function discoverAndOnboardAll(fetcher: HtmlFetcher = fetch, reader
         const response = await fetcher(input, init);
         if (now() - renewed >= 60_000) { renewed = now(); await lease!.heartbeat().catch(() => undefined); }
         return response;
-      });
+      }, known);
     } catch (error) {
       console.error(`[deals-discovery] ${reader.builder} failed`, error instanceof Error ? error.message : error);
       await failed("discovery_failed");
@@ -498,7 +562,7 @@ export async function discoverAndOnboardAll(fetcher: HtmlFetcher = fetch, reader
       await failed("onboarding_failed");
       continue;
     }
-    run.builders.push({ builder: reader.builder, ok: found.ok, reason: found.reason, found: found.communities.length, skipped: found.skipped.length + onboarded.skipped.length, created: onboarded.created.length, existing: onboarded.existing });
+    run.builders.push({ builder: reader.builder, ok: found.ok, reason: found.reason, found: found.communities.length, skipped: found.skipped.length + onboarded.skipped.length, created: onboarded.created.length, existing: onboarded.existing + found.known });
     run.created += onboarded.created.length;
     createdIds.push(...onboarded.created);
     await saved();

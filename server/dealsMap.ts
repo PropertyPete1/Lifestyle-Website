@@ -1,4 +1,4 @@
-import { milesBetween } from "../shared/dealsArea";
+import { marketOf, milesBetween } from "../shared/dealsArea";
 import type { Request, Response } from "express";
 import crypto from "node:crypto";
 import { and, eq } from "drizzle-orm";
@@ -31,6 +31,8 @@ export const AREA_MAP_ATTRIBUTION = "Map data and imagery from Google. Centered 
 /** The landing card names no ZIP code: its circle sits on a coarse grid cell, not the ZIP center. */
 export const PUBLIC_AREA_MAP_ATTRIBUTION = "Map data and imagery from Google. General area only.";
 export const DEFAULT_DRIVE_DESTINATIONS = ["downtown San Antonio", "Randolph AFB", "Lackland AFB", "The Pearl"];
+/** An Austin-market community's chips: its own city's landmarks (the settings list names San Antonio's). */
+export const AUSTIN_DRIVE_DESTINATIONS = ["downtown Austin", "The Domain", "Austin-Bergstrom Airport", "Round Rock"];
 const IMAGE_CACHE_MS = 24 * 60 * 60_000;
 /** Enough for both maps of every community; stored as WebP (about 40 KB each). */
 const IMAGE_CACHE_LIMIT = 800;
@@ -93,7 +95,8 @@ export async function zipForAddress(address: string): Promise<string | null> {
 export async function placeByCommunityName(name: string, address: string): Promise<Centroid | null> {
   const city = address.split(";")[0]!.split(",").map((part) => part.trim()).filter(Boolean)[0];
   if (!name.trim() || !city || /\d/.test(city)) return null;
-  const bigCity = city.toLowerCase() === "san antonio";
+  // The market cities are never replaced by their downtown (Austin's edge-of-town communities would read "Central Austin").
+  const bigCity = /^(?:san antonio|austin)$/i.test(city);
   const limit = bigCity ? 28 : 12;
   const [found, town] = await Promise.all([
     makeRequest<GeocodingResult>("/maps/api/geocode/json", { address: `${name.trim()}, ${city}, TX`, components: "country:US|administrative_area:TX" }),
@@ -134,20 +137,20 @@ export function roundToFiveMinutes(seconds: number): number {
   return Math.max(5, Math.round(seconds / 60 / 5) * 5);
 }
 
-function destinationQuery(destination: string): string {
+function destinationQuery(destination: string, city = "San Antonio"): string {
   const trimmed = destination.trim();
   // Short names such as "The Pearl" are anchored to the metro so Google does not
   // resolve a same-named place elsewhere.
-  return /,|\bTX\b|\bTexas\b/i.test(trimmed) ? trimmed : `${trimmed}, San Antonio, TX`;
+  return /,|\bTX\b|\bTexas\b/i.test(trimmed) ? trimmed : `${trimmed}, ${city}, TX`;
 }
 
 /** "about N min to X" chips from the ZIP centroid, rounded to 5 minutes; failed legs are skipped. */
-export async function driveTimeChips(centroid: Centroid, destinations: readonly string[]): Promise<string[]> {
+export async function driveTimeChips(centroid: Centroid, destinations: readonly string[], city = "San Antonio"): Promise<string[]> {
   const list = destinations.map((value) => value.trim()).filter(Boolean).slice(0, 8);
   if (!list.length) return [];
   const result = await makeRequest<DistanceMatrixResult>("/maps/api/distancematrix/json", {
     origins: `${centroid.lat},${centroid.lng}`,
-    destinations: list.map(destinationQuery).join("|"),
+    destinations: list.map((destination) => destinationQuery(destination, city)).join("|"),
     mode: "driving",
     units: "imperial",
   });
@@ -182,7 +185,8 @@ export async function refreshCommunityGeography(communityId: number): Promise<{ 
     let chips: string[] = [];
     try {
       const settings = await getDealSettings();
-      chips = await driveTimeChips(centroid, settings.driveDestinations);
+      const market = marketOf(centroid);
+      chips = market.name === "Austin" ? await driveTimeChips(centroid, AUSTIN_DRIVE_DESTINATIONS, "Austin") : await driveTimeChips(centroid, settings.driveDestinations);
     } catch (error) {
       console.warn("[deals-map] drive times unavailable", error instanceof Error ? error.message : error);
     }

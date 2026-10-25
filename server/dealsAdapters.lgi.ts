@@ -30,7 +30,7 @@ import { parseNextData } from "./dealsAdapters.davidson";
  * - community: /texas/san-antonio/<slug>               (about 300 KB)
  * - plan:      /texas/san-antonio/<slug>/<plan>
  */
-export const lgiListingUrl = () => `https://${LGI_HOST}/texas/san-antonio`;
+export const lgiListingUrl = (market = "san-antonio") => `https://${LGI_HOST}/texas/${market}`;
 
 type Json = Record<string, unknown>;
 const obj = (value: unknown): Json | null => value && typeof value === "object" && !Array.isArray(value) ? value as Json : null;

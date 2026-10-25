@@ -48,7 +48,7 @@ const HAK = "https://www.hakesbrothers.com";
 const BZ = "https://www.beazer.com";
 const beazerListing = JSON.stringify({ items: [
   { __typename: "CommunityDetailPage", Url: `${BZ}/san-antonio-TX/san-antonio/fixture-meadows`, MinimumPrice: 358990, Name: "Fixture Meadows", CommunityName: "Fixture Meadows", Latitude: 29.4997036, Longitude: -98.7811012, HasHomes: true, HasVIPList: false, ProductLines: { ProductLinePage: { items: [{ City: "San Antonio", StateID: "TX" }] } } },
-  { __typename: "CommunityDetailPage", Url: `${BZ}/san-antonio-TX/kyle/far-fixture`, MinimumPrice: 0, Name: "Far Fixture", CommunityName: "Far Fixture", Latitude: 29.918, Longitude: -97.85, HasHomes: false, HasVIPList: true, ProductLines: { ProductLinePage: { items: [{ City: "Kyle", StateID: "TX" }] } } },
+  { __typename: "CommunityDetailPage", Url: `${BZ}/san-antonio-TX/kyle/far-fixture`, MinimumPrice: 0, Name: "Far Fixture", CommunityName: "Far Fixture", Latitude: 31.55, Longitude: -97.15, HasHomes: false, HasVIPList: true, ProductLines: { ProductLinePage: { items: [{ City: "Kyle", StateID: "TX" }] } } },
 ], total: 2 });
 const beazerPage = (name: string, street: string, city: string, zip: string, geo: [number, number]) => {
   const row = { __typename: "CommunityDetailPage", CommunityID: 1566, CommunityName: name, Url: `${BZ}/san-antonio-TX/${city.toLowerCase().replace(/\s+/g, "-")}/${name.toLowerCase().replace(/\s+/g, "-")}`, Latitude: geo[0], Longitude: geo[1], MinimumPrice: 358990, HasVIPList: false, ProductLines: { ProductLinePage: { items: [{ StreetAddress: street, City: city, PostalCode: zip, PhoneNumber: "210-555-0142" }] } }, Plans: { PlanDetailPage: { items: [] } } };
@@ -78,7 +78,7 @@ const vhCommunity = (title: string, slug: string, street: string, city: string, 
 const vhRoster = `<html><body><script>if (typeof oceanFloorModules.communitiesMapList === 'undefined') { oceanFloorModules.communitiesMapList = []; } oceanFloorModules.communitiesMapList.push({ id: 'communities-list-map', map: { icons: {"default":"<svg><\\/svg>"} }, regions: ${JSON.stringify([{ id: 4, name: "El Paso", communities: [vhCommunity("Far Fixture", "far-fixture", "960 Far Dr", "Horizon City", "79928", [31.65462, -106.179398])], regions: [] }, { id: 8, name: "San Antonio", communities: [vhCommunity("Fixture Fields", "fixture-fields", "14515 Fixture Clover", "San Antonio", "78253", [29.5060502, -98.7824544]), vhCommunity("Fixture Enclave", "fixture-enclave", "", "San Antonio", "78240", [29.526858, -98.566718], ["soon", "Coming Soon"])], regions: [] }]).replace(/\//g, "\\/")}, currentPage: 'texas', });</script></body></html>`;
 const dreesAreas = JSON.stringify({ data: [{ areaName: "Austin", id: "AUST", pageId: 959, pageUrl: "/new-homes-austin/" }, { areaName: "San Antonio", id: "SAN", pageId: 310095, pageUrl: "/new-homes-san-antonio/" }] });
 const dreesRow = (id: number, name: string, url: string, street: string | null, city: string, zip: string, geo: [number, number], parent = false) => ({ contentId: id, ...(parent ? { communityName: name, isCommunity: true } : { neighborhoodName: name, isCommunity: false }), url, ...(street ? { address: street } : {}), cityName: city, zipCode: zip, modelPhone: "210-555-0142", lat: geo[0], lng: geo[1], priceLow: 1174900, qmiCount: 2, planCount: 6, caption: "Now Selling!" });
-const dreesMarket = JSON.stringify({ data: { neighborhoods: [dreesRow(309651, "Fixture Ranch", "/new-homes-san-antonio/boerne/fixture-ranch/fixture-ranch/", "105 Fixture Wind", "Boerne", "78006", [29.8071, -98.6402]), dreesRow(326325, "Fixture Hills", "/new-homes-san-antonio/san-antonio/comm-fixture-hills/", null, "San Antonio", "78253", [29.4975, -98.8081], true), dreesRow(310329, "Fixture Hills 50S", "/new-homes-san-antonio/san-antonio/comm-fixture-hills/fixture-hills-50s/", "9512 Fixture Hollow", "San Antonio", "78253", [29.4975, -98.8081]), dreesRow(400, "Far Fixture", "/new-homes-san-antonio/kyle/far-fixture/far-fixture/", "1 Far Rd", "Kyle", "78640", [29.918, -97.85])], promos: [], filteredRecords: 4 } });
+const dreesMarket = JSON.stringify({ data: { neighborhoods: [dreesRow(309651, "Fixture Ranch", "/new-homes-san-antonio/boerne/fixture-ranch/fixture-ranch/", "105 Fixture Wind", "Boerne", "78006", [29.8071, -98.6402]), dreesRow(326325, "Fixture Hills", "/new-homes-san-antonio/san-antonio/comm-fixture-hills/", null, "San Antonio", "78253", [29.4975, -98.8081], true), dreesRow(310329, "Fixture Hills 50S", "/new-homes-san-antonio/san-antonio/comm-fixture-hills/fixture-hills-50s/", "9512 Fixture Hollow", "San Antonio", "78253", [29.4975, -98.8081]), dreesRow(400, "Far Fixture", "/new-homes-san-antonio/kyle/far-fixture/far-fixture/", "1 Far Rd", "Kyle", "78640", [31.55, -97.15])], promos: [], filteredRecords: 4 } });
 const LEG = "https://www.livelegendhomes.com";
 const legendRow = (id: number, name: string, region: string, county: string, city: string, street: string, zip: string, geo: [number, number], availability = "Active") => ({ id, brand: "legendhomes", name, salesOfficePhone: "2105550142", regions: [{ label: region, stateName: "TX" }], address: { address1: street, city, zip, latitude: geo[0], longitude: geo[1], countyName: county }, communityAvailabilityRef: { id: 1, name: availability, label: "Current" }, priceFrom: 252990, moveInNowHomesCount: 2, plansCount: 6 });
 const legendListing = JSON.stringify({ items: [legendRow(104, "Fixture Ranch", "Schertz/Cibolo", "Bexar", "Converse", "9810 Fixture Way", "78109", [29.5205, -98.3012]), legendRow(500, "Far Fixture", "Houston", "Harris", "Katy", "1 Far Rd", "77449", [29.79, -95.82])], meta: { totalItems: 2 } });
@@ -86,14 +86,14 @@ const LGI = "https://www.lgihomes.com";
 const lgiNext = (route: Record<string, unknown>, componentProps: Record<string, unknown>) => `<html><body><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { page: { layout: { sitecore: { route } } }, dictionary: {}, componentProps } } })}</script></body></html>`;
 const lgiMarket = lgiNext({ name: "san-antonio", fields: {}, placeholders: { "headless-main": [{ componentName: "LGIMarketLandingPage", uid: "m1", placeholders: { "community-search": [{ componentName: "CommunitySearch", uid: "cs1" }] } }] } }, { cs1: { communities: { results: [
   { url: { path: "/texas/san-antonio/fixture-wing" }, communityName: { value: "Fixture Wing" }, locationIdentifier: { value: "San Antonio" }, latitude: { jsonValue: { value: 29.3088 } }, longitude: { jsonValue: { value: -98.4046 } }, phone: { value: "(888) 384-5144" }, minListPrice: { jsonValue: { value: 222900 } } },
-  { url: { path: "/texas/san-antonio/far-fixture" }, communityName: { value: "Far Fixture" }, locationIdentifier: { value: "Kyle" }, latitude: { jsonValue: { value: 29.918 } }, longitude: { jsonValue: { value: -97.85 } }, phone: { value: "(855) 806-2800" } },
+  { url: { path: "/texas/san-antonio/far-fixture" }, communityName: { value: "Far Fixture" }, locationIdentifier: { value: "Kyle" }, latitude: { jsonValue: { value: 31.55 } }, longitude: { jsonValue: { value: -97.15 } }, phone: { value: "(855) 806-2800" } },
 ] } } });
 const lgiPage = (name: string, street: string, city: string, zip: string, geo: [number, number]) => lgiNext({ name: "x", fields: { CommunityName: { value: name }, Address1: { value: street }, City: { value: city }, ZipCode: { value: zip }, Phone: { value: "(888) 384-5144" }, Latitude: { value: geo[0] }, Longitude: { value: geo[1] }, MinListPrice: { value: 222900 }, SaleStatus: { fields: { Key: { value: "Active" } } }, PandIInfo: { value: "" } }, placeholders: { "headless-main": [{ componentName: "LGICommunityLandingPage", uid: "c1", placeholders: { "floorplan-search": [{ componentName: "FloorPlanSearch", uid: "fs1" }] } }] } }, { fs1: { community: { floorplans: { results: [] } } } });
 const AW = "https://www.ashtonwoods.com";
 const ashtonPage = (name: string, street: string, city: string, zip: string) => `<html><head><script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@type": "HomeAndConstructionBusiness", name: `${name} By Ashton Woods`, address: { "@type": "PostalAddress", streetAddress: street, addressLocality: city, addressRegion: "TX", postalCode: zip } })}</script></head><body><div class="property-card js-property-card" data-property-id="1"><h4 class="property-card__title"><a href="/san-antonio/x/x-plan/1-street">1 Street <br> ${city}, TX ${zip}</a></h4><div class="property-card__body-title">Available Now</div><div class="property-card__price">$300,000</div></div></body></html>`;
 const ashtonListing = JSON.stringify({ division: "San Antonio", communities: [
   { items: [{ cid: 713, url: `${AW}/san-antonio/fixture-hollow`, community_title: "Fixture Hollow", community_phone: "210-361-0710", area: "San Antonio", child_communities: [{ cid: 714 }] }], coordinates: { lat: "29.3603446", lon: "-98.7874964" } },
-  { items: [{ cid: 258, url: `${AW}/san-antonio/far-fixture`, community_title: "Far Fixture", community_phone: "210-899-7711", area: "Kyle", child_communities: [] }], coordinates: { lat: "29.99", lon: "-97.87" } },
+  { items: [{ cid: 258, url: `${AW}/san-antonio/far-fixture`, community_title: "Far Fixture", community_phone: "210-899-7711", area: "Kyle", child_communities: [] }], coordinates: { lat: "31.55", lon: "-97.15" } },
   { items: [{ cid: 259, url: `${AW}/san-antonio/appointment-fixture`, community_title: "Appointment Fixture", community_phone: "210-899-7712", area: "Live Oak", child_communities: [] }], coordinates: { lat: "29.56", lon: "-98.33" } },
 ] });
 const DWH = "https://www.davidweekleyhomes.com";
@@ -107,7 +107,7 @@ const TOLL = "https://www.tollbrothers.com";
 const tollListing = `<html><body><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { componentType: "SearchComponent", searchResults: { perfect: [
   { "@type": "CommunitySearchItem", isMaster: false, url: `${TOLL}/luxury-homes-for-sale/Texas/Toll-Brothers-at-Fixture-Ranch`, name: "Toll Brothers at Fixture Ranch", lat: "29.3929", lon: "-98.7582", city: "San Antonio", zipCode: "78245", streetAddress: "13312 Fixture Acacia", phone: "210-756-0955", pMin: 414995 },
   { "@type": "MasterCommunitySearchItem", isMaster: true, url: `${TOLL}/luxury-homes-for-sale/Texas/Regency-at-Fixture`, name: "Regency at Fixture", city: "Boerne", communities: [{ "@type": "CommunitySearchItem", isMaster: false, url: `${TOLL}/luxury-homes-for-sale/Texas/Regency-at-Fixture/Flamenco-Collection`, name: "Regency at Fixture - Flamenco Collection", lat: "29.806", lon: "-98.689", city: "Boerne", zipCode: "78006", streetAddress: "103 Fixture Way", phone: "830-555-0100", pMin: 409995 }] },
-  { "@type": "CommunitySearchItem", isMaster: false, url: `${TOLL}/luxury-homes-for-sale/Texas/Toll-Brothers-at-Far-Fixture`, name: "Toll Brothers at Far Fixture", lat: "29.99", lon: "-97.87", city: "Kyle", zipCode: "78640", streetAddress: "1 Far Rd", phone: "830-360-8715", pMin: 315995 },
+  { "@type": "CommunitySearchItem", isMaster: false, url: `${TOLL}/luxury-homes-for-sale/Texas/Toll-Brothers-at-Far-Fixture`, name: "Toll Brothers at Far Fixture", lat: "31.55", lon: "-97.15", city: "Kyle", zipCode: "78640", streetAddress: "1 Far Rd", phone: "830-360-8715", pMin: 315995 },
   { "@type": "CommunitySearchItem", isMaster: false, url: `${TOLL}/luxury-homes-for-sale/Texas/Toll-Brothers-at-Unplaced`, name: "Unplaced", city: "San Antonio", streetAddress: "2 Nowhere Rd" },
 ] } } } })}</script></body></html>`;
 const KB = "https://www.kbhome.com";
@@ -135,7 +135,7 @@ const DELWEBB = "https://www.delwebb.com";
 const pulteListing = JSON.stringify([
   { id: 211074, name: "Fixture Ridge", status: "Save on To-Be-Built Homes", brandName: "Pulte", address: { street1: "13607 Fixture Way", zipCode: "78245", city: "San Antonio" }, latitude: 29.39, longitude: -98.72, isCommunityActive: true, pageURL: "/homes/texas/san-antonio/san-antonio/fixture-ridge-211074", salesPhoneNumber: "(210) 555-0101", startingFromPrice: 333_990 },
   { id: 211073, name: "Fixture Ridge", status: "Quick Move-Ins Available", brandName: "Centex", address: { street1: "13607 Fixture Way", zipCode: "78245", city: "San Antonio" }, latitude: 29.39, longitude: -98.72, isCommunityActive: true, pageURL: `${CENTEX}/homes/texas/san-antonio/san-antonio/fixture-ridge-211073`, salesPhoneNumber: "(210) 555-0100", startingFromPrice: 251_490 },
-  { id: 211338, name: "Fixture Webb at Far Falls", status: "New Phase Available", brandName: "Del Webb", address: { street1: "1 Far Rd", zipCode: "78640", city: "Kyle" }, latitude: 29.99, longitude: -97.87, isCommunityActive: true, pageURL: `${DELWEBB}/homes/texas/san-antonio/kyle/fixture-webb-211338`, salesPhoneNumber: null, startingFromPrice: 400_000 },
+  { id: 211338, name: "Fixture Webb at Far Falls", status: "New Phase Available", brandName: "Del Webb", address: { street1: "1 Far Rd", zipCode: "78640", city: "Kyle" }, latitude: 31.55, longitude: -97.15, isCommunityActive: true, pageURL: `${DELWEBB}/homes/texas/san-antonio/kyle/fixture-webb-211338`, salesPhoneNumber: null, startingFromPrice: 400_000 },
   { id: 211799, name: "Closed Fixture", status: "Sold Out", brandName: "Pulte", address: { street1: "2 Done St", zipCode: "78245", city: "San Antonio" }, latitude: 29.39, longitude: -98.72, isCommunityActive: false, pageURL: "/homes/texas/san-antonio/san-antonio/closed-fixture-211799", salesPhoneNumber: null, startingFromPrice: null },
 ]);
 const pulteListingUrl = (host: string, brand: string) => `https://${host}/API/Community/Search?State=Texas&Region=San%20Antonio&Brand=${encodeURIComponent(brand)}&JsonFormat=true&pageSize=0`;
@@ -165,11 +165,11 @@ const site: Record<string, { status?: number; body: string; type?: string; locat
   [`${CH}/texas/san-antonio-new-homes/schertz/no-record/`]: { body: "<html><body><h1>Coming soon</h1></body></html>" },
   [`${MI}/Sitemap/sitemap.xml`]: { body: urlset([`${MI}/new-homes/texas/greater-san-antonio/communities`, `${MI}/new-homes/texas/greater-san-antonio/quick-move-in-homes/some-home`, `${MI}/new-homes/texas/greater-san-antonio/converse/paloma-park`, `${MI}/new-homes/texas/greater-san-antonio/san-marcos/high-branch`, `${MI}/new-homes/texas/greater-san-antonio/converse/paloma-park/some-plan`]), type: "application/xml" },
   [`${MI}/new-homes/texas/greater-san-antonio/converse/paloma-park`]: { body: page(miRecords("Paloma Park", "10223 White Hart Lane", "Converse", "78109")) },
-  [`${MI}/new-homes/texas/greater-san-antonio/san-marcos/high-branch`]: { body: page(miRecords("High Branch", "1 Branch Rd", "San Marcos", "78666", { latitude: 29.88, longitude: -97.94 })) },
+  [`${MI}/new-homes/texas/greater-san-antonio/san-marcos/high-branch`]: { body: page(miRecords("High Branch", "1 Branch Rd", "San Marcos", "78666", { latitude: 31.55, longitude: -97.15 })) },
   [`${DRH}/api/comms/direct/texas/san-antonio`]: { body: drhListing([["Fixture Ranch", "/texas/san-antonio/san-antonio/fixture-ranch"], ["Far Fixture", "/texas/san-antonio/kyle/far-fixture"], ["Market page", "/texas/san-antonio"]]), type: "application/json; charset=utf-8" },
   [`${DRH}/texas/san-antonio/san-antonio/fixture-ranch`]: { body: page(drhRecords("Fixture Ranch", "3702 Fixture Terrace", "San Antonio", "78222")) },
   // Kyle is about 55 miles out: the market listing reaches past the area we cover.
-  [`${DRH}/texas/san-antonio/kyle/far-fixture`]: { body: page(drhRecords("Far Fixture", "1 Far Rd", "Kyle", "78640", { latitude: 29.99, longitude: -97.87 })) },
+  [`${DRH}/texas/san-antonio/kyle/far-fixture`]: { body: page(drhRecords("Far Fixture", "1 Far Rd", "Kyle", "78640", { latitude: 31.55, longitude: -97.15 })) },
   // Each host serves the same listing; only its own brand's pages are relative paths.
   [pulteListingUrl("www.pulte.com", "Pulte")]: { body: pulteListing, type: "application/json; charset=utf-8" },
   [pulteListingUrl("www.centex.com", "Centex")]: { body: pulteListing.replaceAll("\"pageURL\":\"/homes/", `"pageURL":"${PULTE}/homes/`).replace(`${CENTEX}/homes/texas/san-antonio/san-antonio/fixture-ridge-211073`, "/homes/texas/san-antonio/san-antonio/fixture-ridge-211073"), type: "application/json; charset=utf-8" },
@@ -177,20 +177,20 @@ const site: Record<string, { status?: number; body: string; type?: string; locat
   [`${FAH}/new-homes/tx/san-antonio-metro/san-antonio/fixture-meadows/`]: { body: page([homefinitiRecord("Fixture Meadows", "10318 Fixture Junction", "San Antonio", "78224")]) },
   [`${COV}/new-homes/tx/san-antonio/`]: { body: `<html><body><a href="/new-homes/tx/san-antonio/available-homes/">All</a><a href="/new-homes/tx/cibolo/buffalo-fixture/">Buffalo Fixture</a><a href="/new-homes/tx/new-braunfels/build-on-your-lot-2/">BOYL</a><a href="/new-homes/tx/kyle/far-fixture/">Far</a></body></html>` },
   [`${COV}/new-homes/tx/cibolo/buffalo-fixture/`]: { body: page([homefinitiRecord("Buffalo Fixture", "1 Fixture Rd", "Cibolo", "78108", { latitude: "29.58", longitude: "-98.22" })]) },
-  [`${COV}/new-homes/tx/kyle/far-fixture/`]: { body: page([homefinitiRecord("Far Fixture", "1 Far Rd", "Kyle", "78640", { latitude: "29.99", longitude: "-97.87" })]) },
+  [`${COV}/new-homes/tx/kyle/far-fixture/`]: { body: page([homefinitiRecord("Far Fixture", "1 Far Rd", "Kyle", "78640", { latitude: "31.55", longitude: "-97.15" })]) },
   [`${DAV}/states/texas/san-antonio-market-area/`]: { body: nextPage({ communities: [{ title: "Fixture Meadows", city: "San Antonio", uri: "/states/texas/san-antonio-market-area/san-antonio/fixture-meadows/" }, { title: "Far Fixture", city: "Kyle", uri: "/states/texas/san-antonio-market-area/kyle/far-fixture/" }] }) },
   [`${DAV}/states/texas/san-antonio-market-area/san-antonio/fixture-meadows/`]: { body: davidsonCommunity("Fixture Meadows", "10326 Fixture Jct", "San Antonio", "78224", { lat: 29.31, lng: -98.55 }) },
-  [`${DAV}/states/texas/san-antonio-market-area/kyle/far-fixture/`]: { body: davidsonCommunity("Far Fixture", "1 Far Rd", "Kyle", "78640", { lat: 29.99, lng: -97.87 }) },
+  [`${DAV}/states/texas/san-antonio-market-area/kyle/far-fixture/`]: { body: davidsonCommunity("Far Fixture", "1 Far Rd", "Kyle", "78640", { lat: 31.55, lng: -97.15 }) },
   [`${HH}/sitemap.xml`]: { body: urlset([`${HH}/san-antonio`, `${HH}/san-antonio/san-antonio/fixture-ranch`, `${HH}/san-antonio/san-antonio/fixture-ranch/760-026`, `${HH}/san-antonio/san-antonio/new-home-concierge`, `${HH}/san-antonio/san-marcos/far-fixture`, `${HH}/dallas/frisco/other-fixture`]), type: "application/xml" },
   [`${HH}/san-antonio/san-antonio/fixture-ranch`]: { body: highlandPage("Fixture Ranch", "13316 Fixture Acacia", "San Antonio", "78245", { lat: 29.3931, lng: -98.7605 }) },
-  [`${HH}/san-antonio/san-marcos/far-fixture`]: { body: highlandPage("Far Fixture", "1 Far Rd", "San Marcos", "78666", { lat: 29.88, lng: -97.94 }) },
+  [`${HH}/san-antonio/san-marcos/far-fixture`]: { body: highlandPage("Far Fixture", "1 Far Rd", "San Marcos", "78666", { lat: 31.55, lng: -97.15 }) },
   [`${TOLL}/luxury-homes/San-Antonio-TX`]: { body: tollListing },
   [`${DWH}/search/CommunityData?marketId=markets/3`]: { body: weekleyListing, type: "application/json" },
   [`${LGI}/texas/san-antonio`]: { body: lgiMarket },
   [`${SF}/communities/san-antonio-area`]: { body: sfMarket },
   [`${STAR}/san-antonio`]: { body: starlightMarket },
   [`${STAR}/san-antonio/fixture-trails`]: { body: starlightPage("Fixture Trails", "101 Fixture Street", "Seguin", "78155", [29.6285, -97.9854]) },
-  [`${STAR}/san-antonio/far-fixture`]: { body: starlightPage("Far Fixture", "1 Far Rd", "Kyle", "78640", [29.918, -97.85]) },
+  [`${STAR}/san-antonio/far-fixture`]: { body: starlightPage("Far Fixture", "1 Far Rd", "Kyle", "78640", [31.55, -97.15]) },
   ["https://api.drbhomes.com/api/v1/public-drb/community?searchField=communityRegion&searchValue=San%20Antonio&state=texas&region=san-antonio&page=1&limit=1000"]: { body: drbListing, type: "application/json" },
   ["https://api.livelegendhomes.com/api/v1/public-epcon/community/for-legend?limit=1000&division=san-antonio&barebones=false"]: { body: legendListing, type: "application/json" },
   [`${DREES}/api/en/dreeshomes/areas`]: { body: dreesAreas, type: "application/json" },
@@ -199,32 +199,32 @@ const site: Record<string, { status?: number; body: string; type?: string; locat
   [`${HAK}/san-antonio`]: { body: hakesMarket },
   ["https://www.beazer.com/api/get-communities-per-area?skip=0&limit=100&orderBy=FeatureOrder%3AASC&filters=%7B%7D&ancestorMainId=55228d07-f388-4656-9b45-c4671017e201"]: { body: beazerListing, type: "application/json" },
   [`${BZ}/san-antonio-TX/san-antonio/fixture-meadows`]: { body: beazerPage("Fixture Meadows", "6614 Fixture Glen", "San Antonio", "78253", [29.4997036, -98.7811012]) },
-  [`${BZ}/san-antonio-TX/kyle/far-fixture`]: { body: beazerPage("Far Fixture", "1 Far Rd", "Kyle", "78640", [29.918, -97.85]) },
+  [`${BZ}/san-antonio-TX/kyle/far-fixture`]: { body: beazerPage("Far Fixture", "1 Far Rd", "Kyle", "78640", [31.55, -97.15]) },
   [`${LEN}/new-homes/texas/san-antonio`]: { body: lennarMarket },
   [`${EMP}/us/texas/san-antonio/`]: { body: empireRegion },
   [`${EMP}/us/texas/san-antonio/fixture-agave/`]: { body: empirePage("Fixture Agave", "8602 Fixture Glen", "San Antonio", "78222", [29.3378048, -98.3938141], "/us/texas/san-antonio/fixture-agave/") },
-  [`${EMP}/us/texas/san-antonio/kyle/far-fixture/`]: { body: empirePage("Far Fixture", "1 Far Rd", "Kyle", "78640", [29.918, -97.85], "/us/texas/san-antonio/kyle/far-fixture/") },
+  [`${EMP}/us/texas/san-antonio/kyle/far-fixture/`]: { body: empirePage("Far Fixture", "1 Far Rd", "Kyle", "78640", [31.55, -97.15], "/us/texas/san-antonio/kyle/far-fixture/") },
   [`${EMP}/us/texas/san-antonio/kyle/`]: { body: "<html><body><h1>Kyle</h1></body></html>" },
   [`${EMP}/us/texas/san-antonio/smart-move-campaign/`]: { body: "<html><body><h1>Smart Move</h1></body></html>" },
   [`${HAK}/san-antonio/fixture-woods`]: { body: hakesPage("Fixture Woods", "293 Fixture Wy", "Mico", "78056", [29.518154, -98.825277]) },
-  [`${HAK}/san-antonio/far-fixture`]: { body: hakesPage("Far Fixture", "1 Far Rd", "Kyle", "78640", [29.918, -97.85]) },
+  [`${HAK}/san-antonio/far-fixture`]: { body: hakesPage("Far Fixture", "1 Far Rd", "Kyle", "78640", [31.55, -97.15]) },
   [`${TXH}/fixture-acres`]: { body: txhPage("Fixture Acres", "241 Fixture Loop", "Castroville", "78009", "29.4293913, -98.8569532") },
-  [`${TXH}/far-fixture`]: { body: txhPage("Far Fixture", "1 Far Rd", "Kyle", "78640", "29.918, -97.85") },
+  [`${TXH}/far-fixture`]: { body: txhPage("Far Fixture", "1 Far Rd", "Kyle", "78640", "31.55, -97.15") },
   [`${TXH}/build-on-your-lot`]: { body: `<html><body>${txhMenu}<main><h1>Build On Your Lot</h1><p>Your plan or ours.</p></main></body></html>` },
   [`${SIT}/communities/`]: { body: sitterleList },
   [`${SIT}/communities/fixture-ranch/`]: { body: sitterlePage("Fixture Ranch", "10103 Fixture Zimmer", "San Antonio", "78254", "29.5371268,-98.7423396") },
   [`${SIT}/communities/far-fixture/`]: { body: sitterlePage("Far Fixture", "1 Far Rd", "Magnolia", "77354", "30.21,-95.75") },
   [`${LGI}/texas/san-antonio/fixture-wing`]: { body: lgiPage("Fixture Wing", "11523 Fixture Eagles", "San Antonio", "78223", [29.3088, -98.4046]) },
-  [`${LGI}/texas/san-antonio/far-fixture`]: { body: lgiPage("Far Fixture", "1 Far Rd", "Kyle", "78640", [29.918, -97.85]) },
+  [`${LGI}/texas/san-antonio/far-fixture`]: { body: lgiPage("Far Fixture", "1 Far Rd", "Kyle", "78640", [31.55, -97.15]) },
   [`${AW}/ashton-woods/get-division-community-map/13`]: { body: ashtonListing, type: "application/json" },
   [`${AW}/san-antonio/fixture-hollow`]: { body: ashtonPage("Fixture Hollow", "14738 Fixture Pass", "San Antonio", "78252") },
   [`${AW}/san-antonio/far-fixture`]: { body: ashtonPage("Far Fixture", "1 Far Rd", "Kyle", "78640") },
   [`${AW}/san-antonio/appointment-fixture`]: { body: ashtonPage("Appointment Fixture", "By Appointment Only", "Live Oak", "78233") },
   [`${DWH}/new-homes/tx/san-antonio/san-antonio/fixture-ranch-45`]: { body: weekleyPage("Fixture Ranch – Select Classic Series", "13222 Fixture Acacia", "San Antonio", "78245", "29.3929823888344,-98.7576751930276") },
-  [`${DWH}/new-homes/tx/san-antonio/kyle/far-fixture`]: { body: weekleyPage("Far Fixture", "1 Far Rd", "Kyle", "78640", "29.99,-97.87") },
-  [`${KB}/sitemap.xml`]: { body: urlset([`${KB}/new-homes-san-antonio`, `${KB}/new-homes-san-antonio/fixture-heights`, `${KB}/new-homes-san-antonio/fixture-heights/plan-2246`, `${KB}/new-homes-austin/far-fixture`, `${KB}/new-homes-san-antonio/far-fixture`]), type: "application/xml" },
+  [`${DWH}/new-homes/tx/san-antonio/kyle/far-fixture`]: { body: weekleyPage("Far Fixture", "1 Far Rd", "Kyle", "78640", "31.55,-97.15") },
+  [`${KB}/sitemap.xml`]: { body: urlset([`${KB}/new-homes-san-antonio`, `${KB}/new-homes-san-antonio/fixture-heights`, `${KB}/new-homes-san-antonio/fixture-heights/plan-2246`, `${KB}/new-homes-houston/far-fixture`, `${KB}/new-homes-san-antonio/far-fixture`]), type: "application/xml" },
   [`${KB}/new-homes-san-antonio/fixture-heights`]: { body: kbPage("Fixture Heights - Heritage Collection", "1308 Fixture Ave.", "New Braunfels", "78130", { latitude: 29.638, longitude: -98.112 }) },
-  [`${KB}/new-homes-san-antonio/far-fixture`]: { body: kbPage("Far Fixture", "1 Far Rd.", "Kyle", "78640", { latitude: 29.99, longitude: -97.87 }) },
+  [`${KB}/new-homes-san-antonio/far-fixture`]: { body: kbPage("Far Fixture", "1 Far Rd.", "Kyle", "78640", { latitude: 31.55, longitude: -97.15 }) },
   [`${CC}/sitemap.xml`]: { body: urlset([`${CC}/find-your-new-home/texas/san-antonio-metro/`, `${CC}/find-your-new-home/texas/san-antonio-metro/san-antonio/fixture-grove/`, `${CC}/find-your-new-home/texas/san-antonio-metro/san-antonio/fixture-grove/lots/15177a-9122-fixture-rdg/`, `${CC}/find-your-new-home/texas/houston-metro/katy/far-fixture/`]), type: "application/xml" },
   [`${CC}/find-your-new-home/texas/san-antonio-metro/san-antonio/fixture-grove/`]: { body: centuryPage("Fixture Grove", "9106 Fixture Rdg", "San Antonio", "78222", { latitude: 29.33, longitude: -98.4 }) },
   [pulteListingUrl("www.delwebb.com", "Del Webb")]: { body: pulteListing.replaceAll("\"pageURL\":\"/homes/", `"pageURL":"${PULTE}/homes/`).replace(`${DELWEBB}/homes/texas/san-antonio/kyle/fixture-webb-211338`, "/homes/texas/san-antonio/kyle/fixture-webb-211338"), type: "application/json; charset=utf-8" },
@@ -288,7 +288,7 @@ describe("reading a builder's own records", () => {
 });
 
 describe("discovery", () => {
-  it("finds Chesmar's New Braunfels communities, filed under central Texas, and leaves central Texas's far ones out by distance", async () => {
+  it("finds Chesmar's New Braunfels and Austin communities, both filed under central Texas (Austin is our market since Oct 25)", async () => {
     const pages: Record<string, string> = {
       [`${CH}/sitemap.xml`]: urlset([`${CH}/texas/central-texas-new-homes/new-braunfels/meyer-ranch-45's/`, `${CH}/texas/central-texas-new-homes/austin/sweetwater/`, `${CH}/texas/central-texas-new-homes/new-braunfels/`]),
       [`${CH}/texas/central-texas-new-homes/new-braunfels/meyer-ranch-45's/`]: page([chesmarRecord("Meyer Ranch 45&#39;s", "1711 Seekat Drive", "New Braunfels", "78132", { latitude: "29.75", longitude: "-98.20" })]),
@@ -297,8 +297,8 @@ describe("discovery", () => {
     const fetched: string[] = [];
     const local = (async (input: string | URL | Request) => { const url = String(input); fetched.push(url); return pages[url] ? new Response(pages[url], { status: 200, headers: { "content-type": url.endsWith(".xml") ? "application/xml" : "text/html" } }) : new Response("missing", { status: 404 }); }) as typeof fetch;
     const found = await discoverBuilderCommunities(reader("Chesmar"), local);
-    expect(found.communities.map((community) => [community.name, community.city])).toEqual([["Meyer Ranch 45's", "New Braunfels"]]);
-    expect(found.skipped).toEqual([{ url: `${CH}/texas/central-texas-new-homes/austin/sweetwater/`, reason: "outside_area" }]);
+    expect(found.communities.map((community) => [community.name, community.city])).toEqual([["Meyer Ranch 45's", "New Braunfels"], ["Sweetwater", "Austin"]]);
+    expect(found.skipped).toEqual([]);
     expect(fetched).not.toContain(`${CH}/texas/central-texas-new-homes/new-braunfels/`);
   });
 
@@ -315,7 +315,7 @@ describe("discovery", () => {
 
     const mi = await discoverBuilderCommunities(reader("M/I Homes"), fetcher);
     expect(mi.communities.map((community) => community.name)).toEqual(["Paloma Park"]);
-    // San Marcos is about 50 miles out: outside the area we cover.
+    // A point near Waco is outside both markets.
     expect(mi.skipped).toEqual([{ url: `${MI}/new-homes/texas/greater-san-antonio/san-marcos/high-branch`, reason: "outside_area" }]);
     expect(mi.communities[0]).toMatchObject({ priceFrom: 289_990, salesPhone: "+12105550200" });
 
@@ -382,7 +382,7 @@ describe("discovery", () => {
       ["Far Fixture Waters", `${DRB}/drbhomes/find-your-home/communities/texas/san-antonio/far-fixture-waters`, "1 Far Rd, Seguin, TX 78155", "2105550142", 269_990],
     ]);
     expect(drb.skipped).toEqual([]);
-    expect(requested).toEqual(["https://api.drbhomes.com/api/v1/public-drb/community?searchField=communityRegion&searchValue=San%20Antonio&state=texas&region=san-antonio&page=1&limit=1000"]);
+    expect(requested).toEqual(["https://api.drbhomes.com/api/v1/public-drb/community?searchField=communityRegion&searchValue=San%20Antonio&state=texas&region=san-antonio&page=1&limit=1000", "https://api.drbhomes.com/api/v1/public-drb/community?searchField=communityRegion&searchValue=Austin&state=texas&region=austin&page=1&limit=1000"]);
 
     // Starlight: the market page links every community; each page's business record places it, and the 45-mile rule drops Kyle.
     requested.length = 0;
@@ -403,7 +403,8 @@ describe("discovery", () => {
     const drees = await discoverBuilderCommunities(reader("Drees Custom Homes"), fetcher);
     expect(drees.communities.map((community) => [community.name, community.sourceUrl, community.address])).toEqual([["Fixture Ranch", `${DREES}/new-homes-san-antonio/boerne/fixture-ranch/fixture-ranch/`, "105 Fixture Wind, Boerne, TX 78006"], ["Fixture Hills 50S", `${DREES}/new-homes-san-antonio/san-antonio/comm-fixture-hills/fixture-hills-50s/`, "9512 Fixture Hollow, San Antonio, TX 78253"]]);
     expect(drees.skipped).toEqual([{ url: `${DREES}/new-homes-san-antonio/kyle/far-fixture/far-fixture/`, reason: "outside_area" }]);
-    expect(requested).toEqual([`${DREES}/api/en/dreeshomes/areas`, `${DREES}/api/en/dreeshomes/community`]);
+    // San Antonio's list, then Austin's (each market's own area id and neighborhood search).
+    expect(requested).toEqual([`${DREES}/api/en/dreeshomes/areas`, `${DREES}/api/en/dreeshomes/community`, `${DREES}/api/en/dreeshomes/areas`, `${DREES}/api/en/dreeshomes/community`]);
 
     // View Homes: the Texas region page's roster carries every record (a coming-soon row is left out); El Paso is out and no page is read.
     requested.length = 0;
@@ -425,7 +426,7 @@ describe("discovery", () => {
     const hakes = await discoverBuilderCommunities(reader("Hakes Brothers"), fetcher);
     expect(hakes.communities.map((community) => [community.name, community.sourceUrl, community.address, community.salesPhone])).toEqual([["Fixture Woods", `${HAK}/san-antonio/fixture-woods`, "293 Fixture Wy, Mico, TX 78056", "2105550142"]]);
     expect(hakes.skipped).toEqual([{ url: `${HAK}/san-antonio/far-fixture`, reason: "outside_area" }]);
-    expect(requested).toEqual([`${HAK}/san-antonio`, `${HAK}/san-antonio/fixture-woods`, `${HAK}/san-antonio/far-fixture`]);
+    expect(requested).toEqual([`${HAK}/san-antonio`, `${HAK}/austin`, `${HAK}/san-antonio/fixture-woods`, `${HAK}/san-antonio/far-fixture`]);
 
     // Beazer: the site's metro search lists every selling community with its pin and city; each page gives the sales office's street.
     requested.length = 0;
@@ -439,7 +440,7 @@ describe("discovery", () => {
     const lennar = await discoverBuilderCommunities(reader("Lennar"), fetcher);
     expect(lennar.communities.map((community) => [community.name, community.sourceUrl, community.address, community.salesPhone, community.priceFrom])).toEqual([["Fixture Ranch", `${LEN}/new-homes/texas/san-antonio/san-antonio/fixture-ranch`, "8702 Fixture Glen, San Antonio, TX 78252", "2105550142", 254_999]]);
     expect(lennar.skipped).toEqual([{ url: `${LEN}/new-homes/texas/san-antonio/lubbock/far-fixture`, reason: "outside_area" }]);
-    expect(requested).toEqual([`${LEN}/new-homes/texas/san-antonio`]);
+    expect(requested).toEqual([`${LEN}/new-homes/texas/san-antonio`, `${LEN}/new-homes/texas/austin`]);
 
     // An index past the per-run cap counts what it left for later instead of dropping it silently.
     const many = Array.from({ length: 125 }, (_, index) => ({ url: `${LEN}/new-homes/texas/san-antonio/san-antonio/fixture-${index}`, record: { name: `Fixture ${index}`, street: `${index + 1} Fixture Rd`, city: "San Antonio", zip: "78252", phone: null, priceFrom: null, geo: { lat: 29.4, lng: -98.5 } } }));
@@ -480,14 +481,14 @@ describe("discovery", () => {
     const toll = await discoverBuilderCommunities(reader("Toll Brothers"), fetcher);
     expect(toll.communities.map((community) => [community.name, community.address, community.salesPhone, community.priceFrom])).toEqual([["Toll Brothers at Fixture Ranch", "13312 Fixture Acacia, San Antonio, TX 78245", "2107560955", 414_995], ["Regency at Fixture - Flamenco Collection", "103 Fixture Way, Boerne, TX 78006", "8305550100", 409_995]]);
     expect(toll.skipped).toEqual([{ url: `${TOLL}/luxury-homes-for-sale/Texas/Toll-Brothers-at-Far-Fixture`, reason: "outside_area" }, { url: `${TOLL}/luxury-homes-for-sale/Texas/Toll-Brothers-at-Unplaced`, reason: "no_community_record" }]);
-    expect(requested).toEqual([`${TOLL}/luxury-homes/San-Antonio-TX`]);
+    expect(requested).toEqual([`${TOLL}/luxury-homes/San-Antonio-TX`, `${TOLL}/luxury-homes/Austin-TX`]);
 
     // KB Home: the sitemap's San Antonio market community pages, never a plan page or another market; the Place record places them.
     requested.length = 0;
     const kb = await discoverBuilderCommunities(reader("KB Home"), fetcher);
     expect(kb.communities.map((community) => [community.name, community.address, community.salesPhone])).toEqual([["Fixture Heights - Heritage Collection", "1308 Fixture Ave., New Braunfels, TX 78130", "8305550066"]]);
     expect(kb.skipped).toEqual([{ url: `${KB}/new-homes-san-antonio/far-fixture`, reason: "outside_area" }]);
-    expect(requested.filter((url) => /plan-|new-homes-austin/.test(url))).toEqual([]);
+    expect(requested.filter((url) => /plan-|new-homes-houston/.test(url))).toEqual([]);
 
     // Century: the sitemap's San Antonio metro community pages, never a lot page or another metro.
     requested.length = 0;
@@ -509,7 +510,7 @@ describe("discovery", () => {
   it("adds new communities hidden, leaves the ones already there alone, and emails what it found", async () => {
     db.seed(dealCommunities, { builder: "Chesmar", privateName: "Sienna Lakes", sourceUrl: `${CH}/texas/san-antonio-new-homes/san-antonio/sienna-lakes`, privateAddress: "9010 Arroyo Grove, San Antonio, TX 78263", publicLabel: "Southeast San Antonio | Half-Acre Lots and Lakes", areaLabel: "Southeast San Antonio", amenities: "[]", reelCode: "sl1", scrubList: "{}", active: true, paused: false, manualMode: false });
     const run = await runCommunityDiscovery(fetcher);
-    expect(run).toMatchObject({ created: 31, builders: [{ builder: "Chesmar", ok: true, found: 2, created: 1, existing: 1 }, { builder: "M/I Homes", ok: true, found: 1, created: 1 }, { builder: "D.R. Horton", ok: true, found: 1, created: 1 }, { builder: "First America Homes", ok: true, found: 1, created: 1 }, { builder: "Coventry Homes", ok: true, found: 1, created: 1 }, { builder: "Davidson Homes", ok: true, found: 1, created: 1 }, { builder: "Highland Homes", ok: true, found: 1, created: 1 }, { builder: "KB Home", ok: true, found: 1, created: 1 }, { builder: "Toll Brothers", ok: true, found: 2, created: 2 }, { builder: "David Weekley Homes", ok: true, found: 1, created: 1 }, { builder: "Ashton Woods", ok: true, found: 2, created: 2 }, { builder: "LGI Homes", ok: true, found: 1, created: 1 }, { builder: "Sitterle Homes", ok: true, found: 1, created: 1 }, { builder: "Scott Felder Homes", ok: true, found: 1, created: 1 }, { builder: "DRB Homes", ok: true, found: 2, created: 2 }, { builder: "Starlight Homes", ok: true, found: 1, created: 1 }, { builder: "Legend Homes", ok: true, found: 1, created: 1 }, { builder: "Drees Custom Homes", ok: true, found: 2, created: 2 }, { builder: "View Homes", ok: true, found: 1, created: 1 }, { builder: "Texas Homes", ok: true, found: 1, created: 1 }, { builder: "Hakes Brothers", ok: true, found: 1, created: 1 }, { builder: "Beazer Homes", ok: true, found: 1, created: 1 }, { builder: "Lennar", ok: true, found: 1, created: 1 }, { builder: "Empire Homes", ok: true, found: 1, created: 1 }, { builder: "Century Communities", ok: true, found: 1, created: 1 }, { builder: "Pulte", ok: true, found: 1, created: 1 }, { builder: "Centex", ok: true, found: 1, created: 1 }, { builder: "Del Webb", ok: true, found: 0, created: 0 }] });
+    expect(run).toMatchObject({ created: 31, builders: [{ builder: "Chesmar", ok: true, found: 1, created: 1, existing: 1 }, { builder: "M/I Homes", ok: true, found: 1, created: 1 }, { builder: "D.R. Horton", ok: true, found: 1, created: 1 }, { builder: "First America Homes", ok: true, found: 1, created: 1 }, { builder: "Coventry Homes", ok: true, found: 1, created: 1 }, { builder: "Davidson Homes", ok: true, found: 1, created: 1 }, { builder: "Highland Homes", ok: true, found: 1, created: 1 }, { builder: "KB Home", ok: true, found: 1, created: 1 }, { builder: "Toll Brothers", ok: true, found: 2, created: 2 }, { builder: "David Weekley Homes", ok: true, found: 1, created: 1 }, { builder: "Ashton Woods", ok: true, found: 2, created: 2 }, { builder: "LGI Homes", ok: true, found: 1, created: 1 }, { builder: "Sitterle Homes", ok: true, found: 1, created: 1 }, { builder: "Scott Felder Homes", ok: true, found: 1, created: 1 }, { builder: "DRB Homes", ok: true, found: 2, created: 2 }, { builder: "Starlight Homes", ok: true, found: 1, created: 1 }, { builder: "Legend Homes", ok: true, found: 1, created: 1 }, { builder: "Drees Custom Homes", ok: true, found: 2, created: 2 }, { builder: "View Homes", ok: true, found: 1, created: 1 }, { builder: "Texas Homes", ok: true, found: 1, created: 1 }, { builder: "Hakes Brothers", ok: true, found: 1, created: 1 }, { builder: "Beazer Homes", ok: true, found: 1, created: 1 }, { builder: "Lennar", ok: true, found: 1, created: 1 }, { builder: "Empire Homes", ok: true, found: 1, created: 1 }, { builder: "Century Communities", ok: true, found: 1, created: 1 }, { builder: "Pulte", ok: true, found: 1, created: 1 }, { builder: "Centex", ok: true, found: 1, created: 1 }, { builder: "Del Webb", ok: true, found: 0, created: 0 }] });
     const added = db.rows(dealCommunities).filter((row) => row.awaitingFirstSync);
     expect(added.map((row) => [row.privateName, row.active, row.areaLabel])).toEqual([["Esperanza 60's", false, "Boerne"], ["Paloma Park", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Meadows", false, "Greater San Antonio"], ["Buffalo Fixture", false, "Greater San Antonio"], ["Fixture Meadows", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Heights - Heritage Collection", false, "New Braunfels"], ["Toll Brothers at Fixture Ranch", false, "Greater San Antonio"], ["Regency at Fixture - Flamenco Collection", false, "Boerne"], ["Fixture Ranch – Select Classic Series", false, "Greater San Antonio"], ["Fixture Hollow", false, "Greater San Antonio"], ["Appointment Fixture", false, "Greater San Antonio"], ["Fixture Wing", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Vine", false, "Greater San Antonio"], ["Fixture Landmark", false, "Greater San Antonio"], ["Far Fixture Waters", false, "Seguin"], ["Fixture Trails", false, "Seguin"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Ranch", false, "Boerne"], ["Fixture Hills 50S", false, "Greater San Antonio"], ["Fixture Fields", false, "Greater San Antonio"], ["Fixture Acres", false, "Castroville"], ["Fixture Woods", false, "Mico"], ["Fixture Meadows", false, "Greater San Antonio"], ["Fixture Ranch", false, "Greater San Antonio"], ["Fixture Agave", false, "Greater San Antonio"], ["Fixture Grove", false, "Greater San Antonio"], ["Fixture Ridge", false, "Greater San Antonio"], ["Fixture Ridge", false, "Greater San Antonio"]]);
     // The exact coordinates on the builder's page are never stored.

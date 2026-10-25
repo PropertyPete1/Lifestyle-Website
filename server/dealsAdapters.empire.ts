@@ -43,7 +43,7 @@ import {
 /** A community with more homes for sale than this is held, never truncated. */
 export const EMPIRE_MAX_HOMES = 100;
 export const EMPIRE_LISTING_PATH = "/wp-json/custom/v1/get_lots_by_community_name";
-export const empireRegionUrl = () => `https://${EMPIRE_HOST}/us/texas/san-antonio/`;
+export const empireRegionUrl = (market = "san-antonio") => `https://${EMPIRE_HOST}/us/texas/${market}/`;
 /** The site's own listing query for a community's homes for sale or plans (the page's widgets make the same request). */
 export function empireListingUrl(community: string, kind: "homes" | "plans"): string {
   const params = new URLSearchParams({ per_page: String(EMPIRE_MAX_HOMES), page: "1", name: community, meta_key: "apartment_type", meta_value: kind === "homes" ? "quick_delivery" : "new_home_plan", sort_comminity: "collection", orderby: "collection", order: "DESC" });
@@ -119,8 +119,8 @@ const geoOf = (latitude: unknown, longitude: unknown): { lat: number; lng: numbe
   const lng = Number(longitude);
   return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat !== 0 || lng !== 0) ? { lat, lng } : null;
 };
-/** "8602 Partida, San Antonio, TX 78222" or "1531 Estelea Grove, New Braunfels, TX, 78130". */
-const ADDRESS_PATTERN = /^(.+?),\s*([A-Za-z .'-]+?),?\s+TX,?\s*(\d{5})(?:-\d{4})?$/;
+/** "8602 Partida, San Antonio, TX 78222"; the Austin pages add ", USA" ("122 Vogel Ln, Bastrop, TX 78602, USA", Oct 25, 2026). */
+const ADDRESS_PATTERN = /^(.+?),\s*([A-Za-z .'-]+?),?\s+TX,?\s*(\d{5})(?:-\d{4})?(?:,?\s*USA)?$/;
 
 function photoUrl(value: unknown, host: string): string | null {
   const url = typeof value === "string" ? asUrl(decodeHtmlEntities(value.trim())) : null;
@@ -186,7 +186,9 @@ export function parseEmpireCommunity(html: string, pageUrl: string): EmpirePage 
   const banner = all.find((node) => elementClass(node, "banner-promotion-single"));
   const promo = banner ? cleanOfferText(elementText(banner, html).replace(/\bRequest Information\b.*$/i, "").replace(/\b(?:View|See)\s+(?:the\s+)?Offers?\b|\bLearn\s+More\b|\bGet\s+in\s+Touch\b/gi, " ")) || null : null;
   // The campaign page: a link in the banner itself first, else the market's own campaign/offers/promotion page (another market's page is never this community's terms).
-  const market = /^\/us\/texas\/san-antonio\//i;
+  // The community's own market (San Antonio or Austin): another market's campaign page is never this community's terms.
+  const marketSlug = /^\/us\/texas\/([a-z-]+)\//i.exec(asUrl(pageUrl)?.pathname ?? "")?.[1] ?? "san-antonio";
+  const market = new RegExp(`^/us/texas/${marketSlug}/`, "i");
   const campaignOf = (nodes: HtmlElement[]) => nodes.map((node) => node.tag === "a" ? asUrl(decodeHtmlEntities(node.attributes.href ?? "")) : null).find((link): link is URL => link !== null && sameOfficialHost(link, host) && market.test(link.pathname) && /campaign|offers?|promotion/i.test(link.pathname)) ?? null;
   const campaignLink = (banner ? campaignOf(descendants(banner)) : null) ?? campaignOf(all);
   return { record, community: quick?.community ?? null, hasPlansWidget: widgets.some((widget) => /plan/i.test(widget.display)), foreignPage, cardUrls, promo, campaignUrl: campaignLink ? `${pageUrlOf(campaignLink)}/` : null };
@@ -338,14 +340,15 @@ export function empireRecord(html: string, pageUrl: string): EmpireCommunityReco
 }
 
 /** The region page's community links for discovery (listing and plan pages sit deeper); null when the page has none. */
-export function empireRegionLinks(html: string, host: string): string[] | null {
+export function empireRegionLinks(html: string, host: string, market = "san-antonio"): string[] | null {
+  const path = new RegExp(`^/us/texas/${market}/(?:[a-z0-9-]+/)?[a-z0-9-]+/?$`, "i");
   const root = parseHtmlElements(html);
   if (!root) return null;
   const out: string[] = [];
   for (const node of descendants(root)) {
     if (node.tag !== "a") continue;
     const link = asUrl(decodeHtmlEntities(node.attributes.href ?? ""));
-    if (!link || !sameOfficialHost(link, host) || !/^\/us\/texas\/san-antonio\/(?:[a-z0-9-]+\/)?[a-z0-9-]+\/?$/i.test(link.pathname) || /\/(?:listing|home-plans)\//i.test(link.pathname)) continue;
+    if (!link || !sameOfficialHost(link, host) || !path.test(link.pathname) || /\/(?:listing|home-plans)\//i.test(link.pathname)) continue;
     const url = `${pageUrlOf(link)}/`;
     if (!out.includes(url)) out.push(url);
   }

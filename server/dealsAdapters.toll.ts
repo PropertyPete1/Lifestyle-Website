@@ -33,7 +33,7 @@ import { parseNextData } from "./dealsAdapters.davidson";
 export const TOLL_MAX_HOMES = 150;
 export const TOLL_CDN_HOST = "cdn.tollbrothers.com";
 /** The metro search page (a function: this module and dealsAdapters import each other, so the host is read when called, not when loaded). */
-export const tollListingUrl = () => `https://${TOLL_HOST}/luxury-homes/San-Antonio-TX`;
+export const tollListingUrl = (metro = "San-Antonio-TX") => `https://${TOLL_HOST}/luxury-homes/${metro}`;
 
 type Json = Record<string, unknown>;
 const obj = (value: unknown): Json | null => value && typeof value === "object" && !Array.isArray(value) ? value as Json : null;

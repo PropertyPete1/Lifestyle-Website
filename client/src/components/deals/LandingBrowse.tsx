@@ -321,7 +321,7 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes }: { com
     <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="deals-community-title" data-deals-community-sheet="true" onClick={(event) => event.stopPropagation()} className="deals-light relative max-h-[94vh] w-full max-w-6xl overflow-y-auto rounded-t-2xl bg-background shadow-2xl sm:rounded-2xl">
       <button ref={closeButton} type="button" onClick={onClose} aria-label={LANDING_COPY.close} className="absolute right-2 top-2 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-background/90 text-muted-foreground shadow hover:text-foreground"><X className="h-5 w-5" /></button>
       <div className="grid min-w-0 gap-6 p-5 sm:p-6 md:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
-        <div className="mx-auto w-full min-w-0 max-w-[340px]"><ReelCard reelUrl={community.reelUrl} label={community.label} autoLoad /></div>
+        <div className="mx-auto w-full min-w-0 max-w-[340px]"><ReelCard reelUrl={community.reelUrl} label={community.label} autoLoad poster={community.cover ?? null} /></div>
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-widest text-gold">{community.area}</p>
           <h2 id="deals-community-title" className="mt-2 text-3xl leading-tight">{community.label}</h2>

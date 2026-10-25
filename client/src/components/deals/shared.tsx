@@ -57,7 +57,7 @@ export function useInstagramEmbeds() {
  * show a "Watch the video tour" cover and load when tapped, so a page of every
  * community never opens dozens of embeds.
  */
-export function ReelCard({ reelUrl, label, autoLoad = true }: { reelUrl: string | null; label: string; autoLoad?: boolean }) {
+export function ReelCard({ reelUrl, label, autoLoad = true, poster }: { reelUrl: string | null; label: string; autoLoad?: boolean; /** Oct 24 (Peter): with no video yet, the community's own best photo stands in (photos showing a builder's name never reach the site). */ poster?: string | null }) {
   const youtubeId = youtubeVideoId(reelUrl);
   const [fallback, setFallback] = useState(!reelUrl);
   const [started, setStarted] = useState(autoLoad);
@@ -88,6 +88,7 @@ export function ReelCard({ reelUrl, label, autoLoad = true }: { reelUrl: string 
       </button>
     );
   }
+  if (fallback && !reelUrl && poster) return <PosterCard poster={poster} label={label} />;
   if (fallback) {
     return (
       <a href={reelUrl ?? "#unlock"} target={reelUrl ? "_blank" : undefined} rel="noreferrer" className="deals-chrome mx-auto flex aspect-[4/5] w-full max-w-[540px] flex-col items-center justify-center bg-[radial-gradient(ellipse_at_50%_0%,oklch(0.75_0.09_85_/_0.16),transparent_60%),linear-gradient(150deg,oklch(0.2_0.01_285),oklch(0.09_0.005_285))] px-6 text-center">
@@ -98,6 +99,17 @@ export function ReelCard({ reelUrl, label, autoLoad = true }: { reelUrl: string 
     );
   }
   return <div ref={wrapperRef} className="relative aspect-[4/5] overflow-hidden bg-secondary"><blockquote className="instagram-media h-full min-w-0 max-w-none bg-transparent" data-instgrm-permalink={reelUrl ?? undefined} data-instgrm-version="14" aria-label={`Instagram reel for ${label}`} /></div>;
+}
+
+/** The community's photo in the video's place, with a quiet "video tour coming soon" note; falls back to the plain card if it will not load. */
+function PosterCard({ poster, label }: { poster: string; label: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <div className="deals-chrome mx-auto flex aspect-[4/5] w-full max-w-[540px] flex-col items-center justify-center bg-[linear-gradient(150deg,oklch(0.2_0.01_285),oklch(0.09_0.005_285))] px-6 text-center"><span className="eyebrow text-gold">Video coming soon</span><span className="mt-3 max-w-[16rem] font-serif text-2xl leading-tight">{label}</span></div>;
+  return <div data-deals-poster="true" className="relative mx-auto aspect-[4/5] w-full max-w-[540px] overflow-hidden bg-secondary">
+    <RetryImage src={poster} alt={`Photo of a home in ${label}`} decoding="async" draggable={false} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className="absolute inset-0 h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
+    <span className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/55 to-transparent" />
+    <span className="pointer-events-none absolute bottom-3 left-3 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium uppercase tracking-widest text-white">Video tour coming soon</span>
+  </div>;
 }
 
 export type DealsIncentive = {

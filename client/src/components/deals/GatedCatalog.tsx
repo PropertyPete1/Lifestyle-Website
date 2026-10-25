@@ -207,7 +207,7 @@ function CommunitySection({ community, homes, open, onToggle, autoLoadReel, team
     {open && <div id={id}>
       <CommunityDetails details={community.details} />
       {community.lotSizes && <p className="mt-2 text-sm text-muted-foreground">{community.lotSizes}</p>}
-      <div className="mt-5"><ReelCard reelUrl={community.reelUrl} label={community.label} autoLoad={autoLoadReel} /></div>
+      <div className="mt-5"><ReelCard reelUrl={community.reelUrl} label={community.label} autoLoad={autoLoadReel} poster={community.homes.find((home) => home.photos?.length)?.photos?.[0] ?? null} /></div>
       {/* The area map sits right under the reel: the general area, never the community. */}
       <AreaMap chips={community.driveTimes} map={community.areaMap} />
       <div className="mt-5"><Incentive incentive={community.incentive} /></div>

@@ -39,24 +39,20 @@ import {
   showGoogleDealsButton,
   createPendingVerification,
 } from "./dealsService";
+import { createPublicPageCache } from "./publicPageCache";
 import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
 import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, adminTurnedOffLeadIds, browserIsAdminPaused, browserIsRealtorBlocked, pausedAccessMessage, staleSessionLeadId, turnOffBuyerAccess, turnOnBuyerAccess } from "./dealsService";
 /** What a realtor sees for the moment before the recruiting page opens. */
 /**
  * The landing's two public reads (every community, the featured row) are the same for every visitor: kept for a minute
- * and shared by requests that arrive together (Oct 24: the first paint waited 3.7 s on them). Off under tests.
+ * and shared by requests that arrive together (Oct 24: the first paint waited 3.7 s on them). Oct 26: served stale
+ * while a rebuild runs in the background and kept warm on a timer while the page is being read, so a visitor who
+ * arrives as the minute ends no longer waits 5–10 s for the rebuild (see publicPageCache). Off under tests.
  */
-const PUBLIC_PAGE_CACHE_MS = 60_000;
-const publicPageEntries = new Map<string, { at: number; value: Promise<unknown> }>();
+const publicPages = createPublicPageCache();
 function publicPageCache<T>(key: string, load: () => Promise<T>): Promise<T> {
   if (process.env.VITEST) return load();
-  const hit = publicPageEntries.get(key);
-  if (hit && Date.now() - hit.at < PUBLIC_PAGE_CACHE_MS) return hit.value as Promise<T>;
-  const value = load();
-  publicPageEntries.set(key, { at: Date.now(), value });
-  value.catch(() => publicPageEntries.delete(key));
-  if (publicPageEntries.size > 200) publicPageEntries.delete(publicPageEntries.keys().next().value as string);
-  return value;
+  return publicPages.get(key, load);
 }
 export const REALTOR_GATE_MESSAGE = "Builder Deals are for home buyers. Agents: these deals are open to our team for your clients. Taking you to our agent page.";
 

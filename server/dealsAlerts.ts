@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { dealAlerts, dealClientLinks, dealCommunities, dealHomes, dealLeads, dealTourRequests } from "../drizzle/schema";
 import { normalizeUsPhone } from "../shared/deals";
 import { getDb } from "./db";
@@ -310,9 +310,10 @@ export async function queueSavedHomePriceDropAlerts(drops: readonly SavedHomePri
   if (!db) return { queued: 0 };
   const saves = await db.select({ homeId: dealTourRequests.homeId, leadId: dealTourRequests.leadId }).from(dealTourRequests)
     .where(and(inArray(dealTourRequests.homeId, real.map((drop) => drop.homeId)), eq(dealTourRequests.requestType, "save"), isNull(dealTourRequests.removedAt)));
-  if (!saves.length) return { queued: 0 };
+  const picked = await queuePickedHomePriceDropAlerts(real, now);
+  if (!saves.length) return { queued: picked };
   const leads = await db.select().from(dealLeads).where(and(inArray(dealLeads.id, Array.from(new Set(saves.map((save) => save.leadId)))), eq(dealLeads.status, "verified"), gt(dealLeads.expiresAt, now)));
-  if (!leads.length) return { queued: 0 };
+  if (!leads.length) return { queued: picked };
   const homes = await db.select().from(dealHomes).where(inArray(dealHomes.id, real.map((drop) => drop.homeId)));
   const communities = homes.length ? await db.select({ id: dealCommunities.id, privateName: dealCommunities.privateName, builder: dealCommunities.builder, publicLabel: dealCommunities.publicLabel }).from(dealCommunities).where(inArray(dealCommunities.id, Array.from(new Set(homes.map((home) => home.communityId))))) : [];
   const { requestTestMode } = await import("./dealsFubJobs");
@@ -340,7 +341,50 @@ export async function queueSavedHomePriceDropAlerts(drops: readonly SavedHomePri
       if (owners.queued) queued += 1;
     }
   }
-  return { queued };
+  return { queued: queued + picked };
+}
+
+/**
+ * The same drop on a home an agent picked for a client (the link is open, whether or not the client has verified yet):
+ * the agent hears once per link and new price. The owners are not copied; it is the agent's pick.
+ */
+async function queuePickedHomePriceDropAlerts(drops: readonly SavedHomePriceDrop[], now: Date): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const { agentForTeamId, parsePicks } = await import("./dealsClientLinks");
+  const { dealsCardHandle } = await import("./dealsService");
+  const homes = await db.select().from(dealHomes).where(inArray(dealHomes.id, drops.map((drop) => drop.homeId)));
+  if (!homes.length) return 0;
+  const cardOf = new Map(homes.map((home) => [dealsCardHandle(home.sourceKey), home]));
+  const links = (await db.select().from(dealClientLinks).where(and(isNull(dealClientLinks.revokedAt), isNotNull(dealClientLinks.picks))))
+    .filter((link) => link.leadId || link.expiresAt.getTime() > now.getTime());
+  const communities = await db.select({ id: dealCommunities.id, privateName: dealCommunities.privateName, builder: dealCommunities.builder }).from(dealCommunities).where(inArray(dealCommunities.id, Array.from(new Set(homes.map((home) => home.communityId)))));
+  const money = (value: number) => `$${Math.round(value).toLocaleString("en-US")}`;
+  let queued = 0;
+  for (const link of links) {
+    const hits = parsePicks(link.picks).flatMap((card) => { const home = cardOf.get(card); const drop = home ? drops.find((entry) => entry.homeId === home.id) : undefined; return home && drop ? [{ home, drop }] : []; });
+    if (!hits.length) continue;
+    const agent = await agentForTeamId(link.agentTeamId);
+    if (!agent?.active || !agent.email) continue;
+    const lead = link.leadId ? (await db.select().from(dealLeads).where(eq(dealLeads.id, link.leadId)).limit(1))[0] : undefined;
+    const first = link.clientName.split(/\s+/)[0] || link.clientName;
+    for (const { home, drop } of hits) {
+      const community = communities.find((row) => row.id === home.communityId);
+      const where = [home.privateAddress, home.privatePlanName ? `(${home.privatePlanName})` : null, community ? `· ${community.builder} ${community.privateName}` : null].filter(Boolean).join(" ") || "a picked home";
+      const amount = money(drop.from - drop.to);
+      const result = await queueDealAlert({
+        dedupeKey: `price_drop:${drop.homeId}:link:${link.id}:${drop.to}`,
+        // The alert is filed under the client's lead when there is one, else the agent's own session that made the link.
+        lead: lead ?? { id: link.agentLeadId, name: link.clientName, phoneE164: link.clientPhoneE164 ?? "", email: null, instagramHandle: null, sourceCode: "agent", timeline: null, agentTeamId: link.agentTeamId, clientLinkId: link.id },
+        kind: "agent_update",
+        agentEmail: agent.email,
+        subject: `Builder Deals: a home you picked for ${first} dropped ${amount}`,
+        content: [`${where} dropped ${amount}: ${money(drop.from)} → ${money(drop.to)}.`, `You picked it for ${link.clientName}. Text them before the next buyer does.`, "", `Your clients and their activity: ${agentTeamLink()}`].join("\n"),
+      });
+      if (result.queued) queued += 1;
+    }
+  }
+  return queued;
 }
 
 /** Queue one alert only when a newly discovered profile screening flag exists (the name prompt answered later). */

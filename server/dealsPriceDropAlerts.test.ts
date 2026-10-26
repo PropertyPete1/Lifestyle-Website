@@ -28,7 +28,7 @@ beforeEach(() => {
   db = new FakeDealsDb();
   mocks.getDb.mockResolvedValue(db);
   mocks.sendBuilderDealsEmail.mockResolvedValue({ ok: true, status: "sent", deliveryLog: "test" });
-  mocks.getDealSettings.mockResolvedValue({ alertRecipients: ["peter@lifestyledesignrealty.com"], alertMode: "hourly_digest", testNumbers: ["+12105559999"], testModeFullPipeline: false });
+  mocks.getDealSettings.mockResolvedValue({ alertRecipients: ["peter@lifestyledesignrealty.com"], alertMode: "hourly_digest", testNumbers: ["+12105559999"], testModeFullPipeline: false, clientLinkDays: 30, allowCanada: false });
   teamId = db.seed(dealTeamAllowlist, { name: "Tiffany Agent", phoneE164: "+12105550101", email: "tiffany@example.com", fubUserId: "77", source: "fub", active: true });
   const communityId = db.seed(dealCommunities, { builder: "Chesmar", privateName: "Fixture Lakes", sourceUrl: "https://www.chesmar.com/fixture-lakes/", publicLabel: "Southeast San Antonio | Lakes", areaLabel: "Southeast San Antonio", reelCode: "sl1", active: true, paused: false, manualMode: false, scrubList: "{}" });
   homeId = db.seed(dealHomes, { communityId, sourceKey: "k1", sourceUrl: "https://www.chesmar.com/fixture-lakes/brandon/1/", privateAddress: "118 Fixture Lakes Blvd", privatePlanName: "Brandon", kind: "quick_move_in", status: "available", origin: "official", price: 479_990 });
@@ -71,5 +71,22 @@ describe("price drops on saved homes", () => {
     expect(owners.dedupeKey).toBe(`price_drop:${homeId}:${buyer.id}:479990`);
     expect(owners.content).toContain("No agent on this buyer.");
     expect(owners.subject).toBe("Builder Deals: a saved home dropped $10,000");
+  });
+});
+
+describe("price drops on homes an agent picked for a client", () => {
+  it("emails the agent once per open link and new price, naming the client; a revoked link hears nothing", async () => {
+    const { createClientLink } = await import("./dealsClientLinks");
+    const { dealsCardHandle } = await import("./dealsService");
+    const agent = lead({ phoneE164: "+12105550101", status: "team" });
+    const card = dealsCardHandle("k1");
+    const open = await createClientLink({ agentLead: agent, clientName: "Maria Lopez", picks: [card] });
+    const revoked = await createClientLink({ agentLead: agent, clientName: "Sam Reyes", picks: [card] });
+    if (!open.ok || !revoked.ok) throw new Error("links not created");
+    db.rows(dealClientLinks).find((row) => row.id === revoked.link.id)!.revokedAt = new Date();
+    expect(await queueSavedHomePriceDropAlerts([{ homeId, from: 489_990, to: 479_990 }])).toEqual({ queued: 1 });
+    const [alert] = alerts();
+    expect(alert).toMatchObject({ dedupeKey: `price_drop:${homeId}:link:${open.link.id}:479990`, kind: "agent_update", deliveryMode: "immediate", recipients: JSON.stringify(["tiffany@example.com"]), subject: "Builder Deals: a home you picked for Maria dropped $10,000" });
+    expect(alert.content).toContain("You picked it for Maria Lopez.");
   });
 });

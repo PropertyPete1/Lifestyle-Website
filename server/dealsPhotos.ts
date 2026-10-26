@@ -174,7 +174,16 @@ const APPROVED_IMAGE_HOSTS = new Set([
   // …and, since October 2026, from its Sitecore Content Hub public links (…/api/public/content/<id>); the path is checked below.
   "mss-p-022.sitecorecontenthub.cloud",
   "mss-p-022-delivery.sitecorecontenthub.cloud",
+  // The three small builders added Oct 26 (every one of their photos had failed as unapproved_source).
+  // Pacesetter and Saratoga serve from their WordPress uploads; the path is checked below.
+  "pacesetterhomestexas.com",
+  "www.pacesetterhomestexas.com",
+  "www.saratogahomestexas.com",
+  // Joseph Creek is on Webflow: its photos live under its own site ids on Webflow's shared CDN; the path is checked below.
+  "cdn.prod.website-files.com",
 ]);
+/** Joseph Creek's Webflow site ids (the main site and its shared asset library): the only folders approved on that shared CDN. */
+const JOSEPH_CREEK_WEBFLOW_SITES = /^\/(?:6387da516f4a3b83431b3562|63861ba77212ca21b38111a8)\//;
 const ACCEPTED_IMAGE_FORMATS = new Set(["jpeg", "png", "webp", "avif", "gif", "heif"]);
 
 const digest = (value: Buffer | string) => crypto.createHash("sha256").update(value).digest("hex");
@@ -423,6 +432,9 @@ export function safeDealImageUrl(raw: string): URL {
   if (url.hostname.toLowerCase() === "cdn.lennar.com" && !/^\/api\/images\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (/^(?:cmp|cms|www)\.beazer\.com$/i.test(url.hostname) && !/^\/(?:images|contentassets|globalassets)\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   if (url.hostname.toLowerCase() === "empirehomes.com" && !/^\/wp-content\/uploads\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
+  if (/^(?:www\.)?pacesetterhomestexas\.com$/i.test(url.hostname) && !/^\/wp-content\/uploads\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
+  if (url.hostname.toLowerCase() === "www.saratogahomestexas.com" && !/^\/wp-content\/uploads\//i.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
+  if (url.hostname.toLowerCase() === "cdn.prod.website-files.com" && !JOSEPH_CREEK_WEBFLOW_SITES.test(url.pathname)) throw new PhotoProcessingError("unapproved_source");
   return url;
 }
 

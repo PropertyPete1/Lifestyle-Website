@@ -53,6 +53,15 @@ describe("Builder Deals private photo primitives", () => {
     expect(() => safeDealImageUrl("https://www.texas-homes.com/move-in-ready/x.jpg")).toThrow("unapproved_source");
     expect(safeDealImageUrl("https://www.hakesbrothers.com/storage/app/medialibrary/x.jpg").hostname).toBe("www.hakesbrothers.com");
     expect(() => safeDealImageUrl("https://www.hakesbrothers.com/san-antonio/x.jpg")).toThrow("unapproved_source");
+    // Oct 26: the three small builders (every photo had failed as unapproved_source); Joseph Creek's shared Webflow CDN only under its own site ids.
+    expect(safeDealImageUrl("https://pacesetterhomestexas.com/wp-content/uploads/2026/03/x.jpg").hostname).toBe("pacesetterhomestexas.com");
+    expect(safeDealImageUrl("https://www.pacesetterhomestexas.com/wp-content/uploads/2026/03/x.jpg").hostname).toBe("www.pacesetterhomestexas.com");
+    expect(() => safeDealImageUrl("https://pacesetterhomestexas.com/new-homes-for-sale-austin/x.jpg")).toThrow("unapproved_source");
+    expect(safeDealImageUrl("https://www.saratogahomestexas.com/wp-content/uploads/2025/04/x.jpg").hostname).toBe("www.saratogahomestexas.com");
+    expect(() => safeDealImageUrl("https://www.saratogahomestexas.com/community/x.jpg")).toThrow("unapproved_source");
+    expect(safeDealImageUrl("https://cdn.prod.website-files.com/6387da516f4a3b83431b3562/6aba6d4f_x.jpg").hostname).toBe("cdn.prod.website-files.com");
+    expect(safeDealImageUrl("https://cdn.prod.website-files.com/63861ba77212ca21b38111a8/x.png").hostname).toBe("cdn.prod.website-files.com");
+    expect(() => safeDealImageUrl("https://cdn.prod.website-files.com/0000000000000000deadbeef/x.jpg")).toThrow("unapproved_source");
     expect(safeDealImageUrl("https://cdn.lennar.com/api/images/contentassets/abc/x.jpg").hostname).toBe("cdn.lennar.com");
     expect(() => safeDealImageUrl("https://cdn.lennar.com/other/x.jpg")).toThrow("unapproved_source");
     expect(safeDealImageUrl("https://cmp.beazer.com/images/x.jpg").hostname).toBe("cmp.beazer.com");

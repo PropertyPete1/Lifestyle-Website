@@ -85,6 +85,22 @@ describe("public page cache (Oct 26: nobody waits on a rebuild while the page is
     expect(await b).toBe("v2");
   });
 
+  it("keeps a pinned key warm with no readers at all, and retries a pinned key whose first load failed", async () => {
+    const { cache, advance, timers } = harness();
+    let builds = 0;
+    const load = () => { builds += 1; return builds === 1 ? Promise.reject(new Error("db down")) : Promise.resolve(`v${builds}`); };
+    cache.pin("catalog", load);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(builds).toBe(1);
+    expect(timers).toHaveLength(1); // the retry
+    await advance(61_000);
+    expect(builds).toBe(2);
+    // Thirty minutes with nobody reading: still rebuilt every minute, never stale, never cold.
+    await advance(30 * 60_000);
+    expect(builds).toBeGreaterThanOrEqual(31);
+    expect(await cache.get("catalog", load)).toBe(`v${builds}`);
+  });
+
   it("drops a failed first load so the next read tries again, and keeps the old value when a background rebuild fails", async () => {
     const { cache, advance } = harness();
     let builds = 0;

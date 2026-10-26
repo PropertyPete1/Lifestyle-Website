@@ -28,6 +28,8 @@ export function createPublicPageCache(options: PublicPageCacheOptions = {}) {
   const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   const entries = new Map<string, Entry<unknown>>();
   const loaders = new Map<string, () => Promise<unknown>>();
+  const pinned = new Set<string>();
+  const warm = (entry: Entry<unknown>, key: string) => pinned.has(key) || now() - entry.lastRead <= keepWarmMs;
 
   function rebuild<T>(key: string, load: () => Promise<T>): Promise<T> {
     const entry = entries.get(key) as Entry<T> | undefined;
@@ -47,11 +49,11 @@ export function createPublicPageCache(options: PublicPageCacheOptions = {}) {
     if (!entry) return;
     if (entry.timer) clearTimer(entry.timer);
     entry.timer = null;
-    if (now() - entry.lastRead > keepWarmMs) return;
+    if (!warm(entry, key)) return;
     const load = loaders.get(key);
     if (!load) return;
     // A full interval from the last attempt, so a failing rebuild (database down) retries once a minute, never in a loop.
-    entry.timer = setTimer(() => { entry.timer = null; if (now() - entry.lastRead <= keepWarmMs) void rebuild(key, load).catch(() => undefined); }, Math.max(1, freshMs - (now() - Math.max(entry.at, entry.lastAttempt))));
+    entry.timer = setTimer(() => { entry.timer = null; if (warm(entry, key)) void rebuild(key, load).catch(() => undefined); }, Math.max(1, freshMs - (now() - Math.max(entry.at, entry.lastAttempt))));
   }
 
   function get<T>(key: string, load: () => Promise<T>): Promise<T> {
@@ -70,16 +72,32 @@ export function createPublicPageCache(options: PublicPageCacheOptions = {}) {
     const value = load();
     const entry: Entry<T> = { at: t, value, lastRead: t, lastAttempt: t, refreshing: null, timer: null };
     entries.set(key, entry as Entry<unknown>);
-    value.then(() => schedule(key)).catch(() => { if (entries.get(key) === entry) entries.delete(key); });
+    value.then(() => schedule(key)).catch(() => {
+      if (entries.get(key) !== entry) return;
+      entries.delete(key);
+      // A pinned key that failed to load is tried again after the fresh interval rather than left cold.
+      if (pinned.has(key)) entry.timer = setTimer(() => { const retry = loaders.get(key); if (retry && !entries.has(key)) void get(key, retry).catch(() => undefined); }, freshMs);
+    });
     if (entries.size > 200) { const oldest = entries.keys().next().value as string; const old = entries.get(oldest); if (old?.timer) clearTimer(old.timer); entries.delete(oldest); }
     return value;
+  }
+
+  /**
+   * Load this key now and keep it rebuilt on the fresh timer for the life of the process, whoever reads it (Oct 26:
+   * the host runs more than one server process, and each one's first visitor was paying the rebuild; the landing's
+   * two reads are pinned at boot so no process is ever cold). Load errors are swallowed here: the timer retries.
+   */
+  function pin<T>(key: string, load: () => Promise<T>): void {
+    pinned.add(key);
+    void get(key, load).catch(() => undefined);
   }
 
   function clear() {
     for (const entry of Array.from(entries.values())) if (entry.timer) clearTimer(entry.timer);
     entries.clear();
     loaders.clear();
+    pinned.clear();
   }
 
-  return { get, clear, size: () => entries.size };
+  return { get, pin, clear, size: () => entries.size };
 }

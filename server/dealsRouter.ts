@@ -54,6 +54,12 @@ function publicPageCache<T>(key: string, load: () => Promise<T>): Promise<T> {
   if (process.env.VITEST) return load();
   return publicPages.get(key, load);
 }
+/** At boot: the landing's two reads are built before the first visitor and rebuilt every minute for the life of the process. */
+export function warmPublicPages(): void {
+  if (process.env.VITEST) return;
+  publicPages.pin("catalog:", () => publicDealsCatalog(undefined));
+  publicPages.pin("featured", async () => (await import("./dealsFeatured")).featuredDeals("public"));
+}
 export const REALTOR_GATE_MESSAGE = "Builder Deals are for home buyers. Agents: these deals are open to our team for your clients. Taking you to our agent page.";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {

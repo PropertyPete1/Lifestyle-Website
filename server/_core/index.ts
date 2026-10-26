@@ -91,6 +91,8 @@ async function startServer() {
     if (process.env.NODE_ENV === "production") {
       void ensureStatsSyncCron().catch(console.error);
       void ensureDealsCron().catch(console.error);
+      // The Builder Deals landing's reads are built now, not by its first visitor (each process has its own cache).
+      void import("../dealsRouter").then(({ warmPublicPages }) => warmPublicPages()).catch(console.error);
       // Each start is kept so the health check can tell restarts (and their memory) apart from a busy server.
       void import("../dealsProcessTelemetry").then(({ recordServerBoot, installServerExitRecorder, startServerBeats }) => {
         // How each process ends (stopped, crashed, or killed with its last memory) is kept for the health check.

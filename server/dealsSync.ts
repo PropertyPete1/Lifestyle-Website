@@ -749,9 +749,11 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
   const planWas = !blanketMarkdown(snapshot.private.plans);
   const homeWas = !blanketMarkdown(snapshot.private.homes.filter((item) => !/sold/i.test(item.status ?? "")));
   const label = (item: { privateAddress?: string | null; privatePlanName?: string | null; privateName: string | null }) => item.privateAddress ?? item.privateName ?? item.privatePlanName ?? "unnamed";
+  const priceDrops: Array<{ homeId: number; from: number; to: number }> = [];
   const record = (result: HomeUpsertResult, name: string) => {
     if (result.inserted) summary.added.push(name);
     if (result.priceChange) summary.priceChanges.push({ name, ...result.priceChange });
+    if (result.priceChange && result.priceChange.to < result.priceChange.from) priceDrops.push({ homeId: result.id, ...result.priceChange });
     if (result.statusChange?.to === "available" && result.statusChange.from === "sold") summary.reappeared.push(name);
     if (result.statusChange?.to === "sold") summary.sold.push(name);
   };
@@ -791,6 +793,8 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     await db.update(dealHomes).set({ status: "sold" }).where(eq(dealHomes.id, missing.id));
     summary.sold.push(missing.privateAddress ?? missing.privatePlanName ?? `home ${missing.id}`);
   }
+  // Oct 26, 2026: buyers who saved a home that just got cheaper; their agent is told. Never fails the sync.
+  if (priceDrops.length) await import("./dealsAlerts").then(({ queueSavedHomePriceDropAlerts }) => queueSavedHomePriceDropAlerts(priceDrops, now)).catch((error) => console.error("[deals] price-drop alerts failed", error instanceof Error ? error.message : error));
   await writeCommunityFacts(community, snapshot, sourceConfig);
   // The headline's price band and area catch up with the facts this run wrote.
   await import("./dealsOnboarding").then(({ refreshLiveAreaLabel }) => refreshLiveAreaLabel(community.id)).catch(() => null);

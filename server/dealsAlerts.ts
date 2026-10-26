@@ -1,5 +1,5 @@
-import { and, eq, lt, lte, or, sql } from "drizzle-orm";
-import { dealAlerts, dealClientLinks, dealLeads } from "../drizzle/schema";
+import { and, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { dealAlerts, dealClientLinks, dealCommunities, dealHomes, dealLeads, dealTourRequests } from "../drizzle/schema";
 import { normalizeUsPhone } from "../shared/deals";
 import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
@@ -294,6 +294,53 @@ export async function queueClientLinkAttachedAlert(lead: AlertLead, agent: Alert
       `Turn off access (opens admin, login required, confirm button): ${adminLeadLink(lead.id)}`,
     ].join("\n"),
   });
+}
+
+export type SavedHomePriceDrop = { homeId: number; from: number; to: number };
+
+/**
+ * Oct 26, 2026: a price drop on a home a buyer saved. The buyer's agent hears right away
+ * (their client is the one to text), and the owners' digest gets a line. Once per home,
+ * buyer and new price; a buyer whose access ended is left alone.
+ */
+export async function queueSavedHomePriceDropAlerts(drops: readonly SavedHomePriceDrop[], now = new Date()) {
+  const real = drops.filter((drop) => drop.to > 0 && drop.from > drop.to);
+  if (!real.length) return { queued: 0 };
+  const db = await getDb();
+  if (!db) return { queued: 0 };
+  const saves = await db.select({ homeId: dealTourRequests.homeId, leadId: dealTourRequests.leadId }).from(dealTourRequests)
+    .where(and(inArray(dealTourRequests.homeId, real.map((drop) => drop.homeId)), eq(dealTourRequests.requestType, "save"), isNull(dealTourRequests.removedAt)));
+  if (!saves.length) return { queued: 0 };
+  const leads = await db.select().from(dealLeads).where(and(inArray(dealLeads.id, Array.from(new Set(saves.map((save) => save.leadId)))), eq(dealLeads.status, "verified"), gt(dealLeads.expiresAt, now)));
+  if (!leads.length) return { queued: 0 };
+  const homes = await db.select().from(dealHomes).where(inArray(dealHomes.id, real.map((drop) => drop.homeId)));
+  const communities = homes.length ? await db.select({ id: dealCommunities.id, privateName: dealCommunities.privateName, builder: dealCommunities.builder, publicLabel: dealCommunities.publicLabel }).from(dealCommunities).where(inArray(dealCommunities.id, Array.from(new Set(homes.map((home) => home.communityId))))) : [];
+  const { requestTestMode } = await import("./dealsFubJobs");
+  const money = (value: number) => `$${Math.round(value).toLocaleString("en-US")}`;
+  let queued = 0;
+  for (const drop of real) {
+    const home = homes.find((row) => row.id === drop.homeId);
+    if (!home) continue;
+    const community = communities.find((row) => row.id === home.communityId);
+    const where = [home.privateAddress, home.privatePlanName ? `(${home.privatePlanName})` : null, community ? `· ${community.builder} ${community.privateName}` : null].filter(Boolean).join(" ") || "a saved home";
+    const amount = money(drop.from - drop.to);
+    for (const save of saves.filter((row) => row.homeId === drop.homeId)) {
+      const lead = leads.find((row) => row.id === save.leadId);
+      if (!lead) continue;
+      const test = await requestTestMode(lead.phoneE164);
+      if (test.quiet) continue;
+      const client = await clientLabel(lead);
+      const agent = await alertAgent(lead);
+      const lines = [`${where} dropped ${amount}: ${money(drop.from)} → ${money(drop.to)}.`, `${client} has this home saved. Reach out before the next buyer does.`];
+      if (agent?.email) {
+        const result = await queueDealAlert({ dedupeKey: `price_drop:${drop.homeId}:${lead.id}:${drop.to}:agent`, lead, kind: "agent_update", agentEmail: agent.email, subject: `${test.isTest ? "TEST: " : ""}Builder Deals: ${client}'s saved home dropped ${amount}`, content: [...lines, "", ...agentClientLines(lead)].join("\n") });
+        if (result.queued) queued += 1;
+      }
+      const owners = await queueDealAlert({ dedupeKey: `price_drop:${drop.homeId}:${lead.id}:${drop.to}`, lead, kind: "agent_update", subject: `${test.isTest ? "TEST: " : ""}Builder Deals: a saved home dropped ${amount}`, content: [...lines, agent ? `Their agent: ${agent.name}${agent.email ? ` (${agent.email})` : ""}, emailed.` : "No agent on this buyer.", "", ...privateLeadLines(lead)].join("\n") });
+      if (owners.queued) queued += 1;
+    }
+  }
+  return { queued };
 }
 
 /** Queue one alert only when a newly discovered profile screening flag exists (the name prompt answered later). */

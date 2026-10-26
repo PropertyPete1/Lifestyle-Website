@@ -54,6 +54,10 @@ function publicPageCache<T>(key: string, load: () => Promise<T>): Promise<T> {
   if (process.env.VITEST) return load();
   return publicPages.get(key, load);
 }
+/** The landing's catalog as the page serves it (the same cache), for the share-card preview of one community. */
+export function cachedPublicCatalog(): Promise<Awaited<ReturnType<typeof publicDealsCatalog>>> {
+  return publicPageCache("catalog:", () => publicDealsCatalog(undefined));
+}
 /** At boot: the landing's two reads are built before the first visitor and rebuilt every minute for the life of the process. */
 export function warmPublicPages(): void {
   if (process.env.VITEST) return;

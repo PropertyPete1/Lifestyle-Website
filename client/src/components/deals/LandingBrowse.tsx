@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Flame, Home, LockKeyhole, MapPin, Play, X } from "lucide-react";
+import { Flame, Home, LockKeyhole, MapPin, Play, Share2, X } from "lucide-react";
 import { AreaMap } from "./AreaMap";
 import { Incentive, RedHotBadge, RedHotSavings, ReelCard, RetryImage, money, type DealsIncentive } from "./shared";
 import { ProtectedGallery } from "./GatedCatalog";
@@ -58,6 +58,10 @@ export const LANDING_COPY = {
   homesLoading: "Loading homes…",
   homesNone: "Homes are being added. Ask us for the current list.",
   privacy: "One of our agents will reach out to set it up and answer your questions.",
+  /** Oct 26, 2026: a buyer sends a community to a spouse; the link opens this sheet and carries a preview card. */
+  share: "Share",
+  shareCopied: "Link copied",
+  shareTitle: (label: string) => `${label} — Builder Deals`,
   close: "Close",
 } as const;
 
@@ -409,6 +413,26 @@ export function isFocusHome(home: PublicHome, focus: SheetFocus | undefined): bo
   return home.price === focus.price && (!focus.sqft || home.sqft === focus.sqft) && (!focus.kind || home.kind === focus.kind);
 }
 
+/** The public link to one community's sheet: the landing page plus its opaque key (never a name or an address). */
+export function communityShareUrl(key: string | undefined): string | null {
+  if (!key || typeof window === "undefined") return null;
+  return `${window.location.origin}/deals?c=${encodeURIComponent(key)}`;
+}
+
+function ShareButton({ community }: { community: LandingCommunity }) {
+  const [copied, setCopied] = useState(false);
+  const url = communityShareUrl(community.key);
+  if (!url) return null;
+  const share = async () => {
+    const nav = navigator as Navigator & { share?: (data: { title?: string; text?: string; url?: string }) => Promise<void>; canShare?: (data: unknown) => boolean };
+    try {
+      if (typeof nav.share === "function" && (!nav.canShare || nav.canShare({ url }))) { await nav.share({ title: LANDING_COPY.shareTitle(community.label), text: community.fromPriceLabel ?? undefined, url }); return; }
+    } catch (error) { if ((error as { name?: string }).name === "AbortError") return; }
+    try { await navigator.clipboard.writeText(url); setCopied(true); window.setTimeout(() => setCopied(false), 2000); } catch { window.prompt(LANDING_COPY.share, url); }
+  };
+  return <button type="button" onClick={() => void share()} data-deals-share="true" aria-live="polite" className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-4 text-sm font-medium text-foreground hover:border-gold hover:text-gold"><Share2 className="h-4 w-4" />{copied ? LANDING_COPY.shareCopied : LANDING_COPY.share}</button>;
+}
+
 export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters, focus }: { community: LandingCommunity; onClose: () => void; onUnlock: () => void; useHomes: UseCommunityHomes; /** The page's filters: the homes that match come first, the rest one tap away. */ filters?: BrowseFilters; /** A featured home: shown first and marked. */ focus?: SheetFocus }) {
   const dialog = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -460,6 +484,7 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
           {community.areaMap ? <AreaMap map={community.areaMap} variant="public" /> : null}
           <button type="button" onClick={onUnlock} className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-gold px-5 text-sm font-semibold text-primary-foreground shadow hover:opacity-95">{LANDING_COPY.unlock}<LockKeyhole className="h-4 w-4" /></button>
           <p className="mt-2 text-xs text-muted-foreground">{LANDING_COPY.privacy}</p>
+          <ShareButton community={community} />
         </div>
       </div>
       <div ref={homesTop} className="scroll-mt-2 border-t border-border px-5 pb-8 pt-6 sm:px-6" data-deals-public-homes="true">
@@ -512,8 +537,10 @@ function AutoMore({ active, onNear }: { active: boolean; onNear: () => void }) {
 /** What the featured row can do on the landing page: open a community's sheet on one of its homes, and light its area on the map. */
 export type LandingActions = { openHome: (key: string, focus?: SheetFocus) => boolean; hover: (key: string | null) => void };
 
-export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup }: {
+export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey }: {
   communities: readonly LandingCommunity[]; onUnlock: () => void; useHomes: UseCommunityHomes;
+  /** A shared link's community (?c=key): its sheet opens once the catalog has it. */
+  openKey?: string | null;
   /** Shown at the top of the list column (the featured row); a function gets the actions above. */
   top?: ReactNode | ((actions: LandingActions) => ReactNode);
   filters?: BrowseFilters;
@@ -529,6 +556,16 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   const keyed = useMemo(() => communities.map((community, index) => ({ ...community, key: keyOf(community, index) })), [communities]);
   // New filters start the list from the top again.
   useEffect(() => setPages(1), [communities]);
+  // A shared link opens its community once (the visitor can close it and browse on).
+  const openedFromLink = useRef<string | null>(null);
+  useEffect(() => {
+    if (!openKey || openedFromLink.current === openKey) return;
+    const community = keyed.find((item) => item.key === openKey) ?? lookup?.find((item) => item.key === openKey);
+    if (!community) return;
+    openedFromLink.current = openKey;
+    setFocus(undefined);
+    setOpen(community);
+  }, [openKey, keyed, lookup]);
   // A marker group the current filters no longer show is let go.
   useEffect(() => { if (selected && !selected.keys.some((key) => keyed.some((item) => item.key === key))) setSelected(null); }, [keyed, selected]);
   const matching = selected ? keyed.filter((item) => selected.keys.includes(item.key)) : keyed;

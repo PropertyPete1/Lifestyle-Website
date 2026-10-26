@@ -18,7 +18,7 @@ import { photoIdFromToken, publicPhotoAllowed, resetPublicPhotoLimits } from "./
 import { regionHomeView, regionPin, spreadStackedPins, SAN_ANTONIO_REGION } from "./dealsRegionMap";
 
 (globalThis as { React?: typeof React }).React = React;
-const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW, clusterView, stillStacked, fanOffsets, isFocusHome } = await import("../client/src/components/deals/LandingBrowse");
+const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW, clusterView, stillStacked, fanOffsets, isFocusHome, communityShareUrl } = await import("../client/src/components/deals/LandingBrowse");
 
 describe("the region map", () => {
   it("places a point by the map's own projection and leaves off anything outside the picture", () => {
@@ -117,6 +117,19 @@ describe("clicking a numbered bubble (Peter, Oct 25: it zooms into the neighborh
     expect(spots.size).toBe(7);
     // Far enough apart to tap one (each bubble is about 30 pixels wide).
     for (let i = 0; i < ring.length; i++) for (let j = i + 1; j < ring.length; j++) expect(Math.hypot(ring[i]!.dx - ring[j]!.dx, ring[i]!.dy - ring[j]!.dy)).toBeGreaterThanOrEqual(56);
+  });
+});
+
+describe("a shared community link (Oct 26: a buyer sends one community to a spouse)", () => {
+  it("is the landing page plus the community's opaque key, and nothing without a key", () => {
+    const location = globalThis.window?.location;
+    (globalThis as { window?: unknown }).window = { location: { origin: "https://lifestyledesignrealty.com" } };
+    try {
+      expect(communityShareUrl("41023f496be9")).toBe("https://lifestyledesignrealty.com/deals?c=41023f496be9");
+      expect(communityShareUrl(undefined)).toBeNull();
+    } finally {
+      if (location) (globalThis.window as { location: unknown }).location = location; else delete (globalThis as { window?: unknown }).window;
+    }
   });
 });
 

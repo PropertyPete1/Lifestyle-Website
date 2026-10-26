@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTags, DEALS_OG_DESCRIPTION, DEALS_OG_IMAGE, DEALS_OG_TITLE, escapeHtml } from "./ogMeta";
+import { buildTags, DEALS_OG_DESCRIPTION, DEALS_OG_IMAGE, DEALS_OG_TITLE, dealsCommunityShareCard, escapeHtml } from "./ogMeta";
 import { selectCityImage } from "../shared/cityImagery";
 
 describe("ogMeta", () => {
@@ -68,5 +68,18 @@ describe("ogMeta", () => {
     expect(tags).toContain("This week's best new-build deals in San Antonio");
     expect(tags).toContain("builder-deals-og-card");
     expect(tags).not.toMatch(/Sienna|Vista|Chesmar|M\/I|Rio Grande|Hanging Basket/i);
+  });
+
+  it("builds a shared community's card from public fields only, with the cover photo and no declared size (Oct 26)", () => {
+    const card = dealsCommunityShareCard({ label: "Northeast San Antonio | From the $400s and Move-In Ready Homes", area: "Northeast San Antonio", fromPriceLabel: "From $499,990", homesAvailable: 4, schoolDistrict: "Schertz-Cibolo-Universal City ISD", redHotDeals: 1 });
+    expect(card.title).toBe("Northeast San Antonio | From the $400s and Move-In Ready Homes");
+    expect(card.description).toBe("4 move-in ready homes from $499,990 · Schertz-Cibolo-Universal City ISD · 1 Red Hot Deal. Photos, prices and this week's builder incentive, before you pick an agent.");
+    expect(dealsCommunityShareCard({ label: "Kyle | From the $300s", area: "Kyle", fromPriceLabel: null, homesAvailable: 0 }).description).toMatch(/^New homes to build\. /);
+    const tags = buildTags({ title: card.title, description: card.description, url: "https://example.com/deals?c=41023f496be9", image: "/deals/pub/img/abc", imageSize: null });
+    expect(tags).toContain('content="https://example.com/deals/pub/img/abc"');
+    expect(tags).not.toContain("og:image:width");
+    expect(tags).toContain('content="https://example.com/deals?c=41023f496be9"');
+    // The static cards still declare their 1200x630.
+    expect(buildTags({ title: "x", description: "y", url: "https://example.com/deals", image: DEALS_OG_IMAGE })).toContain('og:image:width" content="1200"');
   });
 });

@@ -23,6 +23,13 @@ export const DEALS_OG_TITLE = "This week's best new-build deals in San Antonio";
 export const DEALS_OG_DESCRIPTION =
   "A private, phone-verified list for buyers who have not chosen an agent yet.";
 
+/** The share card for one community, from its public catalog entry only. */
+export function dealsCommunityShareCard(community: { label: string; area: string; fromPriceLabel?: string | null; homesAvailable: number; schoolDistrict?: string | null; redHotDeals?: number }): { title: string; description: string } {
+  const homes = community.homesAvailable > 0 ? `${community.homesAvailable} move-in ready home${community.homesAvailable === 1 ? "" : "s"}` : "New homes to build";
+  const parts = [community.fromPriceLabel ? `${homes} ${community.fromPriceLabel.replace(/^From/, "from")}` : homes, community.schoolDistrict ?? null, community.redHotDeals ? `${community.redHotDeals} Red Hot Deal${community.redHotDeals === 1 ? "" : "s"}` : null].filter(Boolean);
+  return { title: community.label, description: `${parts.join(" · ")}. Photos, prices and this week's builder incentive, before you pick an agent.` };
+}
+
 export function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -51,19 +58,21 @@ export function buildTags(opts: {
   url: string;
   /** Site-relative image path. Defaults to the Convince letter card. */
   image?: string;
+  /** The static cards are 1200x630; a photo of unknown size declares none (crawlers must not be lied to). */
+  imageSize?: { width: number; height: number } | null;
 }): string {
   const t = escapeHtml(opts.title);
   const d = escapeHtml(opts.description);
   const u = escapeHtml(opts.url);
   const img = escapeHtml(`${originOf(opts.url)}${opts.image ?? OG_IMAGE}`);
+  const size = opts.imageSize === undefined ? { width: 1200, height: 630 } : opts.imageSize;
   return [
     `<meta property="og:type" content="website" />`,
     `<meta property="og:site_name" content="Lifestyle Design Realty" />`,
     `<meta property="og:title" content="${t}" />`,
     `<meta property="og:description" content="${d}" />`,
     `<meta property="og:image" content="${img}" />`,
-    `<meta property="og:image:width" content="1200" />`,
-    `<meta property="og:image:height" content="630" />`,
+    ...(size ? [`<meta property="og:image:width" content="${size.width}" />`, `<meta property="og:image:height" content="${size.height}" />`] : []),
     `<meta property="og:url" content="${u}" />`,
     `<meta name="twitter:card" content="summary_large_image" />`,
     `<meta name="twitter:title" content="${t}" />`,
@@ -104,6 +113,7 @@ export function registerOgMeta(app: Express) {
     let description =
       "Someone wants to move to Texas with you — and asked us to make the case. Read the letter Lifestyle Design Realty wrote about the life waiting for you here.";
     let image: string | undefined;
+    let imageSize: { width: number; height: number } | null | undefined;
 
     // Recruiting card: canonicalised to the non-trailing-slash /join URL so
     // every share of the page collapses onto one preview.
@@ -113,10 +123,28 @@ export function registerOgMeta(app: Express) {
       image = JOIN_OG_IMAGE;
     }
 
+    // A shared community link (/deals?c=<key>, Oct 26, 2026): the card shows that community's public label, price
+    // band and cover, so the spouse it was sent to sees the home, not the generic card. Only public catalog fields are
+    // used: the key is opaque and nothing names the builder, the community or an address.
+    const sharedKey = typeof req.query.c === "string" && /^[a-f0-9]{12}$/i.test(req.query.c) ? req.query.c.toLowerCase() : null;
     if (isDealsLanding) {
       title = DEALS_OG_TITLE;
       description = DEALS_OG_DESCRIPTION;
       image = DEALS_OG_IMAGE;
+      if (sharedKey) {
+        try {
+          const { cachedPublicCatalog } = await import("./dealsRouter");
+          const community = (await cachedPublicCatalog()).find((entry) => entry.key === sharedKey);
+          if (community) {
+            const card = dealsCommunityShareCard(community);
+            title = card.title;
+            description = card.description;
+            if (community.cover) { image = community.cover; imageSize = null; }
+          }
+        } catch {
+          // The generic Builder Deals card stands in; never break page delivery over a preview.
+        }
+      }
     }
 
     const cityFinderSlug = req.path.match(/^\/city-finder\/([A-Za-z0-9_-]+)$/);
@@ -170,11 +198,11 @@ export function registerOgMeta(app: Express) {
     const canonicalUrl = isJoin
       ? `${proto}://${host}/join`
       : isDealsLanding
-        ? `${proto}://${host}/deals`
+        ? `${proto}://${host}/deals${sharedKey ? `?c=${sharedKey}` : ""}`
       : fullUrl;
 
     const robots = (isDealsLanding || isDealsPrivateDocument) ? `<meta name="robots" content="noindex, nofollow" />` : "";
-    const tags = `${robots}${isDealsLanding || !isDealsPrivateDocument ? `${robots ? "\n    " : ""}${buildTags({ title, description, url: canonicalUrl, image })}` : ""}`;
+    const tags = `${robots}${isDealsLanding || !isDealsPrivateDocument ? `${robots ? "\n    " : ""}${buildTags({ title, description, url: canonicalUrl, image, imageSize })}` : ""}`;
 
     // Monkey-patch send to inject tags into the outgoing HTML
     const originalSend = res.send.bind(res);

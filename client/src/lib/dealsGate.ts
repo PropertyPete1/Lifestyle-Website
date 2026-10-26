@@ -87,7 +87,7 @@ export function isGateStatusMessage(message: string | null): boolean {
 }
 
 /** Query flags the server uses to hand the sheet a one-time outcome. Never src or ig. */
-export const TRANSIENT_GATE_PARAMS = ["codeError", "expired", "error", "blocked", "gate", "cookieBlocked", "google"] as const;
+export const TRANSIENT_GATE_PARAMS = ["codeError", "expired", "error", "blocked", "gate", "cookieBlocked", "google", "team"] as const;
 
 /** Spec sanitizer limits: a reel code is at most 40 characters, a handle at most 30 after the leading @. */
 export const SOURCE_CODE_MAX = 40;

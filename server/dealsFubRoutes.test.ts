@@ -158,9 +158,10 @@ describe("Builder Deals expiry redirect contract", () => {
 
   it("guards the agent tools: no session goes to the gate or the expired page, a buyer to their list, the team through", async () => {
     const fresh = await fetch(`${baseUrl}/deals/team`, { redirect: "manual" });
-    expect(fresh.headers.get("location")).toBe("/deals?gate=1");
+    // Oct 26, 2026: ?team=1 opens the sheet as the agent sign-in.
+    expect(fresh.headers.get("location")).toBe("/deals?gate=1&team=1");
     const dead = await fetch(`${baseUrl}/deals/team`, { redirect: "manual", headers: { cookie: `${DEALS_COOKIE.session}=stale` } });
-    expect(dead.headers.get("location")).toBe("/deals?expired=1");
+    expect(dead.headers.get("location")).toBe("/deals?expired=1&team=1");
     mocks.isLiveDealSession.mockResolvedValue({ leadId: 31, lead: { status: "verified" }, deviceHash: "d" });
     const buyer = await fetch(`${baseUrl}/deals/team`, { redirect: "manual", headers: { cookie: `${DEALS_COOKIE.session}=live` } });
     expect(buyer.status).toBe(302);

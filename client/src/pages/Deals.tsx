@@ -69,7 +69,7 @@ function Landing() {
   // link brings them to it (an agent's client link, a code in progress, an expired or blocked session, a lapsed list).
   const [gateOpen, setGateOpen] = useState(() => Boolean(clientToken) || TRANSIENT_GATE_PARAMS.some((name) => new URLSearchParams(window.location.search).has(name)) || /^\/deals\/(mine|team)/.test(window.location.pathname));
   // Oct 26, 2026: /deals/team with no session is the agent sign-in page (the same sheet, agent wording, phone only).
-  const [teamSignIn] = useState(() => /^\/deals\/team/.test(window.location.pathname) && !clientToken);
+  const [teamSignIn] = useState(() => (/^\/deals\/team/.test(window.location.pathname) || new URLSearchParams(window.location.search).get("team") === "1") && !clientToken);
   useInstagramEmbeds();
   // With no token in hand, the server may name the link from this browser's lapsed agent-client session.
   const linkToken = clientToken ?? state.data?.clientLinkToken ?? undefined;

@@ -118,7 +118,8 @@ export function registerDealsRoutes(app: Express) {
     const session = await isLiveDealSession(req);
     if (!session) {
       const hadSession = Boolean(parseCookie(req.headers.cookie || "")[DEALS_COOKIE.session]);
-      return res.redirect(302, hadSession ? "/deals?expired=1" : "/deals?gate=1");
+      // Oct 26, 2026: no session at /deals/team opens the gate as the agent sign-in (?team=1), not the buyer gate.
+      return res.redirect(302, hadSession ? "/deals?expired=1&team=1" : "/deals?gate=1&team=1");
     }
     if (session.lead.status !== "team") return res.redirect(302, "/deals/mine");
     next();

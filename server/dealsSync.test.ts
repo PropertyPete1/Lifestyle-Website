@@ -156,15 +156,23 @@ describe("official refresh: homes", () => {
     expect(stories()).toEqual({ [home("8301-a")]: 2, [home("8305-b")]: 1, [plan("fixture-a")]: 2 });
   });
 
+  it("fills the district from the ZIP code when the builder's page names none, and never stores page residue", async () => {
+    mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }], facts: { fromPrice: 300_000, schoolDistrict: "Information Schools Schools", lotSizes: null, amenities: [] } }));
+    await refreshOfficialDeals({ communityId, now: T0 });
+    // 78263 is East Central ISD in the NCES ZIP map.
+    expect(db.rows(dealCommunities)[0]!.schoolDistrict).toBe("East Central ISD");
+  });
+
   it("writes community facts and merges discovered plan and street names into the categorized scrub list", async () => {
     mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({
       homes: [{ sourceUrl: home("8301-a") }],
-      facts: { fromPrice: 354_990, schoolDistrict: "Fixture County ISD", lotSizes: "Half-acre homesites", amenities: ["Walking trails", "Fixture Gardens clubhouse"] },
+      // The district is stored as its canonical name, whatever the builder's wording (Oct 26, 2026).
+      facts: { fromPrice: 354_990, schoolDistrict: "Top-rated East Central Independent School District", lotSizes: "Half-acre homesites", amenities: ["Walking trails", "Fixture Gardens clubhouse"] },
       discovered: { builder: [], lender: [], community: [], plan: ["Magnolia"], street: ["Fixture Street"], other: [] },
     }));
     await refreshOfficialDeals({ communityId, now: T0 });
     const community = db.rows(dealCommunities)[0];
-    expect(community).toMatchObject({ fromPrice: 354_990, schoolDistrict: "Fixture County ISD", lotSizes: "Half-acre homesites" });
+    expect(community).toMatchObject({ fromPrice: 354_990, schoolDistrict: "East Central ISD", lotSizes: "Half-acre homesites" });
     expect(JSON.parse(String(community.amenities))).toEqual(["Walking trails", "this community clubhouse"]);
     const scrub = storedScrubConfig(community as never);
     expect(scrub.plan).toEqual(["Magnolia"]);

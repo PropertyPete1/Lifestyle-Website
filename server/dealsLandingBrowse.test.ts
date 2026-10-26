@@ -151,7 +151,7 @@ describe("the landing catalog", () => {
   });
   const community = (over: Partial<typeof dealCommunities.$inferInsert>) => db.seed(dealCommunities, {
     builder: "Chesmar", privateName: "Fixture Lakes", sourceUrl: "https://www.chesmar.com/x/", privateAddress: "100 Fixture Blvd", publicLabel: "Southeast San Antonio | Lakes", areaLabel: "Southeast San Antonio",
-    amenities: "[]", reelCode: "fl1", scrubList: JSON.stringify({ community: ["Fixture Lakes"], street: ["Fixture Blvd"] }), active: true, paused: false, manualMode: false, zipCentroidLat: "29.355424", zipCentroidLng: "-98.319795", fromPrice: 299_990, ...over,
+    amenities: "[]", reelCode: "fl1", scrubList: JSON.stringify({ community: ["Fixture Lakes"], street: ["Fixture Blvd"] }), active: true, paused: false, manualMode: false, zipCentroidLat: "29.355424", zipCentroidLng: "-98.319795", fromPrice: 299_990, schoolDistrict: "East Central ISD", ...over,
   });
   const home = (communityId: number, price: number, over: Partial<typeof dealHomes.$inferInsert> = {}) => db.seed(dealHomes, { communityId, sourceKey: `k-${Math.random()}`, sourceUrl: "https://www.chesmar.com/x/h/", privateAddress: "118 Fixture Blvd", privatePlanName: "Brandon", kind: "quick_move_in", status: "available", origin: "official", price, beds: "4", baths: "3", sqft: 2_100, ...over });
   const photo = (homeId: number, sortOrder: number, over: Partial<typeof dealPhotos.$inferInsert> = {}) => db.seed(dealPhotos, { homeId, sourceUrl: `https://www.chesmar.com/p${Math.random()}.jpg`, sourceHash: `h${Math.random()}`, sortOrder, processingState: "processed", automaticHidden: false, adminHidden: false, nextProcessingAttemptAt: new Date(), ...over });
@@ -170,6 +170,8 @@ describe("the landing catalog", () => {
     const withCover = entries.find((entry) => entry.label === "Southeast San Antonio | Lakes")!;
     expect(withCover.key).toMatch(/^[a-f0-9]{12}$/);
     expect(withCover.fromPriceLabel).toBe("From $299,990");
+    // The school district is public on the landing page (Oct 26, 2026), as its canonical name.
+    expect((withCover as unknown as { schoolDistrict: string | null }).schoolDistrict).toBe("East Central ISD");
     expect(photoIdFromToken(withCover.cover!.replace("/deals/pub/img/", ""))).toBe(cover);
     // The marker is the coarse public cell's point, never the ZIP centroid itself.
     expect(withCover.pin).not.toBeNull();

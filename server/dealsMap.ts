@@ -8,6 +8,8 @@ import { ENV } from "./_core/env";
 import { publicCellMiles } from "./dealsRegionMap";
 import { makeRequest, type DistanceMatrixResult, type GeocodingResult } from "./_core/map";
 import { getDb } from "./db";
+import { resolveDistrict } from "../shared/dealsSchools";
+import { ZIP_DISTRICTS } from "../shared/dealsZipDistricts";
 import { communityScrubConfig, getDealSettings, isLiveDealSession, publicNoPrivateNames } from "./dealsService";
 
 /**
@@ -190,10 +192,13 @@ export async function refreshCommunityGeography(communityId: number): Promise<{ 
     } catch (error) {
       console.warn("[deals-map] drive times unavailable", error instanceof Error ? error.message : error);
     }
+    // A community with no district yet takes its ZIP code's (the builder's page named none, or discovery just added it).
+    const district = community.schoolDistrict ? null : resolveDistrict(null, zip, ZIP_DISTRICTS).district;
     await db.update(dealCommunities).set({
       zipCentroidLat: centroid.lat.toFixed(6),
       zipCentroidLng: centroid.lng.toFixed(6),
       driveTimeChips: JSON.stringify(chips),
+      ...(district ? { schoolDistrict: district } : {}),
     }).where(eq(dealCommunities.id, communityId));
     for (const key of Array.from(imageCache.keys())) if (key.startsWith(`${communityId}:`)) imageCache.delete(key);
     for (const key of Array.from(failureCache.keys())) if (key.startsWith(`${communityId}:`)) failureCache.delete(key);

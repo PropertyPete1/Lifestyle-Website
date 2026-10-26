@@ -30,6 +30,8 @@ export type LandingCommunity = {
   pin?: { x: number; y: number } | null;
   /** Homes here that are Red Hot Deals. */
   redHotDeals?: number;
+  /** The community's school district ("Northside ISD"), public like the area. */
+  schoolDistrict?: string | null;
 };
 
 export const LANDING_COPY = {
@@ -450,7 +452,7 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
       <div className="grid min-w-0 gap-6 p-5 sm:p-6 md:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
         <div className="mx-auto w-full min-w-0 max-w-[340px]"><ReelCard reelUrl={community.reelUrl} label={community.label} autoLoad poster={community.cover ?? null} /></div>
         <div className="min-w-0">
-          <p className="text-xs font-medium uppercase tracking-widest text-gold">{community.area}</p>
+          <p className="text-xs font-medium uppercase tracking-widest text-gold">{community.area}{community.schoolDistrict ? <span data-deals-school-district="true"> · {community.schoolDistrict}</span> : null}</p>
           <h2 id="deals-community-title" className="mt-2 text-3xl leading-tight">{community.label}</h2>
           {community.fromPriceLabel && <p className="mt-3 text-2xl font-semibold">{community.fromPriceLabel}</p>}
           <p className="mt-1 text-sm text-muted-foreground">{community.homesAvailable > 0 ? LANDING_COPY.homesReady(community.homesAvailable) : LANDING_COPY.toBeBuilt}</p>

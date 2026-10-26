@@ -808,7 +808,7 @@ export async function publicDealsCatalog(src?: string | null) {
   const { regionPin } = await import("./dealsRegionMap");
   const { publicPhotoUrl } = await import("./dealsPhotoToken");
   const publicRadius = areaMapRadius(settings, "public");
-  const result = [] as Array<{ key: string; label: string; area: string; fromPrice: number | null; fromPriceLabel: string | null; reelUrl: string | null; homesAvailable: number; incentive: (ReturnType<typeof publicIncentive> & { pending?: true }) | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean; cover: string | null; pin: { x: number; y: number } | null; homeFacts: ReturnType<typeof landingHomeFacts>[] }>;
+  const result = [] as Array<{ key: string; label: string; area: string; fromPrice: number | null; fromPriceLabel: string | null; reelUrl: string | null; homesAvailable: number; incentive: (ReturnType<typeof publicIncentive> & { pending?: true }) | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean; cover: string | null; pin: { x: number; y: number } | null; homeFacts: ReturnType<typeof landingHomeFacts>[]; schoolDistrict: string | null }>;
   if (!communities.length) return result;
   const reelCode = src?.trim().toLowerCase() || null;
   // Two reads for the whole page, however many communities there are.
@@ -865,6 +865,8 @@ export async function publicDealsCatalog(src?: string | null) {
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       // A wide circle around the ZIP code centroid: "this side of town", never the community.
       areaMap: communityAreaMap(community, { variant: "public", radiusMiles: publicRadius }),
+      // The school district (October 26, 2026): public, as New Home Buddy shows it; only a canonical name is stored.
+      schoolDistrict: community.schoolDistrict ? scrubPrivateNames(community.schoolDistrict, communityScrubConfig(community)) || null : null,
       // A public render of the cover, by the community's opaque key; null until a photo is ready.
       cover: coverPhoto ? publicPhotoUrl(coverPhoto) : null,
       // The region map marker sits at the same coarse grid cell the public area map is centered on.
@@ -1487,4 +1489,32 @@ export function leadPresentation(lead: typeof dealLeads.$inferSelect) {
 /** The builder's own page for a home: its source URL, except a home keyed under a path the site does not serve (Starlight's `/available-homes/<street>` keys, on Starlight's host only — Davidson's home pages live under the same segment for real), whose page is the community's. */
 export function builderPageFor(sourceUrl: string): string {
   return /^https:\/\/www\.starlighthomes\.com\//i.test(sourceUrl) ? sourceUrl.replace(/\/available-homes\/[^/?#]+\/?(?=$|[?#])/i, "") : sourceUrl;
+}
+
+/**
+ * One pass over every community (October 26, 2026): the stored district becomes its canonical name, and a community
+ * whose builder names no district takes its ZIP code's. Returns what changed and the ZIP codes the map does not cover.
+ */
+export async function normalizeAllSchoolDistricts(): Promise<{ normalized: number; filled: number; cleared: number; unknownZips: string[] }> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const { resolveDistrict, normalizeDistrict, zipInAddress } = await import("../shared/dealsSchools");
+  const { ZIP_DISTRICTS } = await import("../shared/dealsZipDistricts");
+  const rows = await db.select({ id: dealCommunities.id, schoolDistrict: dealCommunities.schoolDistrict, privateAddress: dealCommunities.privateAddress }).from(dealCommunities);
+  let normalized = 0; let filled = 0; let cleared = 0;
+  const unknown = new Set<string>();
+  for (const row of rows) {
+    const zip = zipInAddress(row.privateAddress);
+    const resolved = resolveDistrict(row.schoolDistrict, zip, ZIP_DISTRICTS);
+    if (!resolved.district) {
+      if (zip && !ZIP_DISTRICTS[zip]) unknown.add(zip);
+      // Builder text that names no district (page residue, "N/A") is cleared rather than shown.
+      if (row.schoolDistrict && !normalizeDistrict(row.schoolDistrict)) { await db.update(dealCommunities).set({ schoolDistrict: null }).where(eq(dealCommunities.id, row.id)); cleared++; }
+      continue;
+    }
+    if (resolved.district === row.schoolDistrict) continue;
+    await db.update(dealCommunities).set({ schoolDistrict: resolved.district }).where(eq(dealCommunities.id, row.id));
+    if (row.schoolDistrict && resolved.source === "builder") normalized++; else filled++;
+  }
+  return { normalized, filled, cleared, unknownZips: Array.from(unknown).sort() };
 }

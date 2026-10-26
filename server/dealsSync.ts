@@ -1,6 +1,8 @@
 import { and, desc, eq, gte, inArray, isNull, like, lt, ne, or } from "drizzle-orm";
 import { dealCommunities, dealHomePriceHistory, dealHomes, dealIncentives, dealJobRuns, dealPhotos, dealSyncDigestEntries } from "../drizzle/schema";
 import { getDb } from "./db";
+import { resolveDistrict, zipInAddress } from "../shared/dealsSchools";
+import { ZIP_DISTRICTS } from "../shared/dealsZipDistricts";
 import { chicagoClock, chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
 import { builderScrubConfig, getDocument, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, mentionsTriggeringTerm, normalizeIncentiveText, publicTextResidue, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher, type PrivatePlanOrHome } from "./dealsAdapters";
 export { builderScrubConfig };
@@ -608,7 +610,10 @@ async function writeCommunityFacts(community: CommunityRow, snapshot: DealAdapte
   if (!facts) return;
   const patch: Partial<CommunityRow> = {};
   if (facts.fromPrice !== null && storedPrice(facts.fromPrice) !== null) patch.fromPrice = facts.fromPrice;
-  const district = publicFact(facts.schoolDistrict, config);
+  // October 26, 2026: the district is stored as its canonical name ("Northside ISD"), never the builder's wording
+  // ("Top-rated ... Independent School District" and page residue); text that names no known district fills from the
+  // community's ZIP code. The public-safe check still runs on the stored name.
+  const district = publicFact(resolveDistrict(facts.schoolDistrict, zipInAddress(community.privateAddress), ZIP_DISTRICTS).district, config);
   if (district) patch.schoolDistrict = district.slice(0, 120);
   const lots = publicFact(facts.lotSizes, config);
   if (lots) patch.lotSizes = lots.slice(0, 160);

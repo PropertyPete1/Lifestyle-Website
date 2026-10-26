@@ -844,20 +844,24 @@ export async function publicDealsCatalog(src?: string | null) {
     const key = dealsHandle(`deals-landing:${community.id}`, 12);
     const coverPhoto = (coverCandidates.get(community.id) ?? []).map((homeId) => firstPhoto.get(homeId)).find((id): id is number => id !== undefined);
     const geometry = areaMapGeometry(community, "public", publicRadius);
+    const shownHomes = selectDealCatalogHomes(homesByCommunity.get(community.id) ?? []);
+    // The starting price the builder states, else the cheapest home shown (Oct 26, Peter: some markers showed no
+    // price on hover; those communities had homes but no stated "from" price).
+    const fromPrice = community.fromPrice ?? shownHomes.map((home) => home.price).find((price): price is number => typeof price === "number" && price > 0) ?? null;
     const entry = {
       key,
       fromYourReel: Boolean(reelCode) && community.reelCode.toLowerCase() === reelCode,
       label: community.publicLabel,
       area: community.areaLabel,
       // October 24, 2026: prices are public (the address, builder and community name are what sign-up opens).
-      fromPrice: community.fromPrice ?? null,
-      fromPriceLabel: community.fromPrice ? `From $${community.fromPrice.toLocaleString("en-US")}` : null,
+      fromPrice,
+      fromPriceLabel: fromPrice ? `From $${fromPrice.toLocaleString("en-US")}` : null,
       reelUrl: community.reelUrl,
       homesAvailable: availableCount.get(community.id) ?? 0,
       redHotDeals: redHotCount.get(community.id) ?? 0,
       // The shown homes' public figures (the same ones the community sheet shows), so the filters match on real homes:
       // price, beds, baths, square feet, garage, move-in ready or to be built, stories, and the price before a drop.
-      homeFacts: selectDealCatalogHomes(homesByCommunity.get(community.id) ?? []).map((home) => landingHomeFacts(home)),
+      homeFacts: shownHomes.map((home) => landingHomeFacts(home)),
       // The landing card shows the teaser and figures; the full wording and the deadlines wait for sign-up.
       // A held offer shows the neutral line only, never a figure or name from its text.
       // A rate never shows without its APR (rateDisclosedIncentive).

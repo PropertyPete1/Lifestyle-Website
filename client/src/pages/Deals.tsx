@@ -56,8 +56,8 @@ function Landing() {
   useEffect(() => { if (realtorRedirect && realtorRedirect.startsWith("/")) window.location.replace(realtorRedirect); }, [realtorRedirect]);
   // The reel that brought the visitor (?src=) puts its community first.
   const [src] = useState(() => new URLSearchParams(window.location.search).get("src")?.trim().slice(0, 40) || undefined);
-  // A shared community link (?c=<key>, Oct 26, 2026): that community's sheet opens on arrival.
-  const [sharedKey] = useState(() => { const key = new URLSearchParams(window.location.search).get("c")?.trim().toLowerCase() ?? ""; return /^[a-f0-9]{12}$/.test(key) ? key : null; });
+  // A shared community link (?k=<key>, Oct 26, 2026; ?c= is an agent's client link): that community's sheet opens on arrival.
+  const [sharedKey] = useState(() => { const key = new URLSearchParams(window.location.search).get("k")?.trim().toLowerCase() ?? ""; return /^[a-f0-9]{12}$/.test(key) ? key : null; });
   const catalog = trpc.deals.publicCatalog.useQuery(src ? { src } : undefined);
   const [filters, setFilters] = useState<BrowseFilters>(EMPTY_FILTERS);
   const all = catalog.data ?? [];

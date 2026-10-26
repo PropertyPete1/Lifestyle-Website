@@ -75,10 +75,10 @@ describe("ogMeta", () => {
     expect(card.title).toBe("Northeast San Antonio | From the $400s and Move-In Ready Homes");
     expect(card.description).toBe("4 move-in ready homes from $499,990 · Schertz-Cibolo-Universal City ISD · 1 Red Hot Deal. Photos, prices and this week's builder incentive, before you pick an agent.");
     expect(dealsCommunityShareCard({ label: "Kyle | From the $300s", area: "Kyle", fromPriceLabel: null, homesAvailable: 0 }).description).toMatch(/^New homes to build\. /);
-    const tags = buildTags({ title: card.title, description: card.description, url: "https://example.com/deals?c=41023f496be9", image: "/deals/pub/img/abc", imageSize: null });
+    const tags = buildTags({ title: card.title, description: card.description, url: "https://example.com/deals?k=41023f496be9", image: "/deals/pub/img/abc", imageSize: null });
     expect(tags).toContain('content="https://example.com/deals/pub/img/abc"');
     expect(tags).not.toContain("og:image:width");
-    expect(tags).toContain('content="https://example.com/deals?c=41023f496be9"');
+    expect(tags).toContain('content="https://example.com/deals?k=41023f496be9"');
     // The static cards still declare their 1200x630.
     expect(buildTags({ title: "x", description: "y", url: "https://example.com/deals", image: DEALS_OG_IMAGE })).toContain('og:image:width" content="1200"');
   });

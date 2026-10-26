@@ -123,10 +123,10 @@ export function registerOgMeta(app: Express) {
       image = JOIN_OG_IMAGE;
     }
 
-    // A shared community link (/deals?c=<key>, Oct 26, 2026): the card shows that community's public label, price
+    // A shared community link (/deals?k=<key>, Oct 26, 2026; ?c= is an agent's private client link and gets no card): the card shows that community's public label, price
     // band and cover, so the spouse it was sent to sees the home, not the generic card. Only public catalog fields are
     // used: the key is opaque and nothing names the builder, the community or an address.
-    const sharedKey = typeof req.query.c === "string" && /^[a-f0-9]{12}$/i.test(req.query.c) ? req.query.c.toLowerCase() : null;
+    const sharedKey = typeof req.query.k === "string" && /^[a-f0-9]{12}$/i.test(req.query.k) ? req.query.k.toLowerCase() : null;
     if (isDealsLanding) {
       title = DEALS_OG_TITLE;
       description = DEALS_OG_DESCRIPTION;
@@ -198,7 +198,7 @@ export function registerOgMeta(app: Express) {
     const canonicalUrl = isJoin
       ? `${proto}://${host}/join`
       : isDealsLanding
-        ? `${proto}://${host}/deals${sharedKey ? `?c=${sharedKey}` : ""}`
+        ? `${proto}://${host}/deals${sharedKey ? `?k=${sharedKey}` : ""}`
       : fullUrl;
 
     const robots = (isDealsLanding || isDealsPrivateDocument) ? `<meta name="robots" content="noindex, nofollow" />` : "";

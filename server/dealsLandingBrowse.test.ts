@@ -125,7 +125,7 @@ describe("a shared community link (Oct 26: a buyer sends one community to a spou
     const location = globalThis.window?.location;
     (globalThis as { window?: unknown }).window = { location: { origin: "https://lifestyledesignrealty.com" } };
     try {
-      expect(communityShareUrl("41023f496be9")).toBe("https://lifestyledesignrealty.com/deals?c=41023f496be9");
+      expect(communityShareUrl("41023f496be9")).toBe("https://lifestyledesignrealty.com/deals?k=41023f496be9");
       expect(communityShareUrl(undefined)).toBeNull();
     } finally {
       if (location) (globalThis.window as { location: unknown }).location = location; else delete (globalThis as { window?: unknown }).window;

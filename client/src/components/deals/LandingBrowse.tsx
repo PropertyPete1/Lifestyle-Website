@@ -59,6 +59,7 @@ export const LANDING_COPY = {
   homesNone: "Homes are being added. Ask us for the current list.",
   privacy: "One of our agents will reach out to set it up and answer your questions.",
   /** Oct 26, 2026: a buyer sends a community to a spouse; the link opens this sheet and carries a preview card. */
+  markerView: "View",
   share: "Share",
   shareCopied: "Link copied",
   shareTitle: (label: string) => `${label} — Builder Deals`,
@@ -120,7 +121,8 @@ export function groupMarkers(items: ReadonlyArray<{ key: string; pin?: { x: numb
     groups.set(id, group);
   }
   const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
-  return Array.from(groups.entries()).map(([id, group]) => ({ id, x: mean(group.xs), y: mean(group.ys), keys: group.keys, label: group.keys.length > 1 ? String(group.keys.length) : group.labels[0] || "1" }));
+  // A lone community without a starting price reads "View" when lit, never "1" (that looked like a bubble of one).
+  return Array.from(groups.entries()).map(([id, group]) => ({ id, x: mean(group.xs), y: mean(group.ys), keys: group.keys, label: group.keys.length > 1 ? String(group.keys.length) : group.labels[0] || LANDING_COPY.markerView }));
 }
 
 /**
@@ -361,7 +363,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
                 const lit = activeKey === key;
                 const label = (item?.fromPriceLabel ?? "").replace(/^From the /, "") || "View";
                 return <button key={key} type="button" data-deals-marker="fan" data-active={lit ? "true" : undefined} aria-label={`Community ${label}. Open it`}
-                  onPointerDown={(event) => event.stopPropagation()}
+                  onPointerDown={(event) => { event.stopPropagation(); gesture.current.moved = 0; }}
                   onMouseEnter={() => onHover(key)} onMouseLeave={() => onHover(null)}
                   onClick={() => onSelect({ id: `fan:${key}`, keys: [key] })}
                   style={{ left: offsets[index]!.dx, top: offsets[index]!.dy }}
@@ -376,7 +378,9 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
           const shape = group ? "min-h-7 min-w-7 px-1.5 text-[11px]" : lit ? "min-h-7 px-2 text-[11px]" : "h-4 w-4";
           return <button key={marker.id} type="button" data-deals-marker={group ? "group" : "single"} data-active={lit ? "true" : undefined}
             aria-label={group ? `${marker.keys.length} communities here. Zoom in and show them` : `Community ${marker.label}. Show it`}
-            onPointerDown={(event) => event.stopPropagation()}
+            // The press stops here so a drag cannot start on a marker; the drag guard is reset too (Peter, Oct 26: after
+            // one drag of the map, every later marker click was swallowed, because only a background press reset it).
+            onPointerDown={(event) => { event.stopPropagation(); gesture.current.moved = 0; }}
             onMouseEnter={() => onHover(group ? null : marker.keys[0]!)} onMouseLeave={() => onHover(null)}
             onClick={() => {
               if (!group) { onSelect({ id: marker.id, keys: marker.keys }); return; }
@@ -416,7 +420,7 @@ export function isFocusHome(home: PublicHome, focus: SheetFocus | undefined): bo
 /** The public link to one community's sheet: the landing page plus its opaque key (never a name or an address). */
 export function communityShareUrl(key: string | undefined): string | null {
   if (!key || typeof window === "undefined") return null;
-  return `${window.location.origin}/deals?c=${encodeURIComponent(key)}`;
+  return `${window.location.origin}/deals?k=${encodeURIComponent(key)}`;
 }
 
 function ShareButton({ community }: { community: LandingCommunity }) {
@@ -539,7 +543,7 @@ export type LandingActions = { openHome: (key: string, focus?: SheetFocus) => bo
 
 export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey }: {
   communities: readonly LandingCommunity[]; onUnlock: () => void; useHomes: UseCommunityHomes;
-  /** A shared link's community (?c=key): its sheet opens once the catalog has it. */
+  /** A shared link's community (?k=key): its sheet opens once the catalog has it. */
   openKey?: string | null;
   /** Shown at the top of the list column (the featured row); a function gets the actions above. */
   top?: ReactNode | ((actions: LandingActions) => ReactNode);

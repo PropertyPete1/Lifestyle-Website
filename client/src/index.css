@@ -116,6 +116,24 @@
   color-scheme: light;
   color: var(--foreground);
 }
+/*
+ * Every native select on Builder Deals draws its own chevron, inset from the edge (Oct 26, Peter: the browser's
+ * arrow sat against the right border and read as low-end). The arrow is a thin gold stroke, the text keeps room.
+ */
+.deals-light select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.75rem;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23946f2e' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-size: 1rem 1rem;
+  text-overflow: ellipsis;
+}
+.deals-light select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
 .deals-chrome {
   --background: oklch(0.145 0.005 285);
   --foreground: oklch(0.97 0.005 90);

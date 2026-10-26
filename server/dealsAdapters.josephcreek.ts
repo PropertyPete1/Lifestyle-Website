@@ -6,8 +6,10 @@ import {
 /**
  * JOSEPH CREEK HOMES reader (a San Antonio-area builder on Webflow). The
  * community page is static: `h1` name, "Model Home Address" then the office
- * ("10106 Mulhouse Dr, Schertz, TX 78154"), a Google Maps embed whose
- * `!2d<lng>!3d<lat>` is the office pin, the sales phone as a `tel:` link, and
+ * ("10106 Mulhouse Dr, Schertz, TX 78154"; "…, Floresville Tx., 78114"; two
+ * communities share one office), a Google Maps embed whose `!2d<lng>!3d<lat>`
+ * is the community's pin and whose `!2s<address>` (when it has one) names the
+ * community's own place, the sales phone as a `tel:` link, and
  * plan cards (`a.floorplan-card-linked`: `.floorplan-card_title`, "1700 Sq
  * Ft", "Starting at 359999", Beds / Baths / Stories / Garage cells, one
  * rendering) whose links are /floorplans/<plan>-at-<community>. Homes for
@@ -62,6 +64,17 @@ function photo(scope: readonly HtmlElement[]): PrivateGalleryImage[] {
 
 export type JosephCreekCommunityPage = { record: JosephCreekCommunityRecord; plans: PrivatePlanOrHome[] };
 
+/** "108 Pradera Ridge Drive, Floresville Tx., 78114" / "…, Floresville, Tx. 78114" / "…, Schertz, TX 78154" -> its parts; null when it is not a Texas address. */
+export function parseJosephCreekOffice(text: string | null | undefined): { street: string; city: string; zip: string | null } | null {
+  const value = clean(text);
+  if (!value) return null;
+  const match = /^(.+?),\s*([A-Za-z .'-]+?)[\s,]+(?:TX|Tx|Texas)\.?[\s,]*(\d{5})?(?:,?\s*(?:USA|United States))?$/i.exec(value);
+  if (!match) return null;
+  const city = clean(match[2]);
+  const street = match[1]!.trim();
+  return street && city ? { street, city, zip: match[3] ?? null } : null;
+}
+
 /** The community on its page; null when the page has no name. */
 export function parseJosephCreekCommunity(html: string, pageUrl: string): JosephCreekCommunityPage | null {
   const community = asUrl(pageUrl);
@@ -72,12 +85,19 @@ export function parseJosephCreekCommunity(html: string, pageUrl: string): Joseph
   const h1 = all.find((item) => item.tag === "h1");
   const name = h1 ? clean(elementText(h1, html)) : null;
   if (!name) return null;
-  const office = clean(/Model\s+Home\s+Address<\/strong><\/div>\s*<div[^>]*>([^<]{6,160})</i.exec(html)?.[1]);
-  const officeMatch = office ? /^(.+?),\s*([A-Za-z .'-]+),\s*TX(?:\s+(\d{5}))?$/i.exec(office) : null;
-  const street = officeMatch ? officeMatch[1]!.trim() : null;
+  // The office sits one or more <div>s under the label; the site spells the state "TX", "Tx.," or "Tx." (Oct 26:
+  // "108 Pradera Ridge Drive, Floresville Tx., 78114" and "…, Floresville, Tx. 78114" had both read as no address).
+  const office = clean(/Model\s+Home\s+Address<\/strong><\/div>(?:\s*<[^>]+>)*\s*([^<]{6,160})</i.exec(html)?.[1]);
   const embed = /!2d(-?\d+\.\d+)!3d(-?\d+\.\d+)/.exec(html);
   const lng = embed ? Number(embed[1]) : NaN;
   const lat = embed ? Number(embed[2]) : NaN;
+  // The map embed names the place it pins ("!2s161 Janice Ave, Castroville, TX 78009!"): that is the community itself,
+  // and it wins over a sales office shared with a sister community sixty miles away (Country Village Estates' office
+  // is Pradera Ridge's, in Floresville; the community is in Castroville).
+  const pinned = /!2s([^!]{6,160})!/.exec(html)?.[1];
+  const pinnedText = pinned && /\d/.test(pinned) ? clean(decodeURIComponent(pinned.replace(/\+/g, " "))) : null;
+  const officeMatch = parseJosephCreekOffice(pinnedText) ?? parseJosephCreekOffice(office);
+  const street = officeMatch?.street ?? null;
   const phone = /href="tel:([^"]+)"/i.exec(html)?.[1]?.replace(/[^\d]/g, "").replace(/^1(?=\d{10}$)/, "") || null;
   const plans: PrivatePlanOrHome[] = [];
   for (const card of all.filter((item) => item.tag === "a" && elementClass(item, "floorplan-card-linked") && item.attributes.href)) {
@@ -110,8 +130,8 @@ export function parseJosephCreekCommunity(html: string, pageUrl: string): Joseph
     record: {
       name,
       street: looksLikeStreetAddress(street) ? street : null,
-      city: officeMatch ? clean(officeMatch[2]) : null,
-      zip: officeMatch?.[3] ?? null,
+      city: officeMatch?.city ?? null,
+      zip: officeMatch?.zip ?? null,
       phone,
       priceFrom: prices.length ? Math.min(...prices) : null,
       geo: Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 ? { lat, lng } : null,

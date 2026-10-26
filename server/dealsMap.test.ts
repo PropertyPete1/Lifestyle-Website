@@ -99,6 +99,17 @@ describe("area map geography", () => {
     expect(await driveTimeChips(CENTROID, ["Nowhere Special", "downtown San Antonio"])).toEqual(["about 25 min to downtown San Antonio"]);
   });
 
+  it("refuses a ZIP outside both markets and clears a pin it had (Oct 26: a Cibolo page carried a Rosenberg office, read as 'Southeast of Austin')", async () => {
+    await refreshCommunityGeography(communityId);
+    expect(db.rows(dealCommunities)[0]).toMatchObject({ zipCentroidLat: "29.300500" });
+    // Rosenberg, TX 77471: about 170 miles from San Antonio and 130 from Austin.
+    geocoded["postal_code:77471|country:US"] = { lat: 29.5434, lng: -95.8776 };
+    db.rows(dealCommunities)[0]!.privateAddress = "531 Coen Cain Drive, Rosenberg, TX 77471";
+    expect(await refreshCommunityGeography(communityId)).toEqual({ ok: false, reason: "outside_markets" });
+    expect(db.rows(dealCommunities)[0]).toMatchObject({ zipCentroidLat: null, zipCentroidLng: null });
+    delete geocoded["postal_code:77471|country:US"];
+  });
+
   it("returns only the ZIP centroid in the gated JSON, more than half a mile from the home's geocoded address", async () => {
     await refreshCommunityGeography(communityId);
     const leadId = db.seed(dealLeads, { phoneE164: "+12105550123", status: "verified", expiresAt: new Date(Date.now() + 3_600_000), deviceHash: "d".repeat(64), consentText: "c", flags: "[]", sourceCode: "vg1" });
@@ -308,5 +319,15 @@ describe("placing a community by its name when the builder gives no street (Oct 
     expect(await placeByCommunityName("Fixture Ridge", "")).toBeNull();
     expect(await placeByCommunityName("Fixture Ridge", "8106 Fixture Street, San Antonio, TX")).toBeNull();
     expect(mocks.makeRequest).not.toHaveBeenCalled();
+  });
+  it("never places a community whose address names only the state (Oct 26: 'TX' had answered as the middle of Texas)", async () => {
+    mocks.makeRequest.mockClear();
+    expect(await placeByCommunityName("Fixture Estates", "TX")).toBeNull();
+    expect(await placeByCommunityName("Fixture Estates", "Texas")).toBeNull();
+    expect(mocks.makeRequest).not.toHaveBeenCalled();
+    // A "city" Google answers as a state is no town either.
+    const texas = { types: ["administrative_area_level_1", "political"], geometry: { location: { lat: 31.9686, lng: -99.9018 } }, address_components: [] };
+    geocodeBy({ "Fixture Estates, Lone Star, TX": { geometry: { location: { lat: 31.9686, lng: -99.9018 } }, address_components: [] }, "Lone Star, TX": texas });
+    expect(await placeByCommunityName("Fixture Estates", "Lone Star, TX")).toBeNull();
   });
 });

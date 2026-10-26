@@ -84,6 +84,17 @@ describe("Saratoga Homes", () => {
     expect(page.plans[1]).toMatchObject({ privatePlanName: "Lennox 2575 S 3CG", price: 500_000, bedrooms: 5 });
   });
 
+  it("reads the model home from the hero's details block and a 'Now Selling in' title (Oct 26: SilverLeaf had read as 'Austin, TX' with no pin)", () => {
+    const silverleaf = COMMUNITY
+      .replace("<title>New Homes in Pflugerville, TX | Enclave at Cele - Saratoga</title>", "<title>New Homes Now Selling in Cedar Creek, TX | SilverLeaf - Saratoga</title>")
+      .replace('<div class="hero"><p>From $447,950</p></div>', '<section class="community_hero"><div class="hero__content"><h1>SilverLeaf</h1><h2 class="uppercase">Now Selling</h2><h3>From $379,950</h3><div class="community__details">\n<p>\n  119 Stetson Court<br>\n  Cedar Creek, TX 78612            </p>\n<p>\n  Model Hours:<br>\n  Mon – Sat: 9am - 7pm    Sun: 12pm - 6pm            </p>\n</div></div></section>')
+      .replace('window.community = "Enclave at Cele"', 'window.community = "SilverLeaf"');
+    expect(parseSaratogaCommunity(silverleaf, `${S}/community/silverleaf/`)!.record).toMatchObject({ name: "SilverLeaf", street: "119 Stetson Court", city: "Cedar Creek", zip: "78612", priceFrom: 379_950 });
+    // Without a details block the city still comes from the title.
+    const titled = COMMUNITY.replace("<title>New Homes in Pflugerville, TX | Enclave at Cele - Saratoga</title>", "<title>New Homes Now Selling in Pflugerville, TX | Enclave at Cele - Saratoga</title>");
+    expect(parseSaratogaCommunity(titled, URL_)!.record).toMatchObject({ street: null, city: "Pflugerville", zip: null });
+  });
+
   it("keeps only this community's homes from a plan page, with the struck 'was' price as the previous price", () => {
     const homes = parseSaratogaPlanHomes(PLAN_MIXED, `${S}/floor-plan/bennington-2434-s-3cg/`, "Enclave at Cele", "Bennington 2434 S 3CG");
     expect(homes).toHaveLength(1);
@@ -125,6 +136,25 @@ describe("Joseph Creek Homes", () => {
     expect(page.record).toEqual({ name: "Rhine Valley", street: "10106 Mulhouse Dr", city: "Schertz", zip: "78154", phone: "2109392575", priceFrom: 359_999, geo: { lat: 29.529378797569837, lng: -98.24013955386698 } });
     expect(page.plans).toHaveLength(2);
     expect(page.plans[0]).toMatchObject({ privatePlanName: "The Maverick", price: 359_999, bedrooms: 3, bathrooms: 2, squareFeet: 1_700, stories: 1, sourceUrl: `${J}/floorplans/the-maverick-at-rhine-valley` });
+  });
+
+  it("reads the office two divs under its label and the site's 'Tx.,' spellings, and takes the community's own place from the map embed over a shared office (Oct 26: Pradera Ridge and Country Village Estates had no address)", () => {
+    // Pradera Ridge, as served: the address one div deeper, "Floresville Tx., 78114", a coordinates-only embed (no "!2s" address).
+    const pradera = COMMUNITY
+      .replace('<h1 class="h1-welcome">Rhine Valley</h1>', '<h1 class="h1-welcome">Pradera Ridge</h1>')
+      .replace('<div class="text-block-24">10106 Mulhouse Dr, Schertz, TX 78154</div>', '<div class="text-block-24"><div>108 Pradera Ridge Drive, Floresville Tx., 78114</div></div>')
+      .replace(/!2d-98\.24013955386698!3d29\.529378797569837/, "!2d-98.24246373340037!3d29.223516975347145")
+      .replace(/!3m3!1m2!1s0x865cecb38c07caf7%3A0x5c92e5e889448d5!2s10106%20Mulhouse%20Dr%2C%20Schertz%2C%20TX%2078154/, "!3m2!1m1!2zMjnCsDEzJzI0LjciTiA5OMKwMTInMDQuNiJX");
+    expect(parseJosephCreekCommunity(pradera, `${J}/communities/pradera-ridge`)!.record).toMatchObject({ name: "Pradera Ridge", street: "108 Pradera Ridge Drive", city: "Floresville", zip: "78114", geo: { lat: 29.223516975347145, lng: -98.24246373340037 } });
+    // Country Village Estates: the office is Pradera Ridge's (Floresville, "Floresville, Tx. 78114"); the embed pins 161 Janice Ave, Castroville.
+    const castroville = COMMUNITY
+      .replace('<h1 class="h1-welcome">Rhine Valley</h1>', '<h1 class="h1-welcome">Country Village Estates</h1>')
+      .replace('<div class="text-block-24">10106 Mulhouse Dr, Schertz, TX 78154</div>', '<div class="text-block-24"><div>108 Pradera Ridge Drive, Floresville, Tx. 78114</div></div>')
+      .replace(/!2d-98\.24013955386698!3d29\.529378797569837/, "!2d-98.8649058246136!3d29.360095675275293")
+      .replace(/!2s10106%20Mulhouse%20Dr%2C%20Schertz%2C%20TX%2078154/, "!2s161%20Janice%20Ave%2C%20Castroville%2C%20TX%2078009");
+    expect(parseJosephCreekCommunity(castroville, `${J}/communities/country-village-estates`)!.record).toMatchObject({ name: "Country Village Estates", street: "161 Janice Ave", city: "Castroville", zip: "78009", geo: { lat: 29.360095675275293, lng: -98.8649058246136 } });
+    // The original shape still reads as before.
+    expect(parseJosephCreekCommunity(COMMUNITY, URL_)!.record).toMatchObject({ street: "10106 Mulhouse Dr", city: "Schertz", zip: "78154" });
   });
 
   it("keeps this community's homes from the site-wide page", () => {

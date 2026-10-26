@@ -1,5 +1,5 @@
 import { zipInAddress } from "../shared/dealsSchools";
-import { marketOf, milesBetween } from "../shared/dealsArea";
+import { MARKETS, marketOf, milesBetween } from "../shared/dealsArea";
 import type { Request, Response } from "express";
 import crypto from "node:crypto";
 import { and, eq } from "drizzle-orm";
@@ -65,6 +65,8 @@ export function areaMapRadius(settings: { areaMapRadiusMiles?: unknown; publicAr
   return typeof value === "number" && Number.isFinite(value) && value >= 1 && value <= 20 ? value : fallback;
 }
 type Centroid = { lat: number; lng: number };
+/** Farther than this from both downtowns, a geocoded place is not a community of either market (discovery's own limit is 70 miles from San Antonio). */
+export const OUTSIDE_MARKETS_MILES = 85;
 
 export function zipFromAddress(address: string | null | undefined): string | null {
   // One parser for both (shared/dealsSchools has the same rule; this module is mocked wholesale in tests).
@@ -94,6 +96,9 @@ export async function zipForAddress(address: string): Promise<string | null> {
 export async function placeByCommunityName(name: string, address: string): Promise<Centroid | null> {
   const city = address.split(";")[0]!.split(",").map((part) => part.trim()).filter(Boolean)[0];
   if (!name.trim() || !city || /\d/.test(city)) return null;
+  // A state-only address ("TX": a reader that found no city, Joseph Creek on Oct 26) names no town: Google answered
+  // "TX, TX" with the middle of Texas, and two San Antonio communities read "Northwest of Austin".
+  if (/^(?:tx|texas|us|usa|united states)\.?$/i.test(city)) return null;
   // The market cities are never replaced by their downtown (Austin's edge-of-town communities would read "Central Austin").
   const bigCity = /^(?:san antonio|austin)$/i.test(city);
   const limit = bigCity ? 28 : 12;
@@ -101,6 +106,9 @@ export async function placeByCommunityName(name: string, address: string): Promi
     makeRequest<GeocodingResult>("/maps/api/geocode/json", { address: `${name.trim()}, ${city}, TX`, components: "country:US|administrative_area:TX" }),
     makeRequest<GeocodingResult>("/maps/api/geocode/json", { address: `${city}, TX`, components: "country:US|administrative_area:TX" }),
   ]);
+  // The "city" must answer as a town: a state or country answer means the address named none.
+  const townTypes = town.results?.[0]?.types ?? [];
+  if (townTypes.some((type) => type === "administrative_area_level_1" || type === "country")) return null;
   const townRaw = town.results?.[0]?.geometry?.location;
   const townLat = townRaw ? finiteCoordinate(townRaw.lat, 90) : null;
   const townLng = townRaw ? finiteCoordinate(townRaw.lng, 180) : null;
@@ -181,6 +189,13 @@ export async function refreshCommunityGeography(communityId: number): Promise<{ 
     }
     const centroid = zip ? await geocodeZipCentroid(zip) : byName;
     if (!centroid) return { ok: false, reason: "zip_not_geocoded" };
+    // A place outside both markets is a wrong address, not a far community (Chesmar's Cibolo page carried a Rosenberg
+    // office on Oct 26: the Houston ZIP's centroid had read "Southeast of Austin"). The pin is cleared rather than kept
+    // wrong; the community stays off the map until its address is corrected.
+    if (!MARKETS.some((market) => milesBetween(market.center, centroid) <= OUTSIDE_MARKETS_MILES)) {
+      if (community.zipCentroidLat) await db.update(dealCommunities).set({ zipCentroidLat: null, zipCentroidLng: null }).where(eq(dealCommunities.id, communityId));
+      return { ok: false, reason: "outside_markets" };
+    }
     let chips: string[] = [];
     try {
       const settings = await getDealSettings();

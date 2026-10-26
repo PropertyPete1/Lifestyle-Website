@@ -9,8 +9,10 @@ import {
  * cards (`h3` plan name, "4 BR | 3.5 BA | 2,453 sq.ft.", "From $538,950" or
  * "From the $500s", a `.badge` "2 Available Homes", one rendering), and its
  * map script sets `window.mapCenter = { lat, lng }` and `window.community =
- * "Enclave at Cele"`. The page has no sales address; the city is in the title
- * ("New Homes in Pflugerville, TX | Enclave at Cele - Saratoga"). Homes for
+ * "Enclave at Cele"`. The hero's `div.community__details` gives the model home
+ * when there is one ("119 Stetson Court<br>Cedar Creek, TX 78612"); the city
+ * is in the title ("New Homes in Pflugerville, TX | Enclave at Cele -
+ * Saratoga", "New Homes Now Selling in Cedar Creek, TX | …"). Homes for
  * sale are not on the community page: each plan page lists `div.home_card`s
  * for EVERY community that sells the plan (`data-community` names the
  * community, `data-address` the street; "Enclave at Cele | Pflugerville, TX";
@@ -75,9 +77,15 @@ export function parseSaratogaCommunity(html: string, pageUrl: string): SaratogaC
   const lat = Number(/window\.mapCenter\s*=\s*\{\s*lat:\s*(-?\d+(?:\.\d+)?)/.exec(html)?.[1]);
   const lng = Number(/lng:\s*(-?\d+(?:\.\d+)?)/.exec(html)?.[1]);
   const title = clean(/<title>([^<]*)<\/title>/i.exec(html)?.[1]) ?? "";
-  const city = clean(/New\s+Homes\s+in\s+([A-Za-z .'-]+?),\s*TX/i.exec(title)?.[1]);
   if (!name) return null;
   const all = descendants(root);
+  // The hero's details block gives the model home when the community has one ("119 Stetson Court<br>Cedar Creek, TX
+  // 78612", SilverLeaf on Oct 26); the title ("New Homes in Pflugerville, TX | …", "New Homes Now Selling in Cedar
+  // Creek, TX | …") always names the city.
+  const detailsHtml = /class="community__details"[\s\S]{0,400}?<p>([\s\S]{0,300}?)<\/p>/i.exec(html)?.[1] ?? "";
+  const office = /^\s*(\d+[A-Za-z]?\s+[^<]{3,80}?)\s*<br\s*\/?>\s*([A-Za-z .'-]+?),\s*TX\s+(\d{5})\b/i.exec(detailsHtml);
+  const street = office && looksLikeStreetAddress(clean(office[1]) ?? "") ? clean(office[1]) : null;
+  const city = clean(office?.[2]) ?? clean(/New\s+Homes\s+(?:Now\s+Selling\s+)?in\s+([A-Za-z .'-]+?),\s*TX/i.exec(title)?.[1]);
   const list = all.find((item) => elementClass(item, "floor_plans"));
   const plans: PrivatePlanOrHome[] = [];
   for (const card of list ? descendants(list).filter((item) => item.tag === "div" && elementClass(item, "item")) : []) {
@@ -110,7 +118,7 @@ export function parseSaratogaCommunity(html: string, pageUrl: string): SaratogaC
   const stated = Array.from(html.matchAll(/From\s+\$\s*([\d,]{5,9})(?!\d*s)/g), (match) => num(match[1])).filter((price): price is number => price !== null && price >= 50_000);
   const prices = stated.length ? stated : plans.map((plan) => plan.price).filter((price): price is number => price !== null && price >= 50_000);
   return {
-    record: { name, street: null, city, zip: null, phone: null, priceFrom: prices.length ? Math.min(...prices) : null, geo: Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 ? { lat, lng } : null },
+    record: { name, street, city, zip: street ? office![3]! : null, phone: null, priceFrom: prices.length ? Math.min(...prices) : null, geo: Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 ? { lat, lng } : null },
     plans,
   };
 }

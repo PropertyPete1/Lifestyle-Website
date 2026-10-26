@@ -1,3 +1,4 @@
+import { zipInAddress } from "../shared/dealsSchools";
 import { marketOf, milesBetween } from "../shared/dealsArea";
 import type { Request, Response } from "express";
 import crypto from "node:crypto";
@@ -66,12 +67,8 @@ export function areaMapRadius(settings: { areaMapRadiusMiles?: unknown; publicAr
 type Centroid = { lat: number; lng: number };
 
 export function zipFromAddress(address: string | null | undefined): string | null {
-  const text = (address ?? "").trim();
-  const match = /\b(\d{5})(?:-\d{4})?\s*$/.exec(text);
-  if (match) return match[1]!;
-  // The ZIP after the state, however the builder wrote it: "TX78222", "TX 78148, USA", "TX, 78009", "TX 78254, U.S.A.".
-  const afterState = Array.from(text.matchAll(/\bTX(?![A-Za-z])[\s,]*?(\d{5})(?:-\d{4})?(?!\d)/gi)).at(-1);
-  return afterState ? afterState[1]! : null;
+  // One parser for both (shared/dealsSchools has the same rule; this module is mocked wholesale in tests).
+  return zipInAddress(address);
 }
 
 /**

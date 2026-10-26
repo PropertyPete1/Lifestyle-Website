@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { SlidersHorizontal, X, Flame, ChevronDown } from "lucide-react";
-import { AVAILABLE_BY, BATH_MINIMUMS, BED_MINIMUMS, BROWSE_PAGE, EMPTY_FILTERS, GARAGE_MINIMUMS, PRICE_CAPS, PRICE_FLOORS, SQFT_MAXIMUMS, SQFT_MINIMUMS, activeFilterCount, areaGroups, MARKET_AREA_PREFIX, moreFilterCount, priceCapLabel, type BrowseFilters } from "@/lib/dealsBrowse";
+import { AVAILABLE_BY, BATH_MINIMUMS, BED_MINIMUMS, BROWSE_PAGE, EMPTY_FILTERS, GARAGE_MINIMUMS, PRICE_CAPS, PRICE_FLOORS, SQFT_MAXIMUMS, SQFT_MINIMUMS, activeFilterCount, areaGroups, districtChoices, MARKET_AREA_PREFIX, moreFilterCount, priceCapLabel, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export const BROWSE_COPY = {
   heading: "Find your community",
@@ -26,6 +26,8 @@ export const BROWSE_COPY = {
   oneStory: "1 story",
   twoStory: "2 story+",
   homeType: "Home type",
+  schoolDistrict: "School district",
+  anyDistrict: "Any district",
   builder: "Builder (team only)",
   anyBuilder: "All builders",
   more: "More filters",
@@ -65,7 +67,7 @@ function NumberSelect({ label, value, options, any, format, onChange }: { label:
 export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedCount = 0, showStories = true, builders = [] }: {
   filters: BrowseFilters;
   onChange: (filters: BrowseFilters) => void;
-  areas: ReadonlyArray<{ area: string }>;
+  areas: ReadonlyArray<{ area: string; schoolDistrict?: string | null }>;
   shown: number;
   total: number;
   /** "communities" or "homes", for the count line. */
@@ -81,6 +83,7 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const groups = areaGroups(areas);
+  const districts = districtChoices(areas);
   const active = activeFilterCount(filters);
   const more = moreFilterCount(filters);
   const set = (patch: Partial<BrowseFilters>) => onChange({ ...filters, ...patch });
@@ -136,6 +139,14 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
           </div>
         </div>}
       </div>
+      {districts.length > 1 && <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className={LABEL} data-deals-district-filter="true">{BROWSE_COPY.schoolDistrict}
+          <select aria-label={BROWSE_COPY.schoolDistrict} value={filters.schoolDistrict} onChange={(event) => set({ schoolDistrict: event.target.value })} className={`mt-1 ${SELECT}`}>
+            <option value="">{BROWSE_COPY.anyDistrict}</option>
+            {districts.map((choice) => <option key={choice.district} value={choice.district}>{choice.district} ({choice.count})</option>)}
+          </select>
+        </label>
+      </div>}
       <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2">
         <span className="mr-1 text-[11px] uppercase tracking-widest text-muted-foreground">{BROWSE_COPY.homeType}</span>
         <Toggle name="move-in-ready-more" on={filters.moveInReady} label={BROWSE_COPY.moveInReady} onChange={(value) => set({ moveInReady: value })} />

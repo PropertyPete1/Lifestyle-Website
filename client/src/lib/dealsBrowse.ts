@@ -33,9 +33,11 @@ export type BrowseFilters = {
   savedOnly: boolean;
   /** Team only (Peter and his agents): one builder, or "" for all. Buyers never see builder names. */
   builder: string;
+  /** One school district ("Northside ISD"), or "" for all. */
+  schoolDistrict: string;
 };
 
-export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, maxSqft: null, availableBy: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, savedOnly: false, builder: "" };
+export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, maxSqft: null, availableBy: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, savedOnly: false, builder: "", schoolDistrict: "" };
 export const PRICE_CAPS = [200_000, 300_000, 400_000, 500_000, 600_000, 750_000, 1_000_000] as const;
 export const PRICE_FLOORS = [200_000, 250_000, 300_000, 350_000, 400_000, 500_000, 600_000, 750_000] as const;
 export const BED_MINIMUMS = [2, 3, 4, 5] as const;
@@ -50,13 +52,16 @@ export const BROWSE_PAGE = 12;
 /** A short list opens every community; a long one opens only the buyer's own. */
 export const OPEN_ALL_UP_TO = 3;
 
+/** A filter is on when it is not its empty value (null, false or ""); 0 ("ready now") counts. */
+const filterOn = (value: unknown) => value !== null && value !== false && value !== undefined && value !== "";
+
 /** The filters tucked behind "More filters" (counted on that button). */
 export function moreFilterCount(filters: BrowseFilters): number {
-  return [filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.toBeBuilt, filters.bigLots, filters.builderRate].filter((value) => value !== null && value !== false && value !== undefined).length;
+  return [filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.toBeBuilt, filters.bigLots, filters.builderRate, filters.schoolDistrict].filter(filterOn).length;
 }
 
 export function activeFilterCount(filters: BrowseFilters): number {
-  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.savedOnly, filters.builder].filter((value) => value !== null && value !== false && value !== "" && value !== undefined).length;
+  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.savedOnly, filters.builder, filters.schoolDistrict].filter(filterOn).length;
 }
 
 /** Areas present in the list, most communities first, for the area picker. */
@@ -177,6 +182,7 @@ export function landingHome(facts: LandingHomeFacts): FilterableHome {
 
 export type LandingBrowseCommunity = {
   area: string;
+  schoolDistrict?: string | null;
   label: string;
   fromPrice?: number | null;
   homesAvailable: number;
@@ -186,6 +192,13 @@ export type LandingBrowseCommunity = {
   /** The homes the community card stands for (see LandingHomeFacts); older pages have none. */
   homeFacts?: LandingHomeFacts[] | null;
 };
+
+/** The school districts on the list, most communities first (the district picker). */
+export function districtChoices(items: ReadonlyArray<{ schoolDistrict?: string | null }>): Array<{ district: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const item of items) { const name = item.schoolDistrict?.trim(); if (name) counts.set(name, (counts.get(name) ?? 0) + 1); }
+  return Array.from(counts, ([district, count]) => ({ district, count })).sort((a, b) => b.count - a.count || a.district.localeCompare(b.district));
+}
 
 /** The builders on a team list, most communities first (the builder filter); empty when the list carries no names. */
 export function builderChoices(items: ReadonlyArray<{ details?: { builderName?: string | null } | null }>): Array<{ builder: string; count: number }> {
@@ -204,6 +217,7 @@ const LANDING_HOME_FILTERS = (filters: BrowseFilters) => filters.minPrice !== nu
 /** A landing card matches when it is in the area, has the offer and lot asked for, and has a home that passes the home filters. */
 export function landingMatches(community: LandingBrowseCommunity, filters: BrowseFilters): boolean {
   if (!areaMatches(community.area, filters.area)) return false;
+  if (filters.schoolDistrict && community.schoolDistrict !== filters.schoolDistrict) return false;
   if (filters.builderRate && !community.incentive?.headlineRate) return false;
   if (filters.bigLots && (lotAcres(community.label) ?? 0) < BIG_LOT_ACRES) return false;
   if (!LANDING_HOME_FILTERS(filters)) return true;
@@ -227,6 +241,7 @@ export function homeFiltersOn(filters: BrowseFilters, saved?: ReadonlySet<string
 }
 export type GatedBrowseCommunity<Home extends GatedBrowseHome = GatedBrowseHome> = {
   area: string;
+  schoolDistrict?: string | null;
   /** The full view's names (team and agent clients); a buyer's list has none. */
   details?: { builderName?: string | null } | null;
   label: string;
@@ -245,6 +260,7 @@ export function homesMatching<Home extends GatedBrowseHome>(community: GatedBrow
 /** A community stays on the private list when it is in the area, has the offer asked for, and has a home that matches. */
 export function gatedCommunityVisible<Home extends GatedBrowseHome>(community: GatedBrowseCommunity<Home>, filters: BrowseFilters, saved?: ReadonlySet<string>): boolean {
   if (!areaMatches(community.area, filters.area)) return false;
+  if (filters.schoolDistrict && community.schoolDistrict !== filters.schoolDistrict) return false;
   if (filters.builderRate && !community.incentive?.headlineRate) return false;
   if (filters.builder && community.details?.builderName !== filters.builder) return false;
   return !homeFiltersOn(filters, saved) || homesMatching(community, filters, saved).length > 0;

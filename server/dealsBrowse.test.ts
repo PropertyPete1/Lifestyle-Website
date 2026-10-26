@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
-import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, areaGroups, areaMatches, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingMatches, moreFilterCount, monthsUntilMoveIn, priceCapLabel, storiesKnown, builderChoices, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
+import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, areaGroups, areaMatches, districtChoices, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingMatches, moreFilterCount, monthsUntilMoveIn, priceCapLabel, storiesKnown, builderChoices, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
 import type { GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
 import { browseOrder } from "./dealsService";
 
@@ -135,6 +135,17 @@ describe("the area picker with two markets (Oct 25: Austin joined San Antonio)",
     expect(areaMatches("Kyle", "Buda")).toBe(false);
     expect(areaMatches("Kyle", "")).toBe(true);
     expect(landingMatches({ area: "Kyle", label: "Kyle | x", homesAvailable: 1 }, { ...EMPTY_FILTERS, area: "market:Austin" })).toBe(true);
+  });
+});
+
+describe("the school district filter (Oct 26: districts are clean, so buyers can pick one like on New Home Buddy)", () => {
+  it("lists districts by how many communities they have and narrows both lists to one", () => {
+    const items = [{ area: "Boerne", schoolDistrict: "Boerne ISD" }, { area: "West San Antonio", schoolDistrict: "Northside ISD" }, { area: "Northwest San Antonio", schoolDistrict: "Northside ISD" }, { area: "Kyle", schoolDistrict: null }];
+    expect(districtChoices(items)).toEqual([{ district: "Northside ISD", count: 2 }, { district: "Boerne ISD", count: 1 }]);
+    expect(items.filter((item) => landingMatches({ ...item, label: "x", homesAvailable: 1 }, { ...EMPTY_FILTERS, schoolDistrict: "Northside ISD" })).length).toBe(2);
+    expect(gatedCommunityVisible(community(1, { schoolDistrict: "Boerne ISD" } as never), { ...EMPTY_FILTERS, schoolDistrict: "Boerne ISD" })).toBe(true);
+    expect(gatedCommunityVisible(community(1, { schoolDistrict: "Boerne ISD" } as never), { ...EMPTY_FILTERS, schoolDistrict: "Comal ISD" })).toBe(false);
+    expect(activeFilterCount({ ...EMPTY_FILTERS, schoolDistrict: "Comal ISD" })).toBe(1);
   });
 });
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ComingSoonSection, type ComingSoonItem } from "./ComingSoon";
 import { Link } from "wouter";
-import { ChevronDown, Clock3, ExternalLink, Heart, X } from "lucide-react";
+import { Check, ChevronDown, Clock3, ExternalLink, Heart, Plus, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
@@ -114,10 +114,18 @@ export function SaveButton({ saved, saving, onToggle }: { saved: boolean; saving
   return <button type="button" aria-pressed={saved} aria-label={saved ? "Saved. Tap to unsave" : "Save this home"} disabled={saving} onClick={onToggle} data-deals-save={saved ? "saved" : "unsaved"} className={`flex min-h-11 items-center gap-2 border px-3 text-xs uppercase tracking-widest transition-colors ${saved ? "border-gold bg-gold/10 text-gold" : "border-border text-muted-foreground hover:text-gold"}`}><Heart className={`h-4 w-4 ${saved ? "fill-current" : ""}`} />{saved ? "Saved" : "Save"}</button>;
 }
 
-function HomeCard({ home, teamPreview, saved, saving, onRequest, onSave }: { home: GatedHome; teamPreview: boolean; saved: boolean; saving?: boolean; onRequest?: (request: HomeRequest) => void; onSave?: (card: string, saved: boolean) => void }) {
+/** Oct 26, 2026: an agent picks homes for a client; the picks ride the client link. Team view only. */
+export type PickControl = { picked: ReadonlySet<string>; onToggle: (card: string) => void };
+
+export function PickButton({ picked, onToggle }: { picked: boolean; onToggle: () => void }) {
+  return <button type="button" aria-pressed={picked} aria-label={picked ? "Picked for your client. Tap to remove" : "Pick this home for a client"} onClick={onToggle} data-deals-pick={picked ? "picked" : "unpicked"} className={`flex min-h-11 items-center gap-2 border px-3 text-xs uppercase tracking-widest transition-colors ${picked ? "border-gold bg-gold text-primary-foreground" : "border-border text-muted-foreground hover:border-gold hover:text-gold"}`}>{picked ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}{picked ? "Picked" : "Pick for client"}</button>;
+}
+
+function HomeCard({ home, teamPreview, saved, saving, onRequest, onSave, pick }: { home: GatedHome; teamPreview: boolean; saved: boolean; saving?: boolean; onRequest?: (request: HomeRequest) => void; onSave?: (card: string, saved: boolean) => void; pick?: PickControl }) {
   const toBeBuilt = home.kind === "to_be_built";
   const details = home.details ?? null;
-  return <article id={`home-${home.card}`} className="min-w-0 max-w-full scroll-mt-6 overflow-hidden border border-border bg-card p-5">
+  const picked = pick?.picked.has(home.card) ?? false;
+  return <article id={`home-${home.card}`} data-deals-picked={picked ? "true" : undefined} className={`min-w-0 max-w-full scroll-mt-6 overflow-hidden border bg-card p-5 ${picked ? "border-gold shadow-[0_0_0_1px_var(--color-gold)]" : "border-border"}`}>
     <div className="flex items-start justify-between gap-4"><p className="eyebrow text-gold">{toBeBuilt ? "To Be Built" : "Available now"}</p><RedHotBadge price={home.price} previousPrice={home.previousPrice} /></div>
     <ProtectedGallery photos={home.photos} />
     <h3 className="mt-3 text-3xl">{home.price ? money.format(home.price) : "Ask for current pricing"}</h3>
@@ -130,7 +138,8 @@ function HomeCard({ home, teamPreview, saved, saving, onRequest, onSave }: { hom
     {/* Wraps on a narrow phone instead of clipping the request button. */}
     <div className="mt-6 flex flex-wrap items-stretch gap-3">
       {onSave && <SaveButton saved={saved} saving={saving} onToggle={() => onSave(home.card, !saved)} />}
-      {teamPreview ? <p className="flex min-w-[10rem] flex-1 items-center justify-center border border-gold/35 px-4 py-3 text-center text-xs uppercase tracking-widest text-gold">Team view</p> : <Button type="button" onClick={() => onRequest?.({ card: home.card, requestType: toBeBuilt ? "ask" : "tour" })} className="h-auto min-h-11 min-w-[10rem] flex-1 whitespace-normal bg-gold text-primary-foreground">{toBeBuilt ? "Ask about this one" : "Tour this home with us"}</Button>}
+      {pick && <PickButton picked={picked} onToggle={() => pick.onToggle(home.card)} />}
+      {teamPreview ? (pick ? null : <p className="flex min-w-[10rem] flex-1 items-center justify-center border border-gold/35 px-4 py-3 text-center text-xs uppercase tracking-widest text-gold">Team view</p>) : <Button type="button" onClick={() => onRequest?.({ card: home.card, requestType: toBeBuilt ? "ask" : "tour" })} className="h-auto min-h-11 min-w-[10rem] flex-1 whitespace-normal bg-gold text-primary-foreground">{toBeBuilt ? "Ask about this one" : "Tour this home with us"}</Button>}
     </div>
   </article>;
 }
@@ -173,6 +182,10 @@ export type GatedCatalogProps = {
   featured?: FeaturedDealsData | null;
   /** Called with a community's key when the buyer opens it (every open community on a short list). */
   onViewCommunity?: (key: string) => void;
+  /** Team view: every home card gets a Pick button and the picked set is shown. */
+  pick?: PickControl;
+  /** A client's list: the card handles their agent picked for them, shown first in the agent's order. */
+  picks?: readonly string[];
 };
 
 /**
@@ -191,9 +204,9 @@ function communityKey(community: GatedCommunity, index: number) {
 }
 
 /** One community: a tappable summary row on a long list, the full section when open. */
-function CommunitySection({ community, homes, open, onToggle, autoLoadReel, teamPreview, savedSet, savingCard, onRequest, onSave, id }: {
+function CommunitySection({ community, homes, open, onToggle, autoLoadReel, teamPreview, savedSet, savingCard, onRequest, onSave, id, pick }: {
   community: GatedCommunity; homes: GatedHome[]; open: boolean; onToggle?: () => void; autoLoadReel: boolean; teamPreview: boolean; savedSet: Set<string>; savingCard?: string | null;
-  onRequest?: (request: HomeRequest) => void; onSave?: (card: string, saved: boolean) => void; id: string;
+  onRequest?: (request: HomeRequest) => void; onSave?: (card: string, saved: boolean) => void; id: string; pick?: PickControl;
 }) {
   const prices = homes.map((home) => home.price).filter((price): price is number => typeof price === "number" && price > 0);
   const from = prices.length ? Math.min(...prices) : community.fromPrice ?? null;
@@ -214,13 +227,27 @@ function CommunitySection({ community, homes, open, onToggle, autoLoadReel, team
       <AreaMap chips={community.driveTimes} map={community.areaMap} />
       <div className="mt-5"><Incentive incentive={community.incentive} /></div>
       {community.amenities && community.amenities.length > 0 && <div className="mt-5 flex flex-wrap gap-2">{community.amenities.map((item) => <span key={item} className="border border-border px-3 py-1.5 text-xs text-muted-foreground">{item}</span>)}</div>}
-      <div className="mt-7 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">{homes.map((home) => <HomeCard key={home.card} home={home} teamPreview={teamPreview} saved={savedSet.has(home.card)} saving={savingCard === home.card} onRequest={onRequest} onSave={onSave} />)}</div>
+      <div className="mt-7 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">{homes.map((home) => <HomeCard key={home.card} home={home} teamPreview={teamPreview} saved={savedSet.has(home.card)} saving={savingCard === home.card} onRequest={onRequest} onSave={onSave} pick={pick} />)}</div>
     </div>}
   </section>;
 }
 
-export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire, featured, onViewCommunity, comingSoon }: GatedCatalogProps) {
+/** The homes an agent picked, in their order, with the community each sits in (a pick no longer on the list is skipped). */
+export function pickedHomes(communities: readonly GatedCommunity[], picks: readonly string[] | undefined): Array<{ home: GatedHome; community: GatedCommunity }> {
+  if (!picks?.length) return [];
+  const byCard = new Map<string, { home: GatedHome; community: GatedCommunity }>();
+  for (const community of communities) for (const home of community.homes) if (!byCard.has(home.card)) byCard.set(home.card, { home, community });
+  return picks.flatMap((card) => { const entry = byCard.get(card); return entry ? [entry] : []; });
+}
+
+export const PICKS_COPY = {
+  heading: (first: string | null | undefined, count: number) => `${first ?? "Your agent"} picked ${count === 1 ? "this home" : `these ${count} homes`} for you`,
+  intro: "Start here. The full list is below if you want to see everything else.",
+} as const;
+
+export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire, featured, onViewCommunity, comingSoon, pick, picks }: GatedCatalogProps) {
   const [promptDismissed, setPromptDismissed] = useState(false);
+  const pickedForMe = useMemo(() => pickedHomes(communities, picks), [communities, picks]);
   const updatedAt = communities.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
   const savedSet = new Set(saved ?? []);
   // Saved homes that are still on this list (a saved home that sold or went off the list is not counted or filtered on).
@@ -270,6 +297,12 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
       <div className="border-b border-border pb-7"><p className="eyebrow text-gold">{eyebrow}</p><h1 className="mt-2 break-words text-4xl sm:text-5xl">Prepared for {lead.display}</h1><p className="mt-3 text-sm text-muted-foreground">Updated {formatChicagoDate(updatedAt)}. Your access expires in <Countdown expiresAt={lead.expiresAt} now={now} />.</p>{agent && !lead.teamPreview && <p className="mt-3 text-sm text-foreground" data-deals-agent-note="true">Shared with you by {agent.name}. Tap Save on any home and {agent.firstName ?? "your agent"} hears about it right away.{agent.phone ? ` Questions? Text ${agent.firstName ?? agent.name} at ${agent.phone}.` : ""}</p>}</div>
       {tools}
       {!promptDismissed && !profileSaved && !lead.name && !lead.teamPreview && <NamePrompt onSave={onSaveProfile} saving={savingProfile} error={profileError} onDismiss={() => setPromptDismissed(true)} />}
+      {pickedForMe.length > 0 && <section aria-labelledby="deals-picked" data-deals-picked-for-you="true" className="mt-8 border border-gold/40 bg-gold/5 p-5 sm:p-6">
+        <p className="eyebrow text-gold">Picked for you</p>
+        <h2 id="deals-picked" className="mt-2 text-3xl sm:text-4xl">{PICKS_COPY.heading(agent?.firstName ?? agent?.name, pickedForMe.length)}</h2>
+        <p className="mt-2 text-sm text-muted-foreground">{PICKS_COPY.intro}</p>
+        <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">{pickedForMe.map(({ home, community }) => <div key={`pick-${home.card}`} className="min-w-0"><p className="mb-2 truncate text-xs uppercase tracking-widest text-muted-foreground">{community.label}</p><HomeCard home={{ ...home, card: `pick-${home.card}` }} teamPreview={lead.teamPreview} saved={savedSet.has(home.card)} saving={savingCard === home.card} onRequest={onRequest ? (request) => onRequest({ ...request, card: home.card }) : undefined} onSave={onSave ? (_card, next) => onSave(home.card, next) : undefined} /></div>)}</div>
+      </section>}
       <FeaturedDeals featured={featured} onSelect={(deal) => selectDeal(deal.card)} />
       {(many || savedOnList.size > 0) && <BrowseBar filters={filters} onChange={(next) => {
         // Turning Saved on opens the communities that hold a saved home; each can still be collapsed.
@@ -278,7 +311,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
       }} areas={communities} shown={shownHomes} total={homeCount} unit="homes" showBeds savedCount={savedOnList.size} showStories={storiesKnown(communities)} builders={lead.teamPreview ? builderChoices(communities) : []} />}
       {(filters.savedOnly || savedOnList.size === 0) && savedGone > 0 && <p role="status" className="mt-3 text-xs text-muted-foreground" data-deals-saved-gone="true">{savedGone === 1 ? "1 home you saved is no longer available." : `${savedGone} homes you saved are no longer available.`}</p>}
       {(many || savedOnList.size > 0) && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{filters.savedOnly && savedOnList.size > 0 ? BROWSE_COPY.noneSaved : BROWSE_COPY.none}</p>}
-      <div className="mt-10 space-y-12">{visible.map(({ community, key }, position) => <CommunitySection key={key} id={`deals-community-${position}`} community={community} homes={homeFilters ? homesMatching(community, filters, savedOnList) : community.homes} open={!many || opened.has(key)} onToggle={many ? () => setOpened((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; }) : undefined} autoLoadReel={!many || position === 0} teamPreview={lead.teamPreview} savedSet={savedSet} savingCard={savingCard} onRequest={onRequest} onSave={onSave} />)}</div>
+      <div className="mt-10 space-y-12">{visible.map(({ community, key }, position) => <CommunitySection key={key} id={`deals-community-${position}`} community={community} homes={homeFilters ? homesMatching(community, filters, savedOnList) : community.homes} open={!many || opened.has(key)} onToggle={many ? () => setOpened((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; }) : undefined} autoLoadReel={!many || position === 0} teamPreview={lead.teamPreview} savedSet={savedSet} savingCard={savingCard} onRequest={onRequest} onSave={onSave} pick={pick} />)}</div>
       {many && <ShowMore remaining={matching.length - visible.length} onClick={() => setPages((value) => value + 1)} />}
       <ComingSoonSection items={comingSoon} action={{ kind: "text", phone: !lead.teamPreview ? agent?.phone ?? null : null, name: !lead.teamPreview ? agent?.firstName ?? agent?.name ?? null : null }} />
     </div></section>

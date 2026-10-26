@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { toast } from "sonner";
-import { LockKeyhole, RotateCcw, X } from "lucide-react";
+import { ListChecks, LockKeyhole, RotateCcw, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -9,7 +9,7 @@ import { trpc } from "@/lib/trpc";
 import { MINE_COPY, isUnauthorizedDealsError, profileErrorCopy } from "@/lib/dealsMine";
 import { TRANSIENT_GATE_PARAMS, clientLinkTokenInUrl, forgetClientLinkToken, keepClientLinkToken, rememberClientLinkToken } from "@/lib/dealsGate";
 import { GateSheet } from "@/components/deals/GateSheet";
-import { GatedCatalog, type GatedCommunity, type HomeRequest } from "@/components/deals/GatedCatalog";
+import { GatedCatalog, type GatedCommunity, type HomeRequest, type PickControl } from "@/components/deals/GatedCatalog";
 import { FeaturedStrip, type FeaturedDealsData } from "@/components/deals/FeaturedDeals";
 import { AgentTools, type AgentWorkspaceData } from "@/components/deals/AgentTools";
 import { ComingSoonSection } from "@/components/deals/ComingSoon";
@@ -68,6 +68,8 @@ function Landing() {
   // October 24, 2026: visitors browse every home first; the sign-up opens when they ask for addresses, or when a
   // link brings them to it (an agent's client link, a code in progress, an expired or blocked session, a lapsed list).
   const [gateOpen, setGateOpen] = useState(() => Boolean(clientToken) || TRANSIENT_GATE_PARAMS.some((name) => new URLSearchParams(window.location.search).has(name)) || /^\/deals\/(mine|team)/.test(window.location.pathname));
+  // Oct 26, 2026: /deals/team with no session is the agent sign-in page (the same sheet, agent wording, phone only).
+  const [teamSignIn] = useState(() => /^\/deals\/team/.test(window.location.pathname) && !clientToken);
   useInstagramEmbeds();
   // With no token in hand, the server may name the link from this browser's lapsed agent-client session.
   const linkToken = clientToken ?? state.data?.clientLinkToken ?? undefined;
@@ -94,7 +96,7 @@ function Landing() {
   const paused = Boolean(state.data && "paused" in state.data && state.data.paused);
   useEffect(() => { if (paused) setGateOpen(true); }, [paused]);
   const updatedAt = catalog.data?.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
-  return <main className="deals-light min-h-screen max-w-full overflow-x-clip bg-background"><header className="deals-chrome flex min-w-0 items-center justify-center border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link></header><section className="ambient-section px-4 pb-28 pt-6 sm:px-6"><div className="mx-auto max-w-[1600px]"><p className="eyebrow text-gold">{shared ? `Shared by ${shared.agentName}` : "New construction deals"}</p><h1 className="mt-2 max-w-3xl text-3xl leading-tight sm:text-4xl">{sourceLabel}</h1><p className="mt-2 text-sm text-muted-foreground">{shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : "Hand-picked by Property Pete."}{updatedAt ? ` Updated ${formatChicagoDate(updatedAt)}.` : ""}</p>{all.length > BROWSE_PAGE / 2 && <BrowseBar filters={filters} onChange={changeFilters} areas={all} shown={matching.length} total={all.length} unit="communities" showStories={storiesKnown(all)} />}{all.length > 0 && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{BROWSE_COPY.none}</p>}<LandingBrowse communities={matching} filters={filters} useHomes={useLandingHomes} onUnlock={() => setGateOpen(true)} lookup={all} openKey={sharedKey} top={(actions) => <FeaturedStrip featured={featured.data as FeaturedDealsData | undefined} opens onHover={(deal) => actions.hover(deal?.landingKey ?? null)} onSelect={(deal) => { if (!deal.landingKey || !actions.openHome(deal.landingKey, { price: deal.price, sqft: deal.sqft, kind: deal.kind })) setGateOpen(true); }} />} /><ComingSoonSection items={comingSoon.data} action={{ kind: "unlock", onClick: () => setGateOpen(true) }} /></div></section><button type="button" onClick={() => setGateOpen(true)} className="fixed bottom-5 left-5 right-5 z-30 min-h-14 bg-gold px-5 text-sm font-medium uppercase tracking-[0.14em] text-primary-foreground shadow-xl sm:left-auto sm:right-8 sm:w-72">Schedule a tour <LockKeyhole className="ml-2 inline h-4 w-4" /></button><DealsFooter />{askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} onClose={() => setGateOpen(false)} />}</main>;
+  return <main className="deals-light min-h-screen max-w-full overflow-x-clip bg-background"><header className="deals-chrome relative flex min-w-0 items-center justify-center border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link><Link href="/deals/team" data-deals-agent-signin="true" className="absolute right-5 top-1/2 hidden -translate-y-1/2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground underline-offset-4 hover:text-gold hover:underline sm:inline">Agent sign-in</Link></header><section className="ambient-section px-4 pb-28 pt-6 sm:px-6"><div className="mx-auto max-w-[1600px]"><p className="eyebrow text-gold">{shared ? `Shared by ${shared.agentName}` : "New construction deals"}</p><h1 className="mt-2 max-w-3xl text-3xl leading-tight sm:text-4xl">{sourceLabel}</h1><p className="mt-2 text-sm text-muted-foreground">{shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : "Hand-picked by Property Pete."}{updatedAt ? ` Updated ${formatChicagoDate(updatedAt)}.` : ""}</p>{all.length > BROWSE_PAGE / 2 && <BrowseBar filters={filters} onChange={changeFilters} areas={all} shown={matching.length} total={all.length} unit="communities" showStories={storiesKnown(all)} />}{all.length > 0 && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{BROWSE_COPY.none}</p>}<LandingBrowse communities={matching} filters={filters} useHomes={useLandingHomes} onUnlock={() => setGateOpen(true)} lookup={all} openKey={sharedKey} top={(actions) => <FeaturedStrip featured={featured.data as FeaturedDealsData | undefined} opens onHover={(deal) => actions.hover(deal?.landingKey ?? null)} onSelect={(deal) => { if (!deal.landingKey || !actions.openHome(deal.landingKey, { price: deal.price, sqft: deal.sqft, kind: deal.kind })) setGateOpen(true); }} />} /><ComingSoonSection items={comingSoon.data} action={{ kind: "unlock", onClick: () => setGateOpen(true) }} /></div></section><button type="button" onClick={() => setGateOpen(true)} className="fixed bottom-5 left-5 right-5 z-30 min-h-14 bg-gold px-5 text-sm font-medium uppercase tracking-[0.14em] text-primary-foreground shadow-xl sm:left-auto sm:right-8 sm:w-72">Schedule a tour <LockKeyhole className="ml-2 inline h-4 w-4" /></button><DealsFooter />{askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} teamSignIn={teamSignIn} onClose={() => setGateOpen(false)} />}</main>;
 }
 
 /**
@@ -131,9 +133,30 @@ function Mine() {
   if (mine.isError && isUnauthorizedDealsError(mine.error)) return <Landing />;
   if (mine.isError || !mine.data) return <MineRetry onRetry={() => { void mine.refetch(); }} retrying={mine.isFetching} />;
   return <>
-    <GatedCatalog lead={mine.data.lead} communities={mine.data.communities as GatedCommunity[]} featured={mine.data.featured as FeaturedDealsData} saved={mine.data.saved} savingCard={savingCard} onSave={onSave} agent={mine.data.agent} onRequest={setRequest} onViewCommunity={(key) => viewed.mutate({ key })} onSaveProfile={(input) => update.mutate(input)} savingProfile={update.isPending} profileSaved={update.isSuccess} profileError={profileErrorCopy(update.error)} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} />
+    <GatedCatalog lead={mine.data.lead} communities={mine.data.communities as GatedCommunity[]} featured={mine.data.featured as FeaturedDealsData} saved={mine.data.saved} picks={mine.data.picks} savingCard={savingCard} onSave={onSave} agent={mine.data.agent} onRequest={setRequest} onViewCommunity={(key) => viewed.mutate({ key })} onSaveProfile={(input) => update.mutate(input)} savingProfile={update.isPending} profileSaved={update.isSuccess} profileError={profileErrorCopy(update.error)} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} />
     <HomeRequestSheet key={request ? `${request.requestType}:${request.card}` : "closed"} request={request} onClose={() => setRequest(null)} />
   </>;
+}
+
+const PICKS_STORAGE = "deals-picks";
+const PICKS_MAX = 30;
+/** The agent's picks survive a reload (and the hop from the list to the tools) in this tab only. */
+function readPicks(): string[] {
+  try { const raw = window.sessionStorage.getItem(PICKS_STORAGE); const parsed: unknown = raw ? JSON.parse(raw) : []; return Array.isArray(parsed) ? parsed.filter((card): card is string => typeof card === "string" && /^[a-f0-9]{20}$/.test(card)).slice(0, PICKS_MAX) : []; }
+  catch { return []; }
+}
+function writePicks(picks: readonly string[]) { try { window.sessionStorage.setItem(PICKS_STORAGE, JSON.stringify(picks)); } catch { /* private mode: the picks live in memory only */ } }
+
+/** Oct 26, 2026: the agent's pick tray; it sits above the list while anything is picked. */
+function PickTray({ count, onSend, onClear }: { count: number; onSend: () => void; onClear: () => void }) {
+  if (count === 0) return null;
+  return <div role="status" data-deals-pick-tray="true" className="fixed bottom-5 left-5 right-5 z-30 flex items-center justify-between gap-3 border border-gold/50 bg-card/95 px-4 py-3 shadow-xl backdrop-blur sm:left-auto sm:right-8 sm:w-[26rem]">
+    <p className="min-w-0 text-sm"><ListChecks className="mr-2 inline h-4 w-4 text-gold" /><span className="font-medium">{count} home{count === 1 ? "" : "s"} picked</span></p>
+    <div className="flex shrink-0 items-center gap-2">
+      <button type="button" onClick={onClear} className="min-h-11 px-2 text-xs uppercase tracking-widest text-muted-foreground hover:text-gold">Clear</button>
+      <button type="button" onClick={onSend} className="min-h-11 bg-gold px-4 text-xs font-medium uppercase tracking-[0.14em] text-primary-foreground">Send to a client</button>
+    </div>
+  </div>;
 }
 
 /** /deals/team: the full list plus the agent tools, for a live team session. */
@@ -141,7 +164,13 @@ function Team() {
   const mine = trpc.deals.mine.useQuery(undefined, { retry: false });
   const workspace = trpc.deals.team.workspace.useQuery(undefined, { retry: false });
   const comingSoon = trpc.deals.comingSoon.useQuery();
-  const create = trpc.deals.team.createClientLink.useMutation({ onSuccess: () => { void workspace.refetch(); } });
+  const [picked, setPicked] = useState<string[]>(() => readPicks());
+  useEffect(() => { writePicks(picked); }, [picked]);
+  const pick: PickControl = useMemo(() => ({ picked: new Set(picked), onToggle: (card) => setPicked((current) => current.includes(card) ? current.filter((entry) => entry !== card) : current.length >= PICKS_MAX ? (toast.error(`Up to ${PICKS_MAX} picks per client.`), current) : [...current, card]) }), [picked]);
+  const clearPicks = () => setPicked([]);
+  const setPicks = trpc.deals.team.setClientLinkPicks.useMutation({ onSuccess: () => { clearPicks(); void workspace.refetch(); } });
+  // A new link made with picks takes them with it; the tray empties so the next client starts fresh.
+  const create = trpc.deals.team.createClientLink.useMutation({ onSuccess: (result) => { if (result.pickCount) clearPicks(); void workspace.refetch(); } });
   const text = trpc.deals.team.textClientLink.useMutation({ onSuccess: () => { void workspace.refetch(); } });
   const revoke = trpc.deals.team.revokeClientLink.useMutation({ onSuccess: () => { toast.success("Link turned off. That client now sees the standard list."); void workspace.refetch(); }, onError: (error) => toast.error(error.message || "Could not turn that link off.") });
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
@@ -158,9 +187,13 @@ function Team() {
   const tools = <AgentTools workspace={workspace.data as AgentWorkspaceData | undefined} loading={workspace.isLoading} error={workspace.isError ? workspace.error.message : null}
     created={create.data ?? null} creating={create.isPending} createError={create.isError ? create.error.message : null}
     onCreate={(input) => create.mutate(input)} onRevoke={(id) => revoke.mutate({ id })} onCopy={(url) => { void copy(url); }} copiedUrl={copiedUrl}
-    onText={(input) => text.mutateAsync(input)} texting={text.isPending} />;
-  // Agents send the list; their own view has no Save hearts (a heart there would belong to no client).
-  return <GatedCatalog lead={mine.data.lead} communities={mine.data.communities as GatedCommunity[]} featured={mine.data.featured as FeaturedDealsData} tools={tools} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} />;
+    onText={(input) => text.mutateAsync(input)} texting={text.isPending}
+    picked={picked} onClearPicks={clearPicks} onSetPicks={(input) => setPicks.mutateAsync(input)} settingPicks={setPicks.isPending} />;
+  // Agents send the list; their own view has no Save hearts (a heart there would belong to no client). Pick buttons stand in.
+  return <>
+    <GatedCatalog lead={mine.data.lead} communities={mine.data.communities as GatedCommunity[]} featured={mine.data.featured as FeaturedDealsData} tools={tools} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} pick={pick} />
+    <PickTray count={picked.length} onClear={clearPicks} onSend={() => document.getElementById("deals-agent-tools")?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+  </>;
 }
 
 export default function Deals() {

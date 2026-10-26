@@ -16,7 +16,7 @@ import type { DealsIncentive } from "../client/src/components/deals/shared";
  * the component module loads.
  */
 (globalThis as { React?: typeof React }).React = React;
-const { GatedCatalog, PHOTOS_ON_REQUEST, ProtectedGallery, countdownLabel } = await import("../client/src/components/deals/GatedCatalog");
+const { GatedCatalog, PHOTOS_ON_REQUEST, ProtectedGallery, countdownLabel, pickedHomes } = await import("../client/src/components/deals/GatedCatalog");
 const { AreaMap } = await import("../client/src/components/deals/AreaMap");
 const { Countdown } = await import("../client/src/components/deals/Countdown");
 const { DealsFooter, Incentive, RATE_CLASS, incentiveRateLines } = await import("../client/src/components/deals/shared");
@@ -363,5 +363,29 @@ describe("deals footer compliance links and logo", () => {
     expect(html).toContain("Equal Housing Opportunity");
     expect(html).toContain('href="/privacy"');
     expect(decode(html)).not.toMatch(/—/);
+  });
+});
+
+describe("Oct 26, 2026: the homes an agent picked lead the client's list", () => {
+  it("renders the picks first in the agent's order and skips a pick that left the list", () => {
+    const communities: GatedCommunity[] = [
+      { label: "A", area: "North", reelUrl: null, homes: [{ card: "a".repeat(20), kind: "quick_move_in", price: 300_000 }, { card: "b".repeat(20), kind: "quick_move_in", price: 310_000 }] },
+      { label: "B", area: "South", reelUrl: null, homes: [{ card: "c".repeat(20), kind: "to_be_built", price: 320_000 }] },
+    ];
+    const picks = ["c".repeat(20), "z".repeat(20), "a".repeat(20)];
+    expect(pickedHomes(communities, picks).map((entry) => [entry.home.card, entry.community.label])).toEqual([["c".repeat(20), "B"], ["a".repeat(20), "A"]]);
+    const html = renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead, communities, now: NOW, picks, agent: { name: "Tiffany Agent", firstName: "Tiffany", phone: "(210) 555-0101" } })));
+    expect(html).toContain('data-deals-picked-for-you="true"');
+    expect(html).toContain("Tiffany picked these 2 homes for you");
+    expect(html.indexOf("Picked for you")).toBeLessThan(html.indexOf('data-deals-community='));
+    // The pick cards carry their own ids so a Best Deals jump still lands on the list card.
+    expect(html).toContain(`id="home-pick-${"c".repeat(20)}"`);
+    expect(html).toContain(`id="home-${"c".repeat(20)}"`);
+    // Without picks, no section; the team view gets Pick buttons instead.
+    expect(renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead, communities, now: NOW })))).not.toContain("data-deals-picked-for-you");
+    const team = renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/team" }, createElement(GatedCatalog, { lead: { ...lead, teamPreview: true }, communities, now: NOW, pick: { picked: new Set(["a".repeat(20)]), onToggle: () => undefined } })));
+    expect(team.match(/data-deals-pick="picked"/g)?.length).toBe(1);
+    expect(team.match(/data-deals-pick="unpicked"/g)?.length).toBe(2);
+    expect(team).toContain('data-deals-picked="true"');
   });
 });

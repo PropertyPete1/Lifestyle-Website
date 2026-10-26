@@ -176,6 +176,13 @@
       "when": 1792938144874,
       "tag": "0024_deal_home_stories",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1793037309885,
+      "tag": "0025_client_link_picks",
+      "breakpoints": true
     }
   ]
 }

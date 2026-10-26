@@ -138,12 +138,14 @@ export async function classifyDealsAccess(input: {
   // a staff phone and a test number; its test switches must still control it.
   // A test number flagged "treat as team member" routes through the team branch even when toggle (b) is off.
   if (input.isTest && input.testTeamNumbers?.includes(input.phone)) return { allowed: true, team: true, flags: ["TEST", "team"] };
-  if (input.isTest && input.testSkipChecks) return { allowed: true, team: false, flags: ["TEST", ...(input.clientLink ? ["agent_client"] : [])] };
+  // Oct 26, 2026: a team member is the team before any test switch. Peter's own cell is a test number with
+  // "skip checks" on; the old order returned team:false for it, and his "I'm a realtor" answer sent him to recruiting.
   const [team] = await db.select().from(dealTeamAllowlist).where(and(
     eq(dealTeamAllowlist.active, true),
     or(eq(dealTeamAllowlist.phoneE164, input.phone), ...(email ? [eq(dealTeamAllowlist.email, email)] : [])),
   )).limit(1);
-  if (team) return { allowed: true, team: true, flags: ["team"] };
+  if (team) return { allowed: true, team: true, flags: input.isTest ? ["TEST", "team"] : ["team"] };
+  if (input.isTest && input.testSkipChecks) return { allowed: true, team: false, flags: ["TEST", ...(input.clientLink ? ["agent_client"] : [])] };
 
   if (input.clientLink) {
     // An agent's own client is working with an agent by definition, so the "has

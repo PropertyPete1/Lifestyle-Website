@@ -348,3 +348,20 @@ describe("a buyer an admin turned off (Oct 25, Peter)", () => {
     expect(gateReducer(fresh(), { type: "state_changed", state: { pending: null, paused: true } }).step).toBe("paused");
   });
 });
+
+describe("Oct 26, 2026: /deals/team is the agent sign-in (Peter: there is no login page)", () => {
+  it("asks for the phone only, with agent wording and no buyer question, and Continue is live with an empty name and email", () => {
+    const html = decode(render(fresh(), noPending, { teamSignIn: true, name: "", email: "", choice: null }));
+    expect(html).toContain('data-deals-team-signin="true"');
+    expect(html).toContain("Agent sign-in.");
+    expect(html).not.toContain("deals-agent-question");
+    expect(html).not.toContain('id="deals-name"');
+    expect(html).not.toContain("Continue with Google");
+    expect(html).toContain('href="/join?from=builder-deals"');
+    expect(html).not.toMatch(/<button[^>]*disabled[^>]*>Sending…|<button[^>]*disabled="">Continue/);
+    // The buyer gate is unchanged.
+    const buyer = decode(render(fresh(), noPending, { name: "", email: "", choice: null }));
+    expect(buyer).toContain("deals-agent-question");
+    expect(buyer).toContain('id="deals-name"');
+  });
+});

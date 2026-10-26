@@ -1,0 +1,1 @@
+ALTER TABLE `deal_client_links` ADD `picks` text;

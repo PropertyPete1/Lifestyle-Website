@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Copy, Heart, Link2, MessageSquareText, Send, X } from "lucide-react";
+import { Check, Copy, Heart, Link2, ListChecks, MessageSquareText, Send, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -30,10 +30,12 @@ export type AgentClient = {
   lastTextedAt?: string | null;
   saves: Array<{ card: string; description: string; price: number | null; communityLabel: string; savedAt: string }>;
   requests: Array<{ kind: "tour" | "ask"; description: string; preferredAt: string; createdAt: string }>;
+  /** Oct 26, 2026: the homes the agent picked for this client, in their order. */
+  picks?: Array<{ card: string; description: string; price: number | null; communityLabel: string }>;
 };
 export type AgentWorkspaceData = { agent: { name: string; email: string | null; fubLinked: boolean }; clients: AgentClient[] };
-export type NewClientLink = { id: number; path: string; expiresAt: string; clientName?: string; clientPhoneDigits?: string | null };
-export type CreateClientInput = { clientName: string; clientPhone?: string; note?: string };
+export type NewClientLink = { id: number; path: string; expiresAt: string; clientName?: string; clientPhoneDigits?: string | null; pickCount?: number };
+export type CreateClientInput = { clientName: string; clientPhone?: string; note?: string; picks?: string[] };
 /** deals.team.textClientLink: the message the phone sends and where; how FUB took the record. */
 export type TextClientResult = { ok: true; message: string; smsTo: string; fub: "logged" | "recorded_no_timeline" | "unavailable" | "skipped"; repeat: boolean };
 export const TEXT_MAX_CHARS = 320;
@@ -58,6 +60,13 @@ export const AGENT_COPY = {
   textedFubDown: "Follow Up Boss didn't answer, so this send isn't logged there. Messages still opened.",
   texted: (name: string) => `Logged in Follow Up Boss. Send the text to ${name} in Messages.`,
   confirmRevoke: "Turn off this link? Your client keeps the standard list but loses the addresses, and the link stops working. This can't be undone; you can send a new link.",
+  /** Picks: tap "Pick for client" on homes in the list, then send them with a new link or put them on an existing client's link. */
+  picksOnNew: (count: number) => `${count} picked home${count === 1 ? "" : "s"} will lead this client's list.`,
+  picksNone: "Tap \"Pick for client\" on any homes below to send a short list instead of the whole market.",
+  picksOnLink: (count: number) => `Put ${count} pick${count === 1 ? "" : "s"} on this list`,
+  picksPut: (count: number, name: string) => `${count} pick${count === 1 ? "" : "s"} now lead ${name}'s list. Text them the link.`,
+  picksClear: "Clear picks",
+  picksFor: "Picked for them",
 } as const;
 
 export function absoluteLink(path: string, origin = typeof window === "undefined" ? "" : window.location.origin) {
@@ -65,10 +74,11 @@ export function absoluteLink(path: string, origin = typeof window === "undefined
 }
 
 /** The suggested text message; the client's first name and the agent's name make it personal without any private home data. */
-export function clientMessage(input: { clientName: string; agentName: string; url: string }) {
+export function clientMessage(input: { clientName: string; agentName: string; url: string; pickCount?: number }) {
   const first = input.clientName.trim().split(/\s+/)[0] || "there";
   const agentFirst = input.agentName.trim().split(/\s+/)[0] || input.agentName;
   // The same wording as the server's default (clientLinkTextMessage), so the preview matches what gets logged.
+  if (input.pickCount && input.pickCount > 0) return `Hi ${first}, I picked ${input.pickCount} new-build home${input.pickCount === 1 ? "" : "s"} for you at Lifestyle Design Realty. Photos, prices and this week's incentives: ${input.url}. Text me with questions.`;
   return `Hi ${first}, here's your private list of new-build deals from ${agentFirst} at Lifestyle Design Realty: ${input.url}. Tap any home for photos and pricing. Text me with questions.`;
 }
 
@@ -122,10 +132,26 @@ export type AgentToolsProps = {
   origin?: string;
   /** Test seam for the turn-off confirmation; the browser uses window.confirm. */
   confirm?: (message: string) => boolean;
+  /** The card handles picked on the list right now (team view); they go on the next link, or onto an existing one. */
+  picked?: readonly string[];
+  onClearPicks?: () => void;
+  /** Puts the current picks on one of the agent's links; resolves with how many stuck. */
+  onSetPicks?: (input: { id: number; picks: string[] }) => Promise<{ pickCount: number }>;
+  settingPicks?: boolean;
 };
 
-export function AgentTools({ workspace, loading, error, created, creating, createError, onCreate, onRevoke, onCopy, copiedUrl, origin, confirm, onText, texting }: AgentToolsProps) {
+export function AgentTools({ workspace, loading, error, created, creating, createError, onCreate, onRevoke, onCopy, copiedUrl, origin, confirm, onText, texting, picked = [], onClearPicks, onSetPicks, settingPicks }: AgentToolsProps) {
   const [clientName, setClientName] = useState("");
+  const [putNote, setPutNote] = useState<{ id: number; text: string } | null>(null);
+  const putPicks = async (client: AgentClient) => {
+    if (!onSetPicks || picked.length === 0) return;
+    try {
+      const result = await onSetPicks({ id: client.id, picks: Array.from(picked) });
+      setPutNote({ id: client.id, text: AGENT_COPY.picksPut(result.pickCount, client.clientName.split(/\s+/)[0] || client.clientName) });
+    } catch (caught) {
+      setPutNote({ id: client.id, text: caught instanceof Error ? caught.message : "Could not put the picks on this link." });
+    }
+  };
   // The "Text it" sheet: which link, the editable message, and what the server said after logging it.
   const [textFor, setTextFor] = useState<{ id: number; name: string; phoneDigits: string | null } | null>(null);
   const [textBody, setTextBody] = useState("");
@@ -151,15 +177,16 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
   const submit = () => {
     const name = clientName.trim();
     if (name.length < 2) return;
-    onCreate({ clientName: name, clientPhone: clientPhone.trim() || undefined, note: note.trim() || undefined });
+    onCreate({ clientName: name, clientPhone: clientPhone.trim() || undefined, note: note.trim() || undefined, picks: picked.length ? Array.from(picked) : undefined });
   };
   const revoke = (client: AgentClient) => { confirmAndRevoke(client, confirm ?? ((message: string) => window.confirm(message)), onRevoke); };
-  const createdMessage = createdUrl && created ? clientMessage({ clientName: created.clientName ?? "", agentName, url: createdUrl }) : null;
+  const createdMessage = createdUrl && created ? clientMessage({ clientName: created.clientName ?? "", agentName, url: createdUrl, pickCount: created.pickCount }) : null;
   return <section aria-labelledby="deals-agent-tools" data-deals-agent-tools="true" className="mt-8 min-w-0 space-y-8">
     <div className="min-w-0 border border-gold/30 bg-gold/5 p-5">
       <p className="eyebrow text-gold">Agent tools · {agentName}</p>
       <h2 id="deals-agent-tools" className="mt-2 text-3xl">{AGENT_COPY.heading}</h2>
       <p className="mt-3 text-sm text-muted-foreground">{AGENT_COPY.intro}</p>
+      {onSetPicks && <p role="status" data-deals-picks-note={picked.length ? "some" : "none"} className={`mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm ${picked.length ? "text-foreground" : "text-muted-foreground"}`}><ListChecks className="h-4 w-4 shrink-0 text-gold" />{picked.length ? AGENT_COPY.picksOnNew(picked.length) : AGENT_COPY.picksNone}{picked.length > 0 && onClearPicks && <button type="button" onClick={onClearPicks} className="min-h-11 text-xs uppercase tracking-widest text-gold underline-offset-4 hover:underline">{AGENT_COPY.picksClear}</button>}</p>}
       {workspace && !workspace.agent.fubLinked && <p role="status" className="mt-3 text-xs text-gold">Your number is on the team list without a Follow Up Boss user, so your clients' contacts and tasks go to Peter in FUB until it is linked. Emails still reach you{workspace.agent.email ? ` at ${workspace.agent.email}` : ""}.</p>}
       <div className="mt-5 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3">
         <div className="min-w-0"><Label htmlFor="deals-client-name" className="text-xs uppercase tracking-widest">Client name</Label><Input id="deals-client-name" value={clientName} maxLength={190} onChange={(event) => setClientName(event.target.value)} placeholder="Maria Lopez" className="mt-2 min-h-11" /></div>
@@ -195,13 +222,16 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
           <p className={`mt-3 text-xs uppercase tracking-widest ${status.tone === "live" ? "text-emerald-700" : status.tone === "gold" ? "text-gold" : "text-muted-foreground"}`}>{status.label}</p>
           {client.note && <p className="mt-2 break-words text-sm text-muted-foreground">Note: {client.note}</p>}
           {client.lastTextedAt && <p className="mt-2 text-xs text-muted-foreground" data-deals-texted-at="true">Texted {when(client.lastTextedAt)}</p>}
+          {(client.picks?.length ?? 0) > 0 && <div className="mt-4" data-deals-client-picks="true"><p className="text-xs uppercase tracking-widest text-gold"><Check className="mr-1 inline h-3.5 w-3.5" />{AGENT_COPY.picksFor} ({client.picks!.length})</p><ul className="mt-2 space-y-1 text-sm">{client.picks!.map((pick) => <li key={pick.card} className="break-words">{pick.description}{pick.price ? ` · ${money.format(pick.price)}` : ""}{pick.communityLabel ? ` · ${pick.communityLabel}` : ""}</li>)}</ul></div>}
+          {putNote?.id === client.id && <p role="status" className="mt-3 text-sm text-gold">{putNote.text}</p>}
           {client.lastViewedAt && <p className="mt-2 text-xs text-muted-foreground">Last looked at the list {when(client.lastViewedAt)}</p>}
           {client.saves.length > 0 && <div className="mt-4"><p className="text-xs uppercase tracking-widest text-gold"><Heart className="mr-1 inline h-3.5 w-3.5 fill-current" />Saved homes</p><ul className="mt-2 space-y-1 text-sm">{client.saves.map((save) => <li key={`${save.card}-${save.savedAt}`} className="break-words">{save.description}{save.price ? ` · ${money.format(save.price)}` : ""}{save.communityLabel ? ` · ${save.communityLabel}` : ""} <span className="text-xs text-muted-foreground">{when(save.savedAt)}</span></li>)}</ul></div>}
           {client.requests.length > 0 && <div className="mt-4"><p className="text-xs uppercase tracking-widest text-gold"><Send className="mr-1 inline h-3.5 w-3.5" />Tour and question requests</p><ul className="mt-2 space-y-1 text-sm">{client.requests.map((request) => <li key={`${request.kind}-${request.createdAt}`} className="break-words">{request.kind === "tour" ? "Tour" : "Question"}: {request.description} <span className="text-xs text-muted-foreground">preferred {when(request.preferredAt)}</span></li>)}</ul></div>}
           {sendable && <div className="mt-5 flex flex-wrap gap-3">
+            {onSetPicks && picked.length > 0 && <button type="button" data-deals-put-picks="true" disabled={settingPicks} onClick={() => { void putPicks(client); }} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground disabled:opacity-60"><ListChecks className="h-4 w-4" /> {AGENT_COPY.picksOnLink(picked.length)}</button>}
             {client.clientPhoneDigits
-              ? <button type="button" data-deals-text-it="true" onClick={() => openText(client, clientMessage({ clientName: client.clientName, agentName, url }))} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> {client.lastTextedAt ? "Text it again" : "Text it"}</button>
-              : <a href={smsHref(clientMessage({ clientName: client.clientName, agentName, url }), null)} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> Text it</a>}
+              ? <button type="button" data-deals-text-it="true" onClick={() => openText(client, clientMessage({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length }))} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> {client.lastTextedAt ? "Text it again" : "Text it"}</button>
+              : <a href={smsHref(clientMessage({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length }), null)} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> Text it</a>}
             <Button type="button" variant="outline" onClick={() => onCopy(url)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === url ? AGENT_COPY.copied : "Copy link"}</Button>
           </div>}
         </article>;

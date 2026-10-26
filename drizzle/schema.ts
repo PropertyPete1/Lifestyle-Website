@@ -452,6 +452,8 @@ export const dealClientLinks = mysqlTable(
     clientName: varchar("client_name", { length: 190 }).notNull(),
     clientPhoneE164: varchar("client_phone_e164", { length: 20 }),
     note: varchar("note", { length: 500 }),
+    /** Oct 26, 2026: the homes the agent picked for this client, a JSON array of card handles in the agent's order; null when the link is the whole list. */
+    picks: text("picks"),
     /** The buyer lead that verified through this link, once there is one. */
     leadId: int("lead_id"),
     verifiedAt: timestamp("verified_at"),

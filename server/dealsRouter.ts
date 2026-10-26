@@ -443,7 +443,9 @@ export const dealsRouter = router({
     // The team and buyers with a live agent link get the full list; everyone else the scrubbed one.
     const { view, agent } = await catalogViewForSession(session.lead);
     const { featuredDeals } = await import("./dealsFeatured");
-    const [communities, saved] = await Promise.all([gatedDealsCatalog(session.leadId, view), savedDealCards(session.leadId)]);
+    const { clientLinkPicksForLead } = await import("./dealsClientLinks");
+    // Oct 26, 2026: the homes the client's agent picked for them lead their list; nobody else has picks.
+    const [communities, saved, picks] = await Promise.all([gatedDealsCatalog(session.leadId, view), savedDealCards(session.leadId), agent ? clientLinkPicksForLead(session.lead) : Promise.resolve([] as string[])]);
     const listCards = new Set((communities as Array<{ homes?: Array<{ card?: string }> }>).flatMap((community) => (community.homes ?? []).flatMap((home) => home.card ? [home.card] : [])));
     // Ranked among the homes on this list only, so a community dropped from it never leaves a gap.
     const featured = await featuredDeals(view, { onlyCards: listCards });
@@ -458,7 +460,7 @@ export const dealsRouter = router({
     // A featured home always has its card in this list: deals whose card is not shown are dropped.
     const onList = <T extends { card?: string }>(deal: T) => Boolean(deal.card && listCards.has(deal.card));
     const featuredOnList = { ...featured, lowestPayment: featured.lowestPayment.filter(onList), bestRate: featured.bestRate && onList(featured.bestRate) ? featured.bestRate : null, bigLots: featured.bigLots.filter(onList) };
-    return { lead: { ...leadPresentation(session.lead), agentClient: Boolean(agent) }, communities, saved, featured: featuredOnList, fullDetails: view.view === "full", agent: agent ? { name: agent.name, firstName: agent.firstName, phone: agentDisplayPhone(agent) } : null };
+    return { lead: { ...leadPresentation(session.lead), agentClient: Boolean(agent) }, communities, saved, picks: picks.filter((card) => listCards.has(card)), featured: featuredOnList, fullDetails: view.view === "full", agent: agent ? { name: agent.name, firstName: agent.firstName, phone: agentDisplayPhone(agent) } : null };
   }),
   /**
    * A buyer who already holds a live list opens an agent's client link: attach
@@ -518,19 +520,30 @@ export const dealsRouter = router({
       }
       return { lead: leadPresentation(session.lead), agent: { name: workspace.agent.name, email: workspace.agent.email, fubLinked: Boolean(workspace.agent.fubUserId) }, clients: workspace.clients };
     }),
-    createClientLink: publicProcedure.input(z.object({ clientName: z.string().trim().min(2).max(190), clientPhone: z.string().trim().max(60).optional(), note: z.string().trim().max(500).optional() })).mutation(async ({ input, ctx }) => {
+    createClientLink: publicProcedure.input(z.object({ clientName: z.string().trim().min(2).max(190), clientPhone: z.string().trim().max(60).optional(), note: z.string().trim().max(500).optional(), picks: z.array(z.string().regex(/^[a-f0-9]{20}$/)).max(30).optional() })).mutation(async ({ input, ctx }) => {
       dealsPublicHeaders(ctx.res);
       const session = await isLiveDealSession(ctx.req);
       if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
       if (session.lead.status !== "team") throw new TRPCError({ code: "FORBIDDEN" });
-      const result = await createClientLink({ agentLead: session.lead, clientName: input.clientName, clientPhone: input.clientPhone, note: input.note });
+      const result = await createClientLink({ agentLead: session.lead, clientName: input.clientName, clientPhone: input.clientPhone, note: input.note, picks: input.picks });
       if (!result.ok) {
         const { SHARED_TEAM_NUMBER_MESSAGE } = await import("./dealsClientLinks");
         const messages = { shared_number: SHARED_TEAM_NUMBER_MESSAGE, not_team: "Your number is not on the team list yet. Ask Peter to add it in Admin, Builder Deals.", invalid_phone: "Enter a valid US mobile number, or leave the phone blank.", invalid_name: "Enter the client's name.", unavailable: "Links are unavailable right now. Try again in a moment." } as const;
         throw new TRPCError({ code: result.kind === "unavailable" ? "INTERNAL_SERVER_ERROR" : result.kind === "not_team" || result.kind === "shared_number" ? "FORBIDDEN" : "BAD_REQUEST", message: messages[result.kind] });
       }
-      const { nationalDigits } = await import("./dealsClientLinks");
-      return { ok: true as const, id: result.link.id, path: result.path, expiresAt: result.link.expiresAt.toISOString(), clientName: result.link.clientName, clientPhoneDigits: nationalDigits(result.link.clientPhoneE164) };
+      const { nationalDigits, parsePicks } = await import("./dealsClientLinks");
+      return { ok: true as const, id: result.link.id, path: result.path, expiresAt: result.link.expiresAt.toISOString(), clientName: result.link.clientName, clientPhoneDigits: nationalDigits(result.link.clientPhoneE164), pickCount: parsePicks(result.link.picks).length };
+    }),
+    /** Oct 26, 2026: the agent's picks go onto one of their links (an empty list takes them off). */
+    setClientLinkPicks: publicProcedure.input(z.object({ id: z.number().int().positive(), picks: z.array(z.string().regex(/^[a-f0-9]{20}$/)).max(30) })).mutation(async ({ input, ctx }) => {
+      dealsPublicHeaders(ctx.res);
+      const session = await isLiveDealSession(ctx.req);
+      if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
+      if (session.lead.status !== "team") throw new TRPCError({ code: "FORBIDDEN" });
+      const { setClientLinkPicks } = await import("./dealsClientLinks");
+      const result = await setClientLinkPicks(session.lead, { linkId: input.id, picks: input.picks });
+      if (!result.ok) throw new TRPCError({ code: result.kind === "not_found" ? "NOT_FOUND" : "BAD_REQUEST", message: result.kind === "not_found" ? "That link is not one of yours." : "This link is turned off or expired. Send a new one." });
+      return { ok: true as const, pickCount: result.picks.length };
     }),
     /** "Text it": records the send in FUB (person, timeline message, note) and answers with the message and number the phone sends to. */
     textClientLink: publicProcedure.input(z.object({ id: z.number().int().positive(), message: z.string().trim().max(320).optional() })).mutation(async ({ input, ctx }) => {

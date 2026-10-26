@@ -25,7 +25,7 @@ vi.mock("./dealsFubJobs", () => ({
   requestTestMode: (...args: unknown[]) => mocks.requestTestMode(...args),
 }));
 
-import { agentDisplayPhone, agentForLead, agentForTeamId, agentRowsForLead, agentWorkspace, attachLeadToClientLink, attachLiveSessionToClientLink, clientLinkForPhone, clientLinkTokenForLead, connectOfferFor, createClientLink, liveAgentForClient, presentClientLink, reassignTeamRowBeforeRemoval, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
+import { agentDisplayPhone, agentForLead, agentForTeamId, agentRowsForLead, agentWorkspace, attachLeadToClientLink, attachLiveSessionToClientLink, clientLinkForPhone, clientLinkPicksForLead, clientLinkTextMessage, clientLinkTokenForLead, connectOfferFor, createClientLink, liveAgentForClient, parsePicks, presentClientLink, reassignTeamRowBeforeRemoval, resolveClientLink, resolvePickCards, revokeClientLink, setClientLinkPicks } from "./dealsClientLinks";
 import { dealEvents } from "../drizzle/schema";
 import { classifyDealsAccess, revokeNonTeamMatchingDealLinks } from "./dealsEligibility";
 import { createDealsHomeRequest, setDealsHomeSaved } from "./dealsRequests";
@@ -693,5 +693,62 @@ describe("turning a buyer off from Admin (Oct 25, Peter: turn the website off on
     await turnOffBuyerAccess({ leadId: buyer.id, by: "Peter" });
     await turnOnBuyerAccess({ leadId: buyer.id, by: "Peter" });
     expect(db.rows(dealBlocklist).map((row) => row.reason)).toEqual(["known_agent"]);
+  });
+});
+
+describe("Oct 26, 2026: the homes an agent picks for a client", () => {
+  it("stores only live homes' cards, in the agent's order, and shows them in the workspace", async () => {
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const sold = db.seed(dealHomes, { communityId, sourceKey: "https://www.chesmar.com/fixture-lakes/gone/", sourceUrl: "https://www.chesmar.com/fixture-lakes/gone/", privatePlanName: "Gone", kind: "quick_move_in", status: "sold", origin: "official", price: 1 });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez", clientPhone: CLIENT_PHONE, picks: [card(planHomeId), "not-a-card", card(sold), card(homeId), card(planHomeId)] });
+    if (!created.ok) throw new Error("link not created");
+    expect(parsePicks(created.link.picks)).toEqual([card(planHomeId), card(homeId)]);
+    const workspace = await agentWorkspace(agent);
+    expect(workspace?.clients[0]?.picks).toEqual([
+      expect.objectContaining({ card: card(planHomeId), description: "(Evan)", price: 429_990, communityLabel: "Fixture Lakes (Southeast San Antonio | Half-Acre Lots)" }),
+      expect.objectContaining({ card: card(homeId), description: "118 Fixture Lakes Blvd (Brandon)", price: 489_990 }),
+    ]);
+    // The text says how many homes were picked, with the link still in it.
+    const message = clientLinkTextMessage({ clientName: "Maria Lopez", agentFirstName: "Tiffany", url: "https://x.test/deals?c=abc", pickCount: 2 });
+    expect(message).toBe("Hi Maria, I picked 2 new-build homes for you at Lifestyle Design Realty. Photos, prices and this week's incentives: https://x.test/deals?c=abc. Text me with questions.");
+    expect(message.length).toBeLessThan(320);
+    expect(clientLinkTextMessage({ clientName: "Maria Lopez", agentFirstName: "Tiffany", url: "u", pickCount: 0 })).toContain("here's your private list");
+  });
+
+  it("puts picks on an existing link, takes them off with an empty list, and refuses another agent's link", async () => {
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    expect(await setClientLinkPicks(agent, { linkId: created.link.id, picks: [card(homeId)] })).toEqual({ ok: true, picks: [card(homeId)] });
+    expect(parsePicks(db.rows(dealClientLinks).find((row) => row.id === created.link.id)!.picks)).toEqual([card(homeId)]);
+    expect(await setClientLinkPicks(agent, { linkId: created.link.id, picks: [] })).toEqual({ ok: true, picks: [] });
+    expect(db.rows(dealClientLinks).find((row) => row.id === created.link.id)!.picks).toBeNull();
+    const otherTeam = db.seed(dealTeamAllowlist, { name: "Other Agent", phoneE164: "+12105550303", source: "manual", active: true });
+    const foreign = db.seed(dealClientLinks, { token: "o".repeat(32), agentTeamId: otherTeam, agentLeadId: 999, clientName: "Not Mine", expiresAt: new Date(Date.now() + HOUR) });
+    expect(await setClientLinkPicks(agent, { linkId: foreign, picks: [card(homeId)] })).toEqual({ ok: false, kind: "not_found" });
+    expect(await resolvePickCards(["zz"])).toEqual([]);
+  });
+
+  it("gives the client their own link's picks and nobody else's", async () => {
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez", picks: [card(homeId)] });
+    if (!created.ok) throw new Error("link not created");
+    const client = lead({ phoneE164: CLIENT_PHONE, agentTeamId: teamId, clientLinkId: created.link.id, sourceCode: AGENT_CLIENT_SOURCE });
+    // Not attached yet (the link's leadId is someone else or empty): no picks.
+    expect(await clientLinkPicksForLead(client)).toEqual([]);
+    db.rows(dealClientLinks).find((row) => row.id === created.link.id)!.leadId = client.id;
+    expect(await clientLinkPicksForLead(client)).toEqual([card(homeId)]);
+    db.rows(dealClientLinks).find((row) => row.id === created.link.id)!.revokedAt = new Date();
+    expect(await clientLinkPicksForLead(client)).toEqual([]);
+    expect(await clientLinkPicksForLead({ id: 5, clientLinkId: null })).toEqual([]);
+  });
+});
+
+describe("Oct 26, 2026: a team member whose cell is a test number with skip-checks on is still the team", () => {
+  it("answers team before the test switches (Peter's own number sent him to recruiting)", async () => {
+    const base = { deviceHash: hashSecret("peters-mac"), isTest: true, testSkipChecks: true, brokerageDomains: [], fubRealtorTags: [], fubRealtorSources: [] };
+    expect(await classifyDealsAccess({ ...base, phone: AGENT_PHONE })).toEqual({ allowed: true, team: true, flags: ["TEST", "team"] });
+    // A test number that is not on the team still skips the checks as a buyer.
+    expect(await classifyDealsAccess({ ...base, phone: "+12105550444" })).toEqual({ allowed: true, team: false, flags: ["TEST"] });
   });
 });

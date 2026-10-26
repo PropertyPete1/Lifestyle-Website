@@ -78,13 +78,23 @@ export type GateSheetViewProps = {
   onClose: () => void;
   /** An agent's client-link token: posted with the code so every redirect keeps the agent's gate. */
   clientToken?: string;
+  /** Oct 26, 2026 (Peter: "there is no login page"): /deals/team opens the sheet as the agent sign-in, no buyer question. */
+  teamSignIn?: boolean;
 };
 
 /**
  * The sheet itself, free of data hooks so every step can be rendered and
  * asserted without a browser. Server copy is rendered verbatim.
  */
-export function GateSheetView({ gate, state, phone, name = "", email = "", onName, onEmail, code, choice, starting, resending, onPhone, onCode, onChoice, onFocusPhone, onContinue, onConfirmAgent, onConfirmRealtor, onGo, onResend, onChangeNumber, onCopyLink, onClose, clientToken }: GateSheetViewProps) {
+export const GATE_TEAM_COPY = {
+  eyebrow: "Lifestyle Design Realty agents",
+  heading: "Agent sign-in.",
+  body: "Enter the mobile number on your team profile. We text you a code, and the full list opens with every address, photo and incentive, plus your client tools.",
+  hint: "Not on the team yet?",
+  joinLabel: "See our agent page",
+} as const;
+
+export function GateSheetView({ gate, state, phone, name = "", email = "", onName, onEmail, code, choice, starting, resending, onPhone, onCode, onChoice, onFocusPhone, onContinue, onConfirmAgent, onConfirmRealtor, onGo, onResend, onChangeNumber, onCopyLink, onClose, clientToken, teamSignIn = false }: GateSheetViewProps) {
   const { step } = gate;
   const shared = state?.clientLink?.state === "live" ? state.clientLink : null;
   const deadLink = state?.clientLink?.state === "dead" ? state.clientLink : null;
@@ -124,19 +134,23 @@ export function GateSheetView({ gate, state, phone, name = "", email = "", onNam
     {step === "gate" && !deadLink && (() => {
       // An agent's client is working with an agent by definition: no question, Continue needs only the phone.
       // The agent already knows their own client: name and email are optional there, and required for everyone else.
-      const ready = shared ? true : Boolean(choice) && gateContactReady(name, email);
+      // The team sign-in needs only the phone: the team list already knows the agent's name and email.
+      const ready = shared || teamSignIn ? true : Boolean(choice) && gateContactReady(name, email);
       return <>{shared
         ? <><p className="eyebrow text-gold" data-deals-shared-by="true">Shared by {shared.agentName}</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">{shared.clientFirstName ? `${shared.clientFirstName}, your list is ready.` : "Your list is ready."}</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{shared.agentName} shared this week's new-build deals with you. Verify your mobile number once and the full list opens, with every address, photo and current incentive.</p></>
-        : <><p className="eyebrow text-gold">Tours</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Schedule a tour.</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground" data-deals-gate-intro="true">Add your name, email and number, and one of our agents will reach out to set up your tour and answer your questions.</p></>}
-      {state?.googleEnabled && !shared && <Button variant="outline" onClick={() => window.location.assign("/deals/auth/google")} className="mt-5 w-full py-6">Continue with Google</Button>}<div className="mt-6 grid gap-4 sm:grid-cols-2"><div><Label htmlFor="deals-name" className="block text-xs uppercase tracking-widest">Name</Label><Input id="deals-name" autoComplete="name" placeholder="First and last name" value={name} onChange={(event) => onName?.(event.target.value.slice(0, 190))} className="mt-2 h-14 text-lg" /></div><div><Label htmlFor="deals-email" className="block text-xs uppercase tracking-widest">Email</Label><Input id="deals-email" type="email" autoComplete="email" inputMode="email" placeholder="you@example.com" value={email} onChange={(event) => onEmail?.(event.target.value.slice(0, 320))} className="mt-2 h-14 text-lg" /></div></div><Label htmlFor="deals-phone" className="mt-4 block text-xs uppercase tracking-widest">Mobile phone</Label><Input id="deals-phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="(210) 555-0123" value={phone} onChange={(event) => onPhone(formatPhoneInput(event.target.value))} onFocus={onFocusPhone} className="mt-2 h-14 text-lg" />
-      {!shared && <><p id="deals-agent-question" className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Are you a realtor, or working with one?</p><div role="group" aria-labelledby="deals-agent-question" className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">{GATE_CHOICES.map((option) => <button key={option.value} type="button" aria-pressed={choice === option.value} data-deals-choice={option.value} onClick={() => onChoice(option.value)} className={`min-h-14 border px-2 text-sm leading-tight transition-colors ${choice === option.value ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>{option.label}</button>)}</div><p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">Lifestyle Design Realty agents: enter your own mobile number to open your agent tools.</p></>}
+        : teamSignIn
+          ? <><p className="eyebrow text-gold" data-deals-team-signin="true">{GATE_TEAM_COPY.eyebrow}</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">{GATE_TEAM_COPY.heading}</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{GATE_TEAM_COPY.body}</p></>
+          : <><p className="eyebrow text-gold">Tours</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Schedule a tour.</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground" data-deals-gate-intro="true">Add your name, email and number, and one of our agents will reach out to set up your tour and answer your questions.</p></>}
+      {state?.googleEnabled && !shared && !teamSignIn && <Button variant="outline" onClick={() => window.location.assign("/deals/auth/google")} className="mt-5 w-full py-6">Continue with Google</Button>}{!teamSignIn && <div className="mt-6 grid gap-4 sm:grid-cols-2"><div><Label htmlFor="deals-name" className="block text-xs uppercase tracking-widest">Name</Label><Input id="deals-name" autoComplete="name" placeholder="First and last name" value={name} onChange={(event) => onName?.(event.target.value.slice(0, 190))} className="mt-2 h-14 text-lg" /></div><div><Label htmlFor="deals-email" className="block text-xs uppercase tracking-widest">Email</Label><Input id="deals-email" type="email" autoComplete="email" inputMode="email" placeholder="you@example.com" value={email} onChange={(event) => onEmail?.(event.target.value.slice(0, 320))} className="mt-2 h-14 text-lg" /></div></div>}<Label htmlFor="deals-phone" className={`${teamSignIn ? "mt-6" : "mt-4"} block text-xs uppercase tracking-widest`}>Mobile phone</Label><Input id="deals-phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="(210) 555-0123" value={phone} onChange={(event) => onPhone(formatPhoneInput(event.target.value))} onFocus={onFocusPhone} className="mt-2 h-14 text-lg" />
+      {teamSignIn && <p className="mt-3 text-xs text-muted-foreground">{GATE_TEAM_COPY.hint} <a href={GATE_REALTOR_COPY.path} className="text-gold underline-offset-4 hover:underline">{GATE_TEAM_COPY.joinLabel}</a></p>}
+      {!shared && !teamSignIn && <><p id="deals-agent-question" className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Are you a realtor, or working with one?</p><div role="group" aria-labelledby="deals-agent-question" className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">{GATE_CHOICES.map((option) => <button key={option.value} type="button" aria-pressed={choice === option.value} data-deals-choice={option.value} onClick={() => onChoice(option.value)} className={`min-h-14 border px-2 text-sm leading-tight transition-colors ${choice === option.value ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>{option.label}</button>)}</div><p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">Lifestyle Design Realty agents: enter your own mobile number to open your agent tools.</p></>}
       {/* Continue waits for deals.state so the consent line below is on screen before anyone can agree to it. */}<Button disabled={!ready || phone.replace(/\D/g, "").length < 10 || starting || state === undefined} onClick={onContinue} className="mt-5 w-full bg-gold py-6 text-primary-foreground">{starting ? "Sending…" : "Continue"} <ArrowRight className="ml-2 h-4 w-4" /></Button>{gateAlert && notice(gateAlert)}<p className="mt-5 text-xs leading-relaxed text-foreground">{state?.consentText}</p></>;
     })()}
   </motion.section></motion.div></AnimatePresence>;
 }
 
 /** Data wiring for the sheet: deals.state, the gate mutations and the one-time URL flags. */
-export function GateSheet({ state, onClose, clientToken, lapsed = false }: { state: GateSheetState; onClose: () => void; clientToken?: string; lapsed?: boolean }) {
+export function GateSheet({ state, onClose, clientToken, lapsed = false, teamSignIn = false }: { state: GateSheetState; onClose: () => void; clientToken?: string; lapsed?: boolean; teamSignIn?: boolean }) {
   // The landing page passes the token it kept (URL or this tab's storage), so "Change number" and a wrong code keep it.
   // A reel buyer whose list lapsed, back from a bookmark rather than a fresh DM link, starts on the expired screen.
   const [params] = useState<GateParams>(() => { const read = readGateParams(window.location.search); return { ...read, c: read.c ?? clientToken, expired: read.expired || lapsed }; });
@@ -188,6 +202,8 @@ export function GateSheet({ state, onClose, clientToken, lapsed = false }: { sta
   const continueGate = () => {
     // A client link answers the agent question for the visitor; the token rides along so the server attributes them.
     if (state?.clientLink?.state === "live") { start.mutate({ phone, name, email, choice: "buyer", src: params.src, ig: params.ig, c: params.c }); return; }
+    // The agent sign-in posts as a buyer: a team number is the team either way, and a stranger's number just gets the buyer screening (never a realtor block for landing here).
+    if (teamSignIn) { start.mutate({ phone, name, email, choice: "buyer", src: params.src, ig: params.ig, c: params.c }); return; }
     if (choice === "has_agent") { dispatch({ type: "go", step: "confirm-agent" }); return; }
     if (choice === "realtor") { dispatch({ type: "go", step: "confirm-realtor" }); return; }
     if (choice) start.mutate({ phone, name, email, choice, src: params.src, ig: params.ig, c: params.c });
@@ -202,5 +218,5 @@ export function GateSheet({ state, onClose, clientToken, lapsed = false }: { sta
     onConfirmAgent={() => start.mutate({ phone, name, email, choice: "has_agent", src: params.src, ig: params.ig, c: params.c })}
     onConfirmRealtor={() => start.mutate({ phone, name, email, choice: "realtor", src: params.src, ig: params.ig, c: params.c })}
     onGo={(step) => { dispatch({ type: "go", step }); if (step === "gate") setCode(""); }}
-    onResend={(channel) => resend.mutate({ channel })} onChangeNumber={() => change.mutate()} onCopyLink={() => { void copyLink(); }} onClose={onClose} clientToken={params.c} />;
+    onResend={(channel) => resend.mutate({ channel })} onChangeNumber={() => change.mutate()} onCopyLink={() => { void copyLink(); }} onClose={onClose} clientToken={params.c} teamSignIn={teamSignIn} />;
 }

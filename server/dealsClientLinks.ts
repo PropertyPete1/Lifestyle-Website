@@ -188,7 +188,7 @@ export async function reassignTeamRowBeforeRemoval(teamId: number): Promise<numb
   return target.id;
 }
 
-export type CreateClientLinkInput = { agentLead: LeadRow; clientName: string; clientPhone?: string | null; note?: string | null };
+export type CreateClientLinkInput = { agentLead: LeadRow; clientName: string; clientPhone?: string | null; note?: string | null; picks?: readonly string[] | null };
 export type CreateClientLinkResult =
   | { ok: true; link: ClientLinkRow; path: string }
   | { ok: false; kind: "not_team" | "shared_number" | "invalid_phone" | "invalid_name" | "unavailable" };
@@ -196,6 +196,35 @@ export type CreateClientLinkResult =
 /** The relative URL the agent sends; the client lands on the gate with the agent's name on it. */
 export function clientLinkPath(token: string) {
   return `/deals?c=${encodeURIComponent(token)}`;
+}
+
+/** A home's card handle as the gated list shows it (dealsCardHandle): 20 hex characters. */
+export const PICK_CARD_PATTERN = /^[a-f0-9]{20}$/;
+/** An agent's picks for one client: a short list is the point. */
+export const PICKS_MAX = 30;
+
+/** The picks column back as card handles (a malformed value reads as no picks). */
+export function parsePicks(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((card): card is string => typeof card === "string" && PICK_CARD_PATTERN.test(card)).slice(0, PICKS_MAX) : [];
+  } catch { return []; }
+}
+
+/**
+ * The picks an agent sent, kept to homes still on the list (available), in the
+ * agent's order, each once. Unknown or sold homes are dropped silently: the
+ * client never sees a gap, and the agent sees the count that stuck.
+ */
+export async function resolvePickCards(cards: readonly string[]): Promise<string[]> {
+  const wanted = unique(cards.filter((card) => PICK_CARD_PATTERN.test(card))).slice(0, PICKS_MAX);
+  if (!wanted.length) return [];
+  const db = await getDb();
+  if (!db) return [];
+  const homes = await db.select({ sourceKey: dealHomes.sourceKey }).from(dealHomes).where(eq(dealHomes.status, "available"));
+  const live = new Set(homes.map((home) => dealsCardHandle(home.sourceKey)));
+  return wanted.filter((card) => live.has(card));
 }
 
 export function nationalDigits(e164: string | null | undefined): string | null {
@@ -221,12 +250,13 @@ export async function createClientLink(input: CreateClientLinkInput): Promise<Cr
   }
   const token = randomOpaqueToken(24);
   const expiresAt = new Date(Date.now() + settings.clientLinkDays * 24 * 60 * 60_000);
-  const values = { token, agentTeamId: agent.teamId, agentLeadId: input.agentLead.id, clientName, clientPhoneE164, note: input.note?.trim().slice(0, 500) || null, expiresAt };
+  const picks = input.picks?.length ? await resolvePickCards(input.picks) : [];
+  const values = { token, agentTeamId: agent.teamId, agentLeadId: input.agentLead.id, clientName, clientPhoneE164, note: input.note?.trim().slice(0, 500) || null, picks: picks.length ? JSON.stringify(picks) : null, expiresAt };
   const inserted = await db.insert(dealClientLinks).values(values);
   const id = Number((inserted as unknown as [{ insertId?: number }])[0]?.insertId ?? 0);
   const link = (await db.select().from(dealClientLinks).where(eq(dealClientLinks.id, id)).limit(1))[0]
     ?? { id, leadId: null, verifiedAt: null, openedAt: null, openCount: 0, revokedAt: null, createdAt: new Date(), updatedAt: new Date(), ...values };
-  await logDealEvent({ leadId: input.agentLead.id, kind: "client_link_created", sourceCode: "agent", deviceHash: input.agentLead.deviceHash, detail: `link:${id};team:${agent.teamId}` });
+  await logDealEvent({ leadId: input.agentLead.id, kind: "client_link_created", sourceCode: "agent", deviceHash: input.agentLead.deviceHash, detail: `link:${id};team:${agent.teamId}${picks.length ? `;picks:${picks.length}` : ""}` });
   return { ok: true, link, path: clientLinkPath(token) };
 }
 
@@ -401,6 +431,36 @@ async function agentLinkTeamIds(agentLead: LeadRow): Promise<number[]> {
   return found.kind === "one" ? found.person.map((row) => row.id) : [];
 }
 
+export type SetPicksResult = { ok: true; picks: string[] } | { ok: false; kind: "not_found" | "closed" };
+
+/**
+ * The agent puts a fresh set of picks on one of their open links (an empty set
+ * takes the picks off, so the client sees the whole list again). The client
+ * sees the change the next time their list loads.
+ */
+export async function setClientLinkPicks(agentLead: LeadRow, input: { linkId: number; picks: readonly string[] }): Promise<SetPicksResult> {
+  const db = await getDb();
+  if (!db) return { ok: false, kind: "not_found" };
+  const teamIds = await agentLinkTeamIds(agentLead);
+  if (!teamIds.length) return { ok: false, kind: "not_found" };
+  const link = (await db.select().from(dealClientLinks).where(and(eq(dealClientLinks.id, input.linkId), inArray(dealClientLinks.agentTeamId, teamIds))).limit(1))[0];
+  if (!link) return { ok: false, kind: "not_found" };
+  if (!linkIsOpen(link)) return { ok: false, kind: "closed" };
+  const picks = await resolvePickCards(input.picks);
+  await db.update(dealClientLinks).set({ picks: picks.length ? JSON.stringify(picks) : null }).where(eq(dealClientLinks.id, link.id));
+  await logDealEvent({ leadId: agentLead.id, kind: "client_link_picks", sourceCode: "agent", deviceHash: agentLead.deviceHash, detail: `link:${link.id};picks:${picks.length}` });
+  return { ok: true, picks };
+}
+
+/** The picks on a buyer's own live link (the link that holds this lead), as card handles; none for anyone else. */
+export async function clientLinkPicksForLead(lead: Pick<LeadRow, "id" | "clientLinkId">): Promise<string[]> {
+  if (!lead.clientLinkId) return [];
+  const db = await getDb();
+  if (!db) return [];
+  const link = (await db.select({ leadId: dealClientLinks.leadId, picks: dealClientLinks.picks, revokedAt: dealClientLinks.revokedAt }).from(dealClientLinks).where(eq(dealClientLinks.id, lead.clientLinkId)).limit(1))[0];
+  return link && link.leadId === lead.id && !link.revokedAt ? parsePicks(link.picks) : [];
+}
+
 export async function revokeClientLink(agentLead: LeadRow, linkId: number): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
@@ -418,8 +478,10 @@ export const TEXT_DEDUPE_MS = 10 * 60_000;
 const TEXT_MAX = 320;
 
 /** The text the agent sends with their link, by default; no builder, community or home data. */
-export function clientLinkTextMessage(input: { clientName: string; agentFirstName: string; url: string }) {
+export function clientLinkTextMessage(input: { clientName: string; agentFirstName: string; url: string; pickCount?: number }) {
   const first = input.clientName.trim().split(/\s+/)[0] || "there";
+  // With picks, the text says so: the client opens the link expecting a short list, not the whole market.
+  if (input.pickCount && input.pickCount > 0) return `Hi ${first}, I picked ${input.pickCount} new-build home${input.pickCount === 1 ? "" : "s"} for you at Lifestyle Design Realty. Photos, prices and this week's incentives: ${input.url}. Text me with questions.`;
   return `Hi ${first}, here's your private list of new-build deals from ${input.agentFirstName} at Lifestyle Design Realty: ${input.url}. Tap any home for photos and pricing. Text me with questions.`;
 }
 
@@ -449,7 +511,7 @@ export async function textClientLink(agentLead: LeadRow, input: { linkId: number
   if (!linkIsOpen(link, now.getTime())) return { ok: false, kind: "closed" };
   if (!link.clientPhoneE164) return { ok: false, kind: "no_phone" };
   const url = clientLinkAbsoluteUrl(clientLinkPath(link.token));
-  const message = (input.message?.replace(/\s+/g, " ").trim() || clientLinkTextMessage({ clientName: link.clientName, agentFirstName: agent.firstName ?? agent.name, url }));
+  const message = (input.message?.replace(/\s+/g, " ").trim() || clientLinkTextMessage({ clientName: link.clientName, agentFirstName: agent.firstName ?? agent.name, url, pickCount: parsePicks(link.picks).length }));
   if (message.length > TEXT_MAX || !message.includes(url)) return { ok: false, kind: "invalid_message" };
   const recent = (await db.select({ detail: dealEvents.detail, createdAt: dealEvents.createdAt }).from(dealEvents).where(and(eq(dealEvents.leadId, agentLead.id), eq(dealEvents.kind, CLIENT_LINK_TEXTED_EVENT))).orderBy(desc(dealEvents.createdAt)).limit(100))
     .find((row) => (row.detail ?? "").startsWith(`link:${link.id};`));
@@ -491,6 +553,8 @@ export type ClientSummary = {
   lastTextedAt: string | null;
   saves: Array<{ card: string; description: string; price: number | null; communityLabel: string; savedAt: string }>;
   requests: Array<{ kind: "tour" | "ask"; description: string; preferredAt: string; createdAt: string }>;
+  /** The homes the agent picked for this client, in the agent's order (a pick that sold is named as gone). */
+  picks: Array<{ card: string; description: string; price: number | null; communityLabel: string }>;
 };
 
 export type AgentWorkspace = { agent: DealsAgent; clients: ClientSummary[] };
@@ -524,11 +588,16 @@ export async function agentWorkspace(agentLead: LeadRow): Promise<AgentWorkspace
     }
   }
   const homeIds = Array.from(new Set(requests.map((request) => request.homeId)));
-  const homes = homeIds.length ? await db.select().from(dealHomes).where(inArray(dealHomes.id, homeIds)) : [];
+  const pickCards = new Set(links.flatMap((link) => parsePicks(link.picks)));
+  const homes = [
+    ...(homeIds.length ? await db.select().from(dealHomes).where(inArray(dealHomes.id, homeIds)) : []),
+    // Picks are stored as card handles, so the available homes are scanned for the ones that match.
+    ...(pickCards.size ? (await db.select().from(dealHomes).where(eq(dealHomes.status, "available"))).filter((home) => pickCards.has(dealsCardHandle(home.sourceKey)) && !homeIds.includes(home.id)) : []),
+  ];
   const communityIds = Array.from(new Set(homes.map((home) => home.communityId)));
   const communities = communityIds.length ? await db.select({ id: dealCommunities.id, publicLabel: dealCommunities.publicLabel, privateName: dealCommunities.privateName }).from(dealCommunities).where(inArray(dealCommunities.id, communityIds)) : [];
-  const describe = (homeId: number) => {
-    const home = homes.find((row) => row.id === homeId);
+  const describe = (homeId: number | null, card?: string) => {
+    const home = homeId !== null ? homes.find((row) => row.id === homeId) : homes.find((row) => dealsCardHandle(row.sourceKey) === card);
     const community = home ? communities.find((row) => row.id === home.communityId) : undefined;
     return {
       card: home ? dealsCardHandle(home.sourceKey) : "",
@@ -564,6 +633,7 @@ export async function agentWorkspace(agentLead: LeadRow): Promise<AgentWorkspace
       lastTextedAt: texted.get(link.id)?.toISOString() ?? null,
       saves: own.filter((request) => request.requestType === "save").map((request) => ({ ...describe(request.homeId), savedAt: request.createdAt.toISOString() })),
       requests: own.filter((request): request is typeof request & { requestType: "tour" | "ask" } => request.requestType !== "save").map((request) => ({ kind: request.requestType, description: describe(request.homeId).description, preferredAt: request.preferredAt.toISOString(), createdAt: request.createdAt.toISOString() })),
+      picks: parsePicks(link.picks).map((card) => ({ ...describe(null, card), card })),
     };
   });
   return { agent, clients };

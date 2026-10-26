@@ -2,7 +2,8 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
 import { describe, expect, it } from "vitest";
-import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, areaGroups, areaMatches, districtChoices, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingMatches, moreFilterCount, monthsUntilMoveIn, priceCapLabel, storiesKnown, builderChoices, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
+import { EMPTY_FILTERS, PRICE_CAPS, activeFilterCount, areaChoices, areaGroups, areaMatches, districtChoices, bedsFrom, dealSelection, gatedCommunityVisible, homePasses, homesMatching, landingHome, landingMatches, moreFilterCount, monthsUntilMoveIn, newThisWeekKnown, priceCapLabel, storiesKnown, builderChoices, type LandingHomeFacts } from "../client/src/lib/dealsBrowse";
+import { FIRST_SYNC_GRACE_MS, NEW_WINDOW_MS, newThisWeek } from "../shared/dealsFeatured";
 import type { GatedCommunity, GatedLead } from "../client/src/components/deals/GatedCatalog";
 import { browseOrder } from "./dealsService";
 
@@ -283,5 +284,39 @@ describe("a long private list", () => {
     expect(deferred).not.toContain("instagram-media");
     const loaded = renderToStaticMarkup(createElement(ReelCard, { reelUrl: "https://www.instagram.com/reel/abc/", label: "North | Homes" }));
     expect(loaded).toContain("instagram-media");
+  });
+});
+
+
+describe("Oct 26, 2026: New this week", () => {
+  const now = Date.parse("2026-10-26T18:00:00Z");
+  const day = 24 * 60 * 60_000;
+  it("marks a home first seen in the last 7 days, unless it came with the community's opening stock", () => {
+    const opened = new Date(now - 30 * day);
+    expect(newThisWeek(new Date(now - 2 * day), opened, now)).toBe(true);
+    expect(newThisWeek(new Date(now - NEW_WINDOW_MS - 1), opened, now)).toBe(false);
+    expect(newThisWeek(new Date(now + 1000), opened, now)).toBe(false);
+    // The community was added 3 days ago and this home came in its first two days: stock, not an arrival.
+    const young = new Date(now - 3 * day);
+    expect(newThisWeek(new Date(young.getTime() + FIRST_SYNC_GRACE_MS - 1), young, now)).toBe(false);
+    expect(newThisWeek(new Date(young.getTime() + FIRST_SYNC_GRACE_MS + 1000), young, now)).toBe(true);
+    expect(newThisWeek(null, opened, now)).toBe(false);
+    expect(newThisWeek("2026-10-25T00:00:00Z", null, now)).toBe(true);
+  });
+  it("filters on it, on the landing facts and on the private list, and the toggle shows only when something is new", () => {
+    const facts: LandingHomeFacts = [300_000, 3, 2, 1_500, 2, 0, 1, null, null, 1];
+    expect(landingHome(facts).isNew).toBe(true);
+    expect(landingHome([300_000, 3, 2, 1_500, 2, 0, 1, null, null]).isNew).toBe(false);
+    const filters = { ...EMPTY_FILTERS, newOnly: true };
+    expect(homePasses({ kind: "quick_move_in", price: 300_000, isNew: true }, filters)).toBe(true);
+    expect(homePasses({ kind: "quick_move_in", price: 300_000 }, filters)).toBe(false);
+    expect(activeFilterCount(filters)).toBe(1);
+    const base = { label: "A", area: "North San Antonio", homesAvailable: 2, reelUrl: null } as const;
+    expect(landingMatches({ ...base, homeFacts: [facts] }, filters)).toBe(true);
+    expect(landingMatches({ ...base, homeFacts: [[300_000, 3, 2, 1_500, 2, 0, 1, null, null, 0]] }, filters)).toBe(false);
+    expect(landingMatches({ ...base, newThisWeek: 1 }, filters)).toBe(true);
+    expect(landingMatches({ ...base, newThisWeek: 0 }, filters)).toBe(false);
+    expect(newThisWeekKnown([{ newThisWeek: 0 }, { homes: [{ isNew: false }] }])).toBe(false);
+    expect(newThisWeekKnown([{ newThisWeek: 0 }, { homes: [{ isNew: true }] }])).toBe(true);
   });
 });

@@ -38,7 +38,7 @@ import {
 import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { effectiveScrubConfig } from "./dealsScrub";
-import { loanTypeLabel, priceBandFloor, priceBandLabel, redHotDeal } from "../shared/dealsFeatured";
+import { loanTypeLabel, newThisWeek, priceBandFloor, priceBandLabel, redHotDeal } from "../shared/dealsFeatured";
 import { incentiveTeaser } from "../shared/dealsTeaser";
 import { heldIncentivePublicEntry, heldIncentiveShowsLine } from "../shared/dealsHeldIncentive";
 import { checkTwilioVerify } from "./dealsVerification";
@@ -793,9 +793,10 @@ function factNumber(value: string | number | null | undefined): number | null {
 }
 
 /** [price, beds, baths, sqft, garage, kind (0 move-in ready, 1 to be built), stories, previous price]: see LandingHomeFacts. */
-export function landingHomeFacts(home: { kind: string; price: number | null; previousPrice: number | null; beds: string | null; baths: string | null; sqft: number | null; garage: string | null; stories?: number | null; moveInDate?: string | null }): [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null, string | null] {
+export function landingHomeFacts(home: { kind: string; price: number | null; previousPrice: number | null; beds: string | null; baths: string | null; sqft: number | null; garage: string | null; stories?: number | null; moveInDate?: string | null; isNew?: boolean }): [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null, string | null, 0 | 1] {
   // The move-in text is a month at most ("Nov 2026"), never a date that could be matched to a listing.
-  return [home.price, factNumber(home.beds), factNumber(home.baths), home.sqft, factNumber(home.garage), home.kind === "to_be_built" ? 1 : 0, home.stories ?? null, home.previousPrice, home.moveInDate ?? null];
+  // The last fact (Oct 26, 2026): 1 when the home arrived this week (the "New this week" badge and filter).
+  return [home.price, factNumber(home.beds), factNumber(home.baths), home.sqft, factNumber(home.garage), home.kind === "to_be_built" ? 1 : 0, home.stories ?? null, home.previousPrice, home.moveInDate ?? null, home.isNew ? 1 : 0];
 }
 
 export async function publicDealsCatalog(src?: string | null) {
@@ -808,13 +809,13 @@ export async function publicDealsCatalog(src?: string | null) {
   const { regionPin } = await import("./dealsRegionMap");
   const { publicPhotoUrl } = await import("./dealsPhotoToken");
   const publicRadius = areaMapRadius(settings, "public");
-  const result = [] as Array<{ key: string; label: string; area: string; fromPrice: number | null; fromPriceLabel: string | null; reelUrl: string | null; homesAvailable: number; incentive: (ReturnType<typeof publicIncentive> & { pending?: true }) | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean; cover: string | null; pin: { x: number; y: number } | null; homeFacts: ReturnType<typeof landingHomeFacts>[]; schoolDistrict: string | null }>;
+  const result = [] as Array<{ key: string; label: string; area: string; fromPrice: number | null; fromPriceLabel: string | null; reelUrl: string | null; homesAvailable: number; newThisWeek: number; incentive: (ReturnType<typeof publicIncentive> & { pending?: true }) | null; updatedAt: string | null; areaMap: ReturnType<typeof communityAreaMap>; fromYourReel: boolean; cover: string | null; pin: { x: number; y: number } | null; homeFacts: ReturnType<typeof landingHomeFacts>[]; schoolDistrict: string | null }>;
   if (!communities.length) return result;
   const reelCode = src?.trim().toLowerCase() || null;
   // Two reads for the whole page, however many communities there are.
   const ids = communities.map((community) => community.id);
   const [availableHomes, incentives, heldLine] = await Promise.all([
-    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price, previousPrice: dealHomes.previousPrice, beds: dealHomes.beds, baths: dealHomes.baths, sqft: dealHomes.sqft, garage: dealHomes.garage, stories: dealHomes.stories, moveInDate: dealHomes.moveInDate }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
+    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price, previousPrice: dealHomes.previousPrice, beds: dealHomes.beds, baths: dealHomes.baths, sqft: dealHomes.sqft, garage: dealHomes.garage, stories: dealHomes.stories, moveInDate: dealHomes.moveInDate, createdAt: dealHomes.createdAt }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
     liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
     heldLineCommunities(db, ids, now, settings.incentiveLapseDays),
   ]);
@@ -844,7 +845,7 @@ export async function publicDealsCatalog(src?: string | null) {
     const key = dealsHandle(`deals-landing:${community.id}`, 12);
     const coverPhoto = (coverCandidates.get(community.id) ?? []).map((homeId) => firstPhoto.get(homeId)).find((id): id is number => id !== undefined);
     const geometry = areaMapGeometry(community, "public", publicRadius);
-    const shownHomes = selectDealCatalogHomes(homesByCommunity.get(community.id) ?? []);
+    const shownHomes = selectDealCatalogHomes(homesByCommunity.get(community.id) ?? []).map((home) => ({ ...home, isNew: newThisWeek(home.createdAt, community.createdAt, now) }));
     // The starting price the builder states, else the cheapest home shown (Oct 26, Peter: some markers showed no
     // price on hover; those communities had homes but no stated "from" price).
     const fromPrice = community.fromPrice ?? shownHomes.map((home) => home.price).find((price): price is number => typeof price === "number" && price > 0) ?? null;
@@ -859,6 +860,8 @@ export async function publicDealsCatalog(src?: string | null) {
       reelUrl: community.reelUrl,
       homesAvailable: availableCount.get(community.id) ?? 0,
       redHotDeals: redHotCount.get(community.id) ?? 0,
+      // Oct 26, 2026: homes that arrived this week, for the card's badge and the "New this week" filter.
+      newThisWeek: shownHomes.filter((home) => home.isNew).length,
       // The shown homes' public figures (the same ones the community sheet shows), so the filters match on real homes:
       // price, beds, baths, square feet, garage, move-in ready or to be built, stories, and the price before a drop.
       homeFacts: shownHomes.map((home) => landingHomeFacts(home)),
@@ -936,6 +939,7 @@ async function readPublicCommunityHomes(communityId: number, key: string): Promi
     return {
       // Position on this page only: never an id, a source key or a card handle.
       card: `${key}-${index}`,
+      isNew: newThisWeek(home.createdAt, community.createdAt),
       kind: home.kind,
       beds: home.beds,
       baths: home.baths,
@@ -1065,6 +1069,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
         // Opaque, deterministic card handle for React only. It is not a
         // builder listing ID, database ID, source URL, or reversible key.
         card: dealsCardHandle(home.sourceKey),
+        isNew: newThisWeek(home.createdAt, community.createdAt, now),
         kind: home.kind,
         beds: home.beds,
         baths: home.baths,

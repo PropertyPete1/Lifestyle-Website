@@ -192,8 +192,10 @@ describe("the landing catalog", () => {
     // The marker is the coarse public cell's point, never the ZIP centroid itself.
     expect(withCover.pin).not.toBeNull();
     expect(withCover.pin).not.toEqual(regionPin({ lat: 29.355424, lng: -98.319795 }));
-    // The filters read each shown home's public figures: [price, beds, baths, sqft, garage, kind, stories, previous price].
-    expect((withCover as unknown as { homeFacts: unknown[] }).homeFacts).toEqual([[300_000, 4, 3, 2_100, null, 0, null, null, null], [350_000, 4, 3, 2_100, 2, 0, 2, null, "Nov 2026"]]);
+    // The filters read each shown home's public figures: [price, beds, baths, sqft, garage, kind, stories, previous price, move-in, new this week].
+    // Homes that came with the community's first sync are stock, not "new this week" (Oct 26, 2026).
+    expect((withCover as unknown as { homeFacts: unknown[] }).homeFacts).toEqual([[300_000, 4, 3, 2_100, null, 0, null, null, null, 0], [350_000, 4, 3, 2_100, 2, 0, 2, null, "Nov 2026", 0]]);
+    expect((withCover as unknown as { newThisWeek: number }).newThisWeek).toBe(0);
     const without = entries.find((entry) => entry.label === "North San Antonio | Hills")!;
     expect(without.cover).toBeNull();
     expect(without.pin).toBeNull();

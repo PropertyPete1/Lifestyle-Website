@@ -9,10 +9,10 @@ import { identityPatternStyle } from "@/lib/dealsIdentityPattern";
 import { PROFILE_NAME_MAX, PROFILE_TIMELINES, profileInput, type ProfileInput } from "@/lib/dealsMine";
 import { AreaMap } from "./AreaMap";
 import { Countdown } from "./Countdown";
-import { DealsFooter, Incentive, RedHotBadge, RedHotSavings, ReelCard, RetryImage, formatChicagoDate, money, type DealsIncentive } from "./shared";
+import { DealsFooter, Incentive, NewBadge, RedHotBadge, RedHotSavings, ReelCard, RetryImage, formatChicagoDate, money, type DealsIncentive } from "./shared";
 import { FeaturedDeals, type FeaturedDealsData } from "./FeaturedDeals";
 import { BrowseBar, BROWSE_COPY, ShowMore } from "./BrowseBar";
-import { BROWSE_PAGE, EMPTY_FILTERS, OPEN_ALL_UP_TO, numberFrom, storiesKnown, builderChoices, dealSelection, gatedCommunityVisible, homeFiltersOn, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
+import { BROWSE_PAGE, EMPTY_FILTERS, OPEN_ALL_UP_TO, numberFrom, newThisWeekKnown, storiesKnown, builderChoices, dealSelection, gatedCommunityVisible, homeFiltersOn, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export { countdownLabel } from "@/lib/dealsMine";
 export type { ProfileInput } from "@/lib/dealsMine";
@@ -38,6 +38,7 @@ export type GatedHome = {
   lotSize?: string | null;
   photos?: string[];
   details?: GatedHomeDetails | null;
+  isNew?: boolean;
 };
 
 export type GatedCommunityDetails = { builderName?: string | null; communityName?: string | null; address?: string | null; salesLine?: string | null; builderPage?: string | null };
@@ -126,7 +127,7 @@ function HomeCard({ home, teamPreview, saved, saving, onRequest, onSave, pick }:
   const details = home.details ?? null;
   const picked = pick?.picked.has(home.card) ?? false;
   return <article id={`home-${home.card}`} data-deals-picked={picked ? "true" : undefined} className={`min-w-0 max-w-full scroll-mt-6 overflow-hidden border bg-card p-5 ${picked ? "border-gold shadow-[0_0_0_1px_var(--color-gold)]" : "border-border"}`}>
-    <div className="flex items-start justify-between gap-4"><p className="eyebrow text-gold">{toBeBuilt ? "To Be Built" : "Available now"}</p><RedHotBadge price={home.price} previousPrice={home.previousPrice} /></div>
+    <div className="flex items-start justify-between gap-4"><p className="eyebrow text-gold">{toBeBuilt ? "To Be Built" : "Available now"}</p><span className="flex flex-wrap justify-end gap-2"><RedHotBadge price={home.price} previousPrice={home.previousPrice} /><NewBadge isNew={home.isNew} /></span></div>
     <ProtectedGallery photos={home.photos} />
     <h3 className="mt-3 text-3xl">{home.price ? money.format(home.price) : "Ask for current pricing"}</h3>
     <RedHotSavings price={home.price} previousPrice={home.previousPrice} />
@@ -308,7 +309,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
         // Turning Saved on opens the communities that hold a saved home; each can still be collapsed.
         if (next.savedOnly && !filters.savedOnly) setOpened((current) => new Set([...Array.from(current), ...communities.flatMap((community, index) => community.homes.some((home) => savedOnList.has(home.card)) ? [communityKey(community, index)] : [])]));
         setFilters(next); setPages(1);
-      }} areas={communities} shown={shownHomes} total={homeCount} unit="homes" showBeds savedCount={savedOnList.size} showStories={storiesKnown(communities)} builders={lead.teamPreview ? builderChoices(communities) : []} />}
+      }} areas={communities} shown={shownHomes} total={homeCount} unit="homes" showBeds savedCount={savedOnList.size} showStories={storiesKnown(communities)} showNew={newThisWeekKnown(communities)} builders={lead.teamPreview ? builderChoices(communities) : []} />}
       {(filters.savedOnly || savedOnList.size === 0) && savedGone > 0 && <p role="status" className="mt-3 text-xs text-muted-foreground" data-deals-saved-gone="true">{savedGone === 1 ? "1 home you saved is no longer available." : `${savedGone} homes you saved are no longer available.`}</p>}
       {(many || savedOnList.size > 0) && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{filters.savedOnly && savedOnList.size > 0 ? BROWSE_COPY.noneSaved : BROWSE_COPY.none}</p>}
       <div className="mt-10 space-y-12">{visible.map(({ community, key }, position) => <CommunitySection key={key} id={`deals-community-${position}`} community={community} homes={homeFilters ? homesMatching(community, filters, savedOnList) : community.homes} open={!many || opened.has(key)} onToggle={many ? () => setOpened((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; }) : undefined} autoLoadReel={!many || position === 0} teamPreview={lead.teamPreview} savedSet={savedSet} savingCard={savingCard} onRequest={onRequest} onSave={onSave} pick={pick} />)}</div>

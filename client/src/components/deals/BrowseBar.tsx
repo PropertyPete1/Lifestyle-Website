@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { SlidersHorizontal, X, Flame, ChevronDown } from "lucide-react";
+import { SlidersHorizontal, X, Flame, ChevronDown, Sparkles } from "lucide-react";
 import { AVAILABLE_BY, BATH_MINIMUMS, BED_MINIMUMS, BROWSE_PAGE, EMPTY_FILTERS, GARAGE_MINIMUMS, PRICE_CAPS, PRICE_FLOORS, SQFT_MAXIMUMS, SQFT_MINIMUMS, activeFilterCount, areaGroups, districtChoices, MARKET_AREA_PREFIX, moreFilterCount, priceCapLabel, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export const BROWSE_COPY = {
@@ -37,6 +37,7 @@ export const BROWSE_COPY = {
   builderRate: "Builder rate offer",
   bigLots: "Half-acre+ lots",
   redHot: "Red Hot Deals",
+  newThisWeek: "New this week",
   saved: "Saved",
   noneSaved: "None of your saved homes match these filters. Clear a filter to see them all.",
   clear: "Clear filters",
@@ -64,7 +65,7 @@ function NumberSelect({ label, value, options, any, format, onChange }: { label:
  * baths, size, garage, stories and home type under "More filters". The landing page filters on each community's
  * public home figures; the private list filters the homes themselves.
  */
-export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedCount = 0, showStories = true, builders = [] }: {
+export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedCount = 0, showStories = true, builders = [], showNew = false }: {
   filters: BrowseFilters;
   onChange: (filters: BrowseFilters) => void;
   areas: ReadonlyArray<{ area: string; schoolDistrict?: string | null }>;
@@ -78,6 +79,8 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
   savedCount?: number;
   /** Off until some home on the list has its stories from the builder (a stories filter would match nothing). */
   showStories?: boolean;
+  /** Oct 26, 2026: the "New this week" toggle, shown while some home on the list arrived this week. */
+  showNew?: boolean;
   /** Team lists only (Peter and his agents): the builder picker. Never passed on a buyer's list or the landing page. */
   builders?: ReadonlyArray<{ builder: string; count: number }>;
 }) {
@@ -119,6 +122,7 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
     <div className="mt-3 flex min-w-0 flex-wrap gap-2 xl:mt-0">
       {savedCount > 0 && <Toggle name="saved" on={filters.savedOnly} label={`${BROWSE_COPY.saved} (${savedCount})`} onChange={(value) => set({ savedOnly: value })} />}
       <button type="button" aria-pressed={filters.redHot} data-deals-filter="red-hot" onClick={() => set({ redHot: !filters.redHot })} className={`inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-sm font-semibold transition-colors ${filters.redHot ? "border-red-600 bg-red-600 text-white" : "border-red-600/60 text-red-600 hover:bg-red-50"}`}><Flame className="h-4 w-4" />{BROWSE_COPY.redHot}</button>
+      {showNew && <button type="button" aria-pressed={filters.newOnly} data-deals-filter="new" onClick={() => set({ newOnly: !filters.newOnly })} className={`inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-sm font-semibold transition-colors ${filters.newOnly ? "border-gold bg-gold text-primary-foreground" : "border-gold/60 text-gold hover:bg-gold/10"}`}><Sparkles className="h-4 w-4" />{BROWSE_COPY.newThisWeek}</button>}
       <Toggle name="move-in-ready" on={filters.moveInReady} label={BROWSE_COPY.moveInReady} onChange={(value) => set({ moveInReady: value })} />
       <button type="button" aria-expanded={moreOpen} data-deals-filter="more" onClick={() => setMoreOpen((value) => !value)} className={`inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-sm transition-colors ${more > 0 || moreOpen ? "border-gold text-gold" : "border-border text-foreground hover:text-gold"}`}>
         <SlidersHorizontal className="h-4 w-4" />{BROWSE_COPY.more}{more > 0 && <span className="rounded-full bg-gold px-1.5 text-[11px] font-semibold text-primary-foreground">{more}</span>}<ChevronDown className={`h-4 w-4 transition-transform ${moreOpen ? "rotate-180" : ""}`} />

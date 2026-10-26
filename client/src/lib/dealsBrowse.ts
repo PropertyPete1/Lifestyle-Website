@@ -29,6 +29,8 @@ export type BrowseFilters = {
   bigLots: boolean;
   /** Homes with a real price drop (see redHotDeal). */
   redHot: boolean;
+  /** Oct 26, 2026: homes that arrived this week (newThisWeek). */
+  newOnly: boolean;
   /** Private list only: just the homes this buyer has saved. */
   savedOnly: boolean;
   /** Team only (Peter and his agents): one builder, or "" for all. Buyers never see builder names. */
@@ -37,7 +39,7 @@ export type BrowseFilters = {
   schoolDistrict: string;
 };
 
-export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, maxSqft: null, availableBy: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, savedOnly: false, builder: "", schoolDistrict: "" };
+export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, maxSqft: null, availableBy: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, newOnly: false, savedOnly: false, builder: "", schoolDistrict: "" };
 export const PRICE_CAPS = [200_000, 300_000, 400_000, 500_000, 600_000, 750_000, 1_000_000] as const;
 export const PRICE_FLOORS = [200_000, 250_000, 300_000, 350_000, 400_000, 500_000, 600_000, 750_000] as const;
 export const BED_MINIMUMS = [2, 3, 4, 5] as const;
@@ -61,7 +63,7 @@ export function moreFilterCount(filters: BrowseFilters): number {
 }
 
 export function activeFilterCount(filters: BrowseFilters): number {
-  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.savedOnly, filters.builder, filters.schoolDistrict].filter(filterOn).length;
+  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.newOnly, filters.savedOnly, filters.builder, filters.schoolDistrict].filter(filterOn).length;
 }
 
 /** Areas present in the list, most communities first, for the area picker. */
@@ -125,6 +127,8 @@ export type FilterableHome = {
   stories?: number | null;
   lotSize?: string | null;
   moveInDate?: string | null;
+  /** Arrived this week (the server decides; see newThisWeek). */
+  isNew?: boolean;
 };
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
@@ -169,15 +173,16 @@ export function homePasses(home: FilterableHome, filters: BrowseFilters, communi
   if (filters.moveInReady !== filters.toBeBuilt && home.kind !== (filters.moveInReady ? "quick_move_in" : "to_be_built")) return false;
   if (filters.bigLots && (homeLotAcres(home.lotSize, communityLot) ?? 0) < BIG_LOT_ACRES) return false;
   if (filters.redHot && !redHotDeal(home.price, home.previousPrice)) return false;
+  if (filters.newOnly && !home.isNew) return false;
   return true;
 }
 
 /** The landing card's homes, compact: [price, beds, baths, sqft, garage, kind (0 move-in ready, 1 to be built), stories, previous price, move-in text]. */
-export type LandingHomeFacts = [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null, (string | null)?];
+export type LandingHomeFacts = [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null, (string | null)?, (0 | 1)?];
 
 export function landingHome(facts: LandingHomeFacts): FilterableHome {
-  const [price, beds, baths, sqft, garage, kind, stories, previousPrice, moveInDate] = facts;
-  return { price, beds, baths, sqft, garage, kind: kind === 1 ? "to_be_built" : "quick_move_in", stories, previousPrice, moveInDate: moveInDate ?? null };
+  const [price, beds, baths, sqft, garage, kind, stories, previousPrice, moveInDate, isNew] = facts;
+  return { price, beds, baths, sqft, garage, kind: kind === 1 ? "to_be_built" : "quick_move_in", stories, previousPrice, moveInDate: moveInDate ?? null, isNew: isNew === 1 };
 }
 
 export type LandingBrowseCommunity = {
@@ -189,6 +194,8 @@ export type LandingBrowseCommunity = {
   incentive?: { headlineRate?: string | null } | null;
   /** Homes in the community that are Red Hot Deals. */
   redHotDeals?: number;
+  /** Homes in the community that arrived this week. */
+  newThisWeek?: number;
   /** The homes the community card stands for (see LandingHomeFacts); older pages have none. */
   homeFacts?: LandingHomeFacts[] | null;
 };
@@ -212,7 +219,7 @@ export function storiesKnown(items: ReadonlyArray<{ homeFacts?: LandingHomeFacts
   return items.some((item) => item.homeFacts?.some((facts) => facts[6] !== null) || item.homes?.some((home) => typeof home.stories === "number"));
 }
 
-const LANDING_HOME_FILTERS = (filters: BrowseFilters) => filters.minPrice !== null || filters.maxPrice !== null || filters.minBeds !== null || filters.minBaths !== null || filters.minSqft !== null || filters.maxSqft !== null || filters.availableBy !== null || filters.minGarage !== null || filters.stories !== null || filters.moveInReady || filters.toBeBuilt || filters.redHot;
+const LANDING_HOME_FILTERS = (filters: BrowseFilters) => filters.minPrice !== null || filters.maxPrice !== null || filters.minBeds !== null || filters.minBaths !== null || filters.minSqft !== null || filters.maxSqft !== null || filters.availableBy !== null || filters.minGarage !== null || filters.stories !== null || filters.moveInReady || filters.toBeBuilt || filters.redHot || filters.newOnly;
 
 /** A landing card matches when it is in the area, has the offer and lot asked for, and has a home that passes the home filters. */
 export function landingMatches(community: LandingBrowseCommunity, filters: BrowseFilters): boolean {
@@ -229,7 +236,13 @@ export function landingMatches(community: LandingBrowseCommunity, filters: Brows
   if (filters.maxPrice !== null && !(community.fromPrice && community.fromPrice < filters.maxPrice)) return false;
   if (filters.moveInReady && !filters.toBeBuilt && community.homesAvailable <= 0) return false;
   if (filters.redHot && !(community.redHotDeals && community.redHotDeals > 0)) return false;
+  if (filters.newOnly && !(community.newThisWeek && community.newThisWeek > 0)) return false;
   return true;
+}
+
+/** The "New this week" toggle shows only while some home on the list is new (otherwise it would match nothing). */
+export function newThisWeekKnown(items: ReadonlyArray<{ newThisWeek?: number; homes?: ReadonlyArray<{ isNew?: boolean }> }>): boolean {
+  return items.some((item) => (item.newThisWeek ?? 0) > 0 || item.homes?.some((home) => home.isNew));
 }
 
 export type GatedBrowseHome = FilterableHome & { card?: string };

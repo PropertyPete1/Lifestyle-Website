@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Flame, Home, LockKeyhole, MapPin, Play, Share2, X } from "lucide-react";
+import { Flame, Home, LockKeyhole, MapPin, Play, Share2, Sparkles, X } from "lucide-react";
 import { AreaMap } from "./AreaMap";
-import { Incentive, RedHotBadge, RedHotSavings, ReelCard, RetryImage, money, type DealsIncentive } from "./shared";
+import { Incentive, NEW_COPY, NewBadge, RedHotBadge, RedHotSavings, ReelCard, RetryImage, money, type DealsIncentive } from "./shared";
 import { ProtectedGallery } from "./GatedCatalog";
 import { ShowMore } from "./BrowseBar";
 import { BROWSE_PAGE, homeFiltersOn, homePasses, numberFrom, type BrowseFilters } from "@/lib/dealsBrowse";
@@ -30,6 +30,8 @@ export type LandingCommunity = {
   pin?: { x: number; y: number } | null;
   /** Homes here that are Red Hot Deals. */
   redHotDeals?: number;
+  /** Homes here that arrived this week. */
+  newThisWeek?: number;
   /** The community's school district ("Northside ISD"), public like the area. */
   schoolDistrict?: string | null;
 };
@@ -92,6 +94,7 @@ export function CommunityCard({ community, active, onHover, onOpen }: { communit
         <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-1.5">
           {community.fromYourReel && <span className="rounded-full bg-gold px-2.5 py-1 text-[11px] font-semibold text-primary-foreground shadow">{LANDING_COPY.fromYourReel}</span>}
           {(community.redHotDeals ?? 0) > 0 && <span data-deals-card-red-hot="true" className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-white shadow"><Flame className="h-3.5 w-3.5" />{LANDING_COPY.redHot(community.redHotDeals!)}</span>}
+          {(community.newThisWeek ?? 0) > 0 && <span data-deals-card-new="true" className="inline-flex items-center gap-1 rounded-full border border-gold bg-card/90 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-gold shadow"><Sparkles className="h-3.5 w-3.5" />{NEW_COPY.count(community.newThisWeek!)}</span>}
           {rate && <span data-deals-card-rate="true" className="rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-semibold text-foreground shadow">{LANDING_COPY.rate(rate)}</span>}
         </div>
         {community.reelUrl && <span className="pointer-events-none absolute bottom-3 right-3 inline-flex items-center gap-1 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white"><Play className="h-3 w-3 fill-current" />{LANDING_COPY.videoTour}</span>}
@@ -508,7 +511,7 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
 }
 
 /** A home on the landing page: the same facts as the private list, with no address, plan, builder or community name. */
-export type PublicHome = { card: string; kind: string; beds?: string | number | null; baths?: string | number | null; sqft?: number | null; garage?: string | null; stories?: number | null; price?: number | null; previousPrice?: number | null; moveInDate?: string | null; lotSize?: string | null; photos?: string[] };
+export type PublicHome = { card: string; kind: string; beds?: string | number | null; baths?: string | number | null; sqft?: number | null; garage?: string | null; stories?: number | null; price?: number | null; previousPrice?: number | null; moveInDate?: string | null; lotSize?: string | null; photos?: string[]; isNew?: boolean };
 
 export function PublicHomeCard({ home, onAddress, featured = false }: { home: PublicHome; onAddress: () => void; featured?: boolean }) {
   return <article data-deals-public-home="true" data-deals-featured-home={featured ? "true" : undefined} className={`relative min-w-0 overflow-hidden rounded-xl border bg-card shadow-sm ${featured ? "border-gold ring-2 ring-gold/60" : "border-border"}`}>
@@ -518,6 +521,7 @@ export function PublicHomeCard({ home, onAddress, featured = false }: { home: Pu
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className="rounded-full bg-secondary px-2.5 py-0.5 text-[11px] font-medium text-foreground">{home.kind === "to_be_built" ? "To be built" : "Move-in ready"}</span>
         <RedHotBadge price={home.price} previousPrice={home.previousPrice} />
+        <NewBadge isNew={home.isNew} />
       </div>
       <p className="mt-2 text-2xl font-semibold leading-tight">{home.price ? money.format(home.price) : "Ask for current pricing"}</p>
       <RedHotSavings price={home.price} previousPrice={home.previousPrice} />

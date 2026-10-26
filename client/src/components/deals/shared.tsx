@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ImgHTMLAttributes } from "react";
 import { Link } from "wouter";
-import { Flame, Play, Send } from "lucide-react";
+import { Flame, Play, Send, Sparkles } from "lucide-react";
 import { redHotDeal } from "@shared/dealsFeatured";
 import { SITE } from "@shared/site";
 import { youtubeEmbedUrl, youtubeVideoId } from "@/lib/dealsVideo";
@@ -199,6 +199,14 @@ export function InstagramHelp({ state }: { state: DealsContactState }) {
 }
 
 export const RED_HOT_COPY = { badge: "Red Hot Deal", savings: "Extreme savings", save: (amount: number) => `Save ${money.format(amount)}` } as const;
+
+export const NEW_COPY = { badge: "New this week", count: (count: number) => count === 1 ? "1 new this week" : `${count} new this week` } as const;
+
+/** Oct 26, 2026: the gold "New this week" badge for a home that arrived in the last seven days. */
+export function NewBadge({ isNew, className = "" }: { isNew?: boolean | null; className?: string }) {
+  if (!isNew) return null;
+  return <span data-deals-new="true" className={`inline-flex items-center gap-1 rounded-full border border-gold bg-gold/10 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-gold ${className}`}><Sparkles className="h-3.5 w-3.5" />{NEW_COPY.badge}</span>;
+}
 
 /** The red "Red Hot Deal" badge (a real price drop, see redHotDeal); nothing when the home is not one. */
 export function RedHotBadge({ price, previousPrice, className = "" }: { price?: number | null; previousPrice?: number | null; className?: string }) {

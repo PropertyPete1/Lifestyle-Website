@@ -387,3 +387,21 @@ export function redHotDeal(price: number | null | undefined, previousPrice: numb
   const savings = previousPrice - price;
   return savings >= Math.max(RED_HOT_MIN_SAVINGS, (price * RED_HOT_MIN_PERCENT) / 100) ? { savings, was: previousPrice } : null;
 }
+
+/** "New this week": a home first seen in the last 7 days. */
+export const NEW_WINDOW_MS = 7 * 24 * 60 * 60_000;
+/** A community's first sync lists everything at once; homes from those first two days are the stock, not arrivals. */
+export const FIRST_SYNC_GRACE_MS = 48 * 60 * 60_000;
+
+/**
+ * Oct 26, 2026: a home is new this week when it was first seen within the window and was not part of its
+ * community's opening stock (the first two days after the community itself was added).
+ */
+export function newThisWeek(homeCreatedAt: Date | string | null | undefined, communityCreatedAt: Date | string | null | undefined, now: number | Date = Date.now()): boolean {
+  if (!homeCreatedAt) return false;
+  const seen = new Date(homeCreatedAt).getTime();
+  const at = typeof now === "number" ? now : now.getTime();
+  if (!Number.isFinite(seen) || at - seen > NEW_WINDOW_MS || seen > at) return false;
+  const opened = communityCreatedAt ? new Date(communityCreatedAt).getTime() : NaN;
+  return !Number.isFinite(opened) || seen - opened > FIRST_SYNC_GRACE_MS;
+}

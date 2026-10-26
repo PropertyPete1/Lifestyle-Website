@@ -5,7 +5,7 @@ import { AreaMap } from "./AreaMap";
 import { Incentive, NEW_COPY, NewBadge, RedHotBadge, RedHotSavings, ReelCard, RetryImage, money, type DealsIncentive } from "./shared";
 import { ProtectedGallery } from "./GatedCatalog";
 import { ShowMore } from "./BrowseBar";
-import { BROWSE_PAGE, homeFiltersOn, homePasses, numberFrom, type BrowseFilters } from "@/lib/dealsBrowse";
+import { BROWSE_PAGE, homeFiltersOn, homePasses, numberFrom, sortHomes, type BrowseFilters } from "@/lib/dealsBrowse";
 
 /**
  * The landing page's list, laid out like a home search: photo cards beside one
@@ -477,7 +477,7 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
   const [showAll, setShowAll] = useState(false);
   const narrowed = filters && homeFiltersOn(filters) && !showAll ? all.filter((home) => homePasses(home, filters)) : null;
   // When no home passes (the community matched on its offer or area), every home shows rather than an empty sheet.
-  const base = narrowed && narrowed.length ? narrowed : all;
+  const base = sortHomes(narrowed && narrowed.length ? narrowed : all, filters?.sort ?? "recommended");
   // A featured home leads the sheet, whatever the filters say.
   const featuredHome = all.find((home) => isFocusHome(home, focus));
   const list = featuredHome ? [featuredHome, ...base.filter((home) => home !== featuredHome)] : base;

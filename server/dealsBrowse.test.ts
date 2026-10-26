@@ -320,3 +320,31 @@ describe("Oct 26, 2026: New this week", () => {
     expect(newThisWeekKnown([{ newThisWeek: 0 }, { homes: [{ isNew: true }] }])).toBe(true);
   });
 });
+
+describe("Oct 26, 2026: sort order", () => {
+  it("orders landing cards, private-list communities and homes; missing figures go last; recommended keeps the order", async () => {
+    const { BROWSE_SORTS, sortGatedCommunities, sortHomes, sortLandingCommunities } = await import("../client/src/lib/dealsBrowse");
+    expect(BROWSE_SORTS.map((option) => option.value)).toEqual(["recommended", "price_asc", "price_desc", "newest", "largest"]);
+    const cards = [
+      { label: "A", area: "x", homesAvailable: 1, reelUrl: null, fromPrice: 400_000, newThisWeek: 0, homeFacts: [[400_000, 3, 2, 2_000, 2, 0, 1, null, null, 0]] },
+      { label: "B", area: "x", homesAvailable: 1, reelUrl: null, fromPrice: null, newThisWeek: 2, homeFacts: [[300_000, 3, 2, 1_500, 2, 0, 1, null, null, 1]] },
+      { label: "C", area: "x", homesAvailable: 0, reelUrl: null, fromPrice: null, newThisWeek: 0, homeFacts: [] },
+      { label: "D", area: "x", homesAvailable: 1, reelUrl: null, fromPrice: 350_000, newThisWeek: 1, homeFacts: [[350_000, 4, 3, 2_600, 2, 0, 2, null, null, 1]] },
+    ] as const;
+    const labels = (items: ReadonlyArray<{ label: string }>) => items.map((item) => item.label).join("");
+    expect(labels(sortLandingCommunities(cards as never, "recommended"))).toBe("ABCD");
+    expect(labels(sortLandingCommunities(cards as never, "price_asc"))).toBe("BDAC");
+    expect(labels(sortLandingCommunities(cards as never, "price_desc"))).toBe("ADBC");
+    expect(labels(sortLandingCommunities(cards as never, "newest"))).toBe("BDAC");
+    expect(labels(sortLandingCommunities(cards as never, "largest"))).toBe("DABC");
+    const homes = [{ kind: "q", price: 300_000, sqft: 1_800 }, { kind: "q", price: null, sqft: 2_400, isNew: true }, { kind: "q", price: 250_000, sqft: null }];
+    expect(sortHomes(homes, "price_asc").map((home) => home.price)).toEqual([250_000, 300_000, null]);
+    expect(sortHomes(homes, "price_desc").map((home) => home.price)).toEqual([300_000, 250_000, null]);
+    expect(sortHomes(homes, "largest").map((home) => home.sqft)).toEqual([2_400, 1_800, null]);
+    expect(sortHomes(homes, "newest")[0]!.isNew).toBe(true);
+    const communities = [{ label: "A", homes: [{ kind: "q", price: 500_000, sqft: 3_000 }] }, { label: "B", homes: [{ kind: "q", price: 320_000, sqft: 1_700, isNew: true }, { kind: "q", price: 290_000, sqft: 1_600 }] }, { label: "C", homes: [] }];
+    expect(labels(sortGatedCommunities(communities, "price_asc"))).toBe("BAC");
+    expect(labels(sortGatedCommunities(communities, "largest"))).toBe("ABC");
+    expect(labels(sortGatedCommunities(communities, "newest"))).toBe("BAC");
+  });
+});

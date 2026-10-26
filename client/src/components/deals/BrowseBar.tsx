@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { SlidersHorizontal, X, Flame, ChevronDown, Sparkles } from "lucide-react";
-import { AVAILABLE_BY, BATH_MINIMUMS, BED_MINIMUMS, BROWSE_PAGE, EMPTY_FILTERS, GARAGE_MINIMUMS, PRICE_CAPS, PRICE_FLOORS, SQFT_MAXIMUMS, SQFT_MINIMUMS, activeFilterCount, areaGroups, districtChoices, MARKET_AREA_PREFIX, moreFilterCount, priceCapLabel, type BrowseFilters } from "@/lib/dealsBrowse";
+import { ArrowDownUp, SlidersHorizontal, X, Flame, ChevronDown, Sparkles } from "lucide-react";
+import { AVAILABLE_BY, BATH_MINIMUMS, BED_MINIMUMS, BROWSE_PAGE, BROWSE_SORTS, EMPTY_FILTERS, GARAGE_MINIMUMS, PRICE_CAPS, PRICE_FLOORS, SQFT_MAXIMUMS, SQFT_MINIMUMS, activeFilterCount, areaGroups, districtChoices, MARKET_AREA_PREFIX, moreFilterCount, priceCapLabel, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export const BROWSE_COPY = {
   heading: "Find your community",
@@ -38,6 +38,7 @@ export const BROWSE_COPY = {
   bigLots: "Half-acre+ lots",
   redHot: "Red Hot Deals",
   newThisWeek: "New this week",
+  sort: "Sort",
   saved: "Saved",
   noneSaved: "None of your saved homes match these filters. Clear a filter to see them all.",
   clear: "Clear filters",
@@ -128,6 +129,9 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
         <SlidersHorizontal className="h-4 w-4" />{BROWSE_COPY.more}{more > 0 && <span className="rounded-full bg-gold px-1.5 text-[11px] font-semibold text-primary-foreground">{more}</span>}<ChevronDown className={`h-4 w-4 transition-transform ${moreOpen ? "rotate-180" : ""}`} />
       </button>
       {active > 0 && <button type="button" onClick={() => onChange(EMPTY_FILTERS)} className="inline-flex min-h-11 items-center gap-1 px-2 text-xs uppercase tracking-widest text-muted-foreground hover:text-gold"><X className="h-3.5 w-3.5" />{BROWSE_COPY.clear}</button>}
+      <label className="inline-flex min-h-11 min-w-0 items-center gap-2 rounded-full border border-border pl-4 text-sm text-foreground hover:text-gold" data-deals-sort="true"><ArrowDownUp className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="sr-only">{BROWSE_COPY.sort}</span>
+        <select aria-label={BROWSE_COPY.sort} value={filters.sort} onChange={(event) => set({ sort: event.target.value as BrowseFilters["sort"] })} className="min-h-11 min-w-0 max-w-[12rem] bg-transparent pr-10 text-sm text-foreground">{BROWSE_SORTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+      </label>
     </div>
     </div>
     {moreOpen && <div data-deals-more-filters="true" className="mt-4 min-w-0 border-t border-border pt-4">

@@ -16,7 +16,7 @@ import { ComingSoonSection } from "@/components/deals/ComingSoon";
 import { DealsFooter, formatChicagoDate, useInstagramEmbeds } from "@/components/deals/shared";
 import { BrowseBar, BROWSE_COPY } from "@/components/deals/BrowseBar";
 import { LandingBrowse, type PublicHome, type UseCommunityHomes } from "@/components/deals/LandingBrowse";
-import { BROWSE_PAGE, EMPTY_FILTERS, landingMatches, newThisWeekKnown, storiesKnown, type BrowseFilters } from "@/lib/dealsBrowse";
+import { BROWSE_PAGE, EMPTY_FILTERS, landingMatches, newThisWeekKnown, sortLandingCommunities, storiesKnown, type BrowseFilters } from "@/lib/dealsBrowse";
 
 const sourceLabel = "This week's best new-build deals in San Antonio.";
 
@@ -61,7 +61,7 @@ function Landing() {
   const catalog = trpc.deals.publicCatalog.useQuery(src ? { src } : undefined);
   const [filters, setFilters] = useState<BrowseFilters>(EMPTY_FILTERS);
   const all = catalog.data ?? [];
-  const matching = useMemo(() => all.filter((community) => landingMatches(community, filters)), [all, filters]);
+  const matching = useMemo(() => sortLandingCommunities(all.filter((community) => landingMatches(community, filters)), filters.sort), [all, filters]);
   const changeFilters = (next: BrowseFilters) => setFilters(next);
   const featured = trpc.deals.featured.useQuery();
   const comingSoon = trpc.deals.comingSoon.useQuery();

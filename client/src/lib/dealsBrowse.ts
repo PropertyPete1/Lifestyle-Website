@@ -37,9 +37,20 @@ export type BrowseFilters = {
   builder: string;
   /** One school district ("Northside ISD"), or "" for all. */
   schoolDistrict: string;
+  /** Oct 26, 2026: the order of the cards and homes; not a filter (never counted, "Clear filters" resets it too). */
+  sort: BrowseSort;
 };
 
-export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, maxSqft: null, availableBy: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, newOnly: false, savedOnly: false, builder: "", schoolDistrict: "" };
+export type BrowseSort = "recommended" | "price_asc" | "price_desc" | "newest" | "largest";
+export const BROWSE_SORTS: ReadonlyArray<{ value: BrowseSort; label: string }> = [
+  { value: "recommended", label: "Recommended" },
+  { value: "price_asc", label: "Price: low to high" },
+  { value: "price_desc", label: "Price: high to low" },
+  { value: "newest", label: "Newest first" },
+  { value: "largest", label: "Largest first" },
+];
+
+export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, maxSqft: null, availableBy: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, newOnly: false, savedOnly: false, builder: "", schoolDistrict: "", sort: "recommended" };
 export const PRICE_CAPS = [200_000, 300_000, 400_000, 500_000, 600_000, 750_000, 1_000_000] as const;
 export const PRICE_FLOORS = [200_000, 250_000, 300_000, 350_000, 400_000, 500_000, 600_000, 750_000] as const;
 export const BED_MINIMUMS = [2, 3, 4, 5] as const;
@@ -238,6 +249,43 @@ export function landingMatches(community: LandingBrowseCommunity, filters: Brows
   if (filters.redHot && !(community.redHotDeals && community.redHotDeals > 0)) return false;
   if (filters.newOnly && !(community.newThisWeek && community.newThisWeek > 0)) return false;
   return true;
+}
+
+const price = (value: number | null | undefined) => typeof value === "number" && value > 0 ? value : null;
+/** A stable sort: ties keep the recommended order. Missing figures sort last whichever way. */
+function orderBy<T>(items: readonly T[], sort: BrowseSort, keyOf: (item: T) => number | null): T[] {
+  if (sort === "recommended") return [...items];
+  const direction = sort === "price_asc" ? 1 : -1;
+  return items.map((item, index) => ({ item, index, key: keyOf(item) })).sort((a, b) => {
+    if (a.key === null && b.key === null) return a.index - b.index;
+    if (a.key === null) return 1;
+    if (b.key === null) return -1;
+    return a.key === b.key ? a.index - b.index : (a.key - b.key) * direction;
+  }).map((entry) => entry.item);
+}
+
+/** The landing cards in the chosen order: by starting price, by how many homes arrived this week, or by the biggest home shown. */
+export function sortLandingCommunities<T extends LandingBrowseCommunity>(items: readonly T[], sort: BrowseSort): T[] {
+  return orderBy(items, sort, (community) => {
+    if (sort === "price_asc" || sort === "price_desc") return price(community.fromPrice) ?? price(community.homeFacts?.map((facts) => facts[0]).filter((value): value is number => typeof value === "number" && value > 0).sort((a, b) => a - b)[0]);
+    if (sort === "newest") return community.newThisWeek ?? community.homeFacts?.filter((facts) => facts[9] === 1).length ?? 0;
+    return community.homeFacts?.reduce<number | null>((best, facts) => facts[3] && (best === null || facts[3] > best) ? facts[3] : best, null) ?? null;
+  });
+}
+
+/** The homes inside a community (private list and the community sheet) in the chosen order. */
+export function sortHomes<T extends FilterableHome>(homes: readonly T[], sort: BrowseSort): T[] {
+  return orderBy(homes, sort, (home) => sort === "price_asc" || sort === "price_desc" ? price(home.price) : sort === "newest" ? (home.isNew ? 1 : 0) : home.sqft ?? null);
+}
+
+/** The private list's communities in the chosen order, judged by the homes they show. */
+export function sortGatedCommunities<T extends { homes: readonly FilterableHome[] }>(items: readonly T[], sort: BrowseSort): T[] {
+  return orderBy(items, sort, (community) => {
+    const homes = community.homes;
+    if (sort === "price_asc" || sort === "price_desc") { const prices = homes.map((home) => price(home.price)).filter((value): value is number => value !== null); return prices.length ? Math.min(...prices) : null; }
+    if (sort === "newest") return homes.filter((home) => home.isNew).length;
+    const sizes = homes.map((home) => home.sqft ?? 0); return sizes.length ? Math.max(...sizes) || null : null;
+  });
 }
 
 /** The "New this week" toggle shows only while some home on the list is new (otherwise it would match nothing). */

@@ -7,7 +7,7 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { ASHTON_HOST, PERRY_HOST, CENTURY_HOST, DRB_HOST, DREES_HOST, LEGEND_HOST, VIEWHOMES_HOST, TEXASHOMES_HOST, HAKES_HOST, BEAZER_HOST, LENNAR_HOST, EMPIRE_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { ASHTON_HOST, PERRY_HOST, CENTURY_HOST, DRB_HOST, DREES_HOST, LEGEND_HOST, VIEWHOMES_HOST, TEXASHOMES_HOST, HAKES_HOST, BEAZER_HOST, LENNAR_HOST, EMPIRE_HOST, PACESETTER_HOST, SARATOGA_HOST, JOSEPHCREEK_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
@@ -28,6 +28,9 @@ import { viewHomesListingEntries, viewHomesListingUrl } from "./dealsAdapters.vi
 import { texasHomesListingEntries, texasHomesListingUrl, texasHomesRecord } from "./dealsAdapters.texashomes";
 import { hakesDiscoveryRecord, hakesListingEntries, hakesListingUrl } from "./dealsAdapters.hakes";
 import { beazerListingEntries, beazerListingUrl, beazerRecord } from "./dealsAdapters.beazer";
+import { pacesetterCommunitySitemapUrl, pacesetterSitemapEntries, parsePacesetterCommunity } from "./dealsAdapters.pacesetter";
+import { parseSaratogaCommunity, saratogaCommunitiesUrl, saratogaListingEntries } from "./dealsAdapters.saratoga";
+import { josephCreekCommunitiesUrl, josephCreekListingEntries, parseJosephCreekCommunity } from "./dealsAdapters.josephcreek";
 import { lennarListingEntries, lennarListingUrl, lennarRecord } from "./dealsAdapters.lennar";
 import { empireRecord, empireRegionLinks, empireRegionUrl } from "./dealsAdapters.empire";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
@@ -303,6 +306,27 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     record: empireRecord,
   },
   { builder: "Century Communities", host: CENTURY_HOST, index: { kind: "sitemap", url: `https://${CENTURY_HOST}/sitemap.xml` }, communityPath: /^\/find-your-new-home\/texas\/(?:san-antonio|austin)-metro\/[a-z0-9-]+\/[a-z0-9-]+\/?$/i },
+  {
+    // Pacesetter (Austin market; its Dallas communities are outside both areas): the community sitemap names each page; the page's quick move-in cards carry the pin, "Model Home Address:" the sales office. A plans-only community (no card, so no pin) waits until a home lists.
+    builder: "Pacesetter Homes", host: PACESETTER_HOST,
+    index: { kind: "listing", url: pacesetterCommunitySitemapUrl(), accept: "application/xml,text/xml", entries: (body, host) => pacesetterSitemapEntries(body, host) },
+    communityPath: /^\/new-homes-for-sale-austin\/[a-z0-9-]+-tx\/[a-z0-9-]+\/?$/i,
+    record: (html, url) => parsePacesetterCommunity(html, url)?.record ?? null,
+  },
+  {
+    // Saratoga (Austin region; Houston and El Paso are outside both areas): the communities page lists each with its city and starting price; the page's map script gives the pin (no sales address is published).
+    builder: "Saratoga Homes", host: SARATOGA_HOST,
+    index: { kind: "listing", url: saratogaCommunitiesUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => saratogaListingEntries(body, host) },
+    communityPath: /^\/community\/[a-z0-9-]+\/?$/i,
+    record: (html, url) => parseSaratogaCommunity(html, url)?.record ?? null,
+  },
+  {
+    // Joseph Creek (San Antonio): the communities page links each; the page's "Model Home Address" and map embed give the office and pin, the tel: link the phone.
+    builder: "Joseph Creek Homes", host: JOSEPHCREEK_HOST,
+    index: { kind: "listing", url: josephCreekCommunitiesUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => josephCreekListingEntries(body, host) },
+    communityPath: /^\/communities\/[a-z0-9-]+\/?$/i,
+    record: (html, url) => parseJosephCreekCommunity(html, url)?.record ?? null,
+  },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({
     builder: brand, host: PULTEGROUP_HOSTS[brand], index: { kind: "listing", url: pulteListingUrl(PULTEGROUP_HOSTS[brand], brand), accept: "application/json", entries: (body, host) => pulteListingEntries(body, host, brand) },
     communityPath: /^\/homes\/texas\/san-antonio\/[a-z0-9-]+\/[a-z0-9-]+-\d{4,8}\/?$/i,

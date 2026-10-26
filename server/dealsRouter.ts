@@ -41,7 +41,7 @@ import {
 } from "./dealsService";
 import { createPublicPageCache } from "./publicPageCache";
 import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
-import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, adminTurnedOffLeadIds, browserIsAdminPaused, browserIsRealtorBlocked, pausedAccessMessage, staleSessionLeadId, turnOffBuyerAccess, turnOnBuyerAccess } from "./dealsService";
+import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, adminTurnedOffLeadIds, browserIsAdminPaused, browserIsRealtorBlocked, dealsCardHandle, pausedAccessMessage, staleSessionLeadId, turnOffBuyerAccess, turnOnBuyerAccess } from "./dealsService";
 /** What a realtor sees for the moment before the recruiting page opens. */
 /**
  * The landing's two public reads (every community, the featured row) are the same for every visitor: kept for a minute
@@ -706,7 +706,14 @@ export const dealsRouter = router({
         db.select({ id: dealTourRequests.id, requestType: dealTourRequests.requestType, preferredAt: dealTourRequests.preferredAt, createdAt: dealTourRequests.createdAt, removedAt: dealTourRequests.removedAt, fubTaskId: dealTourRequests.fubTaskId, privateAddress: dealHomes.privateAddress, privatePlanName: dealHomes.privatePlanName }).from(dealTourRequests).leftJoin(dealHomes, eq(dealHomes.id, dealTourRequests.homeId)).where(eq(dealTourRequests.leadId, input.id)).orderBy(desc(dealTourRequests.createdAt)).limit(100),
         db.select({ id: dealFubJobs.id, status: dealFubJobs.status, operation: dealFubJobs.operation, lastError: dealFubJobs.lastError, attempts: dealFubJobs.attempts }).from(dealFubJobs).where(eq(dealFubJobs.leadId, input.id)).orderBy(desc(dealFubJobs.createdAt)).limit(100),
       ]);
-      return { lead, views, tours, jobs };
+      // Oct 26, 2026: the agent's picks for this client (their live link), described like the saves.
+      const { clientLinkPicksForLead } = await import("./dealsClientLinks");
+      const pickCards = await clientLinkPicksForLead(lead);
+      const picks = pickCards.length ? (await db.select({ sourceKey: dealHomes.sourceKey, privateAddress: dealHomes.privateAddress, privatePlanName: dealHomes.privatePlanName, price: dealHomes.price }).from(dealHomes).where(eq(dealHomes.status, "available")))
+        .filter((home) => pickCards.includes(dealsCardHandle(home.sourceKey)))
+        .sort((a, b) => pickCards.indexOf(dealsCardHandle(a.sourceKey)) - pickCards.indexOf(dealsCardHandle(b.sourceKey)))
+        .map((home) => ({ description: [home.privateAddress, home.privatePlanName ? `(${home.privatePlanName})` : null].filter(Boolean).join(" ") || "Home", price: home.price })) : [];
+      return { lead, views, tours, jobs, picks };
     }),
     funnel: adminProcedure.input(z.object({ days: z.number().int().min(1).max(365).default(30) })).query(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });

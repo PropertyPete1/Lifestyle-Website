@@ -35,7 +35,7 @@ export function LeadDetailView({ leadId }: { leadId: number }) {
   });
   if (detail.isLoading) return <p className="text-xs text-muted-foreground">Loading lead details...</p>;
   if (detail.isError || !detail.data) return <p role="alert" className="text-xs text-destructive">{detail.error?.message ?? "Lead details could not be loaded."}</p>;
-  const { lead, views, tours, jobs } = detail.data;
+  const { lead, views, tours, jobs, picks = [] } = detail.data;
   return (
     <div className="grid gap-4 text-xs lg:grid-cols-3">
       <div>
@@ -45,6 +45,7 @@ export function LeadDetailView({ leadId }: { leadId: number }) {
         {views.length ? <ul className="mt-1 space-y-1">{views.map((view, index) => <li key={`${view.communityId}-${index}`}>{view.publicLabel ?? `Community #${view.communityId}`} at {displayDate(view.viewedAt)}</li>)}</ul> : <p className="text-muted-foreground">None recorded.</p>}
       </div>
       <div>
+        {picks.length > 0 && <><p className="font-medium text-foreground">Picked for them by their agent</p><ul className="mb-2 mt-1 space-y-1" data-admin-lead-picks="true">{picks.map((pick, index) => <li key={index}>{pick.description}{pick.price ? ` · $${pick.price.toLocaleString("en-US")}` : ""}</li>)}</ul></>}
         <p className="font-medium text-foreground">Tour requests and questions</p>
         {tours.length ? <ul className="mt-1 space-y-1">{tours.map((tour) => <li key={tour.id}>{tour.requestType === "tour" ? "Tour" : tour.requestType === "save" ? (tour.removedAt ? "Saved, then removed" : "Saved") : "Ask"}: {tour.privateAddress || tour.privatePlanName || "home removed"}, {tour.requestType === "save" ? `saved ${displayDate(tour.createdAt)}` : `preferred ${displayDate(tour.preferredAt)}`}{tour.fubTaskId ? ", FUB task created" : ", FUB task pending"}</li>)}</ul> : <p className="text-muted-foreground">None yet.</p>}
       </div>

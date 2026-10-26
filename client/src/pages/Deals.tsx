@@ -140,6 +140,7 @@ function Team() {
   const workspace = trpc.deals.team.workspace.useQuery(undefined, { retry: false });
   const comingSoon = trpc.deals.comingSoon.useQuery();
   const create = trpc.deals.team.createClientLink.useMutation({ onSuccess: () => { void workspace.refetch(); } });
+  const text = trpc.deals.team.textClientLink.useMutation({ onSuccess: () => { void workspace.refetch(); } });
   const revoke = trpc.deals.team.revokeClientLink.useMutation({ onSuccess: () => { toast.success("Link turned off. That client now sees the standard list."); void workspace.refetch(); }, onError: (error) => toast.error(error.message || "Could not turn that link off.") });
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   useInstagramEmbeds();
@@ -154,7 +155,8 @@ function Team() {
   };
   const tools = <AgentTools workspace={workspace.data as AgentWorkspaceData | undefined} loading={workspace.isLoading} error={workspace.isError ? workspace.error.message : null}
     created={create.data ?? null} creating={create.isPending} createError={create.isError ? create.error.message : null}
-    onCreate={(input) => create.mutate(input)} onRevoke={(id) => revoke.mutate({ id })} onCopy={(url) => { void copy(url); }} copiedUrl={copiedUrl} />;
+    onCreate={(input) => create.mutate(input)} onRevoke={(id) => revoke.mutate({ id })} onCopy={(url) => { void copy(url); }} copiedUrl={copiedUrl}
+    onText={(input) => text.mutateAsync(input)} texting={text.isPending} />;
   // Agents send the list; their own view has no Save hearts (a heart there would belong to no client).
   return <GatedCatalog lead={mine.data.lead} communities={mine.data.communities as GatedCommunity[]} featured={mine.data.featured as FeaturedDealsData} tools={tools} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} />;
 }

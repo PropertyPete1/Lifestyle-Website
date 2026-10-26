@@ -3,6 +3,8 @@ import { Copy, Heart, Link2, MessageSquareText, Send, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatPhoneInput, money } from "./shared";
 
 /** deals.team.workspace as the tools need it. The link path carries the token. */
@@ -24,12 +26,17 @@ export type AgentClient = {
   movedAway?: boolean;
   accessExpiresAt: string | null;
   lastViewedAt: string | null;
+  /** When "Text it" was last tapped for this link. */
+  lastTextedAt?: string | null;
   saves: Array<{ card: string; description: string; price: number | null; communityLabel: string; savedAt: string }>;
   requests: Array<{ kind: "tour" | "ask"; description: string; preferredAt: string; createdAt: string }>;
 };
 export type AgentWorkspaceData = { agent: { name: string; email: string | null; fubLinked: boolean }; clients: AgentClient[] };
 export type NewClientLink = { id: number; path: string; expiresAt: string; clientName?: string; clientPhoneDigits?: string | null };
 export type CreateClientInput = { clientName: string; clientPhone?: string; note?: string };
+/** deals.team.textClientLink: the message the phone sends and where; how FUB took the record. */
+export type TextClientResult = { ok: true; message: string; smsTo: string; fub: "logged" | "recorded_no_timeline" | "unavailable" | "skipped"; repeat: boolean };
+export const TEXT_MAX_CHARS = 320;
 
 export const AGENT_COPY = {
   heading: "Send the list to a client",
@@ -43,6 +50,13 @@ export const AGENT_COPY = {
   revoked: "Link turned off",
   expired: "Link expired before they used it",
   movedAway: "Now connected through another agent's link",
+  textTitle: "Text the link",
+  textIntro: "Your phone sends this text. The client is added to Follow Up Boss under you, and the text is logged on their timeline.",
+  textSend: "Open Messages",
+  textCancel: "Cancel",
+  textedAgain: "Already texted in the last few minutes; opening Messages again without a second log.",
+  textedFubDown: "Follow Up Boss didn't answer, so this send isn't logged there. Messages still opened.",
+  texted: (name: string) => `Logged in Follow Up Boss. Send the text to ${name} in Messages.`,
   confirmRevoke: "Turn off this link? Your client keeps the standard list but loses the addresses, and the link stops working. This can't be undone; you can send a new link.",
 } as const;
 
@@ -53,7 +67,9 @@ export function absoluteLink(path: string, origin = typeof window === "undefined
 /** The suggested text message; the client's first name and the agent's name make it personal without any private home data. */
 export function clientMessage(input: { clientName: string; agentName: string; url: string }) {
   const first = input.clientName.trim().split(/\s+/)[0] || "there";
-  return `Hi ${first}, here are the best new-build deals I'm tracking right now, with the current builder incentives. Open the link and verify your mobile number once: ${input.url} - ${input.agentName}`;
+  const agentFirst = input.agentName.trim().split(/\s+/)[0] || input.agentName;
+  // The same wording as the server's default (clientLinkTextMessage), so the preview matches what gets logged.
+  return `Hi ${first}, here's your private list of new-build deals from ${agentFirst} at Lifestyle Design Realty: ${input.url}. Tap any home for photos and pricing. Text me with questions.`;
 }
 
 /** iOS wants "sms:number&body=", Android "sms:number?body="; "?&body=" is read by both. */
@@ -99,14 +115,33 @@ export type AgentToolsProps = {
   onRevoke: (id: number) => void;
   onCopy: (url: string) => void;
   copiedUrl?: string | null;
+  /** "Text it": logs the send in FUB, then resolves with the message to put in the phone's Messages app. */
+  onText?: (input: { id: number; message: string }) => Promise<TextClientResult>;
+  texting?: boolean;
   /** Fixed origin for static rendering and tests. */
   origin?: string;
   /** Test seam for the turn-off confirmation; the browser uses window.confirm. */
   confirm?: (message: string) => boolean;
 };
 
-export function AgentTools({ workspace, loading, error, created, creating, createError, onCreate, onRevoke, onCopy, copiedUrl, origin, confirm }: AgentToolsProps) {
+export function AgentTools({ workspace, loading, error, created, creating, createError, onCreate, onRevoke, onCopy, copiedUrl, origin, confirm, onText, texting }: AgentToolsProps) {
   const [clientName, setClientName] = useState("");
+  // The "Text it" sheet: which link, the editable message, and what the server said after logging it.
+  const [textFor, setTextFor] = useState<{ id: number; name: string; phoneDigits: string | null } | null>(null);
+  const [textBody, setTextBody] = useState("");
+  const [textNote, setTextNote] = useState<string | null>(null);
+  const openText = (client: { id: number; clientName: string; clientPhoneDigits?: string | null }, message: string) => { setTextFor({ id: client.id, name: client.clientName, phoneDigits: client.clientPhoneDigits ?? null }); setTextBody(message); setTextNote(null); };
+  const sendText = async () => {
+    if (!textFor) return;
+    if (!onText) { window.location.href = smsHref(textBody, textFor.phoneDigits); setTextFor(null); return; }
+    try {
+      const result = await onText({ id: textFor.id, message: textBody });
+      setTextNote(result.repeat ? AGENT_COPY.textedAgain : result.fub === "unavailable" ? AGENT_COPY.textedFubDown : AGENT_COPY.texted(textFor.name));
+      window.location.href = smsHref(result.message, textFor.phoneDigits);
+    } catch (caught) {
+      setTextNote(caught instanceof Error ? caught.message : "Could not log the text.");
+    }
+  };
   const [clientPhone, setClientPhone] = useState("");
   const [note, setNote] = useState("");
   const agentName = workspace?.agent.name ?? "Lifestyle Design Realty";
@@ -138,7 +173,9 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
         <p className="mt-2 break-all text-xs text-muted-foreground">{createdUrl}</p>
         <p className="mt-3 text-sm text-foreground [overflow-wrap:anywhere]">{createdMessage}</p>
         <div className="mt-4 flex flex-wrap gap-3">
-          <a href={smsHref(createdMessage, created.clientPhoneDigits ?? null)} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground"><MessageSquareText className="h-4 w-4" /> Text it</a>
+          {created.clientPhoneDigits
+            ? <button type="button" data-deals-text-it="true" onClick={() => openText({ id: created.id, clientName: created.clientName ?? "", clientPhoneDigits: created.clientPhoneDigits }, createdMessage)} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground"><MessageSquareText className="h-4 w-4" /> Text it</button>
+            : <a href={smsHref(createdMessage, null)} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground"><MessageSquareText className="h-4 w-4" /> Text it</a>}
           <Button type="button" variant="outline" onClick={() => onCopy(createdUrl)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === createdUrl ? AGENT_COPY.copied : "Copy link"}</Button>
         </div>
       </div>}
@@ -157,15 +194,30 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
           <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h3 className="break-words text-2xl">{client.clientName}</h3><p className="mt-1 text-xs text-muted-foreground">{[client.clientPhone, `sent ${when(client.createdAt)}`].filter(Boolean).join(" · ")}</p></div>{!client.revoked && !client.movedAway && <button type="button" onClick={() => revoke(client)} aria-label={`Turn off the link for ${client.clientName}`} className="flex h-11 w-11 shrink-0 items-center justify-center text-muted-foreground hover:text-destructive"><X className="h-4 w-4" /></button>}</div>
           <p className={`mt-3 text-xs uppercase tracking-widest ${status.tone === "live" ? "text-emerald-700" : status.tone === "gold" ? "text-gold" : "text-muted-foreground"}`}>{status.label}</p>
           {client.note && <p className="mt-2 break-words text-sm text-muted-foreground">Note: {client.note}</p>}
+          {client.lastTextedAt && <p className="mt-2 text-xs text-muted-foreground" data-deals-texted-at="true">Texted {when(client.lastTextedAt)}</p>}
           {client.lastViewedAt && <p className="mt-2 text-xs text-muted-foreground">Last looked at the list {when(client.lastViewedAt)}</p>}
           {client.saves.length > 0 && <div className="mt-4"><p className="text-xs uppercase tracking-widest text-gold"><Heart className="mr-1 inline h-3.5 w-3.5 fill-current" />Saved homes</p><ul className="mt-2 space-y-1 text-sm">{client.saves.map((save) => <li key={`${save.card}-${save.savedAt}`} className="break-words">{save.description}{save.price ? ` · ${money.format(save.price)}` : ""}{save.communityLabel ? ` · ${save.communityLabel}` : ""} <span className="text-xs text-muted-foreground">{when(save.savedAt)}</span></li>)}</ul></div>}
           {client.requests.length > 0 && <div className="mt-4"><p className="text-xs uppercase tracking-widest text-gold"><Send className="mr-1 inline h-3.5 w-3.5" />Tour and question requests</p><ul className="mt-2 space-y-1 text-sm">{client.requests.map((request) => <li key={`${request.kind}-${request.createdAt}`} className="break-words">{request.kind === "tour" ? "Tour" : "Question"}: {request.description} <span className="text-xs text-muted-foreground">preferred {when(request.preferredAt)}</span></li>)}</ul></div>}
           {sendable && <div className="mt-5 flex flex-wrap gap-3">
-            <a href={smsHref(clientMessage({ clientName: client.clientName, agentName, url }), client.clientPhoneDigits ?? null)} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> Text it</a>
+            {client.clientPhoneDigits
+              ? <button type="button" data-deals-text-it="true" onClick={() => openText(client, clientMessage({ clientName: client.clientName, agentName, url }))} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> {client.lastTextedAt ? "Text it again" : "Text it"}</button>
+              : <a href={smsHref(clientMessage({ clientName: client.clientName, agentName, url }), null)} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> Text it</a>}
             <Button type="button" variant="outline" onClick={() => onCopy(url)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === url ? AGENT_COPY.copied : "Copy link"}</Button>
           </div>}
         </article>;
       })}</div>
     </div>
+    <Dialog open={Boolean(textFor)} onOpenChange={(open) => { if (!open) setTextFor(null); }}>
+      <DialogContent className="max-w-lg" data-deals-text-dialog="true">
+        <DialogHeader><DialogTitle>{AGENT_COPY.textTitle}{textFor ? ` · ${textFor.name}` : ""}</DialogTitle><DialogDescription>{AGENT_COPY.textIntro}</DialogDescription></DialogHeader>
+        <Textarea value={textBody} maxLength={TEXT_MAX_CHARS} rows={5} onChange={(event) => setTextBody(event.target.value)} aria-label="Text message" className="min-h-28 text-sm" />
+        <p className="text-right text-xs text-muted-foreground">{textBody.length} / {TEXT_MAX_CHARS}</p>
+        {textNote && <p role="status" className="text-sm text-gold">{textNote}</p>}
+        <DialogFooter className="gap-2">
+          <Button type="button" variant="outline" onClick={() => setTextFor(null)} className="min-h-11">{AGENT_COPY.textCancel}</Button>
+          <Button type="button" disabled={texting || textBody.trim().length === 0} onClick={() => { void sendText(); }} className="min-h-11 bg-gold text-primary-foreground"><MessageSquareText className="mr-2 h-4 w-4" />{texting ? "Logging…" : AGENT_COPY.textSend}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </section>;
 }

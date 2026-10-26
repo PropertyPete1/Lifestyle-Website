@@ -207,6 +207,62 @@ export async function recordBuilderDealsRealtor(input: { phone: string; name?: s
   } catch { return { ok: false as const, error: "FUB realtor update failed" }; }
 }
 
+export const BUILDER_DEALS_CLIENT_TAG = "Builder Deals Client";
+export const CLIENT_LINK_TEXT_SOURCE = "Builder Deals - Client Link";
+
+export type ClientLinkTextRecord =
+  | { ok: true; personId: string | null; created: boolean; logged: boolean }
+  | { ok: false; kind: "opted_out"; personId: string }
+  | { ok: false; kind: "unavailable"; error: string };
+
+/**
+ * An agent texted a client their Builder Deals link (from their own phone: FUB's text endpoint only records a
+ * message on the timeline, it never delivers one). The client is found or created in FUB, assigned to the agent (else
+ * Peter), tagged, the text is written to their timeline as an outgoing message from the agent's number, and a note
+ * says who sent the link and when. A contact who opted out of texts is never written to and the caller is told.
+ */
+export async function recordClientLinkText(input: { clientPhone: string; clientName: string; message: string; agent: { name: string; fubUserId: string | null; phoneE164: string | null }; linkUrl: string; sentAt?: Date }) {
+  const sentAt = input.sentAt ?? new Date();
+  try {
+    let person = await findPerson({ phone: input.clientPhone, email: null });
+    let created = false;
+    if (person?.id !== undefined) {
+      const personId = String(person.id);
+      const full = (await loadPerson(personId)) ?? person;
+      const history = await personHistory(personId);
+      if (detectPriorOptOut(full, history.notes)) return { ok: false as const, kind: "opted_out" as const, personId };
+      const tags = Array.from(new Set([...fubTags(full), BUILDER_DEALS_CLIENT_TAG]));
+      await fub(`/people/${encodeURIComponent(personId)}`, { method: "PUT", body: JSON.stringify({ tags, mergeTags: false }) });
+      person = full;
+    } else {
+      const assignedUserId = input.agent.fubUserId?.trim() || await peterUserId();
+      const [firstName, ...rest] = input.clientName.trim().split(/\s+/);
+      const res = await fub("/events", { method: "POST", body: JSON.stringify({
+        source: CLIENT_LINK_TEXT_SOURCE, system: "Lifestyle Design Realty", type: "General Inquiry",
+        message: `${input.agent.name} sent their Builder Deals client link.`,
+        person: { firstName, ...(rest.length ? { lastName: rest.join(" ") } : {}), phones: [{ value: input.clientPhone }], tags: [BUILDER_DEALS_CLIENT_TAG], ...(assignedUserId ? { assignedUserId: Number(assignedUserId) } : {}) },
+      }) });
+      const body = await res.json().catch(() => ({})) as { person?: { id?: string | number }; personId?: string | number; id?: string | number };
+      const id = body.person?.id ?? body.personId ?? body.id;
+      person = id === undefined ? null : { id };
+      created = true;
+    }
+    const personId = person?.id === undefined ? null : String(person.id);
+    let logged = false;
+    if (personId) {
+      // The timeline record (FUB does not send it); the agent's own number is the "from" when the team list has it.
+      try {
+        await fub("/textMessages", { method: "POST", body: JSON.stringify({ personId: Number(personId), message: input.message, isIncoming: false, toNumber: input.clientPhone, ...(input.agent.phoneE164 ? { fromNumber: input.agent.phoneE164 } : {}), externalLabel: "Builder Deals client link" }) });
+        logged = true;
+      } catch { logged = false; }
+      await postFubNote(personId, "Builder Deals: client link texted", `${input.agent.name} texted their Builder Deals client link on ${formatChicagoDateTime(sentAt)}.\nLink: ${input.linkUrl}`);
+    }
+    return { ok: true as const, personId, created, logged };
+  } catch (error) {
+    return { ok: false as const, kind: "unavailable" as const, error: error instanceof Error ? error.message : "FUB unavailable" };
+  }
+}
+
 function textInFubObject(value: unknown): string[] {
   if (typeof value === "string" || typeof value === "number") return [String(value)];
   if (Array.isArray(value)) return value.flatMap(textInFubObject);

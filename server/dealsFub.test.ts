@@ -18,6 +18,8 @@ import {
   unionFubContactValues,
   unionFubTags,
   updateBuilderDealsProfileInFub,
+  recordClientLinkText,
+  BUILDER_DEALS_CLIENT_TAG,
 } from "./dealsFub";
 import { jsonResponse } from "./dealsFubFakeDb.test-support";
 import { notifyOwner } from "./_core/notification";
@@ -394,5 +396,69 @@ describe("owner notification recipient limitation", () => {
     vi.mocked(notifyOwner).mockResolvedValue(true);
     await expect(notifyOwner({ title: "Builder Deals test", content: "Recipient routing test" })).resolves.toBe(true);
     expect(notifyOwner).toHaveBeenCalledWith({ title: "Builder Deals test", content: "Recipient routing test" });
+  });
+});
+
+describe("a client link texted by an agent (Oct 26, 2026)", () => {
+  const agent = { name: "Tiffany Agent", fubUserId: "77", phoneE164: "+12105550101" };
+  const url = "https://lifestyledesignrealty.com/deals?c=tok";
+
+  it("creates a new contact under the agent, writes the text to the timeline from the agent's number, and leaves a note", async () => {
+    const calls = mockFub((call) => {
+      const p = path(call);
+      if (call.method === "GET" && p.startsWith("/people?")) return jsonResponse({ people: [] });
+      if (call.method === "POST" && p === "/events") return jsonResponse({ id: 901, firstName: "Maria" }, 201);
+      if (call.method === "POST" && p === "/textMessages") return jsonResponse({ id: 55 }, 201);
+      if (call.method === "POST" && p === "/notes") return jsonResponse({ id: 56 }, 201);
+      return jsonResponse({}, 404);
+    });
+    const result = await recordClientLinkText({ clientPhone: "+12105550202", clientName: "Maria Lopez", message: `Hi Maria ${url}`, agent, linkUrl: url, sentAt: new Date("2026-10-26T04:00:00Z") });
+    expect(result).toEqual({ ok: true, personId: "901", created: true, logged: true });
+    const event = calls.find((call) => path(call) === "/events")!.body!;
+    expect(event.source).toBe("Builder Deals - Client Link");
+    expect(event.person).toMatchObject({ firstName: "Maria", lastName: "Lopez", phones: [{ value: "+12105550202" }], tags: [BUILDER_DEALS_CLIENT_TAG], assignedUserId: 77 });
+    const text = calls.find((call) => path(call) === "/textMessages")!.body!;
+    expect(text).toMatchObject({ personId: 901, message: `Hi Maria ${url}`, isIncoming: false, toNumber: "+12105550202", fromNumber: "+12105550101" });
+    const note = calls.find((call) => path(call) === "/notes")!.body!;
+    expect(String(note.body)).toContain("Tiffany Agent texted their Builder Deals client link");
+    expect(String(note.body)).toContain(url);
+  });
+
+  it("tags an existing contact instead of creating one, and refuses one who opted out of texts", async () => {
+    let notes: unknown[] = [];
+    const calls = mockFub((call) => {
+      const p = path(call);
+      if (call.method === "GET" && p.startsWith("/people?")) return jsonResponse({ people: [{ id: 12, tags: ["Past Client"] }] });
+      if (call.method === "GET" && p === "/people/12") return jsonResponse({ id: 12, tags: ["Past Client"], phones: [{ value: "+12105550202" }] });
+      if (call.method === "GET" && p.startsWith("/notes")) return jsonResponse({ notes });
+      if (call.method === "GET" && p.startsWith("/events")) return jsonResponse({ events: [] });
+      if (call.method === "PUT" && p === "/people/12") return jsonResponse({ id: 12 });
+      if (call.method === "POST") return jsonResponse({ id: 1 }, 201);
+      return jsonResponse({}, 404);
+    });
+    const ok = await recordClientLinkText({ clientPhone: "+12105550202", clientName: "Maria Lopez", message: `Hi ${url}`, agent, linkUrl: url });
+    expect(ok).toEqual({ ok: true, personId: "12", created: false, logged: true });
+    expect(calls.some((call) => path(call) === "/events" && call.method === "POST")).toBe(false);
+    expect(calls.find((call) => call.method === "PUT")!.body!.tags).toEqual(["Past Client", BUILDER_DEALS_CLIENT_TAG]);
+    notes = [{ id: 3, body: "Replied STOP, do not text" }];
+    calls.length = 0;
+    const refused = await recordClientLinkText({ clientPhone: "+12105550202", clientName: "Maria Lopez", message: `Hi ${url}`, agent, linkUrl: url });
+    expect(refused).toEqual({ ok: false, kind: "opted_out", personId: "12" });
+    expect(calls.some((call) => call.method === "POST" || call.method === "PUT")).toBe(false);
+  });
+
+  it("still returns the contact when the timeline record is rejected, and reports FUB down when it is", async () => {
+    mockFub((call) => {
+      const p = path(call);
+      if (call.method === "GET" && p.startsWith("/people?")) return jsonResponse({ people: [] });
+      if (call.method === "POST" && p === "/events") return jsonResponse({ id: 77 }, 201);
+      if (call.method === "POST" && p === "/textMessages") return jsonResponse({ error: "forbidden" }, 403);
+      if (call.method === "POST" && p === "/notes") return jsonResponse({ id: 2 }, 201);
+      return jsonResponse({}, 404);
+    });
+    expect(await recordClientLinkText({ clientPhone: "+12105550202", clientName: "Maria", message: url, agent: { ...agent, phoneE164: null }, linkUrl: url })).toEqual({ ok: true, personId: "77", created: true, logged: false });
+    vi.restoreAllMocks();
+    mockFub(() => jsonResponse({}, 503));
+    expect(await recordClientLinkText({ clientPhone: "+12105550202", clientName: "Maria", message: url, agent, linkUrl: url })).toMatchObject({ ok: false, kind: "unavailable" });
   });
 });

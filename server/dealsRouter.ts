@@ -526,6 +526,26 @@ export const dealsRouter = router({
       const { nationalDigits } = await import("./dealsClientLinks");
       return { ok: true as const, id: result.link.id, path: result.path, expiresAt: result.link.expiresAt.toISOString(), clientName: result.link.clientName, clientPhoneDigits: nationalDigits(result.link.clientPhoneE164) };
     }),
+    /** "Text it": records the send in FUB (person, timeline message, note) and answers with the message and number the phone sends to. */
+    textClientLink: publicProcedure.input(z.object({ id: z.number().int().positive(), message: z.string().trim().max(320).optional() })).mutation(async ({ input, ctx }) => {
+      dealsPublicHeaders(ctx.res);
+      const session = await isLiveDealSession(ctx.req);
+      if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
+      if (session.lead.status !== "team") throw new TRPCError({ code: "FORBIDDEN" });
+      const { textClientLink } = await import("./dealsClientLinks");
+      const result = await textClientLink(session.lead, { linkId: input.id, message: input.message });
+      if (!result.ok) {
+        const messages = {
+          not_found: "That link is not one of yours.",
+          no_phone: "Add your client's mobile number to this link first.",
+          closed: "This link is turned off or expired. Send a new one.",
+          opted_out: "This contact has opted out of texts in Follow Up Boss, so no text was sent. Reach out another way.",
+          invalid_message: "Keep the message under 320 characters and keep the link in it.",
+        } as const;
+        throw new TRPCError({ code: result.kind === "not_found" ? "NOT_FOUND" : result.kind === "opted_out" ? "FORBIDDEN" : "BAD_REQUEST", message: messages[result.kind] });
+      }
+      return result;
+    }),
     revokeClientLink: publicProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input, ctx }) => {
       dealsPublicHeaders(ctx.res);
       const session = await isLiveDealSession(ctx.req);

@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
-import { dealClientLinks, dealCommunities, dealCommunityViews, dealHomes, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
+import { dealClientLinks, dealCommunities, dealCommunityViews, dealEvents, dealHomes, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
 import { normalizeUsPhone } from "../shared/deals";
 import { getDb } from "./db";
 import { dealsCardHandle, getDealSettings, hashSecret, logDealEvent, randomOpaqueToken } from "./dealsService";
@@ -412,6 +412,61 @@ export async function revokeClientLink(agentLead: LeadRow, linkId: number): Prom
   return true;
 }
 
+export const CLIENT_LINK_TEXTED_EVENT = "client_link_texted";
+/** Two taps of "Text it" inside this window count once (a double tap, or the sms: hand-off bouncing back). */
+export const TEXT_DEDUPE_MS = 10 * 60_000;
+const TEXT_MAX = 320;
+
+/** The text the agent sends with their link, by default; no builder, community or home data. */
+export function clientLinkTextMessage(input: { clientName: string; agentFirstName: string; url: string }) {
+  const first = input.clientName.trim().split(/\s+/)[0] || "there";
+  return `Hi ${first}, here's your private list of new-build deals from ${input.agentFirstName} at Lifestyle Design Realty: ${input.url}. Tap any home for photos and pricing. Text me with questions.`;
+}
+
+export function clientLinkAbsoluteUrl(path: string) {
+  const origin = (process.env.DEALS_SITE_ORIGIN?.trim() || "https://lifestyledesignrealty.com").replace(/\/+$/, "");
+  return `${origin}${path}`;
+}
+
+export type TextClientLinkResult =
+  | { ok: true; message: string; smsTo: string; fub: "logged" | "recorded_no_timeline" | "unavailable" | "skipped"; repeat: boolean }
+  | { ok: false; kind: "not_found" | "no_phone" | "closed" | "opted_out" | "invalid_message" };
+
+/**
+ * "Text it" on a client link: the agent's phone sends the message (the sms: link the page opens); here the client is
+ * put into FUB under the agent, the message is written to their timeline and a note records the send, and the agent's
+ * own event remembers it. A contact who opted out of texts stops the send before the phone opens.
+ */
+export async function textClientLink(agentLead: LeadRow, input: { linkId: number; message?: string | null; now?: Date }): Promise<TextClientLinkResult> {
+  const db = await getDb();
+  if (!db) return { ok: false, kind: "not_found" };
+  const now = input.now ?? new Date();
+  const teamIds = await agentLinkTeamIds(agentLead);
+  const agent = await agentForLead(agentLead);
+  if (!teamIds.length || !agent) return { ok: false, kind: "not_found" };
+  const link = (await db.select().from(dealClientLinks).where(and(eq(dealClientLinks.id, input.linkId), inArray(dealClientLinks.agentTeamId, teamIds))).limit(1))[0];
+  if (!link) return { ok: false, kind: "not_found" };
+  if (!linkIsOpen(link, now.getTime())) return { ok: false, kind: "closed" };
+  if (!link.clientPhoneE164) return { ok: false, kind: "no_phone" };
+  const url = clientLinkAbsoluteUrl(clientLinkPath(link.token));
+  const message = (input.message?.replace(/\s+/g, " ").trim() || clientLinkTextMessage({ clientName: link.clientName, agentFirstName: agent.firstName ?? agent.name, url }));
+  if (message.length > TEXT_MAX || !message.includes(url)) return { ok: false, kind: "invalid_message" };
+  const recent = (await db.select({ detail: dealEvents.detail, createdAt: dealEvents.createdAt }).from(dealEvents).where(and(eq(dealEvents.leadId, agentLead.id), eq(dealEvents.kind, CLIENT_LINK_TEXTED_EVENT))).orderBy(desc(dealEvents.createdAt)).limit(100))
+    .find((row) => (row.detail ?? "").startsWith(`link:${link.id};`));
+  const repeat = Boolean(recent && now.getTime() - recent.createdAt.getTime() < TEXT_DEDUPE_MS);
+  const smsTo = link.clientPhoneE164;
+  if (repeat) return { ok: true, message, smsTo, fub: "skipped", repeat: true };
+  const { recordClientLinkText } = await import("./dealsFub");
+  const record = await recordClientLinkText({ clientPhone: link.clientPhoneE164, clientName: link.clientName, message, agent: { name: agent.name, fubUserId: agent.fubUserId, phoneE164: agent.phoneE164 }, linkUrl: url, sentAt: now });
+  if (!record.ok && record.kind === "opted_out") {
+    await logDealEvent({ leadId: agentLead.id, kind: "client_link_text_refused", sourceCode: "agent", deviceHash: agentLead.deviceHash, detail: `link:${link.id};opted_out` });
+    return { ok: false, kind: "opted_out" };
+  }
+  const fub = record.ok ? (record.logged ? "logged" : "recorded_no_timeline") : "unavailable";
+  await logDealEvent({ leadId: agentLead.id, kind: CLIENT_LINK_TEXTED_EVENT, sourceCode: "agent", deviceHash: agentLead.deviceHash, detail: `link:${link.id};fub:${fub}${record.ok && record.personId ? `;person:${record.personId}` : ""}` });
+  return { ok: true, message, smsTo, fub, repeat: false };
+}
+
 export type ClientSummary = {
   id: number;
   clientName: string;
@@ -432,6 +487,8 @@ export type ClientSummary = {
   /** The buyer's own list access: live until this time, then they re-verify through the same link. */
   accessExpiresAt: string | null;
   lastViewedAt: string | null;
+  /** When the agent last tapped "Text it" for this link (the send goes from their own phone; FUB gets the record). */
+  lastTextedAt: string | null;
   saves: Array<{ card: string; description: string; price: number | null; communityLabel: string; savedAt: string }>;
   requests: Array<{ kind: "tour" | "ask"; description: string; preferredAt: string; createdAt: string }>;
 };
@@ -457,6 +514,15 @@ export async function agentWorkspace(agentLead: LeadRow): Promise<AgentWorkspace
     // The latest view of each client, one small read per client, so a long history never pushes a client off the end.
     Promise.all(leadIds.map((leadId) => db.select({ leadId: dealCommunityViews.leadId, viewedAt: dealCommunityViews.viewedAt }).from(dealCommunityViews).where(eq(dealCommunityViews.leadId, leadId)).orderBy(desc(dealCommunityViews.viewedAt)).limit(1))).then((rows) => rows.flat()),
   ]) : [[], [], []];
+  // The latest "Text it" per link, from the agent's own events (detail "link:<id>;…").
+  const texted = new Map<number, Date>();
+  if (links.length) {
+    const rows = await db.select({ detail: dealEvents.detail, createdAt: dealEvents.createdAt }).from(dealEvents).where(and(eq(dealEvents.leadId, agentLead.id), eq(dealEvents.kind, CLIENT_LINK_TEXTED_EVENT))).orderBy(desc(dealEvents.createdAt)).limit(400);
+    for (const row of rows) {
+      const id = Number(/^link:(\d+)/.exec(row.detail ?? "")?.[1]);
+      if (Number.isFinite(id) && !texted.has(id)) texted.set(id, row.createdAt);
+    }
+  }
   const homeIds = Array.from(new Set(requests.map((request) => request.homeId)));
   const homes = homeIds.length ? await db.select().from(dealHomes).where(inArray(dealHomes.id, homeIds)) : [];
   const communityIds = Array.from(new Set(homes.map((home) => home.communityId)));
@@ -495,6 +561,7 @@ export async function agentWorkspace(agentLead: LeadRow): Promise<AgentWorkspace
       movedAway: Boolean(lead && !attached),
       accessExpiresAt: attached && lead && lead.status === "verified" && lead.expiresAt > new Date() ? lead.expiresAt.toISOString() : null,
       lastViewedAt: lastView ? new Date(lastView).toISOString() : null,
+      lastTextedAt: texted.get(link.id)?.toISOString() ?? null,
       saves: own.filter((request) => request.requestType === "save").map((request) => ({ ...describe(request.homeId), savedAt: request.createdAt.toISOString() })),
       requests: own.filter((request): request is typeof request & { requestType: "tour" | "ask" } => request.requestType !== "save").map((request) => ({ kind: request.requestType, description: describe(request.homeId).description, preferredAt: request.preferredAt.toISOString(), createdAt: request.createdAt.toISOString() })),
     };

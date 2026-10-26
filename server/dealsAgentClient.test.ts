@@ -138,9 +138,11 @@ describe("agent tools on /deals/team", () => {
     expect(html).toContain("118 Demo Lakes Blvd (Brandon) · $489,990 · Demo Lakes (Southeast demo area)");
     expect(html).toContain("Tour: 120 Demo Lakes Blvd (Evan)");
     expect(html).toContain("Note: Wants 4 beds");
-    // Maria's number was typed by the agent, so her Text it is addressed; Sam's is not.
-    expect(html).toContain('href="sms:+12105550202?&body=');
+    // Maria's number was typed by the agent, so her Text it logs the send in FUB first (a button that opens the sheet);
+    // Sam's has no number, so it is a plain sms: link with no address.
+    expect(html).toContain('data-deals-text-it="true"');
     expect(html).toContain('href="sms:?&body=');
+    expect(html).not.toContain('href="sms:+12105550202');
     // The expired, never-used link offers nothing to send.
     expect(html.match(/ Text it</g)?.length).toBe(2);
     expect(html).not.toContain("Follow Up Boss user");
@@ -153,11 +155,13 @@ describe("agent tools on /deals/team", () => {
     // The created link comes back from the server with the client's normalized number, so Text it is addressed.
     expect(html).toContain("Link ready. Text it or copy it.");
     expect(html).toContain(`https://lifestyledesignrealty.com/deals?c=${TOKEN}`);
-    expect(html).toContain('href="sms:+12105550202?&body=Hi%20Maria');
+    expect(html).toContain('data-deals-text-it="true"');
+    expect(html).not.toContain('href="sms:+12105550202');
     const url = absoluteLink(`/deals?c=${TOKEN}`, "https://lifestyledesignrealty.com");
     expect(url).toBe(`https://lifestyledesignrealty.com/deals?c=${TOKEN}`);
     const message = clientMessage({ clientName: "Maria Lopez", agentName: "Tiffany Agent", url });
-    expect(message).toBe(`Hi Maria, here are the best new-build deals I'm tracking right now, with the current builder incentives. Open the link and verify your mobile number once: ${url} - Tiffany Agent`);
+    expect(message).toBe(`Hi Maria, here's your private list of new-build deals from Tiffany at Lifestyle Design Realty: ${url}. Tap any home for photos and pricing. Text me with questions.`);
+    expect(message.length).toBeLessThanOrEqual(320);
     expect(smsHref(message, "2105550202")).toBe(`sms:+12105550202?&body=${encodeURIComponent(message)}`);
     // A number typed with the country code is not doubled.
     expect(smsHref(message, "12105550202")).toBe(`sms:+12105550202?&body=${encodeURIComponent(message)}`);

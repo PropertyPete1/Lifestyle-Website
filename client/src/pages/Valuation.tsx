@@ -24,8 +24,9 @@ export default function Valuation() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-[1400px] px-5 lg:px-8 py-16 lg:py-24 grid lg:grid-cols-3 gap-12">
-        <div className="lg:col-span-2 bg-card border border-border p-6 lg:p-10">
+      {/* Oct 26, 2026: min-w-0 on both columns; on a phone the grid track grew past the screen and the page scrolled sideways. */}
+      <section className="mx-auto max-w-[1400px] px-5 lg:px-8 py-16 lg:py-24 grid grid-cols-1 lg:grid-cols-3 gap-12">
+        <div className="min-w-0 lg:col-span-2 bg-card border border-border p-6 lg:p-10">
           <LeadForm
             sourceTag="Website - Valuation"
             heading="Unlock Your Free Valuation"
@@ -38,7 +39,7 @@ export default function Valuation() {
             messageLabel="Property address & details"
           />
         </div>
-        <aside className="space-y-6">
+        <aside className="min-w-0 space-y-6">
           {PERKS.map((p) => (
             <div key={p} className="flex items-center gap-3">
               <CheckCircle2 className="h-5 w-5 text-gold shrink-0" />

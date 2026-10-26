@@ -1,5 +1,6 @@
 import { useState } from "react";
 import PageShell from "@/components/PageShell";
+import TeamPhoto from "@/components/TeamPhoto";
 import LeadForm from "@/components/LeadForm";
 import { trpc } from "@/lib/trpc";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -41,13 +42,7 @@ export default function Team() {
                 onClick={() => setSelected(m)}
                 className="text-left group focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gold transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] hover:-translate-y-1.5">
                 <div className="relative aspect-[3/4] bg-secondary overflow-hidden flex items-center justify-center">
-                  {m.photo ? (
-                    <img src={m.photo} alt={m.name} className="h-full w-full object-cover transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] group-hover:scale-[1.06] group-hover:brightness-[1.08]" />
-                  ) : (
-                    <span className="font-serif text-6xl text-gold/60 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] group-hover:scale-110 group-hover:text-gold">
-                      {m.name.charAt(0)}
-                    </span>
-                  )}
+                  <TeamPhoto photo={m.photo} name={m.name} className="h-full w-full object-cover transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] group-hover:scale-[1.06] group-hover:brightness-[1.08]" fallbackClassName="font-serif text-6xl text-gold/60 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] group-hover:scale-110 group-hover:text-gold" />
                   {/* Inset gold frame, drawn on hover */}
                   <span aria-hidden className="pointer-events-none absolute inset-3 border border-gold/0 transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] group-hover:border-gold/60" />
                   {/* Bottom gradient + view-profile cue */}

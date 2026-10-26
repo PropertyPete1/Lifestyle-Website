@@ -1,3 +1,4 @@
+import TeamPhoto from "@/components/TeamPhoto";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { ArrowRight } from "lucide-react";
@@ -356,11 +357,7 @@ export default function Home() {
             <Link key={m.id} href="/team">
               <div className="group reveal" style={{ transitionDelay: `${i * 50}ms` }}>
                 <div className="aspect-[3/4] bg-secondary overflow-hidden flex items-center justify-center">
-                  {m.photo ? (
-                    <img src={m.photo} alt={m.name} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" />
-                  ) : (
-                    <span className="font-serif text-5xl text-gold/60">{m.name.charAt(0)}</span>
-                  )}
+                  <TeamPhoto photo={m.photo} name={m.name} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" fallbackClassName="font-serif text-5xl text-gold/60" />
                 </div>
                 <h3 className="font-sans text-sm uppercase tracking-[0.15em] mt-4">{m.name}</h3>
                 <p className="text-[11px] uppercase tracking-[0.15em] text-gold mt-1">{m.title}</p>

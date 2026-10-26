@@ -150,10 +150,11 @@ function writePicks(picks: readonly string[]) { try { window.sessionStorage.setI
 /** Oct 26, 2026: the agent's pick tray; it sits above the list while anything is picked. */
 function PickTray({ count, onSend, onClear }: { count: number; onSend: () => void; onClear: () => void }) {
   if (count === 0) return null;
-  return <div role="status" data-deals-pick-tray="true" className="fixed bottom-5 left-5 right-5 z-30 flex items-center justify-between gap-3 border border-gold/50 bg-card/95 px-4 py-3 shadow-xl backdrop-blur sm:left-auto sm:right-8 sm:w-[26rem]">
+  // Dark like the site header (explicit colors: the tray sits outside the light Deals theme scope).
+  return <div role="status" data-deals-pick-tray="true" className="fixed bottom-5 left-5 right-5 z-30 flex items-center justify-between gap-3 border border-gold/50 bg-[oklch(0.2_0.02_260)] px-4 py-3 text-white shadow-xl sm:left-auto sm:right-8 sm:w-[26rem]">
     <p className="min-w-0 text-sm"><ListChecks className="mr-2 inline h-4 w-4 text-gold" /><span className="font-medium">{count} home{count === 1 ? "" : "s"} picked</span></p>
     <div className="flex shrink-0 items-center gap-2">
-      <button type="button" onClick={onClear} className="min-h-11 px-2 text-xs uppercase tracking-widest text-muted-foreground hover:text-gold">Clear</button>
+      <button type="button" onClick={onClear} className="min-h-11 px-2 text-xs uppercase tracking-widest text-white/70 hover:text-gold">Clear</button>
       <button type="button" onClick={onSend} className="min-h-11 bg-gold px-4 text-xs font-medium uppercase tracking-[0.14em] text-primary-foreground">Send to a client</button>
     </div>
   </div>;

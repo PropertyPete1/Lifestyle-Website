@@ -57,8 +57,11 @@ describe("the region map", () => {
       { key: "b", pin: { x: 0.501, y: 0.502 }, fromPriceLabel: "From the $400s" },
       { key: "c", pin: { x: 0.8, y: 0.2 }, fromPriceLabel: "From the $250s" },
       { key: "d", pin: null },
+      // Oct 26: no price and nothing move-in ready (plans only) reads "Build new"; no price with homes reads "View", never "1".
+      { key: "e", pin: { x: 0.2, y: 0.9 }, fromPriceLabel: null, homesAvailable: 0 },
+      { key: "f", pin: { x: 0.9, y: 0.9 }, fromPriceLabel: null, homesAvailable: 3 },
     ]);
-    expect(markers.map((marker) => [marker.keys, marker.label])).toEqual([[["a", "b"], "2"], [["c"], "$250s"]]);
+    expect(markers.map((marker) => [marker.keys, marker.label])).toEqual([[["a", "b"], "2"], [["c"], "$250s"], [["e"], "Build new"], [["f"], "View"]]);
   });
 });
 

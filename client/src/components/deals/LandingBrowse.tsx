@@ -60,6 +60,8 @@ export const LANDING_COPY = {
   privacy: "One of our agents will reach out to set it up and answer your questions.",
   /** Oct 26, 2026: a buyer sends a community to a spouse; the link opens this sheet and carries a preview card. */
   markerView: "View",
+  /** A community with plans but no priced home yet (build-only) says so on its marker instead of "View". */
+  markerBuild: "Build new",
   share: "Share",
   shareCopied: "Link copied",
   shareTitle: (label: string) => `${label} — Builder Deals`,
@@ -111,13 +113,18 @@ type Marker = { id: string; x: number; y: number; keys: string[]; label: string 
 const GROUP_CELL = 0.045;
 
 /** One marker per community, grouped where they overlap; a group shows its count, a lone community its price band. */
-export function groupMarkers(items: ReadonlyArray<{ key: string; pin?: { x: number; y: number } | null; fromPriceLabel?: string | null }>, cell = GROUP_CELL): Marker[] {
+/** What a lone marker says: its price band, else "Build new" for a plan-only community, else "View". */
+export function loneMarkerLabel(item: { fromPriceLabel?: string | null; homesAvailable?: number }): string {
+  return (item.fromPriceLabel ?? "").replace(/^From the /, "") || (item.homesAvailable === 0 ? LANDING_COPY.markerBuild : LANDING_COPY.markerView);
+}
+
+export function groupMarkers(items: ReadonlyArray<{ key: string; pin?: { x: number; y: number } | null; fromPriceLabel?: string | null; homesAvailable?: number }>, cell = GROUP_CELL): Marker[] {
   const groups = new Map<string, { xs: number[]; ys: number[]; keys: string[]; labels: string[] }>();
   for (const item of items) {
     if (!item.pin) continue;
     const id = `${Math.floor(item.pin.x / cell)}:${Math.floor(item.pin.y / cell)}`;
     const group = groups.get(id) ?? { xs: [], ys: [], keys: [], labels: [] };
-    group.xs.push(item.pin.x); group.ys.push(item.pin.y); group.keys.push(item.key); group.labels.push((item.fromPriceLabel ?? "").replace(/^From the /, ""));
+    group.xs.push(item.pin.x); group.ys.push(item.pin.y); group.keys.push(item.key); group.labels.push(loneMarkerLabel(item));
     groups.set(id, group);
   }
   const mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -188,7 +195,7 @@ export function fanOffsets(count: number): Array<{ dx: number; dy: number }> {
 }
 
 export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, className = "" }: {
-  items: ReadonlyArray<{ key: string; pin?: { x: number; y: number } | null; fromPriceLabel?: string | null }>;
+  items: ReadonlyArray<{ key: string; pin?: { x: number; y: number } | null; fromPriceLabel?: string | null; homesAvailable?: number }>;
   activeKey: string | null;
   onHover: (key: string | null) => void;
   onSelect: (marker: { id: string; keys: string[] } | null) => void;
@@ -361,7 +368,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
               {marker.keys.map((key, index) => {
                 const item = items.find((entry) => entry.key === key);
                 const lit = activeKey === key;
-                const label = (item?.fromPriceLabel ?? "").replace(/^From the /, "") || "View";
+                const label = item ? loneMarkerLabel(item) : LANDING_COPY.markerView;
                 return <button key={key} type="button" data-deals-marker="fan" data-active={lit ? "true" : undefined} aria-label={`Community ${label}. Open it`}
                   onPointerDown={(event) => { event.stopPropagation(); gesture.current.moved = 0; }}
                   onMouseEnter={() => onHover(key)} onMouseLeave={() => onHover(null)}

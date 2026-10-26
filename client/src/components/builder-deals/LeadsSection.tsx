@@ -17,6 +17,7 @@ import type { LeadRow, Overview } from "./types";
 
 type StatusFilter = "all" | "verified" | "blocked" | "expired" | "team";
 type FubFilter = "all" | "pending" | "synced" | "failed";
+type SortOrder = "newest" | "active";
 
 function FubLink({ fubPersonId }: { fubPersonId: string | null }) {
   const href = fubPersonLink(fubPersonId);
@@ -117,6 +118,7 @@ export function LeadsSection({ overview }: { overview: Overview }) {
   const [applied, setApplied] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [fubStatus, setFubStatus] = useState<FubFilter>("all");
+  const [sort, setSort] = useState<SortOrder>("newest");
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [pinned, setPinned] = useState<number | null>(null);
@@ -124,7 +126,7 @@ export function LeadsSection({ overview }: { overview: Overview }) {
   const [leadToMakeTeam, setLeadToMakeTeam] = useState<LeadRow | null>(null);
   const [leadToTurnOn, setLeadToTurnOn] = useState<LeadRow | null>(null);
   const pageSize = 25;
-  const leads = trpc.deals.admin.leads.useQuery({ search: applied, status, fubStatus, page, pageSize }, { retry: false, refetchOnWindowFocus: false, placeholderData: keepPreviousData });
+  const leads = trpc.deals.admin.leads.useQuery({ search: applied, status, fubStatus, sort, page, pageSize }, { retry: false, refetchOnWindowFocus: false, placeholderData: keepPreviousData });
   const turnOn = trpc.deals.admin.turnOnBuyer.useMutation({
     onSuccess: () => { void utils.deals.admin.leads.invalidate(); void utils.deals.admin.identityList.invalidate(); void utils.deals.admin.overview.invalidate(); setLeadToTurnOn(null); toast.success(TURN_OFF_COPY.turnedOn); },
     onError: (error) => toast.error(error.message || "Could not turn access back on"),
@@ -180,6 +182,12 @@ export function LeadsSection({ overview }: { overview: Overview }) {
             <SelectContent><SelectItem value="all">All</SelectItem><SelectItem value="pending">Pending</SelectItem><SelectItem value="synced">Synced</SelectItem><SelectItem value="failed">Failed</SelectItem></SelectContent>
           </Select>
         </Field>
+        <Field id="lead-sort" label="Sort">
+          <Select value={sort} onValueChange={(value) => { setSort(value as SortOrder); setPage(1); }}>
+            <SelectTrigger id="lead-sort" className={inputClass}><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="newest">Newest first</SelectItem><SelectItem value="active">Most active first</SelectItem></SelectContent>
+          </Select>
+        </Field>
         <div className="flex items-end gap-2">
           <Button type="button" variant="outline" className={TAP} disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</Button>
           <span className="text-xs text-muted-foreground">Page {page} of {pages}</span>
@@ -196,7 +204,7 @@ export function LeadsSection({ overview }: { overview: Overview }) {
       {leads.isError && <p role="alert" className="mt-4 text-sm text-destructive">Leads could not be loaded: {leads.error.message}</p>}
       <div className="mt-4 overflow-x-auto">
         <Table className="min-w-[64rem]">
-          <TableHeader><TableRow><TableHead>Lead</TableHead><TableHead>Contact</TableHead><TableHead>Attribution</TableHead><TableHead>Flags</TableHead><TableHead>Access</TableHead><TableHead>FUB</TableHead><TableHead>Created</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Lead</TableHead><TableHead>Contact</TableHead><TableHead>Attribution</TableHead><TableHead>Flags</TableHead><TableHead>Access</TableHead><TableHead>Activity</TableHead><TableHead>FUB</TableHead><TableHead>Created</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
           <TableBody>
             {rows.map((lead) => {
               const flags = flagValues(lead.flags);
@@ -205,8 +213,8 @@ export function LeadsSection({ overview }: { overview: Overview }) {
                 <LeadRows key={lead.id} lead={lead} flags={flags} expanded={expanded === lead.id} onToggle={() => setExpanded(expanded === lead.id ? null : lead.id)} onBlock={() => setLeadToBlock({ id: lead.id, label })} onTurnOn={() => setLeadToTurnOn(lead)} onTeam={() => setLeadToMakeTeam(lead)} />
               );
             })}
-            {rows.length === 0 && !leads.isLoading && <TableRow><TableCell colSpan={8}><EmptyRow>{applied || status !== "all" || fubStatus !== "all" ? "No leads match these filters." : "No Builder Deals leads have been recorded."}</EmptyRow></TableCell></TableRow>}
-            {leads.isLoading && <TableRow><TableCell colSpan={8}><EmptyRow>Loading leads...</EmptyRow></TableCell></TableRow>}
+            {rows.length === 0 && !leads.isLoading && <TableRow><TableCell colSpan={9}><EmptyRow>{applied || status !== "all" || fubStatus !== "all" ? "No leads match these filters." : "No Builder Deals leads have been recorded."}</EmptyRow></TableCell></TableRow>}
+            {leads.isLoading && <TableRow><TableCell colSpan={9}><EmptyRow>Loading leads...</EmptyRow></TableCell></TableRow>}
           </TableBody>
         </Table>
       </div>
@@ -250,6 +258,7 @@ function LeadRows({ lead, flags, expanded, onToggle, onBlock, onTurnOn, onTeam }
         <TableCell className="align-top"><p className="text-xs">src {lead.sourceCode}</p><p className="text-xs text-muted-foreground">{lead.timeline || "No timeline"}</p></TableCell>
         <TableCell className="max-w-56 align-top"><div className="flex flex-wrap gap-1">{flags.length ? flags.map((flag, index) => <Badge key={`${flag}-${index}`} variant="secondary" className="max-w-44 truncate text-[10px]">{flag}</Badge>) : <span className="text-xs text-muted-foreground">None</span>}</div></TableCell>
         <TableCell className="align-top">{lead.turnedOff ? <Badge variant="destructive" data-lead-turned-off="true">{TURN_OFF_COPY.pill}</Badge> : <Badge variant={statusVariant(lead.status)}>{lead.status}</Badge>}<p className="mt-1 text-[10px] text-muted-foreground">Expires {displayDate(lead.expiresAt)}</p></TableCell>
+        <TableCell className="whitespace-nowrap align-top text-xs" data-lead-activity="true">{lead.activity ? <><span className={lead.activity.saves > 0 ? "font-semibold text-foreground" : "text-muted-foreground"}>{lead.activity.saves} saved</span><br /><span className={lead.activity.tours > 0 ? "font-semibold text-foreground" : "text-muted-foreground"}>{lead.activity.tours} tour{lead.activity.tours === 1 ? "" : "s"}</span> · {lead.activity.views} viewed{lead.activity.lastSeen && <><br /><span className="text-muted-foreground">Seen {displayDate(lead.activity.lastSeen)}</span></>}</> : null}</TableCell>
         <TableCell className="align-top"><Badge variant={lead.fubStatus === "synced" ? "default" : lead.fubStatus === "failed" ? "destructive" : "secondary"}>{lead.fubStatus}</Badge><div className="mt-1"><FubLink fubPersonId={lead.fubPersonId} /></div></TableCell>
         <TableCell className="whitespace-nowrap align-top text-xs">{displayDate(lead.createdAt)}</TableCell>
         <TableCell className="align-top">
@@ -263,7 +272,7 @@ function LeadRows({ lead, flags, expanded, onToggle, onBlock, onTurnOn, onTeam }
           </div>
         </TableCell>
       </TableRow>
-      {expanded && <TableRow><TableCell colSpan={8} className="bg-muted/10"><LeadDetailView leadId={lead.id} /></TableCell></TableRow>}
+      {expanded && <TableRow><TableCell colSpan={9} className="bg-muted/10"><LeadDetailView leadId={lead.id} /></TableCell></TableRow>}
     </>
   );
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dealAccessTokens, dealBlocklist, dealClientLinks, dealCommunities, dealDoNotAutoImport, dealEvents, dealHomes, dealIncentives, dealJobRuns, dealKnownAgents, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
+import { dealAccessTokens, dealBlocklist, dealClientLinks, dealCommunities, dealCommunityViews, dealDoNotAutoImport, dealEvents, dealHomes, dealIncentives, dealJobRuns, dealKnownAgents, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 import type { TrpcContext } from "./_core/context";
 
@@ -789,6 +789,28 @@ describe("admin.blockLeadAndKillLink", () => {
     expect(db.rows(dealLeads)[0].status).toBe("blocked");
     expect(db.rows(dealAccessTokens)[0].revokedAt).toBeInstanceOf(Date);
     expect(db.rows(dealBlocklist)).toContainEqual(expect.objectContaining({ phoneE164: "+12105550123", reason: "admin review" }));
+  });
+});
+
+describe("admin.leads activity (Oct 26, Peter: know who is hot before calling)", () => {
+  const seedLead = (id: number, phoneE164: string) => db.seed(dealLeads, { id, phoneE164, email: null, name: `Buyer ${id}`, instagramHandle: null, sourceCode: "sl1", timeline: null, status: "verified", flags: "[]", consentText: "x", consentAt: new Date(), consentIp: "1.1.1.1", deviceHash: "d".repeat(64), fubStatus: "pending", expiresAt: new Date(Date.now() + 3600_000), createdAt: new Date(Date.now() - id * 60_000) });
+  it("counts saves, tour asks and communities viewed per buyer, and puts the most active first on request", async () => {
+    seedLead(1, "+12105550001"); seedLead(2, "+12105550002"); seedLead(3, "+12105550003");
+    db.seed(dealTourRequests, { leadId: 2, homeId: 11, requestType: "save", preferredAt: new Date(), chicagoDay: "2026-10-26", removedAt: null });
+    db.seed(dealTourRequests, { leadId: 2, homeId: 12, requestType: "save", preferredAt: new Date(), chicagoDay: "2026-10-26", removedAt: new Date() });
+    db.seed(dealTourRequests, { leadId: 3, homeId: 13, requestType: "tour", preferredAt: new Date(), chicagoDay: "2026-10-26", removedAt: null });
+    db.seed(dealCommunityViews, { leadId: 2, communityId: 7, viewedAt: new Date() });
+    db.seed(dealCommunityViews, { leadId: 2, communityId: 7, viewedAt: new Date() });
+    db.seed(dealCommunityViews, { leadId: 2, communityId: 8, viewedAt: new Date() });
+    db.seed(dealEvents, { leadId: 3, kind: "home_saved", sourceCode: "sl1", deviceHash: "d".repeat(64), createdAt: new Date("2026-10-26T12:00:00Z") });
+    const newest = await admin().leads({});
+    expect(newest.rows.map((row) => row.id)).toEqual([1, 2, 3]);
+    expect(newest.rows[1]!.activity).toEqual({ saves: 1, tours: 0, views: 2, lastSeen: null });
+    expect(newest.rows[2]!.activity).toEqual({ saves: 0, tours: 1, views: 0, lastSeen: "2026-10-26T12:00:00.000Z" });
+    const active = await admin().leads({ sort: "active" });
+    // A tour ask (5) outranks a save (3) plus two views (2); a buyer who did nothing comes last.
+    expect(active.rows.map((row) => row.id)).toEqual([3, 2, 1]);
+    expect(active.total).toBe(3);
   });
 });
 

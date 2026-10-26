@@ -656,13 +656,28 @@ export const dealsRouter = router({
       const photoRows = photos.map((photo) => photo.lastProcessingError?.startsWith("claim:") ? { ...photo, lastProcessingError: null } : photo);
       return { communities, leads, blocks, homes, photos: photoRows, agents, team, tours, fubJobs, doNotAutoImport, alerts, emailLogs, incentives, clientLinks: clientLinkRows, email: builderDealsEmailStatus(settings.alertRecipients), import: imports[0] ?? null, trecSummary, dailyCount, capReached: dailyCount >= settings.dailyVerificationCap, leadCounts: Object.fromEntries(leadStats.map((row) => [row.status, Number(row.n)])), blockCount: Number(blockStats[0]?.n ?? 0), stats, limits: { homes: 500, photos: 200, recentActivity: 100 } };
     }),
-    leads: adminProcedure.input(z.object({ search: z.string().trim().max(190).default(""), status: z.enum(["all", "verified", "blocked", "expired", "team"]).default("all"), fubStatus: z.enum(["all", "pending", "synced", "failed"]).default("all"), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(100).default(25) })).query(async ({ input }) => {
+    leads: adminProcedure.input(z.object({ search: z.string().trim().max(190).default(""), status: z.enum(["all", "verified", "blocked", "expired", "team"]).default("all"), fubStatus: z.enum(["all", "pending", "synced", "failed"]).default("all"), /** "active": the buyers who did the most (saves, tours, views) first; "newest": by sign-up. */ sort: z.enum(["newest", "active"]).default("newest"), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(100).default(25) })).query(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const pattern = `%${input.search.replace(/[\\%_]/g, "\\$&")}%`;
       const where = and(input.search ? or(like(dealLeads.name, pattern), like(dealLeads.phoneE164, pattern), like(dealLeads.email, pattern), like(dealLeads.instagramHandle, pattern), like(dealLeads.sourceCode, pattern)) : undefined, input.status === "all" ? undefined : eq(dealLeads.status, input.status), input.fubStatus === "all" ? undefined : eq(dealLeads.fubStatus, input.fubStatus));
-      const [rows, count] = await Promise.all([db.select().from(dealLeads).where(where).orderBy(desc(dealLeads.createdAt), desc(dealLeads.id)).limit(input.pageSize).offset((input.page - 1) * input.pageSize), db.select({ n: sql<number>`count(*)` }).from(dealLeads).where(where)]);
+      // What each buyer did (Oct 26, 2026, Peter: know who is hot before calling): saves and tour asks still standing,
+      // communities opened, and when they were last on the page. "Most active first" ranks every lead that matches,
+      // then pages; "newest" pages first and counts only the page.
+      const count = await db.select({ n: sql<number>`count(*)` }).from(dealLeads).where(where);
+      const candidates = input.sort === "active"
+        ? await db.select({ id: dealLeads.id }).from(dealLeads).where(where).orderBy(desc(dealLeads.createdAt)).limit(5000)
+        : await db.select({ id: dealLeads.id }).from(dealLeads).where(where).orderBy(desc(dealLeads.createdAt), desc(dealLeads.id)).limit(input.pageSize).offset((input.page - 1) * input.pageSize);
+      const ids = candidates.map((row) => row.id);
+      const { leadActivity } = await import("./dealsAdminActivity");
+      const activity = ids.length ? await leadActivity(db, ids) : new Map();
+      const score = (id: number) => { const a = activity.get(id); return a ? a.saves * 3 + a.tours * 5 + a.views : 0; };
+      const pageIds = input.sort === "active"
+        ? [...ids].sort((a, b) => score(b) - score(a) || ((activity.get(b)?.lastSeen?.getTime() ?? 0) - (activity.get(a)?.lastSeen?.getTime() ?? 0)) || b - a).slice((input.page - 1) * input.pageSize, input.page * input.pageSize)
+        : ids;
+      const rowsUnordered = pageIds.length ? await db.select().from(dealLeads).where(inArray(dealLeads.id, pageIds)) : [];
+      const rows = pageIds.map((id) => rowsUnordered.find((row) => row.id === id)).filter((row): row is NonNullable<typeof row> => Boolean(row));
       const turnedOff = new Set(await adminTurnedOffLeadIds(rows).catch(() => []));
-      return { rows: rows.map(({ consentText, consentIp, deviceHash, ...lead }) => ({ ...lead, turnedOff: turnedOff.has(lead.id) })), total: Number(count[0]?.n ?? 0), page: input.page, pageSize: input.pageSize };
+      return { rows: rows.map(({ consentText, consentIp, deviceHash, ...lead }) => { const a = activity.get(lead.id); return { ...lead, turnedOff: turnedOff.has(lead.id), activity: { saves: a?.saves ?? 0, tours: a?.tours ?? 0, views: a?.views ?? 0, lastSeen: a?.lastSeen ? a.lastSeen.toISOString() : null } }; }), total: Number(count[0]?.n ?? 0), page: input.page, pageSize: input.pageSize };
     }),
     leadDetail: adminProcedure.input(z.object({ id: z.number().int().positive() })).query(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });

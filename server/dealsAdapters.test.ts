@@ -5,6 +5,7 @@ import {
   storiesFrom,
   categorizedPrivateTerms,
   loadOfficialDeals,
+  miCatalogShortOfTotal,
   looksLikeStreetAddress,
   normalizeIncentiveText,
   parsePromotionalRate,
@@ -502,6 +503,28 @@ describe("deals adapters", () => {
     expect(result.holdReasons).toEqual([failure === "failed GET" ? "inventory_fetch_failed" : "incomplete_inventory"]);
     expect(result.public.homes).toEqual([]);
     expect(fetcher.mock.calls).toHaveLength(3);
+  });
+
+  it("accepts an M/I catalog one home short of its count after the whole walk (unstable paging), never two short of a small one (Oct 27)", async () => {
+    // 32 homes: a home repeats on the offset-20 page in place of another, and the endpoint runs out at offset 32.
+    const documents = miDocuments(32);
+    documents[miEndpointUrl("homes", 20)] = JSON.stringify({ TotalItems: 32, Html: `<div class="row">${miCard(0)}${miCard(20)}${miCard(19)}${miCard(22)}</div>` });
+    documents[miEndpointUrl("homes", 32)] = JSON.stringify({ TotalItems: 32, Html: '<div class="row"></div>' });
+    const result = await loadOfficialDeals({ ...config, builder: "M/I Homes", sourceUrl: miCommunityUrl }, { fetcher: fixtureFetcher(documents) });
+    expect(result.ok).toBe(true);
+    expect(result.holdReasons).toEqual([]);
+    expect(result.public.homes).toHaveLength(31);
+    // The same walk three homes short is a changed page, not slack.
+    const short = miDocuments(32);
+    short[miEndpointUrl("homes", 20)] = JSON.stringify({ TotalItems: 32, Html: `<div class="row">${miCard(0)}${miCard(19)}${miCard(18)}${miCard(17)}</div>` });
+    short[miEndpointUrl("homes", 32)] = JSON.stringify({ TotalItems: 32, Html: '<div class="row"></div>' });
+    const held = await loadOfficialDeals({ ...config, builder: "M/I Homes", sourceUrl: miCommunityUrl }, { fetcher: fixtureFetcher(short) });
+    expect(held.ok).toBe(false);
+    expect(held.holdReasons).toEqual(["incomplete_inventory"]);
+    expect(miCatalogShortOfTotal(4, 5)).toBe(false);
+    expect(miCatalogShortOfTotal(3, 5)).toBe(true);
+    expect(miCatalogShortOfTotal(38, 40)).toBe(false);
+    expect(miCatalogShortOfTotal(37, 40)).toBe(true);
   });
 
   it.each(["failed GET", "missing gallery"])("holds M/I catalog publication when a detail gallery has %s", async (failure) => {

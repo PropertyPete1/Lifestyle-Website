@@ -2380,10 +2380,22 @@ async function fetchMiCatalog(
     if (properties.size > total) return { properties: [], holds: ["invalid_inventory_response"] };
     if (properties.size === total) return { properties: Array.from(properties.values()), holds: [] };
     // A missing card container, malformed Product, or stuck endpoint is never a zero-homes update.
-    if (properties.size === before) return { properties: [], holds: ["incomplete_inventory"] };
+    if (properties.size === before) {
+      // Oct 27, 2026: M/I's pages are cut from an unstably sorted list, so a home can appear on two pages and another
+      // on none (Estancia West: 31 distinct of 32, held for a day). Once the walk has covered the whole count, a
+      // shortfall within the paging slack is that, not a changed page; a bigger one is still held.
+      if (offset + cards.length >= total && !miCatalogShortOfTotal(properties.size, total)) return { properties: Array.from(properties.values()), holds: [] };
+      return { properties: [], holds: ["incomplete_inventory"] };
+    }
     offset = offset === 0 ? 5 : offset + 3;
   }
   return { properties: [], holds: ["incomplete_inventory"] };
+}
+
+/** One home short is paging slack on any M/I catalog; past twenty homes, five percent of the count is. */
+export function miCatalogShortOfTotal(found: number, total: number): boolean {
+  const slack = total <= 20 ? 1 : Math.ceil(total * 0.05);
+  return found < total - slack;
 }
 
 function officialMiImage(value: string, base: URL): URL | null {

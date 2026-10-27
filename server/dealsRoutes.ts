@@ -115,7 +115,12 @@ export function registerDealsRoutes(app: Express) {
   // Agent tools: the same session rules as /deals/mine, and a buyer session is sent to its own list.
   app.get("/deals/team", safe(async (req, res, next) => {
     const { isLiveDealSession } = await import("./dealsService");
-    const session = await isLiveDealSession(req);
+    let session = await isLiveDealSession(req);
+    if (!session) {
+      // Oct 27, 2026: an agent signed in to the site with their Lifestyle e-mail gets a team session here without a text.
+      const { teamSessionFromSiteLogin } = await import("./dealsTeamSignIn");
+      if ((await teamSessionFromSiteLogin(req, res)) === "ok") session = await isLiveDealSession(req) ?? null;
+    }
     if (!session) {
       const hadSession = Boolean(parseCookie(req.headers.cookie || "")[DEALS_COOKIE.session]);
       // Oct 26, 2026: no session at /deals/team opens the gate as the agent sign-in (?team=1), not the buyer gate.

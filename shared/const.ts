@@ -12,7 +12,10 @@ export const OAUTH_STATE_COOKIE = "__Host-oauth_state";
 
 // `state` carries the callback redirect URI (used at token exchange) plus the
 // CSRF nonce. Defined here so the client encoder and server decoder never drift.
-export type OAuthState = { redirectUri: string; nonce?: string };
+export type OAuthState = { redirectUri: string; nonce?: string; /** Oct 27, 2026: a same-origin path to land on after login (e.g. /deals/team). */ returnTo?: string };
+
+/** A path the login callback may send the browser to: same origin, starts with one slash, nothing odd. */
+export const safeReturnTo = (value: unknown): string | null => typeof value === "string" && /^\/(?!\/)[A-Za-z0-9_./?=&%-]{0,200}$/.test(value) ? value : null;
 
 export const encodeOAuthState = (state: OAuthState): string =>
   btoa(JSON.stringify(state));

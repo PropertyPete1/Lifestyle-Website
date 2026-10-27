@@ -358,6 +358,11 @@ describe("Oct 26, 2026: /deals/team is the agent sign-in (Peter: there is no log
     expect(html).not.toContain('id="deals-name"');
     expect(html).not.toContain("Continue with Google");
     expect(html).toContain('href="/join?from=builder-deals"');
+    // Oct 27: the site's own login (Lifestyle e-mail) leads, the text code follows.
+    const withLogin = decode(render(fresh(), noPending, { teamSignIn: true, name: "", email: "", choice: null, onSiteLogin: () => undefined }));
+    expect(withLogin).toContain('data-deals-site-login="true"');
+    expect(withLogin).toContain("Sign in with your Lifestyle e-mail");
+    expect(withLogin.indexOf("data-deals-site-login")).toBeLessThan(withLogin.indexOf('id="deals-phone"'));
     expect(html).not.toMatch(/<button[^>]*disabled[^>]*>Sending…|<button[^>]*disabled="">Continue/);
     // The buyer gate is unchanged.
     const buyer = decode(render(fresh(), noPending, { name: "", email: "", choice: null }));

@@ -266,3 +266,13 @@ export function codeStepAlert(gate: GateState): string | null {
 
 /** Where the gate leaves a realtor's typed number for the recruiting form (this tab only; never in a URL). */
 export const RECRUIT_PREFILL_KEY = "ldr_recruit_phone";
+
+/**
+ * Where a browser kept off Builder Deals (its own "I'm a realtor" answer or the screening) is sent: the recruiting
+ * path the server named, same-origin only. Never from the agent sign-in (Oct 27, 2026: Peter's browser was flagged
+ * the day before and every visit, the sign-in included, bounced to recruiting; signing in as the team clears it).
+ */
+export function agentRecruitRedirect(redirect: string | null | undefined, teamSignIn: boolean): string | null {
+  if (teamSignIn || typeof redirect !== "string" || !redirect.startsWith("/") || redirect.startsWith("//")) return null;
+  return redirect;
+}

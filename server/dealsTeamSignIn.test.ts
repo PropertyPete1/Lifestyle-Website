@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { dealAccessTokens, dealLeads, dealTeamAllowlist } from "../drizzle/schema";
+import { dealAccessTokens, dealBlocklist, dealLeads, dealTeamAllowlist } from "../drizzle/schema";
 import { DEALS_COOKIE } from "../shared/deals";
 import { safeReturnTo, decodeOAuthState, encodeOAuthState } from "../shared/const";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
@@ -11,7 +11,7 @@ vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }))
 vi.mock("./dealsMap", () => ({ communityAreaMap: () => null, areaMapGeometry: () => null, areaMapRadius: () => 5 }));
 
 import { teamEmailKnown, teamSessionFromSiteLogin } from "./dealsTeamSignIn";
-import { TEAM_ACCESS_HOURS, isLiveDealSession } from "./dealsService";
+import { TEAM_ACCESS_HOURS, browserIsRealtorBlocked, hashSecret, isLiveDealSession } from "./dealsService";
 
 const HOUR = 3_600_000;
 let db: FakeDealsDb;
@@ -50,6 +50,18 @@ describe("team session from the site login", () => {
     const again = responseRecorder();
     expect(await teamSessionFromSiteLogin(request(browser), again.response, { authenticate })).toBe("ok");
     expect(db.rows(dealLeads).filter((row) => row.phoneE164 === "+12105550101")).toHaveLength(1);
+  });
+
+  it("clears the browser's agent block on a team sign-in, so the sign-in page never bounces a team member to recruiting (Oct 27)", async () => {
+    // Peter's Mac answered "I'm a realtor" once; from then on every /deals visit went to recruiting, the agent sign-in included.
+    db.seed(dealBlocklist, { deviceHash: hashSecret("agent-mac"), reason: "known_agent", expiresAt: new Date(Date.now() + 24 * HOUR) });
+    db.seed(dealBlocklist, { phoneE164: "+15555550199", reason: "Abusive messages" });
+    expect(await browserIsRealtorBlocked(request(browser))).toBe(true);
+    const res = responseRecorder();
+    expect(await teamSessionFromSiteLogin(request(browser), res.response, { authenticate: async () => ({ email: "tiffany@lifestyledesignrealty.com", name: "Tiffany" }) })).toBe("ok");
+    expect(await browserIsRealtorBlocked(request(browser))).toBe(false);
+    // Only the agent blocks go; an admin's own block on someone else stays.
+    expect(db.rows(dealBlocklist).map((row) => row.reason)).toEqual(["Abusive messages"]);
   });
 
   it("refuses everyone else: no login, an e-mail off the team, a removed agent, a row without a phone, a browser without cookies, a turned-off lead", async () => {

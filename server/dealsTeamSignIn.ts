@@ -4,7 +4,7 @@ import { DEALS_COOKIE, DEALS_CONSENT_TEXT } from "../shared/deals";
 import type { Request, Response } from "express";
 import { getDb } from "./db";
 import { sdk } from "./_core/sdk";
-import { TEAM_ACCESS_HOURS, ensureDealsCookies, hashSecret, logDealEvent, randomOpaqueToken, setDealCookie } from "./dealsService";
+import { TEAM_ACCESS_HOURS, clearAgentBlocksForBrowser, ensureDealsCookies, hashSecret, logDealEvent, randomOpaqueToken, setDealCookie } from "./dealsService";
 
 export type TeamSiteSignIn = "ok" | "no_login" | "not_team" | "no_phone" | "turned_off" | "cookie_blocked" | "unavailable";
 
@@ -44,6 +44,8 @@ export async function teamSessionFromSiteLogin(req: Request, res: Response, opti
   await db.insert(dealAccessTokens).values({ leadId: lead.id, tokenHash: hashSecret(session), deviceHash: cookieState.deviceHash, expiresAt: lead.expiresAt, kind: "session" });
   // A team cookie lasts as long as the session (no lapsed-cookie grace: nothing to send a team member back to).
   setDealCookie(res, DEALS_COOKIE.session, session, Math.max(60, Math.floor((lead.expiresAt.getTime() - now.getTime()) / 1000)));
+  // A team member is never an agent kept off the list: this browser's agent block (their own answer or the screening) goes.
+  await clearAgentBlocksForBrowser(cookieState.deviceHash).catch(() => undefined);
   await logDealEvent({ leadId: lead.id, kind: "team_site_login", sourceCode: "team", deviceHash: cookieState.deviceHash, ip, phone: row.phoneE164, detail: `team:${row.id}` });
   return "ok";
 }

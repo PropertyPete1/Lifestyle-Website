@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import { startLogin } from "@/const";
 import { MINE_COPY, isUnauthorizedDealsError, parseMineCommunities, profileErrorCopy } from "@/lib/dealsMine";
-import { TRANSIENT_GATE_PARAMS, clientLinkTokenInUrl, forgetClientLinkToken, keepClientLinkToken, rememberClientLinkToken } from "@/lib/dealsGate";
+import { TRANSIENT_GATE_PARAMS, agentRecruitRedirect, clientLinkTokenInUrl, forgetClientLinkToken, keepClientLinkToken, rememberClientLinkToken } from "@/lib/dealsGate";
 import { GateSheet } from "@/components/deals/GateSheet";
 import { GatedCatalog, type GatedCommunity, type HomeRequest, type PickControl } from "@/components/deals/GatedCatalog";
 import { FeaturedStrip, type FeaturedDealsData } from "@/components/deals/FeaturedDeals";
@@ -52,9 +52,13 @@ function Landing() {
   // An agent's client link (?c=, or the one this tab kept) goes to the state query, the gate and the start call.
   const [clientToken, setClientToken] = useState(() => rememberClientLinkToken(window.location.search));
   const state = trpc.deals.state.useQuery(clientToken ? { c: clientToken } : undefined);
-  // An agent kept off Builder Deals (their own answer or the screening) is sent to the agent recruiting page.
-  const realtorRedirect = state.data && "realtorRedirect" in state.data ? state.data.realtorRedirect : null;
-  useEffect(() => { if (realtorRedirect && realtorRedirect.startsWith("/")) window.location.replace(realtorRedirect); }, [realtorRedirect]);
+  // Oct 26, 2026: /deals/team with no session is the agent sign-in page (the same sheet, agent wording, phone only).
+  const [teamSignIn] = useState(() => (/^\/deals\/team/.test(window.location.pathname) || new URLSearchParams(window.location.search).get("team") === "1") && !clientToken);
+  // An agent kept off Builder Deals (their own answer or the screening) is sent to the agent recruiting page — unless
+  // they came for the agent sign-in (Oct 27: Peter's browser was flagged on Oct 26, and every later visit, the sign-in
+  // included, bounced to recruiting; signing in as the team clears the flag).
+  const realtorRedirect = agentRecruitRedirect(state.data && "realtorRedirect" in state.data ? state.data.realtorRedirect : null, teamSignIn);
+  useEffect(() => { if (realtorRedirect) window.location.replace(realtorRedirect); }, [realtorRedirect]);
   // The reel that brought the visitor (?src=) puts its community first.
   const [src] = useState(() => new URLSearchParams(window.location.search).get("src")?.trim().slice(0, 40) || undefined);
   // A shared community link (?k=<key>, Oct 26, 2026; ?c= is an agent's client link): that community's sheet opens on arrival.
@@ -69,8 +73,6 @@ function Landing() {
   // October 24, 2026: visitors browse every home first; the sign-up opens when they ask for addresses, or when a
   // link brings them to it (an agent's client link, a code in progress, an expired or blocked session, a lapsed list).
   const [gateOpen, setGateOpen] = useState(() => Boolean(clientToken) || TRANSIENT_GATE_PARAMS.some((name) => new URLSearchParams(window.location.search).has(name)) || /^\/deals\/(mine|team)/.test(window.location.pathname));
-  // Oct 26, 2026: /deals/team with no session is the agent sign-in page (the same sheet, agent wording, phone only).
-  const [teamSignIn] = useState(() => (/^\/deals\/team/.test(window.location.pathname) || new URLSearchParams(window.location.search).get("team") === "1") && !clientToken);
   useInstagramEmbeds();
   // With no token in hand, the server may name the link from this browser's lapsed agent-client session.
   const linkToken = clientToken ?? state.data?.clientLinkToken ?? undefined;

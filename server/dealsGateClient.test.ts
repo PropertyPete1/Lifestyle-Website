@@ -381,3 +381,14 @@ describe("parseMineCommunities (Oct 27: the list travels as one JSON string)", a
     expect(parseMineCommunities(JSON.stringify({ key: "a" }))).toEqual([]);
   });
 });
+
+describe("agentRecruitRedirect (Oct 27: a flagged browser still reaches the agent sign-in)", async () => {
+  const { agentRecruitRedirect } = await import("../client/src/lib/dealsGate");
+  it("sends a flagged browser to recruiting from the buyer pages only, and only to a same-origin path", () => {
+    expect(agentRecruitRedirect("/join?from=builder-deals", false)).toBe("/join?from=builder-deals");
+    expect(agentRecruitRedirect("/join?from=builder-deals", true)).toBeNull();
+    expect(agentRecruitRedirect(null, false)).toBeNull();
+    expect(agentRecruitRedirect("https://evil.example/", false)).toBeNull();
+    expect(agentRecruitRedirect("//evil.example/", false)).toBeNull();
+  });
+});

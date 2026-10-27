@@ -1,4 +1,9 @@
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { dealTrecFakeRows, dealTrecImports, dealTrecLicenses } from "../drizzle/schema";
 import { getDb } from "./db";
 
@@ -71,30 +76,39 @@ export async function importTrecLicenses(options: TrecImportOptions = {}) {
   if (!response.ok || !response.body) throw new Error(`TREC CSV ${response.status}`);
   const imported = await db.insert(dealTrecImports).values({ sourceEtag: response.headers.get("etag"), rowCount: 0, current: false });
   const importId = Number((imported as unknown as [{ insertId: number }])[0].insertId);
-  const reader = response.body.getReader(), decoder = new TextDecoder(); let remainder = "", headers: string[] | null = null, batch: Array<typeof dealTrecLicenses.$inferInsert> = [], count = 0;
+  const reader = response.body.getReader(); let headers: string[] | null = null, batch: Array<typeof dealTrecLicenses.$inferInsert> = [], count = 0;
   const flush = async () => { if (!batch.length) return; await db.insert(dealTrecLicenses).values(batch); count += batch.length; batch = []; };
   const readChunk = async () => {
     watchdog = setTimeout(() => controller.abort(new Error("TREC CSV download stalled")), options.readInactivityMs ?? TREC_READ_INACTIVITY_MS);
     try { return await reader.read(); } finally { clearWatchdog(); }
   };
+  // Oct 27, 2026: the body is spooled to a temp file at network speed, then parsed from disk. Parsing while
+  // downloading paused the socket for every database batch, and on a busy morning TREC's server closed the idle
+  // connection seven minutes in ("terminated"), twice in a row.
+  const dir = await mkdtemp(join(tmpdir(), "trec-"));
+  const file = join(dir, "licenses.csv");
   try {
-    while (true) {
-      const { done, value } = await readChunk(); remainder += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-      const lines = remainder.split(/\r?\n/); remainder = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!headers) { headers = parseCsvLine(line).map((value) => value.trim().toLowerCase().replace(/[^a-z0-9]/g, "_")); continue; }
-        if (!line.trim()) continue;
-        const cells = parseCsvLine(line); const row = Object.fromEntries(headers.map((key, index) => [key, cells[index] ?? ""]));
-        const values = trecLicenseValues(importId, row); if (!values) continue;
-        batch.push(values);
-        if (batch.length >= 500) await flush();
+    const out = createWriteStream(file);
+    try {
+      while (true) {
+        const { done, value } = await readChunk();
+        if (value?.length && !out.write(value)) await new Promise<void>((resolve) => out.once("drain", resolve));
+        if (done) break;
       }
-      if (done) break;
+    } finally { await new Promise<void>((resolve, reject) => out.end((error?: Error | null) => error ? reject(error) : resolve())); }
+    const lines = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Number.POSITIVE_INFINITY });
+    for await (const line of lines) {
+      if (!headers) { headers = parseCsvLine(line).map((value) => value.trim().toLowerCase().replace(/[^a-z0-9]/g, "_")); continue; }
+      if (!line.trim()) continue;
+      const cells = parseCsvLine(line); const row = Object.fromEntries(headers.map((key, index) => [key, cells[index] ?? ""]));
+      const values = trecLicenseValues(importId, row); if (!values) continue;
+      batch.push(values);
+      if (batch.length >= 500) await flush();
     }
-    if (remainder.trim() && headers) { const cells = parseCsvLine(remainder); const row = Object.fromEntries(headers.map((key, index) => [key, cells[index] ?? ""])); const values = trecLicenseValues(importId, row); if (values) batch.push(values); }
     await flush(); await activateAndRetainOnlyImport(importId, count);
     return { ok: true, rows: count, importId };
   } catch (error) { clearWatchdog(); reader.cancel().catch(() => undefined); await db.delete(dealTrecLicenses).where(eq(dealTrecLicenses.importId, importId)); await db.delete(dealTrecImports).where(eq(dealTrecImports.id, importId)); throw error; }
+  finally { await rm(dir, { recursive: true, force: true }).catch(() => undefined); }
 }
 
 /**

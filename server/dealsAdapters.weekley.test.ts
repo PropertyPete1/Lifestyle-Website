@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DavidWeekleyAdapter, parseWeekleyCommunity, parseWeekleyPageData, parseWeekleyPromotions, resetWeekleyCaches, weekleyListingEntries, weekleyListingUrl, weekleyPromotionsUrl, weekleyRecord, weekleyShowcaseCounts, weekleyStatus } from "./dealsAdapters.weekley";
+import { DavidWeekleyAdapter, parseWeekleyCommunity, parseWeekleyPageData, parseWeekleyPromotions, resetWeekleyCaches, weekleyListingEntries, weekleyListingUrl, weekleyPromotionsUrl, weekleyPageShortOfShowcase, weekleyRecord, weekleyShowcaseCounts, weekleyStatus } from "./dealsAdapters.weekley";
 import { DEAL_ADAPTERS, loadOfficialDeals, type CommunitySourceConfig } from "./dealsAdapters";
 
 /**
@@ -122,6 +122,14 @@ describe("David Weekley reader: page data", () => {
     const elsewhere = { ...plan({ name: "Zinnia", price: 300_000, beds: 3, baths: 2, half: 0, sqft: 1_500 }), Token: "/new-homes/tx/san-antonio/san-antonio/other-ranch-60/zinnia" };
     expect(parseWeekleyCommunity(communityPage({ plans: [elsewhere] }), COMMUNITY, NOW)).toMatchObject({ foreignPlan: true, plans: [] });
     expect(weekleyShowcaseCounts(listing)).toEqual(new Map([["communities/22915", 3], ["communities/100", 0], ["communities/22916", 0]]));
+    // Oct 27: one home fewer than the list (a sale the list has not caught up with) is not a changed page; two is.
+    expect(weekleyPageShortOfShowcase(4, 5)).toBe(false);
+    expect(weekleyPageShortOfShowcase(3, 5)).toBe(true);
+    expect(weekleyPageShortOfShowcase(2, 3)).toBe(false);
+    expect(weekleyPageShortOfShowcase(1, 3)).toBe(true);
+    expect(weekleyPageShortOfShowcase(16, 20)).toBe(false);
+    expect(weekleyPageShortOfShowcase(15, 20)).toBe(true);
+    expect(weekleyPageShortOfShowcase(0, 1)).toBe(false);
     expect(weekleyShowcaseCounts("<html>")).toBeNull();
   });
 

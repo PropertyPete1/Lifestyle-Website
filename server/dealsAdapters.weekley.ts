@@ -323,6 +323,17 @@ export function weekleyListingEntries(body: string, host: string): Array<{ url: 
 }
 
 /** Each listed community's `ShowcaseCount` (homes for sale) by id, from both the flat list and the neighbourhood groups; null when the body is not the listing. */
+/**
+ * Oct 27, 2026: the market list is read once an hour, so its count lags the community page by a home or so after a
+ * sale (Rees Landing showed four homes while the list still counted five, and the community was held for a day).
+ * A page is short of the list only when it misses more than that lag: one home up to five listed, a fifth above.
+ * (A neighborhood's own series counts are read in the same run and stay exact.)
+ */
+export function weekleyPageShortOfShowcase(pageHomes: number, showcase: number): boolean {
+  const lag = showcase <= 5 ? 1 : Math.ceil(showcase * 0.2);
+  return pageHomes < showcase - lag;
+}
+
 export function weekleyShowcaseCounts(body: string): Map<string, number> | null {
   let parsed: unknown;
   try { parsed = JSON.parse(body); } catch { return null; }
@@ -424,9 +435,9 @@ export class DavidWeekleyAdapter implements DealAdapter {
       if (parsed.foreignPage || parsed.foreignPlan || parsed.foreignHome) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
       // A series page must show at least the homes its neighborhood listing counts.
       if (entry.expectedHomes !== null && parsed.homes.filter((home) => home.status !== "Model").length < entry.expectedHomes) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
-      // The market list counts each community's homes for sale; fewer homes on the page than that is a changed page, not homes sold. With the list unreachable, an empty page is not trusted.
+      // The market list counts each community's homes for sale; far fewer homes on the page than that is a changed page, not homes sold. With the list unreachable, an empty page is not trusted.
       const showcase = await showcaseCount(fetcher, now().getTime(), privateSnapshot, parsed.communityId, weekleyMarketFor(config.sourceUrl));
-      if (showcase === "unavailable" ? parsed.homes.length === 0 : showcase !== null && parsed.homes.length < showcase) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+      if (showcase === "unavailable" ? parsed.homes.length === 0 : showcase !== null && weekleyPageShortOfShowcase(parsed.homes.length, showcase)) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
       read.push(parsed);
     }
     if (!read.length && comingSoonPages) return failedResult(config, fetchedAt, privateSnapshot, ["community_coming_soon"]);

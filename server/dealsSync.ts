@@ -227,7 +227,7 @@ export type CommunityChangeSummary = {
 
 export type HoldNotice = { communityId: number; privateName: string; builder: string; kind: "catalog" | "incentive"; reason: string; detail?: string };
 
-export type RefreshResult = { communityId: number; reelCode: string; ok: boolean; reason?: string; skipped?: string };
+export type RefreshResult = { communityId: number; reelCode: string; ok: boolean; reason?: string; skipped?: string; /** The reader's own error, first line, redacted (refresh_failed only). */ error?: string };
 
 function emptySummary(community: CommunityRow): CommunityChangeSummary {
   return { communityId: community.id, privateName: community.privateName, builder: community.builder, added: [], sold: [], reappeared: [], priceChanges: [], incentive: [] };
@@ -641,7 +641,13 @@ async function refreshFailed(community: CommunityRow, now: Date, holds: HoldNoti
   // Do not log the source URL: it is private metadata.
   console.error(`[deals-sync] community ${community.id} refresh failed`, error instanceof Error ? error.message : error);
   await recordCatalogHold(community, REFRESH_FAILED, now, holds).catch(() => undefined);
-  return { communityId: community.id, reelCode: community.reelCode, ok: false, reason: REFRESH_FAILED };
+  // Oct 27, 2026: the error itself (first line, values masked) rides with the result so the admin's refresh job run and
+  // the hold e-mail say what broke, not just that something did.
+  const { jobErrorMessage, redactJobError } = await import("./dealsJobRuns");
+  const message = redactJobError(jobErrorMessage(error)).slice(0, 240);
+  const notice = holds.find((hold) => hold.communityId === community.id && hold.kind === "catalog" && hold.reason === REFRESH_FAILED);
+  if (notice && !notice.detail) notice.detail = message;
+  return { communityId: community.id, reelCode: community.reelCode, ok: false, reason: REFRESH_FAILED, error: message };
 }
 
 /**
@@ -1094,7 +1100,7 @@ async function finishRefreshRequest(rowId: number, status: "ok" | "failed" | "sk
 function refreshRequestOutcome(result: RefreshResult): { status: "ok" | "failed" | "skipped"; detail: string } {
   if (result.skipped) return { status: "skipped", detail: `not refreshed: ${result.skipped.replace(/_/g, " ")}` };
   if (result.ok) return { status: "ok", detail: "refreshed" };
-  if (result.reason === REFRESH_FAILED) return { status: "failed", detail: "failed: the reader hit an unexpected error on this community's pages; nothing was published or marked sold" };
+  if (result.reason === REFRESH_FAILED) return { status: "failed", detail: `failed: the reader hit an unexpected error on this community's pages; nothing was published or marked sold${result.error ? ` (${result.error})` : ""}` };
   return { status: "ok", detail: `held: ${result.reason ?? "unknown"}` };
 }
 

@@ -320,6 +320,6 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
       {many && <ShowMore remaining={matching.length - visible.length} onClick={() => setPages((value) => value + 1)} />}
       <ComingSoonSection items={comingSoon} action={{ kind: "text", phone: !lead.teamPreview ? agent?.phone ?? null : null, name: !lead.teamPreview ? agent?.firstName ?? agent?.name ?? null : null }} />
     </div></section>
-    <DealsFooter />
+    <DealsFooter agentSignIn={!lead.teamPreview} />
   </main>;
 }

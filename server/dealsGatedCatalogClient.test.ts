@@ -123,6 +123,9 @@ describe("gated catalog stays inside a 375 px phone viewport (A19)", () => {
     expect(team).toContain(">Team view</p><h1");
     expect(team).toContain('href="/deals/team"');
     expect(team).not.toContain("Add your name so we know who to text.");
+    // The footer's "Agent sign-in" link is for buyers' pages; an agent is already in.
+    expect(team).not.toContain('data-deals-agent-signin-footer');
+    expect(render({ lead: { teamPreview: false, name: "Maria" } })).toContain('data-deals-agent-signin-footer');
     // A team member who has not given a name is never asked for one either.
     expect(render({ lead: { teamPreview: true, name: null } })).not.toContain("Add your name so we know who to text.");
   });

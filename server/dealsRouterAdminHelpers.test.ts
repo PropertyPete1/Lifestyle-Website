@@ -165,3 +165,28 @@ describe("admin panel helpers", () => {
     expect(pageCount(51, 25)).toBe(3);
   });
 });
+
+describe("Communities list search and paging (Oct 27: 934 cards at once was a 34,000-node page)", async () => {
+  const { COMMUNITY_LIST_PAGE, communityMatches, visibleCommunities } = await import("@/components/builder-deals/helpers");
+  const row = (id: number, over: Partial<Parameters<typeof communityMatches>[0]> = {}) => ({ id, builder: "Chesmar", privateName: `Place ${id}`, publicLabel: `Area ${id} | New Homes`, areaLabel: "Southeast San Antonio", schoolDistrict: "East Central ISD", holdReason: null, awaitingFirstSync: false, paused: false, active: true, ...over });
+  it("matches builder, names, area, district, hold reason and id, and the words held, paused, hidden, waiting", () => {
+    const held = row(7, { holdReason: "catalog: incomplete_inventory", builder: "M/I Homes" });
+    expect(communityMatches(held, "m/i")).toBe(true);
+    expect(communityMatches(held, "incomplete")).toBe(true);
+    expect(communityMatches(held, "held")).toBe(true);
+    expect(communityMatches(row(8), "held")).toBe(false);
+    expect(communityMatches(row(9, { paused: true }), "paused")).toBe(true);
+    expect(communityMatches(row(10, { active: false }), "hidden")).toBe(true);
+    expect(communityMatches(row(11, { awaitingFirstSync: true }), "waiting")).toBe(true);
+    expect(communityMatches(row(12), "12")).toBe(true);
+    expect(communityMatches(row(12), "east central")).toBe(true);
+    expect(communityMatches(row(12), "")).toBe(true);
+  });
+  it("shows a page until searched or opened in full", () => {
+    const rows = Array.from({ length: 100 }, (_, index) => row(index + 1));
+    expect(visibleCommunities(rows, "", false)).toMatchObject({ matching: 100 });
+    expect(visibleCommunities(rows, "", false).shown).toHaveLength(COMMUNITY_LIST_PAGE);
+    expect(visibleCommunities(rows, "", true).shown).toHaveLength(100);
+    expect(visibleCommunities(rows, "place 9", false).shown.map((item) => item.id)).toEqual([9, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]);
+  });
+});

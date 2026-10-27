@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConfirmDialog, EmptyRow, Field, GOLD_BUTTON, Section, SwitchRow, TAP, Warning, inputClass } from "./shared";
 import {
-  INCENTIVE_FIELD_LABELS, SCRUB_CATEGORIES, SCRUB_CATEGORY_LABELS, acceptHoldInput, acceptHoldReady, ageLabel, chicagoDateInput, displayDate,
+  COMMUNITY_LIST_PAGE, INCENTIVE_FIELD_LABELS, SCRUB_CATEGORIES, SCRUB_CATEGORY_LABELS, acceptHoldInput, acceptHoldReady, ageLabel, chicagoDateInput, displayDate, visibleCommunities,
   emptyAcceptDraft, emptyScrubDraft, scrubDraftFromConfig, scrubListFromDraft, sourceHost, type AcceptDraft, type IncentiveFieldKey, type ScrubDraft,
 } from "./helpers";
 import type { CommunityDiagnostics, CommunityRow, HeldIncentive, IncentiveRow, Overview } from "./types";
@@ -352,6 +352,10 @@ export function CommunitiesSection({ overview }: { overview: Overview }) {
   const importResearch = trpc.deals.admin.importResearchCommunities.useMutation({ onSuccess: (result) => { refresh(); toast.success(`Research list loaded: ${result.created} new, ${result.existing} already here, ${result.skipped} skipped (${result.builders} builders).`); }, onError: (error) => toast.error(error.message) });
   const discover = trpc.deals.admin.discoverCommunities.useMutation({ onSuccess: () => toast.success("Looking for new communities on every builder's site. New ones are emailed to you and appear here hidden until their first clean update."), onError: (error) => toast.error(error.message) });
   const waiting = overview.communities.filter((community) => community.awaitingFirstSync).length;
+  // Oct 27, 2026: 934 cards at once was a 34,000-node page; the list shows a page until searched or opened in full.
+  const [query, setQuery] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const { shown, matching } = visibleCommunities(overview.communities, query, showAll);
   return (
     <Section
       id="communities"
@@ -364,8 +368,14 @@ export function CommunitiesSection({ overview }: { overview: Overview }) {
         {waiting > 0 && <p className="text-xs text-muted-foreground" data-deals-waiting-count="true">{waiting} communit{waiting === 1 ? "y was" : "ies were"} added automatically and go{waiting === 1 ? "es" : ""} live after {waiting === 1 ? "its" : "their"} first clean update. Builders are checked every Monday, or now with Find new communities.</p>}
         {adding && (builders.length ? <CommunityForm initial={EMPTY_COMMUNITY} builders={builders} onDone={() => setAdding(false)} /> : <p className="text-xs text-muted-foreground">{buildersQuery.isError ? `Builder list could not be loaded: ${buildersQuery.error.message}` : "Loading builder list..."}</p>)}
         {diagnosticsQuery.isError && <Warning>Community diagnostics could not be loaded ({diagnosticsQuery.error.message}). Holds and refresh history are hidden until it loads.</Warning>}
-        {overview.communities.map((community) => <CommunityCard key={community.id} community={community} diagnostics={byId.get(community.id)} activeIncentive={activeIncentive(community.id)} builders={builders} />)}
+        {overview.communities.length > COMMUNITY_LIST_PAGE && <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Input aria-label="Find a community" data-deals-community-search="true" className={inputClass} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a community: builder, name, area, district, id — or held, paused, hidden, waiting" />
+          <p className="shrink-0 text-xs text-muted-foreground" data-deals-community-count="true">{query.trim() ? `${matching} of ${overview.communities.length} match` : showAll ? `All ${overview.communities.length}` : `First ${Math.min(COMMUNITY_LIST_PAGE, matching)} of ${overview.communities.length}`}</p>
+        </div>}
+        {shown.map((community) => <CommunityCard key={community.id} community={community} diagnostics={byId.get(community.id)} activeIncentive={activeIncentive(community.id)} builders={builders} />)}
         {overview.communities.length === 0 && <EmptyRow>No Builder Deals communities are configured. Add the first one above.</EmptyRow>}
+        {overview.communities.length > 0 && matching === 0 && <EmptyRow>No community matches "{query.trim()}".</EmptyRow>}
+        {!query.trim() && !showAll && matching > COMMUNITY_LIST_PAGE && <Button type="button" variant="outline" className={`${TAP} w-full sm:w-auto`} data-deals-community-show-all="true" onClick={() => setShowAll(true)}>Show all {matching} communities</Button>}
       </div>
     </Section>
   );

@@ -322,3 +322,22 @@ export function mergeUntouched<T extends object>(server: T, draft: T, touched: R
   for (const key of touched) merged[key] = draft[key];
   return merged;
 }
+
+/** The Communities list shows this many cards before "Show all": 934 cards at once made the admin page a 34,000-node render (Oct 27, 2026). */
+export const COMMUNITY_LIST_PAGE = 40;
+export type CommunitySearchRow = { id: number; builder: string; privateName: string; publicLabel: string; areaLabel: string; schoolDistrict?: string | null; holdReason?: string | null; awaitingFirstSync?: boolean; paused?: boolean; active?: boolean };
+/** Case-insensitive match on anything the team would type: builder, private or public name, area, district, hold reason, id. */
+export function communityMatches(row: CommunitySearchRow, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  if (needle === "held" || needle === "hold") return Boolean(row.holdReason);
+  if (needle === "paused") return Boolean(row.paused);
+  if (needle === "hidden" || needle === "inactive") return row.active === false;
+  if (needle === "waiting" || needle === "new") return Boolean(row.awaitingFirstSync);
+  return [String(row.id), row.builder, row.privateName, row.publicLabel, row.areaLabel, row.schoolDistrict ?? "", row.holdReason ?? ""].some((value) => value.toLowerCase().includes(needle));
+}
+/** The cards to render: every match when searching or showing all, else the first page. */
+export function visibleCommunities<T extends CommunitySearchRow>(rows: readonly T[], query: string, showAll: boolean): { shown: T[]; matching: number } {
+  const matching = rows.filter((row) => communityMatches(row, query));
+  return { shown: query.trim() || showAll ? matching : matching.slice(0, COMMUNITY_LIST_PAGE), matching: matching.length };
+}

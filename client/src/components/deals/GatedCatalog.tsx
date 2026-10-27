@@ -241,6 +241,22 @@ export function pickedHomes(communities: readonly GatedCommunity[], picks: reado
   return picks.flatMap((card) => { const entry = byCard.get(card); return entry ? [entry] : []; });
 }
 
+/**
+ * Oct 27, 2026: the picked homes as plain text for the agent's clipboard (a CRM note, an e-mail, a text): one line
+ * per home with price, specs, the address or plan, the community and when it is ready. The agent sees the full list,
+ * so the private names are theirs to paste; a buyer's page never shows this.
+ */
+export function picksAsText(picked: ReadonlyArray<{ home: GatedHome; community: GatedCommunity }>, listUrl?: string | null): string {
+  const spec = (home: GatedHome) => [home.beds ? `${home.beds} bd` : null, home.baths ? `${home.baths} ba` : null, home.sqft ? `${home.sqft.toLocaleString("en-US")} sq ft` : null, home.garage ? `${home.garage} garage` : null].filter(Boolean).join(" · ");
+  const ready = (home: GatedHome) => home.kind === "to_be_built" ? "to be built" : home.moveInDate ? `move-in ${home.moveInDate}` : "available now";
+  const lines = picked.map(({ home, community }, index) => {
+    const where = [home.details?.address, home.details?.planName ? `${home.details.planName} plan` : null].filter(Boolean).join(" · ") || community.label;
+    const place = [community.details?.communityName, community.details?.builderName].filter(Boolean).join(" by ") || community.area;
+    return `${index + 1}. ${home.price ? money.format(home.price) : "Price on request"}${home.previousPrice && home.price && home.previousPrice > home.price ? ` (was ${money.format(home.previousPrice)})` : ""} — ${spec(home) || "specs on request"}\n   ${where}\n   ${place} · ${ready(home)}`;
+  });
+  return [`${picked.length} new-build home${picked.length === 1 ? "" : "s"} picked for you:`, "", ...lines, ...(listUrl ? ["", `Photos, prices and this week's incentives: ${listUrl}`] : [])].join("\n");
+}
+
 export const PICKS_COPY = {
   heading: (first: string | null | undefined, count: number) => `${first ?? "Your agent"} picked ${count === 1 ? "this home" : `these ${count} homes`} for you`,
   intro: "Start here. The full list is below if you want to see everything else.",

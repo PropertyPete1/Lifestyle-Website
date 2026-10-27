@@ -10,7 +10,7 @@ import { startLogin } from "@/const";
 import { MINE_COPY, isUnauthorizedDealsError, parseMineCommunities, profileErrorCopy } from "@/lib/dealsMine";
 import { TRANSIENT_GATE_PARAMS, agentRecruitRedirect, clientLinkTokenInUrl, forgetClientLinkToken, keepClientLinkToken, rememberClientLinkToken } from "@/lib/dealsGate";
 import { GateSheet } from "@/components/deals/GateSheet";
-import { GatedCatalog, type GatedCommunity, type HomeRequest, type PickControl } from "@/components/deals/GatedCatalog";
+import { GatedCatalog, pickedHomes, picksAsText, type GatedCommunity, type HomeRequest, type PickControl } from "@/components/deals/GatedCatalog";
 import { FeaturedStrip, type FeaturedDealsData } from "@/components/deals/FeaturedDeals";
 import { AgentTools, type AgentWorkspaceData } from "@/components/deals/AgentTools";
 import { ComingSoonSection } from "@/components/deals/ComingSoon";
@@ -152,13 +152,14 @@ function readPicks(): string[] {
 function writePicks(picks: readonly string[]) { try { window.sessionStorage.setItem(PICKS_STORAGE, JSON.stringify(picks)); } catch { /* private mode: the picks live in memory only */ } }
 
 /** Oct 26, 2026: the agent's pick tray; it sits above the list while anything is picked. */
-function PickTray({ count, onSend, onClear }: { count: number; onSend: () => void; onClear: () => void }) {
+function PickTray({ count, onSend, onClear, onCopy }: { count: number; onSend: () => void; onClear: () => void; onCopy: () => void }) {
   if (count === 0) return null;
   // Dark like the site header (explicit colors: the tray sits outside the light Deals theme scope).
   return <div role="status" data-deals-pick-tray="true" className="fixed bottom-5 left-5 right-5 z-30 flex items-center justify-between gap-3 border border-gold/50 bg-[oklch(0.2_0.02_260)] px-4 py-3 text-white shadow-xl sm:left-auto sm:right-8 sm:w-[26rem]">
     <p className="min-w-0 text-sm"><ListChecks className="mr-2 inline h-4 w-4 text-gold" /><span className="font-medium">{count} home{count === 1 ? "" : "s"} picked</span></p>
     <div className="flex shrink-0 items-center gap-2">
       <button type="button" onClick={onClear} className="min-h-11 px-2 text-xs uppercase tracking-widest text-white/70 hover:text-gold">Clear</button>
+      <button type="button" onClick={onCopy} data-deals-copy-picks="true" aria-label="Copy the picked homes as text" className="min-h-11 px-2 text-xs uppercase tracking-widest text-white/70 hover:text-gold">Copy list</button>
       <button type="button" onClick={onSend} className="min-h-11 bg-gold px-4 text-xs font-medium uppercase tracking-[0.14em] text-primary-foreground">Send to a client</button>
     </div>
   </div>;
@@ -195,6 +196,12 @@ function Team() {
     try { await navigator.clipboard.writeText(url); setCopiedUrl(url); toast.success("Link copied."); }
     catch { window.prompt("Copy this link:", url); }
   };
+  // Oct 27, 2026: the picked homes as text, for a CRM note or an e-mail written by hand.
+  const copyPicks = async () => {
+    const text = picksAsText(pickedHomes(communities, picked));
+    try { await navigator.clipboard.writeText(text); toast.success(`${picked.length} home${picked.length === 1 ? "" : "s"} copied as text.`); }
+    catch { window.prompt("Copy this list:", text); }
+  };
   const tools = <AgentTools workspace={workspace.data as AgentWorkspaceData | undefined} loading={workspace.isLoading} error={workspace.isError ? workspace.error.message : null}
     created={create.data ?? null} creating={create.isPending} createError={create.isError ? create.error.message : null}
     onCreate={(input) => create.mutate(input)} onRevoke={(id) => revoke.mutate({ id })} onCopy={(url) => { void copy(url); }} copiedUrl={copiedUrl}
@@ -203,7 +210,7 @@ function Team() {
   // Agents send the list; their own view has no Save hearts (a heart there would belong to no client). Pick buttons stand in.
   return <>
     <GatedCatalog lead={mine.data.lead} communities={communities} featured={mine.data.featured as FeaturedDealsData} tools={tools} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} pick={pick} />
-    <PickTray count={picked.length} onClear={clearPicks} onSend={sendPicksToClient} />
+    <PickTray count={picked.length} onClear={clearPicks} onSend={sendPicksToClient} onCopy={() => { void copyPicks(); }} />
   </>;
 }
 

@@ -16,7 +16,7 @@ import type { DealsIncentive } from "../client/src/components/deals/shared";
  * the component module loads.
  */
 (globalThis as { React?: typeof React }).React = React;
-const { GatedCatalog, PHOTOS_ON_REQUEST, ProtectedGallery, countdownLabel, pickedHomes } = await import("../client/src/components/deals/GatedCatalog");
+const { GatedCatalog, PHOTOS_ON_REQUEST, ProtectedGallery, countdownLabel, pickedHomes, picksAsText } = await import("../client/src/components/deals/GatedCatalog");
 const { AreaMap } = await import("../client/src/components/deals/AreaMap");
 const { Countdown } = await import("../client/src/components/deals/Countdown");
 const { DealsFooter, Incentive, RATE_CLASS, incentiveRateLines } = await import("../client/src/components/deals/shared");
@@ -390,5 +390,29 @@ describe("Oct 26, 2026: the homes an agent picked lead the client's list", () =>
     expect(team.match(/data-deals-pick="picked"/g)?.length).toBe(1);
     expect(team.match(/data-deals-pick="unpicked"/g)?.length).toBe(2);
     expect(team).toContain('data-deals-picked="true"');
+  });
+});
+
+describe("picksAsText (Oct 27: the agent copies the picked homes as plain text)", () => {
+  it("writes one numbered entry per home with price, specs, address or plan, community and readiness, plus the link when given", () => {
+    const picked = [
+      { home: { card: "a".repeat(20), kind: "quick_move_in", beds: "4", baths: "3", sqft: 2500, garage: "2-car", price: 499000, previousPrice: 549000, moveInDate: "Nov 2026", details: { address: "9923 Monte Carmel Place, Converse, TX 78109", planName: "Kemp" } }, community: { label: "East San Antonio | From the $200s", area: "East San Antonio", homes: [], details: { builderName: "Chesmar", communityName: "Sienna Lakes" } } },
+      { home: { card: "c".repeat(20), kind: "to_be_built", beds: "3", baths: "2", sqft: 2000, price: 354990 }, community: { label: "Seguin | From the $200s", area: "Seguin", homes: [] } },
+    ] as unknown as Parameters<typeof picksAsText>[0];
+    const text = picksAsText(picked, "https://lifestyledesignrealty.com/deals?c=abc");
+    expect(text).toBe([
+      "2 new-build homes picked for you:",
+      "",
+      "1. $499,000 (was $549,000) — 4 bd · 3 ba · 2,500 sq ft · 2-car garage",
+      "   9923 Monte Carmel Place, Converse, TX 78109 · Kemp plan",
+      "   Sienna Lakes by Chesmar · move-in Nov 2026",
+      "2. $354,990 — 3 bd · 2 ba · 2,000 sq ft",
+      "   Seguin | From the $200s",
+      "   Seguin · to be built",
+      "",
+      "Photos, prices and this week's incentives: https://lifestyledesignrealty.com/deals?c=abc",
+    ].join("\n"));
+    expect(picksAsText([picked[0]!])).toMatch(/^1 new-build home picked for you:/);
+    expect(picksAsText([picked[0]!])).not.toContain("incentives:");
   });
 });

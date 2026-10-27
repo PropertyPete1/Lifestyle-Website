@@ -115,16 +115,18 @@ export function registerDealsRoutes(app: Express) {
   // Agent tools: the same session rules as /deals/mine, and a buyer session is sent to its own list.
   app.get("/deals/team", safe(async (req, res, next) => {
     const { isLiveDealSession } = await import("./dealsService");
-    let session = await isLiveDealSession(req);
+    const session = await isLiveDealSession(req);
     if (!session) {
       // Oct 27, 2026: an agent signed in to the site with their Lifestyle e-mail gets a team session here without a text.
+      // The session cookie is on the response, not this request, so an "ok" goes straight through (the lead is the team).
       const { teamSessionFromSiteLogin } = await import("./dealsTeamSignIn");
-      if ((await teamSessionFromSiteLogin(req, res)) === "ok") session = await isLiveDealSession(req) ?? null;
-    }
-    if (!session) {
+      const signIn = await teamSessionFromSiteLogin(req, res);
+      if (signIn === "ok") return next();
       const hadSession = Boolean(parseCookie(req.headers.cookie || "")[DEALS_COOKIE.session]);
       // Oct 26, 2026: no session at /deals/team opens the gate as the agent sign-in (?team=1), not the buyer gate.
-      return res.redirect(302, hadSession ? "/deals?expired=1&team=1" : "/deals?gate=1&team=1");
+      // A site login that is not the team's says so on the sheet (?login=not_team | no_phone | turned_off).
+      const why = signIn === "not_team" || signIn === "no_phone" || signIn === "turned_off" ? `&login=${signIn}` : "";
+      return res.redirect(302, hadSession ? `/deals?expired=1&team=1${why}` : `/deals?gate=1&team=1${why}`);
     }
     if (session.lead.status !== "team") return res.redirect(302, "/deals/mine");
     next();

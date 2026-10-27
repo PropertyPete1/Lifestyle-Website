@@ -18,6 +18,8 @@ export type GateParams = {
   blocked: boolean;
   codeError: string | null;
   google: string | null;
+  /** Why the site login did not open the team list (Oct 27): not on the team, no mobile on the profile, access turned off. */
+  login: "not_team" | "no_phone" | "turned_off" | null;
 };
 
 /** Pending verification as deals.state reports it; the display phone is already masked by the server. */
@@ -77,6 +79,9 @@ export const GATE_COPY = {
   freshCode: "A fresh code is on its way.",
   calling: "We're calling you now. Enter the code you hear below.",
   googleFailed: "Google sign-in didn't work here. Enter your mobile number instead.",
+  loginNotTeam: "That login isn't on the team list. Sign in with your Lifestyle e-mail, or get a code by text.",
+  loginNoPhone: "Your team profile has no mobile number on file yet. Ask Peter to add it, then sign in again.",
+  loginTurnedOff: "Your team access is turned off. Text the office to turn it back on.",
   linkCopied: "Link copied. Open it in Safari or Chrome.",
 } as const;
 
@@ -87,7 +92,7 @@ export function isGateStatusMessage(message: string | null): boolean {
 }
 
 /** Query flags the server uses to hand the sheet a one-time outcome. Never src or ig. */
-export const TRANSIENT_GATE_PARAMS = ["codeError", "expired", "error", "blocked", "gate", "cookieBlocked", "google", "team"] as const;
+export const TRANSIENT_GATE_PARAMS = ["codeError", "expired", "error", "blocked", "gate", "cookieBlocked", "google", "team", "login"] as const;
 
 /** Spec sanitizer limits: a reel code is at most 40 characters, a handle at most 30 after the leading @. */
 export const SOURCE_CODE_MAX = 40;
@@ -168,6 +173,7 @@ export function readGateParams(search: string): GateParams {
     blocked: params.get("blocked") === "1",
     codeError: codeError && codeError.trim() ? codeError.trim().slice(0, 40) : null,
     google: params.get("google"),
+    login: (["not_team", "no_phone", "turned_off"] as const).find((value) => value === params.get("login")) ?? null,
   };
 }
 
@@ -182,7 +188,7 @@ export function initialGateState(params: GateParams, state: GateDealsState): Gat
   const step: GateStep = state?.paused ? "paused" : params.cookieBlocked ? "cookie-blocked" : params.expired ? "expired" : params.blocked ? "blocked" : state?.pending ? "code" : "gate";
   return {
     step,
-    message: params.error ? GATE_COPY.somethingWrong : params.google === "failed" ? GATE_COPY.googleFailed : null,
+    message: params.error ? GATE_COPY.somethingWrong : params.google === "failed" ? GATE_COPY.googleFailed : params.login === "not_team" ? GATE_COPY.loginNotTeam : params.login === "no_phone" ? GATE_COPY.loginNoPhone : params.login === "turned_off" ? GATE_COPY.loginTurnedOff : null,
     codeError: params.codeError,
     cannotReceive: false,
     pendingDisplayPhone: state?.pending?.displayPhone ?? null,

@@ -5,6 +5,7 @@ import express from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  teamSessionFromSiteLogin: vi.fn(async () => "no_login"),
   completeVerification: vi.fn(),
   isLiveDealSession: vi.fn(),
   getDealSettings: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   staleSessionLeadId: vi.fn(),
   clientLinkTokenForLead: vi.fn(),
 }));
+vi.mock("./dealsTeamSignIn", () => ({ teamSessionFromSiteLogin: (...args: unknown[]) => mocks.teamSessionFromSiteLogin(...args) }));
 vi.mock("./dealsService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./dealsService")>()),
   completeVerification: (...args: unknown[]) => mocks.completeVerification(...args),
@@ -169,6 +171,19 @@ describe("Builder Deals expiry redirect contract", () => {
     mocks.isLiveDealSession.mockResolvedValue({ leadId: 9, lead: { status: "team" }, deviceHash: "d" });
     const team = await fetch(`${baseUrl}/deals/team`, { redirect: "manual", headers: { cookie: `${DEALS_COOKIE.session}=live` } });
     expect(team.status).toBe(404);
+  });
+
+  it("opens the agent tools straight from a site login, and names a login that is not the team's on the sign-in sheet (Oct 27)", async () => {
+    mocks.isLiveDealSession.mockResolvedValue(null);
+    mocks.teamSessionFromSiteLogin.mockResolvedValueOnce("ok");
+    // The new session cookie rides on the response, so the page is served now, not after a second round trip through the gate.
+    expect((await fetch(`${baseUrl}/deals/team`, { redirect: "manual" })).status).toBe(404);
+    mocks.teamSessionFromSiteLogin.mockResolvedValueOnce("not_team");
+    expect((await fetch(`${baseUrl}/deals/team`, { redirect: "manual" })).headers.get("location")).toBe("/deals?gate=1&team=1&login=not_team");
+    mocks.teamSessionFromSiteLogin.mockResolvedValueOnce("no_phone");
+    expect((await fetch(`${baseUrl}/deals/team`, { redirect: "manual", headers: { cookie: `${DEALS_COOKIE.session}=stale` } })).headers.get("location")).toBe("/deals?expired=1&team=1&login=no_phone");
+    mocks.teamSessionFromSiteLogin.mockResolvedValueOnce("unavailable");
+    expect((await fetch(`${baseUrl}/deals/team`, { redirect: "manual" })).headers.get("location")).toBe("/deals?gate=1&team=1");
   });
 });
 

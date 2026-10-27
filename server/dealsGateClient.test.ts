@@ -392,3 +392,14 @@ describe("agentRecruitRedirect (Oct 27: a flagged browser still reaches the agen
     expect(agentRecruitRedirect("//evil.example/", false)).toBeNull();
   });
 });
+
+describe("the sign-in sheet names a site login that did not open the team list (Oct 27)", () => {
+  it("maps ?login= to its message, drops unknown values, and strips it on reload", () => {
+    const state = { pending: null } as never;
+    expect(initialGateState(readGateParams("?gate=1&team=1&login=not_team"), state).message).toBe(GATE_COPY.loginNotTeam);
+    expect(initialGateState(readGateParams("?gate=1&team=1&login=no_phone"), state).message).toBe(GATE_COPY.loginNoPhone);
+    expect(initialGateState(readGateParams("?gate=1&team=1&login=turned_off"), state).message).toBe(GATE_COPY.loginTurnedOff);
+    expect(readGateParams("?login=whatever").login).toBeNull();
+    expect(stripTransientGateParams("/deals?gate=1&team=1&login=not_team&src=sl1")).toBe("/deals?src=sl1");
+  });
+});

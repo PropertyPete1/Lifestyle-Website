@@ -9,7 +9,7 @@ import { FakeDealsDb } from "./dealsSync.fakeDb";
 const mocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 
-import { gatedDealsCatalog, publicDealsCatalog } from "./dealsService";
+import { buildGatedCatalog, gatedCatalogViewKey, gatedDealsCatalog, publicDealsCatalog } from "./dealsService";
 
 let db: FakeDealsDb;
 let selects = 0;
@@ -75,6 +75,31 @@ describe("catalog reads at the scale of every community", () => {
     const gated = await gatedDealsCatalog(leadId) as Array<{ label: string; fromYourReel: boolean; key: string }>;
     expect(gated[0]).toMatchObject({ label: "Area 4 | New Homes", fromYourReel: true });
     expect(new Set(gated.map((entry) => entry.key)).size).toBe(5);
+  });
+
+  it("serves one shared build of the list per view, ordering it and marking the reel per lead without rebuilding (Oct 27)", async () => {
+    seedCommunities(5);
+    const built = await buildGatedCatalog({ view: "gated" });
+    expect(built.map((item) => item.id)).toEqual([...built.map((item) => item.id)].sort((a, b) => a - b));
+    expect(built.every((item) => item.entry.fromYourReel === false)).toBe(true);
+    const loader = vi.fn(async () => built);
+    const r4 = db.seed(dealLeads, { phoneE164: "+12105550124", status: "verified", expiresAt: new Date(Date.now() + 3_600_000), deviceHash: "e".repeat(64), consentText: "c", flags: "[]", sourceCode: "r4" });
+    const r2 = db.seed(dealLeads, { phoneE164: "+12105550125", status: "verified", expiresAt: new Date(Date.now() + 3_600_000), deviceHash: "f".repeat(64), consentText: "c", flags: "[]", sourceCode: "R2" });
+    const listFour = await gatedDealsCatalog(r4, { view: "gated" }, { built: loader }) as Array<{ label: string; fromYourReel: boolean }>;
+    const listTwo = await gatedDealsCatalog(r2, { view: "gated" }, { built: loader }) as Array<{ label: string; fromYourReel: boolean }>;
+    expect(loader).toHaveBeenCalledTimes(2);
+    expect(listFour[0]).toMatchObject({ label: "Area 4 | New Homes", fromYourReel: true });
+    expect(listTwo[0]).toMatchObject({ label: "Area 2 | New Homes", fromYourReel: true });
+    expect(listFour.filter((entry) => entry.fromYourReel)).toHaveLength(1);
+    // The shared build is never written to by a lead's pass.
+    expect(built.every((item) => item.entry.fromYourReel === false)).toBe(true);
+    // An expired lead gets nothing and never asks for the build.
+    const expired = db.seed(dealLeads, { phoneE164: "+12105550126", status: "verified", expiresAt: new Date(Date.now() - 1), deviceHash: "a".repeat(64), consentText: "c", flags: "[]", sourceCode: "r1" });
+    expect(await gatedDealsCatalog(expired, { view: "gated" }, { built: loader })).toEqual([]);
+    expect(loader).toHaveBeenCalledTimes(2);
+    expect(gatedCatalogViewKey({ view: "gated" })).toBe("gated");
+    expect(gatedCatalogViewKey({ view: "full", builderPages: true })).toBe("full:pages");
+    expect(gatedCatalogViewKey({ view: "full", builderPages: false })).toBe("full:nopages");
   });
 
   it("gives the landing page an offer's teaser and figures only; the full wording, the exact homes and the deadlines wait for sign-up", async () => {

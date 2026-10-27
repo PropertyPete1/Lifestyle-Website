@@ -38,6 +38,8 @@ import {
   savedDealCards,
   showGoogleDealsButton,
   createPendingVerification,
+  buildGatedCatalog,
+  gatedCatalogViewKey,
 } from "./dealsService";
 import { createPublicPageCache } from "./publicPageCache";
 import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
@@ -446,10 +448,19 @@ export const dealsRouter = router({
     const { featuredDeals } = await import("./dealsFeatured");
     const { clientLinkPicksForLead } = await import("./dealsClientLinks");
     // Oct 26, 2026: the homes the client's agent picked for them lead their list; nobody else has picks.
-    const [communities, saved, picks] = await Promise.all([gatedDealsCatalog(session.leadId, view), savedDealCards(session.leadId), agent ? clientLinkPicksForLead(session.lead) : Promise.resolve([] as string[])]);
+    // Oct 27, 2026: the list and its featured row are the same for every lead with this view and took ~4 s to build
+    // on every open ("Preparing the team list…"); they are built once a minute per view and shared (see publicPageCache).
+    const viewKey = gatedCatalogViewKey(view);
+    const builtList = () => publicPageCache(`mine:${viewKey}`, () => buildGatedCatalog(view));
+    const cardsOf = (built: Awaited<ReturnType<typeof buildGatedCatalog>>) => new Set(built.flatMap(({ entry }) => ((entry.homes as Array<{ card?: string }> | undefined) ?? []).flatMap((home) => home.card ? [home.card] : [])));
+    const [communities, saved, picks, featured] = await Promise.all([
+      gatedDealsCatalog(session.leadId, view, { built: builtList }),
+      savedDealCards(session.leadId),
+      agent ? clientLinkPicksForLead(session.lead) : Promise.resolve([] as string[]),
+      // Ranked among the homes on this list only, so a community dropped from it never leaves a gap.
+      publicPageCache(`mine-featured:${viewKey}`, async () => featuredDeals(view, { onlyCards: cardsOf(await builtList()) })),
+    ]);
     const listCards = new Set((communities as Array<{ homes?: Array<{ card?: string }> }>).flatMap((community) => (community.homes ?? []).flatMap((home) => home.card ? [home.card] : [])));
-    // Ranked among the homes on this list only, so a community dropped from it never leaves a gap.
-    const featured = await featuredDeals(view, { onlyCards: listCards });
     const connection = await getDb();
     if (connection) {
       const hourAgo = new Date(Date.now() - 60 * 60_000);

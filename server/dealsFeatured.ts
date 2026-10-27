@@ -81,6 +81,11 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
     db.select().from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))),
   ]);
   const full = view !== "public" && view.view === "full";
+  // Grouped once: a filter per community over every home in the area was 784 × 12,000 comparisons a request.
+  const homesBy = new Map<number, typeof homes>();
+  for (const row of homes) { const list = homesBy.get(row.communityId); if (list) list.push(row); else homesBy.set(row.communityId, [row]); }
+  const incentivesBy = new Map<number, typeof incentives>();
+  for (const row of incentives) { const list = incentivesBy.get(row.communityId); if (list) list.push(row); else incentivesBy.set(row.communityId, [row]); }
   const candidates: FeaturedCandidate[] = [];
   /** Deal key to home id, kept on the server only (a key is never reversible). */
   const homeByKey = new Map<string, number>();
@@ -91,7 +96,7 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
     const area = scrub(community.areaLabel);
     // The public label is written to be safe; a slip still never reaches a buyer, here or in the catalog.
     if (!full && !publicNoPrivateNames({ label, area }, config)) continue;
-    const live = incentives.filter((row) => row.communityId === community.id && incentiveIsLive(row, now, settings.incentiveLapseDays))
+    const live = (incentivesBy.get(community.id) ?? []).filter((row) => incentiveIsLive(row, now, settings.incentiveLapseDays))
       .sort((a, b) => b.confirmedAt.getTime() - a.confirmedAt.getTime())[0];
     const baseOffer = offerFromIncentive(live);
     // The APR goes with the rate wherever the rate is printed (Reg Z): an offer with no APR is not a builder rate here,
@@ -101,7 +106,7 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
     // The smallest lot the community promises; a home's own lot size wins when it has one.
     const communityAcres = lotAcres(community.lotSizes, { field: true }) ?? lotAcres(community.publicLabel);
     const excluded = communityExcludedFromFeatured(community, config, excludedBuilders);
-    for (const home of selectDealCatalogHomes(homes.filter((row) => row.communityId === community.id))) {
+    for (const home of selectDealCatalogHomes(homesBy.get(community.id) ?? [])) {
       // A home with its own lot size answers for itself, even when that text gives no acreage.
       const homeAcres = homeLotAcres(home.lotSize, communityAcres);
       const card = view !== "public" ? dealsCardHandle(home.sourceKey) : undefined;

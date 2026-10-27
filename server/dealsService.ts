@@ -1042,18 +1042,40 @@ export async function catalogViewForSession(lead: Pick<typeof dealLeads.$inferSe
   return agent ? { view: { view: "full", builderPages: false }, agent } : { view: { view: "gated" }, agent: null };
 }
 
-export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView = { view: "gated" }) {
+/** One built list entry with the community facts the per-lead pass needs (its reel, for ordering and "from your reel"). */
+export type GatedCatalogBuilt = { id: number; reelCode: string; reelUrl: string | null; entry: Record<string, unknown> };
+/** The catalog key a cache keeps one built list under: the same for every lead who sees this view. */
+export function gatedCatalogViewKey(view: DealsCatalogView): string {
+  return view.view === "full" ? `full:${view.builderPages ? "pages" : "nopages"}` : "gated";
+}
+
+/**
+ * The unlocked list for one lead. The list itself depends only on the view (scrubbed, full, full with builder pages),
+ * not on who is reading it, and takes seconds to build, so a caller may hand in a cached build (`built`); only the
+ * order and the "from your reel" mark are the lead's own.
+ */
+export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView = { view: "gated" }, options: { built?: (view: DealsCatalogView) => Promise<GatedCatalogBuilt[]> } = {}) {
   const db = await getDb();
   if (!db) return [];
   const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, leadId)).limit(1))[0];
   if (!lead || !["verified", "team"].includes(lead.status) || lead.expiresAt <= new Date()) return [];
+  const built = await (options.built ?? buildGatedCatalog)(view);
+  const code = lead.sourceCode?.trim().toLowerCase() || null;
+  // A shallow copy per community, so the shared build is never written to.
+  return browseOrder(built, lead.sourceCode).map(({ reelCode, entry }) => ({ ...entry, fromYourReel: Boolean(code) && reelCode.toLowerCase() === code })) as unknown[];
+}
+
+/** Every community on the unlocked list for a view, built in id order; `gatedDealsCatalog` orders it for the lead. */
+export async function buildGatedCatalog(view: DealsCatalogView = { view: "gated" }): Promise<GatedCatalogBuilt[]> {
+  const db = await getDb();
+  if (!db) return [];
   const full = view.view === "full";
   const now = new Date();
   const settings = await getDealSettings();
   const { areaMapRadius, communityAreaMap } = await import("./dealsMap");
   const gatedRadius = areaMapRadius(settings, "gated");
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
-  const data = [] as unknown[];
+  const data = [] as GatedCatalogBuilt[];
   if (!communities.length) return data;
   // Three reads for the whole list (incentives, homes, photos), however many communities there are.
   const ids = communities.map((community) => community.id);
@@ -1069,7 +1091,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
     ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, shownHomeIds), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
     : [];
   const photosBy = groupBy(photoRows, (photo) => photo.homeId);
-  for (const community of browseOrder(communities, lead.sourceCode)) {
+  for (const community of communities) {
     const scrubNames = communityScrubConfig(community);
     const scrub = (value: string) => full ? value : scrubPrivateNames(value, scrubNames);
     const incentive = incentives.get(community.id);
@@ -1101,8 +1123,8 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
       });
     }
     const entry = {
-      // The community whose reel this buyer commented on opens first on their list.
-      fromYourReel: Boolean(lead.sourceCode) && community.reelCode.toLowerCase() === lead.sourceCode.toLowerCase(),
+      // The community whose reel this buyer commented on opens first on their list: set per lead in gatedDealsCatalog.
+      fromYourReel: false,
       // Opaque handle the page keys its open/closed state on.
       key: dealsHandle(`deals-community:${community.id}`, 16),
       label: scrub(community.publicLabel),
@@ -1122,7 +1144,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
       ...(full ? { details: { builderName: community.builder === "Manual" ? null : community.builder, communityName: community.privateName, address: community.privateAddress || null, salesLine: view.builderPages ? community.salesPhone : null, builderPage: view.builderPages && /^https?:\/\//i.test(community.sourceUrl) ? community.sourceUrl : null } } : {}),
     };
     if (!full && await dropPrivateResidue(community.id, entry, scrubNames, "gated")) continue;
-    data.push(entry);
+    data.push({ id: community.id, reelCode: community.reelCode, reelUrl: community.reelUrl, entry });
   }
   return data;
 }

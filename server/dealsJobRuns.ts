@@ -31,6 +31,17 @@ export function maskPersonalData(text: string): string {
  * "… '…' for column … at row"); every other quoted value ('…' or "…") becomes '?' (backquoted SQL identifiers are
  * names, not values, and stay); anything still shaped like an e-mail, phone or long number is masked. Cut to 300.
  */
+/**
+ * Oct 27, 2026: a database error from drizzle reads "Failed query: <whole SQL>" with the real cause (the MySQL
+ * message) attached as `cause`; the first line alone said nothing. The cause leads, the query's first words follow.
+ */
+export function jobErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return "failed";
+  const cause = error.cause instanceof Error ? error.cause.message : typeof error.cause === "string" ? error.cause : null;
+  const first = error.message.split(/\r?\n/)[0] ?? "";
+  return cause ? `${cause.split(/\r?\n/)[0]} (during: ${first.slice(0, 60)})` : error.message;
+}
+
 export function redactJobError(message: string): string {
   const first = (message.split(/\r?\n/)[0] ?? "").replace(/\bparams:.*$/i, "");
   // The value-bearing messages first (greedy, on the raw text), then personal shapes are masked before the generic

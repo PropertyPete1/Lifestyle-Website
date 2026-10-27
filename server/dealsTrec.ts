@@ -26,7 +26,7 @@ function field(row: TrecInput, ...names: string[]) { for (const name of names) i
 
 /** Normalizes the lookup columns before insertion so matching can stay in SQL. */
 export function trecLicenseValues(importId: number, row: TrecInput): typeof dealTrecLicenses.$inferInsert | null {
-  const fullName = canonicalTrecName(field(row, "full_name", "name"));
+  const fullName = canonicalTrecName(field(row, "full_name", "name")).slice(0, 190);
   if (!fullName) return null;
   const parts = trecNameParts(fullName);
   return {
@@ -76,8 +76,21 @@ export async function importTrecLicenses(options: TrecImportOptions = {}) {
   if (!response.ok || !response.body) throw new Error(`TREC CSV ${response.status}`);
   const imported = await db.insert(dealTrecImports).values({ sourceEtag: response.headers.get("etag"), rowCount: 0, current: false });
   const importId = Number((imported as unknown as [{ insertId: number }])[0].insertId);
-  const reader = response.body.getReader(); let headers: string[] | null = null, batch: Array<typeof dealTrecLicenses.$inferInsert> = [], count = 0;
-  const flush = async () => { if (!batch.length) return; await db.insert(dealTrecLicenses).values(batch); count += batch.length; batch = []; };
+  const reader = response.body.getReader(); let headers: string[] | null = null, batch: Array<typeof dealTrecLicenses.$inferInsert> = [], count = 0, skipped = 0, firstSkip: string | null = null;
+  // Oct 27, 2026: one row the database refuses (a value it will not store) no longer fails a 326k-row import: the
+  // batch is retried row by row, the refused rows are counted, and the first refusal's reason is kept for the job run.
+  const flush = async () => {
+    if (!batch.length) return;
+    const rows = batch; batch = [];
+    try { await db.insert(dealTrecLicenses).values(rows); count += rows.length; return; }
+    catch (error) {
+      for (const row of rows) {
+        try { await db.insert(dealTrecLicenses).values(row); count += 1; }
+        catch (rowError) { skipped += 1; if (!firstSkip) firstSkip = (rowError instanceof Error ? (rowError.cause instanceof Error ? rowError.cause.message : rowError.message) : String(rowError)).split(/\r?\n/)[0]!.slice(0, 160); }
+      }
+      if (skipped > rows.length / 2) throw error;
+    }
+  };
   const readChunk = async () => {
     watchdog = setTimeout(() => controller.abort(new Error("TREC CSV download stalled")), options.readInactivityMs ?? TREC_READ_INACTIVITY_MS);
     try { return await reader.read(); } finally { clearWatchdog(); }
@@ -106,7 +119,7 @@ export async function importTrecLicenses(options: TrecImportOptions = {}) {
       if (batch.length >= 500) await flush();
     }
     await flush(); await activateAndRetainOnlyImport(importId, count);
-    return { ok: true, rows: count, importId };
+    return { ok: true, rows: count, importId, ...(skipped ? { skipped, firstSkip } : {}) };
   } catch (error) { clearWatchdog(); reader.cancel().catch(() => undefined); await db.delete(dealTrecLicenses).where(eq(dealTrecLicenses.importId, importId)); await db.delete(dealTrecImports).where(eq(dealTrecImports.id, importId)); throw error; }
   finally { await rm(dir, { recursive: true, force: true }).catch(() => undefined); }
 }

@@ -309,7 +309,11 @@ describe("Builder Deals once-per-day job records", () => {
   });
 
   it("redacts a value that holds its own apostrophe, and masks phone, e-mail and long numbers in every stored result", async () => {
-    const { redactJobError, maskPersonalData } = await import("./dealsJobRuns");
+    const { redactJobError, maskPersonalData, jobErrorMessage } = await import("./dealsJobRuns");
+    // Oct 27: a drizzle "Failed query" carries the MySQL message as its cause; the cause is what the job run shows.
+    const query = new Error("Failed query: insert into `deal_trec_licenses` (`id`, `import_id`) values (default, ?)\nparams: 1", { cause: new Error("Data too long for column 'county' at row 7") });
+    expect(redactJobError(jobErrorMessage(query))).toBe("Data too long for column '?' at row 7 (during: Failed query: insert into `deal_trec_licenses` (`id`, `impor)");
+    expect(jobErrorMessage(new Error("plain"))).toBe("plain");
     expect(redactJobError("Duplicate entry 'O'Brien-+12105551234' for key 'idx_deal_known_agent'")).toBe("Duplicate entry '?' for key '?'");
     expect(redactJobError("Incorrect string value: 'O'Neil \\xF0\\x9F' for column 'name' at row 1")).toBe("Incorrect string value: '?' for column '?' at row 1");
     expect(redactJobError("Data too long for column 'email' at row 3 (jane.o'neil@example.com)")).not.toMatch(/jane|example/);

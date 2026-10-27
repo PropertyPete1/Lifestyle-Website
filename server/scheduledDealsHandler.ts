@@ -8,7 +8,7 @@ import { CATALOG_BATCH_BUDGET_MS, refreshDueCommunitiesBatch, revalidateDealInce
 import { importTrecLicenses } from "./dealsTrec";
 import { cleanupDealsTestRecords, runBuilderDealsHealthJob, sendBuilderDealsMondayReport, syncKnownAgentsFromFub, syncTeamAllowlistFromFub } from "./dealsMaintenance";
 import { enqueueDailyActivityNote, runPendingDealsFubJobs } from "./dealsFubJobs";
-import { looksLikeDbError, maskPersonalData, redactJobError } from "./dealsJobRuns";
+import { looksLikeDbError, maskPersonalData, redactJobError, jobErrorMessage } from "./dealsJobRuns";
 import { SCHEDULED_PHOTO_RESPOND_MS, pruneDealPhotoRenders, runScheduledDealPhotoDrain } from "./dealsPhotos";
 
 import { chicagoClock, chicagoDay } from "./dealsService";
@@ -70,7 +70,7 @@ async function once(jobName: string, work: () => Promise<unknown>) {
     return result;
   } catch (error) {
     // A thrown error (a database error quotes the values it was given) is stored redacted: first line, no values.
-    await db.update(dealJobRuns).set({ status: "failed", detail: (detail ?? (error instanceof Error ? `threw: ${redactJobError(error.message)}` : "failed")).slice(0, 10_000), completedAt: new Date() }).where(mine);
+    await db.update(dealJobRuns).set({ status: "failed", detail: (detail ?? (error instanceof Error ? `threw: ${redactJobError(jobErrorMessage(error))}` : "failed")).slice(0, 10_000), completedAt: new Date() }).where(mine);
     throw error;
   }
 }

@@ -344,7 +344,7 @@ describe("agent client links through the router", () => {
     db.seed(dealLeads, buyer);
     mocks.isLiveDealSession.mockResolvedValue({ leadId: 52, lead: buyer, deviceHash: buyer.deviceHash });
     const mine = await visitor().mine();
-    const cards = (mine.communities as Array<{ homes: Array<{ card: string }> }>).flatMap((community) => community.homes.map((home) => home.card));
+    const cards = (JSON.parse(mine.communitiesJson) as Array<{ homes: Array<{ card: string }> }>).flatMap((community) => community.homes.map((home) => home.card));
     expect(mine.featured.lowestPayment.map((deal) => deal.card)).toEqual([cards[0]]);
     expect(mine.featured.lowestPayment[0]).not.toHaveProperty("detail");
   });
@@ -373,8 +373,8 @@ describe("agent client links through the router", () => {
     // The client gets the agent's real number, formatted, never a masked one.
     expect(mine.agent).toEqual({ name: "Tiffany Agent", firstName: "Tiffany", phone: "(210) 555-0101" });
     expect(mine.lead.agentClient).toBe(true);
-    expect(JSON.stringify(mine.communities)).toContain("Fixture Lakes");
-    expect(JSON.stringify(mine.communities)).not.toContain("chesmar.com");
+    expect(mine.communitiesJson).toContain("Fixture Lakes");
+    expect(mine.communitiesJson).not.toContain("chesmar.com");
 
     const buyer = row({ id: 42, phoneE164: "+12105550124", sourceCode: "sl1" });
     db.seed(dealLeads, buyer);
@@ -382,7 +382,7 @@ describe("agent client links through the router", () => {
     const reel = await visitor().mine();
     expect(reel.fullDetails).toBe(false);
     expect(reel.agent).toBeNull();
-    expect(JSON.stringify(reel.communities)).not.toContain("Fixture Lakes");
+    expect(reel.communitiesJson).not.toContain("Fixture Lakes");
     expect(reel.saved).toEqual([]);
   });
 
@@ -390,7 +390,7 @@ describe("agent client links through the router", () => {
     const client = row({ agentTeamId: teamId });
     db.seed(dealLeads, client);
     mocks.isLiveDealSession.mockResolvedValue({ leadId: 41, lead: client, deviceHash: client.deviceHash });
-    const card = (await visitor().mine()).communities[0]!.homes[0]!.card as string;
+    const card = (JSON.parse((await visitor().mine()).communitiesJson) as Array<{ homes: Array<{ card: string }> }>)[0]!.homes[0]!.card;
     await expect(visitor().saveHome({ card, saved: true })).resolves.toEqual({ ok: true, saved: true, notified: true });
     expect((await visitor().mine()).saved).toEqual([card]);
     expect(db.rows(dealTourRequests)).toHaveLength(1);
@@ -446,7 +446,7 @@ describe("agent client links through the router", () => {
     // The team member's own list is the full one with builder pages.
     const mine = await visitor().mine();
     expect(mine.fullDetails).toBe(true);
-    expect(JSON.stringify(mine.communities)).toContain("https://www.chesmar.com/x/plan/1/");
+    expect(mine.communitiesJson).toContain("https://www.chesmar.com/x/plan/1/");
 
     const buyer = row({ id: 42, phoneE164: "+12105550124", sourceCode: "sl1" });
     db.seed(dealLeads, buyer);

@@ -472,7 +472,9 @@ export const dealsRouter = router({
     // A featured home always has its card in this list: deals whose card is not shown are dropped.
     const onList = <T extends { card?: string }>(deal: T) => Boolean(deal.card && listCards.has(deal.card));
     const featuredOnList = { ...featured, lowestPayment: featured.lowestPayment.filter(onList), bestRate: featured.bestRate && onList(featured.bestRate) ? featured.bestRate : null, bigLots: featured.bigLots.filter(onList) };
-    return { lead: { ...leadPresentation(session.lead), agentClient: Boolean(agent) }, communities, saved, picks: picks.filter((card) => listCards.has(card)), featured: featuredOnList, fullDetails: view.view === "full", agent: agent ? { name: agent.name, firstName: agent.firstName, phone: agentDisplayPhone(agent) } : null };
+    // The list goes out as one JSON string: superjson walks every value it serializes, and the list is ~5,700 homes
+    // (hundreds of thousands of values) on every open; a string is one value, and the page parses it once (dealsMine.ts).
+    return { lead: { ...leadPresentation(session.lead), agentClient: Boolean(agent) }, communitiesJson: JSON.stringify(communities), saved, picks: picks.filter((card) => listCards.has(card)), featured: featuredOnList, fullDetails: view.view === "full", agent: agent ? { name: agent.name, firstName: agent.firstName, phone: agentDisplayPhone(agent) } : null };
   }),
   /**
    * A buyer who already holds a live list opens an agent's client link: attach

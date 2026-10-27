@@ -370,3 +370,14 @@ describe("Oct 26, 2026: /deals/team is the agent sign-in (Peter: there is no log
     expect(buyer).toContain('id="deals-name"');
   });
 });
+
+describe("parseMineCommunities (Oct 27: the list travels as one JSON string)", async () => {
+  const { parseMineCommunities } = await import("../client/src/lib/dealsMine");
+  it("parses the list once and treats anything else as an empty list", () => {
+    expect(parseMineCommunities<{ key: string }>(JSON.stringify([{ key: "a" }, { key: "b" }]))).toEqual([{ key: "a" }, { key: "b" }]);
+    expect(parseMineCommunities(undefined)).toEqual([]);
+    expect(parseMineCommunities("")).toEqual([]);
+    expect(parseMineCommunities("{not json")).toEqual([]);
+    expect(parseMineCommunities(JSON.stringify({ key: "a" }))).toEqual([]);
+  });
+});

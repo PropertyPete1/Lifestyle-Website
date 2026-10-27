@@ -194,7 +194,12 @@ function chunkUrlsFromScript(script: string, scriptUrl: string): string[] {
   return Array.from(urls).slice(0, 25);
 }
 
-type GatedJson = { lead: { display: string; expiresAt: string; teamPreview: boolean }; communities: Array<{ label: string; areaMap: unknown; homes: Array<{ card: string; photos: string[] }> }> };
+type GatedCommunityJson = { label: string; areaMap: unknown; homes: Array<{ card: string; photos: string[] }> };
+type GatedJson = { lead: { display: string; expiresAt: string; teamPreview: boolean }; communities: GatedCommunityJson[] };
+/** deals.mine carries the list as one JSON string (`communitiesJson`); the page parses it, and so does this harness. */
+function gatedFromMine(mine: { lead: GatedJson["lead"]; communitiesJson: string }): GatedJson {
+  return { lead: mine.lead, communities: JSON.parse(mine.communitiesJson) as GatedCommunityJson[] };
+}
 
 type LiveRun = {
   jar: CookieJar;
@@ -244,7 +249,7 @@ configuredRuntime("Builder Deals runtime privacy boundary (live deployment)", ()
     if (exchange.status !== 302 || exchange.headers.get("location") !== "/deals/mine") throw new Error(`[deals runtime privacy] token exchange returned ${exchange.status} -> ${exchange.headers.get("location") ?? "none"}`);
     const mineDocument = await capture(endpoint("/deals/mine"), { headers: { Accept: "text/html" }, jar });
     const mineJson = await trpcQuery("deals.mine", jar);
-    const gated = unwrapTrpc<GatedJson>(mineJson, "deals.mine");
+    const gated = gatedFromMine(unwrapTrpc<{ lead: GatedJson["lead"]; communitiesJson: string }>(mineJson, "deals.mine"));
 
     const scripts: LiveRun["scripts"] = [];
     const seen = new Set<string>();

@@ -121,7 +121,7 @@ describe("/deals/mine: only a dead session falls back to the landing page", () =
   });
 
   it("renders the personal list when mine succeeds, with no retry panel", () => {
-    mocks.mine.mockReturnValue(mineResult({ data: { lead, communities } }));
+    mocks.mine.mockReturnValue(mineResult({ data: { lead, communitiesJson: JSON.stringify(communities) } }));
     const html = decode(renderMine());
     expect(html).toContain("Prepared for @demo_buyer");
     expect(html).toContain('data-deals-gated="true"');
@@ -130,7 +130,7 @@ describe("/deals/mine: only a dead session falls back to the landing page", () =
   });
 
   it("shows the readable profile error under the name prompt and hides the prompt once a save succeeded", () => {
-    mocks.mine.mockReturnValue(mineResult({ data: { lead, communities } }));
+    mocks.mine.mockReturnValue(mineResult({ data: { lead, communitiesJson: JSON.stringify(communities) } }));
     mocks.updateProfileResult.isError = true;
     mocks.updateProfileResult.error = { message: '[{"code":"too_small","minimum":2}]', data: { code: "BAD_REQUEST" } };
     const failed = decode(renderMine());

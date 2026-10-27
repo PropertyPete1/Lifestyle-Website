@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import { startLogin } from "@/const";
-import { MINE_COPY, isUnauthorizedDealsError, profileErrorCopy } from "@/lib/dealsMine";
+import { MINE_COPY, isUnauthorizedDealsError, parseMineCommunities, profileErrorCopy } from "@/lib/dealsMine";
 import { TRANSIENT_GATE_PARAMS, clientLinkTokenInUrl, forgetClientLinkToken, keepClientLinkToken, rememberClientLinkToken } from "@/lib/dealsGate";
 import { GateSheet } from "@/components/deals/GateSheet";
 import { GatedCatalog, type GatedCommunity, type HomeRequest, type PickControl } from "@/components/deals/GatedCatalog";
@@ -127,6 +127,7 @@ function Mine() {
   const viewed = trpc.deals.viewedCommunity.useMutation();
   const [request, setRequest] = useState<HomeRequest | null>(null);
   const { savingCard, onSave } = useSaveHome(() => { void mine.refetch(); });
+  const communities = useMemo(() => parseMineCommunities<GatedCommunity>(mine.data?.communitiesJson), [mine.data?.communitiesJson]);
   useInstagramEmbeds();
   if (mine.isLoading) return <div className="deals-light min-h-screen bg-background p-8 text-center text-muted-foreground">Preparing your private list…</div>;
   // Only "no live session" falls back to the landing page and its gate; any other
@@ -134,7 +135,7 @@ function Mine() {
   if (mine.isError && isUnauthorizedDealsError(mine.error)) return <Landing />;
   if (mine.isError || !mine.data) return <MineRetry onRetry={() => { void mine.refetch(); }} retrying={mine.isFetching} />;
   return <>
-    <GatedCatalog lead={mine.data.lead} communities={mine.data.communities as GatedCommunity[]} featured={mine.data.featured as FeaturedDealsData} saved={mine.data.saved} picks={mine.data.picks} savingCard={savingCard} onSave={onSave} agent={mine.data.agent} onRequest={setRequest} onViewCommunity={(key) => viewed.mutate({ key })} onSaveProfile={(input) => update.mutate(input)} savingProfile={update.isPending} profileSaved={update.isSuccess} profileError={profileErrorCopy(update.error)} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} />
+    <GatedCatalog lead={mine.data.lead} communities={communities} featured={mine.data.featured as FeaturedDealsData} saved={mine.data.saved} picks={mine.data.picks} savingCard={savingCard} onSave={onSave} agent={mine.data.agent} onRequest={setRequest} onViewCommunity={(key) => viewed.mutate({ key })} onSaveProfile={(input) => update.mutate(input)} savingProfile={update.isPending} profileSaved={update.isSuccess} profileError={profileErrorCopy(update.error)} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} />
     <HomeRequestSheet key={request ? `${request.requestType}:${request.card}` : "closed"} request={request} onClose={() => setRequest(null)} />
   </>;
 }
@@ -168,6 +169,7 @@ function Team() {
   const comingSoon = trpc.deals.comingSoon.useQuery();
   const [picked, setPicked] = useState<string[]>(() => readPicks());
   useEffect(() => { writePicks(picked); }, [picked]);
+  const communities = useMemo(() => parseMineCommunities<GatedCommunity>(mine.data?.communitiesJson), [mine.data?.communitiesJson]);
   const pick: PickControl = useMemo(() => ({ picked: new Set(picked), onToggle: (card) => setPicked((current) => current.includes(card) ? current.filter((entry) => entry !== card) : current.length >= PICKS_MAX ? (toast.error(`Up to ${PICKS_MAX} picks per client.`), current) : [...current, card]) }), [picked]);
   const clearPicks = () => setPicked([]);
   // "Send to a client" lands the agent in the form with the cursor in the client-name field (focus after the smooth scroll settles).
@@ -198,7 +200,7 @@ function Team() {
     picked={picked} onClearPicks={clearPicks} onSetPicks={(input) => setPicks.mutateAsync(input)} settingPicks={setPicks.isPending} />;
   // Agents send the list; their own view has no Save hearts (a heart there would belong to no client). Pick buttons stand in.
   return <>
-    <GatedCatalog lead={mine.data.lead} communities={mine.data.communities as GatedCommunity[]} featured={mine.data.featured as FeaturedDealsData} tools={tools} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} pick={pick} />
+    <GatedCatalog lead={mine.data.lead} communities={communities} featured={mine.data.featured as FeaturedDealsData} tools={tools} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} pick={pick} />
     <PickTray count={picked.length} onClear={clearPicks} onSend={sendPicksToClient} />
   </>;
 }

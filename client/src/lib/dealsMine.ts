@@ -80,3 +80,18 @@ export function countdownLabel(expiresAt: string, now: number): string {
 export function countdownExpired(expiresAt: string, now: number): boolean {
   return countdownSeconds(expiresAt, now) === 0;
 }
+
+/**
+ * The unlocked list arrives as one JSON string (deals.mine `communitiesJson`): the server stringifies it once instead
+ * of superjson walking every value, and the page parses it once here. A string that will not parse is an empty list,
+ * so a damaged response shows the retry card, never a blank page.
+ */
+export function parseMineCommunities<T>(communitiesJson: string | null | undefined): T[] {
+  if (typeof communitiesJson !== "string" || !communitiesJson) return [];
+  try {
+    const parsed: unknown = JSON.parse(communitiesJson);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}

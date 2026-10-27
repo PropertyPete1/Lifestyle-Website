@@ -147,6 +147,18 @@ function sendOperationalAlert(settings: DealSettings, category: string, subject:
 
 const SETTINGS_KEY = "builder_deals";
 const PENDING_MINUTES = 10;
+/**
+ * Oct 27, 2026: a team member's number always gets a real code, even when it is also on the test-number list with
+ * "skip Twilio" on (Peter's own cell: he unlocked, got no text, and was dropped on the landing page).
+ */
+export async function isTeamPhone(phoneE164: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  return (await db.select({ id: dealTeamAllowlist.id }).from(dealTeamAllowlist).where(and(eq(dealTeamAllowlist.active, true), eq(dealTeamAllowlist.phoneE164, phoneE164))).limit(1)).length > 0;
+}
+
+/** A team member stays signed in for 90 days (Oct 27, 2026); buyers keep the settings' expiry hours. */
+export const TEAM_ACCESS_HOURS = 90 * 24;
 
 export function hashSecret(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
@@ -1414,12 +1426,13 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   }
   // The link belongs to a buyer: a team member stays a team member even when they open one.
   const attachLink = clientLink && !eligibility.team ? clientLink : null;
-  const accessHours = attachLink ? settings.clientLinkExpiryHours : settings.expiryHours;
+  // Oct 27, 2026 (Peter: agents get in and stay logged in): a team member's session lasts TEAM_ACCESS_HOURS, not a buyer's day.
+  const accessHours = eligibility.team ? TEAM_ACCESS_HOURS : attachLink ? settings.clientLinkExpiryHours : settings.expiryHours;
   let old = (await db.select().from(dealLeads).where(eq(dealLeads.phoneE164, pending.phoneE164)).limit(1))[0];
   let reverifiedActive = Boolean(old && old.expiresAt > new Date());
   // An agent's client keeps the longer access window even when a shorter reel link is still live.
   const freshExpiry = new Date(Date.now() + accessHours * 60 * 60_000);
-  let expiresAt = old && old.expiresAt > new Date() ? (attachLink && old.expiresAt < freshExpiry ? freshExpiry : old.expiresAt) : freshExpiry;
+  let expiresAt = old && old.expiresAt > new Date() ? ((attachLink || eligibility.team) && old.expiresAt < freshExpiry ? freshExpiry : old.expiresAt) : freshExpiry;
   const agentFields = attachLink ? { agentTeamId: attachLink.agentTeamId, clientLinkId: attachLink.linkId } : {};
   // "fub_check_deferred" is an operational marker for the deferred re-check,
   // never a persisted lead flag; it is carried to the caller separately.
@@ -1448,7 +1461,7 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
       if (!raced) throw error;
       old = raced;
       reverifiedActive = raced.expiresAt > new Date();
-      expiresAt = reverifiedActive ? (attachLink && raced.expiresAt < freshExpiry ? freshExpiry : raced.expiresAt) : expiresAt;
+      expiresAt = reverifiedActive ? ((attachLink || eligibility.team) && raced.expiresAt < freshExpiry ? freshExpiry : raced.expiresAt) : expiresAt;
       await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, flags: JSON.stringify(flags), ...agentFields }).where(eq(dealLeads.id, raced.id));
       leadId = raced.id;
     }

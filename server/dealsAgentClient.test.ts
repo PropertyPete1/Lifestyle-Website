@@ -143,6 +143,9 @@ describe("agent tools on /deals/team", () => {
     expect(html).toContain('data-deals-text-it="true"');
     expect(html).toContain('href="sms:?&body=');
     expect(html).not.toContain('href="sms:+12105550202');
+    // Oct 27: Email it opens the agent's mail app with the same message (the agent adds the address).
+    expect(html).toContain('data-deals-email-it="true"');
+    expect(html).toMatch(/href="mailto:\?subject=Your%20private%20list%20of%20new-build%20deals&(?:amp;)?body=Hi%20(?:Maria|Sam)/);
     // The expired, never-used link offers nothing to send.
     expect(html.match(/ Text it</g)?.length).toBe(2);
     expect(html).not.toContain("Follow Up Boss user");

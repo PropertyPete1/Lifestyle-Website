@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Copy, Heart, Link2, ListChecks, MessageSquareText, Send, X } from "lucide-react";
+import { Check, Copy, Heart, Link2, ListChecks, Mail, MessageSquareText, Send, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -80,6 +80,13 @@ export function clientMessage(input: { clientName: string; agentName: string; ur
   // The same wording as the server's default (clientLinkTextMessage), so the preview matches what gets logged.
   if (input.pickCount && input.pickCount > 0) return `Hi ${first}, I picked ${input.pickCount} new-build home${input.pickCount === 1 ? "" : "s"} for you at Lifestyle Design Realty. Photos, prices and this week's incentives: ${input.url}. Text me with questions.`;
   return `Hi ${first}, here's your private list of new-build deals from ${agentFirst} at Lifestyle Design Realty: ${input.url}. Tap any home for photos and pricing. Text me with questions.`;
+}
+
+/** Oct 27, 2026 (Peter: send clients the list by email too): the agent's mail app opens with the message; they add the address. */
+export function mailtoHref(input: { clientName: string; agentName: string; url: string; pickCount?: number }) {
+  const subject = input.pickCount && input.pickCount > 0 ? `${input.pickCount} new-build home${input.pickCount === 1 ? "" : "s"} I picked for you` : "Your private list of new-build deals";
+  const body = `${clientMessage(input)}\n\n${input.agentName}\nLifestyle Design Realty`;
+  return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
 /** iOS wants "sms:number&body=", Android "sms:number?body="; "?&body=" is read by both. */
@@ -203,6 +210,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
           {created.clientPhoneDigits
             ? <button type="button" data-deals-text-it="true" onClick={() => openText({ id: created.id, clientName: created.clientName ?? "", clientPhoneDigits: created.clientPhoneDigits }, createdMessage)} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground"><MessageSquareText className="h-4 w-4" /> Text it</button>
             : <a href={smsHref(createdMessage, null)} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground"><MessageSquareText className="h-4 w-4" /> Text it</a>}
+          <a href={mailtoHref({ clientName: created.clientName ?? "", agentName, url: createdUrl, pickCount: created.pickCount })} data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>
           <Button type="button" variant="outline" onClick={() => onCopy(createdUrl)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === createdUrl ? AGENT_COPY.copied : "Copy link"}</Button>
         </div>
       </div>}
@@ -232,6 +240,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
             {client.clientPhoneDigits
               ? <button type="button" data-deals-text-it="true" onClick={() => openText(client, clientMessage({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length }))} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> {client.lastTextedAt ? "Text it again" : "Text it"}</button>
               : <a href={smsHref(clientMessage({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length }), null)} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> Text it</a>}
+            <a href={mailtoHref({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length })} data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>
             <Button type="button" variant="outline" onClick={() => onCopy(url)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === url ? AGENT_COPY.copied : "Copy link"}</Button>
           </div>}
         </article>;

@@ -752,3 +752,27 @@ describe("Oct 26, 2026: a team member whose cell is a test number with skip-chec
     expect(await classifyDealsAccess({ ...base, phone: "+12105550444" })).toEqual({ allowed: true, team: false, flags: ["TEST"] });
   });
 });
+
+describe("Oct 27, 2026: agents get in and stay in", () => {
+  it("a team member's session lasts 90 days, and a returning one is extended to that, while a buyer keeps the day", async () => {
+    vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
+    testSettings({ testNumbers: [AGENT_PHONE, CLIENT_PHONE] });
+    const { TEAM_ACCESS_HOURS, isTeamPhone } = await import("./dealsService");
+    expect(TEAM_ACCESS_HOURS).toBe(90 * 24);
+    const { done } = await verifyThrough(null, AGENT_PHONE);
+    expect(done?.ok && done.isTeam).toBe(true);
+    const agent = db.rows(dealLeads).find((row) => row.phoneE164 === AGENT_PHONE)!;
+    expect(agent.status).toBe("team");
+    expect(agent.expiresAt.getTime() - Date.now()).toBeGreaterThan(89 * 24 * HOUR);
+    // Returning with a short window left (a session from before): extended to the full 90 days.
+    agent.expiresAt = new Date(Date.now() + 2 * HOUR);
+    await verifyThrough(null, AGENT_PHONE, "another-device");
+    expect(db.rows(dealLeads).find((row) => row.phoneE164 === AGENT_PHONE)!.expiresAt.getTime() - Date.now()).toBeGreaterThan(89 * 24 * HOUR);
+    const buyer = await verifyThrough(null, CLIENT_PHONE);
+    expect(buyer.done?.ok).toBe(true);
+    expect(db.rows(dealLeads).find((row) => row.phoneE164 === CLIENT_PHONE)!.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(24 * HOUR);
+    // A team member's number is never a "skip the text" test number.
+    expect(await isTeamPhone(AGENT_PHONE)).toBe(true);
+    expect(await isTeamPhone(CLIENT_PHONE)).toBe(false);
+  });
+});

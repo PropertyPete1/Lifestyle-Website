@@ -41,7 +41,7 @@ import {
 } from "./dealsService";
 import { createPublicPageCache } from "./publicPageCache";
 import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
-import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, adminTurnedOffLeadIds, browserIsAdminPaused, browserIsRealtorBlocked, dealsCardHandle, pausedAccessMessage, staleSessionLeadId, turnOffBuyerAccess, turnOnBuyerAccess } from "./dealsService";
+import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, adminTurnedOffLeadIds, browserIsAdminPaused, browserIsRealtorBlocked, dealsCardHandle, isTeamPhone, pausedAccessMessage, staleSessionLeadId, turnOffBuyerAccess, turnOnBuyerAccess } from "./dealsService";
 /** What a realtor sees for the moment before the recruiting page opens. */
 /**
  * The landing's two public reads (every community, the featured row) are the same for every visitor: kept for a minute
@@ -381,7 +381,8 @@ export const dealsRouter = router({
       await removePending(ctx.req, ctx.res);
       return { ok: false as const, kind: reserved.kind, message: `We're getting a lot of traffic, so please try again in a bit. Or text ${result.settings.commentKeyword} to ${result.settings.textLine}.` };
     }
-    if (result.isTest && result.settings.skipTwilioForTestNumbers) return { ok: true as const, status: "code_sent", displayPhone: result.displayPhone, test: true };
+    // A test number skips the text unless it belongs to a team member, who needs the real code to sign in (Oct 27, 2026).
+    if (result.isTest && result.settings.skipTwilioForTestNumbers && !(await isTeamPhone(result.phone))) return { ok: true as const, status: "code_sent", displayPhone: result.displayPhone, test: true };
     const sent = await sendTwilioVerify(result.phone, "sms");
     if (!sent.ok) {
       if (sent.reason === "twilio") await recordTwilioVerifyFailure({ sourceCode: result.sourceCode, deviceHash: result.deviceHash, ip: result.ip });
@@ -411,7 +412,7 @@ export const dealsRouter = router({
       ip: pending.clientIp, channel: input.channel, isTest,
     });
     if (!reserved.ok) return { ok: false as const, kind: reserved.kind, message: `We're getting a lot of traffic, so please try again in a bit. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
-    if (isTest && settings.skipTwilioForTestNumbers) return { ok: true as const, test: true };
+    if (isTest && settings.skipTwilioForTestNumbers && !(await isTeamPhone(pending.phoneE164))) return { ok: true as const, test: true };
     const sent = await sendTwilioVerify(pending.phoneE164, input.channel);
     if (!sent.ok && sent.reason === "twilio") await recordTwilioVerifyFailure({ sourceCode: pending.sourceCode, deviceHash: pending.deviceHash, ip: pending.clientIp });
     // The pending row stays either way: "Call me" (voice) is the recovery path for a number that cannot receive texts.

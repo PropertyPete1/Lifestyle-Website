@@ -226,6 +226,8 @@ describe("Texas Homes reader: adapter", () => {
     // An unfiltered answer (rows with another community's logo, a filter set to another id, or more homes for sale than the menu counts) is never this community's list.
     expect((await load(communityPage(), { [texasHomesHomesUrl(ID)]: listPage([...ROWS, { ...ROWS[0]!, street: "100 Grove Trail", logo: `${HOST}/sites/default/files/2024-05/fixture-grove-logo.png` }]) })).holdReasons).toEqual(["invalid_inventory_response"]);
     expect((await load(communityPage(), { [texasHomesHomesUrl(ID)]: listPage(ROWS, false, 999) })).holdReasons).toEqual(["invalid_inventory_response"]);
+    // Oct 27: one home more than the menu counts is the community page's cache a home behind the list, not an unfiltered list.
+    expect((await load(communityPage(), { [texasHomesHomesUrl(ID)]: listPage([...ROWS, { ...ROWS[2]!, street: "300 Fixture Loop" }]) })).holdReasons).toEqual(["missing_down_payment"]);
     expect((await load(communityPage({ logo: null }), { [texasHomesHomesUrl(ID)]: listPage([...ROWS, ...Array.from({ length: 5 }, (_, index) => ({ ...ROWS[2]!, street: `${200 + index} Fixture Loop` }))], false, null) })).holdReasons).toEqual(["invalid_inventory_response"]);
     // A row with no availability element holds through the sync's status rule.
     const dateless = await load(communityPage(), { [texasHomesHomesUrl(ID)]: listPage(ROWS.map((row) => ({ ...row, noDate: true }))) });

@@ -479,8 +479,9 @@ export class TexasHomesAdapter implements DealAdapter {
       const listing = parseTexasHomesListing(list.text, listUrl, now(), cityLine, parsed.logo);
       if (!listing) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
       // The list must be this community's: its rows carry the community's logo, its filter names the community's id, and its
-      // homes for sale never outnumber the menu's count (an unfiltered list would show every community's homes here).
-      if (listing.foreignHome || (listing.selectedNeighborhoodId !== null && listing.selectedNeighborhoodId !== parsed.neighborhoodId) || (menuCount !== null && listing.available > menuCount)) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
+      // homes for sale never outnumber the menu's count by more than one (an unfiltered list would show every community's
+      // homes here; one more is the community page's cached menu a home behind the list, Ventana on Oct 27, 2026).
+      if (listing.foreignHome || (listing.selectedNeighborhoodId !== null && listing.selectedNeighborhoodId !== parsed.neighborhoodId) || (menuCount !== null && listing.available > menuCount + 1)) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
       // The list must be whole: no further page, and never fewer rows than the menu counts for the community.
       if (listing.hasPager || listing.homes.length > TEXASHOMES_MAX_HOMES || (menuCount !== null && listing.homes.length < menuCount)) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
       homes = listing.homes;

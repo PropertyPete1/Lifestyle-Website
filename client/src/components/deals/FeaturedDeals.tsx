@@ -43,7 +43,7 @@ function DealRow({ deal, rank, locked, onSelect, tags = [] }: { deal: FeaturedDe
   const action = locked ? FEATURED_COPY.unlock : FEATURED_COPY.see;
   return <li className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
     <button type="button" onClick={() => onSelect?.(deal)} className="block w-full min-w-0 text-left" data-deals-featured={deal.reason} aria-label={`${action}: ${deal.label}, ${money.format(deal.estMonthly)} a month estimated`}>
-      {deal.photo && <RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className="block aspect-[4/3] w-full min-w-0 select-none object-cover [-webkit-touch-callout:none]" />}
+      {deal.photo && <RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className="block aspect-[4/3] w-full min-w-0 select-none bg-secondary object-cover [-webkit-touch-callout:none]" />}
       <span className="flex w-full min-w-0 items-start gap-4 p-4">
         {rank !== undefined && <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gold/50 font-serif text-lg text-gold">{rank}</span>}
         <span className="min-w-0 flex-1">

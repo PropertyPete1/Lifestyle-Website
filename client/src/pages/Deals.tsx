@@ -170,6 +170,11 @@ function Team() {
   useEffect(() => { writePicks(picked); }, [picked]);
   const pick: PickControl = useMemo(() => ({ picked: new Set(picked), onToggle: (card) => setPicked((current) => current.includes(card) ? current.filter((entry) => entry !== card) : current.length >= PICKS_MAX ? (toast.error(`Up to ${PICKS_MAX} picks per client.`), current) : [...current, card]) }), [picked]);
   const clearPicks = () => setPicked([]);
+  // "Send to a client" lands the agent in the form with the cursor in the client-name field (focus after the smooth scroll settles).
+  const sendPicksToClient = () => {
+    document.getElementById("deals-agent-tools")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => document.getElementById("deals-client-name")?.focus({ preventScroll: true }), 450);
+  };
   const setPicks = trpc.deals.team.setClientLinkPicks.useMutation({ onSuccess: () => { clearPicks(); void workspace.refetch(); } });
   // A new link made with picks takes them with it; the tray empties so the next client starts fresh.
   const create = trpc.deals.team.createClientLink.useMutation({ onSuccess: (result) => { if (result.pickCount) clearPicks(); void workspace.refetch(); } });
@@ -194,7 +199,7 @@ function Team() {
   // Agents send the list; their own view has no Save hearts (a heart there would belong to no client). Pick buttons stand in.
   return <>
     <GatedCatalog lead={mine.data.lead} communities={mine.data.communities as GatedCommunity[]} featured={mine.data.featured as FeaturedDealsData} tools={tools} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} pick={pick} />
-    <PickTray count={picked.length} onClear={clearPicks} onSend={() => document.getElementById("deals-agent-tools")?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+    <PickTray count={picked.length} onClear={clearPicks} onSend={sendPicksToClient} />
   </>;
 }
 

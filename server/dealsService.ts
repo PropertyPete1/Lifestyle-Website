@@ -1065,10 +1065,24 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
   return browseOrder(built, lead.sourceCode).map(({ reelCode, entry }) => ({ ...entry, fromYourReel: Boolean(code) && reelCode.toLowerCase() === code })) as unknown[];
 }
 
+/** How long the last build of each view took (reads vs. the whole), for Admin health: the number the opening wait is made of. */
+export type CatalogBuildStat = { at: string; ms: number; readMs: number; communities: number; homes: number };
+const catalogBuildStats = new Map<string, CatalogBuildStat>();
+export function catalogBuildsSinceStart(): Record<string, CatalogBuildStat> {
+  return Object.fromEntries(catalogBuildStats);
+}
+
 /** Every community on the unlocked list for a view, built in id order; `gatedDealsCatalog` orders it for the lead. */
 export async function buildGatedCatalog(view: DealsCatalogView = { view: "gated" }): Promise<GatedCatalogBuilt[]> {
+  const startedAt = Date.now();
+  const built = await buildGatedCatalogTimed(view, startedAt);
+  catalogBuildStats.set(gatedCatalogViewKey(view), { at: new Date(startedAt).toISOString(), ms: Date.now() - startedAt, readMs: built.readMs, communities: built.entries.length, homes: built.entries.reduce((sum, item) => sum + ((item.entry.homes as unknown[] | undefined)?.length ?? 0), 0) });
+  return built.entries;
+}
+
+async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number): Promise<{ entries: GatedCatalogBuilt[]; readMs: number }> {
   const db = await getDb();
-  if (!db) return [];
+  if (!db) return { entries: [], readMs: 0 };
   const full = view.view === "full";
   const now = new Date();
   const settings = await getDealSettings();
@@ -1076,7 +1090,7 @@ export async function buildGatedCatalog(view: DealsCatalogView = { view: "gated"
   const gatedRadius = areaMapRadius(settings, "gated");
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
   const data = [] as GatedCatalogBuilt[];
-  if (!communities.length) return data;
+  if (!communities.length) return { entries: data, readMs: Date.now() - startedAt };
   // Three reads for the whole list (incentives, homes, photos), however many communities there are.
   const ids = communities.map((community) => community.id);
   const [incentives, allHomes, heldLine] = await Promise.all([
@@ -1091,6 +1105,7 @@ export async function buildGatedCatalog(view: DealsCatalogView = { view: "gated"
     ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, shownHomeIds), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
     : [];
   const photosBy = groupBy(photoRows, (photo) => photo.homeId);
+  const readMs = Date.now() - startedAt;
   for (const community of communities) {
     const scrubNames = communityScrubConfig(community);
     const scrub = (value: string) => full ? value : scrubPrivateNames(value, scrubNames);
@@ -1146,7 +1161,7 @@ export async function buildGatedCatalog(view: DealsCatalogView = { view: "gated"
     if (!full && await dropPrivateResidue(community.id, entry, scrubNames, "gated")) continue;
     data.push({ id: community.id, reelCode: community.reelCode, reelUrl: community.reelUrl, entry });
   }
-  return data;
+  return { entries: data, readMs };
 }
 
 /** Opaque card handles of the homes this lead currently has saved. */

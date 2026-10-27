@@ -9,7 +9,7 @@ import { FakeDealsDb } from "./dealsSync.fakeDb";
 const mocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 
-import { buildGatedCatalog, gatedCatalogViewKey, gatedDealsCatalog, publicDealsCatalog } from "./dealsService";
+import { buildGatedCatalog, catalogBuildsSinceStart, gatedCatalogViewKey, gatedDealsCatalog, publicDealsCatalog } from "./dealsService";
 
 let db: FakeDealsDb;
 let selects = 0;
@@ -97,6 +97,9 @@ describe("catalog reads at the scale of every community", () => {
     const expired = db.seed(dealLeads, { phoneE164: "+12105550126", status: "verified", expiresAt: new Date(Date.now() - 1), deviceHash: "a".repeat(64), consentText: "c", flags: "[]", sourceCode: "r1" });
     expect(await gatedDealsCatalog(expired, { view: "gated" }, { built: loader })).toEqual([]);
     expect(loader).toHaveBeenCalledTimes(2);
+    // Admin health reads how long the last build took and what it held.
+    expect(catalogBuildsSinceStart().gated).toMatchObject({ communities: 5, homes: expect.any(Number) });
+    expect(catalogBuildsSinceStart().gated.readMs).toBeLessThanOrEqual(catalogBuildsSinceStart().gated.ms);
     expect(gatedCatalogViewKey({ view: "gated" })).toBe("gated");
     expect(gatedCatalogViewKey({ view: "full", builderPages: true })).toBe("full:pages");
     expect(gatedCatalogViewKey({ view: "full", builderPages: false })).toBe("full:nopages");

@@ -29,7 +29,7 @@ export function photoDrainLine(lastDrain: Pick<LastPhotoDrain, "at" | "processed
   const cost = lastDrain.msPerPhoto ? `; about ${lastDrain.msPerPhoto} ms per photo${stages ? ` (busy ms per photo: ${stages})` : ""}` : "";
   return `last drain processed ${lastDrain.processed}${lastDrain.hidden ? ` (+${lastDrain.hidden} hidden)` : ""}${lastDrain.partial ? ", answered early" : ""}${lastDrain.coalesced ? ", another drain was running" : ""} ${minutes} min ago${cost}`;
 }
-import { PRIVACY_RESIDUE_EVENT_KIND, getDealSettings, privacyResidueCommunityId, privacyResidueSinceStart } from "./dealsService";
+import { PRIVACY_RESIDUE_EVENT_KIND, catalogBuildsSinceStart, getDealSettings, privacyResidueCommunityId, privacyResidueSinceStart, type CatalogBuildStat } from "./dealsService";
 import { hasBuilderReader } from "./dealsAdapters";
 import { heldReasonsOf } from "../shared/dealsHeldIncentive";
 
@@ -508,6 +508,8 @@ type OperationalSnapshot = {
   holds: { communities: number; incentives: number; incentivesShowingLine: number; items: HoldItem[]; state: HealthState };
   /** Buyer-facing community entries dropped because a private name survived scrubbing (deal_events rows in the window, plus the in-process counter). */
   privacyResidue: { dropped: number; communityIds: number[]; droppedSinceStart: number; state: HealthState };
+  /** The last build of each unlocked-list view in this process (Oct 27: what a cold open waits on), by view key. */
+  catalogBuilds: Record<string, CatalogBuildStat>;
 };
 
 const emptyOperationalSnapshot = (): OperationalSnapshot => ({
@@ -521,6 +523,7 @@ const emptyOperationalSnapshot = (): OperationalSnapshot => ({
   jobFailures: { failed: 0, jobs: [], state: "unknown" },
   holds: { communities: 0, incentives: 0, incentivesShowingLine: 0, items: [], state: "unknown" },
   privacyResidue: { dropped: 0, communityIds: [], droppedSinceStart: privacyResidueSinceStart().dropped, state: "unknown" },
+  catalogBuilds: catalogBuildsSinceStart(),
 });
 
 function holdText(value: string | null | undefined) {
@@ -640,6 +643,7 @@ export async function builderDealsOperationalSnapshot(now = new Date()): Promise
       jobFailures: { failed: failedRunRows.length, jobs: failedRunNames, state: healthState(failedRunRows.length === 0) },
       holds: { communities: heldCommunities, incentives: heldIncentives.length, incentivesShowingLine: heldIncentives.filter((row) => heldIncentiveCountsAsShowingLine(row, now, lapseDays)).length, items: holdItems, state: healthState(holdItems.length === 0) },
       privacyResidue: { dropped: residueRows.length, communityIds: residueCommunityIds, droppedSinceStart: privacyResidueSinceStart().dropped, state: healthState(residueRows.length === 0) },
+      catalogBuilds: catalogBuildsSinceStart(),
     };
   } catch {
     return emptyOperationalSnapshot();

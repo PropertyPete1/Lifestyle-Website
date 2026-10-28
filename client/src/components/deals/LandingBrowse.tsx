@@ -506,6 +506,28 @@ export type SheetOptions = {
   focusHero?: (home: PublicHome, community: LandingCommunity) => ReactNode;
 };
 
+/** The window pieces sheetHistory uses (a test passes a fake). */
+type HistoryWindow = Pick<Window, "addEventListener" | "removeEventListener" | "setTimeout"> & { history: Pick<History, "state" | "pushState" | "back"> };
+
+/**
+ * Oct 28, 2026 (New Home Buddy: the phone's back button closes an open home, it never leaves the page): an open sheet
+ * adds one history entry on the same address; going back closes the sheet, and closing it any other way takes that
+ * entry back off. Returns the clean-up to run when the sheet closes.
+ */
+export function sheetHistory(onBack: () => void, win: HistoryWindow = window): () => void {
+  const token = `sheet-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const mine = () => (win.history.state as { dealsSheet?: string } | null)?.dealsSheet === token;
+  try { win.history.pushState({ ...((win.history.state as object | null) ?? {}), dealsSheet: token }, ""); } catch { return () => undefined; }
+  let popped = false;
+  const onPop = () => { if (!mine()) { popped = true; onBack(); } };
+  win.addEventListener("popstate", onPop);
+  return () => {
+    win.removeEventListener("popstate", onPop);
+    // Checked a moment later, so a sheet that opens again at once (React's development double run) keeps its own entry.
+    if (!popped) win.setTimeout(() => { if (mine()) win.history.back(); }, 0);
+  };
+}
+
 export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters, focus, options = {} }: { community: LandingCommunity; onClose: () => void; onUnlock?: () => void; useHomes: UseCommunityHomes; /** The page's filters: the homes that match come first, the rest one tap away. */ filters?: BrowseFilters; focus?: SheetFocus; options?: SheetOptions }) {
   const dialog = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -529,7 +551,8 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
     window.addEventListener("keydown", onKey);
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = overflow; opener?.focus(); };
+    const releaseHistory = sheetHistory(() => close.current());
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = overflow; releaseHistory(); opener?.focus(); };
   }, []);
   const homes = useHomes(community.key);
   const all = homes.data ?? [];

@@ -18,7 +18,7 @@ import { photoIdFromToken, publicPhotoAllowed, resetPublicPhotoLimits } from "./
 import { regionHomeView, regionPin, spreadStackedPins, SAN_ANTONIO_REGION } from "./dealsRegionMap";
 
 (globalThis as { React?: typeof React }).React = React;
-const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW, clusterView, stillStacked, fanOffsets, isFocusHome, communityShareUrl, keysInView } = await import("../client/src/components/deals/LandingBrowse");
+const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW, clusterView, stillStacked, fanOffsets, isFocusHome, communityShareUrl, keysInView, sheetHistory } = await import("../client/src/components/deals/LandingBrowse");
 
 describe("the region map", () => {
   it("places a point by the map's own projection and leaves off anything outside the picture", () => {
@@ -130,6 +130,58 @@ describe("Search this area (Oct 28, New Home Buddy): the list narrows to what th
     expect(keysInView(items, view, 800, 600)).toEqual(["in", "edge"]);
     // The whole picture in view keeps every placed community.
     expect(keysInView(items, { z: 800, tx: 0, ty: 0 }, 800, 800 / REGION_VIEW.aspect)).toEqual(["in", "edge", "out"]);
+  });
+});
+
+describe("the phone's back button closes an open home (Oct 28, New Home Buddy), never the page", () => {
+  const fakeWindow = () => {
+    const entries: unknown[] = [null];
+    let index = 0;
+    const listeners = new Set<() => void>();
+    const timers: Array<() => void> = [];
+    const win = {
+      history: {
+        get state() { return entries[index] ?? null; },
+        pushState(state: unknown) { entries.splice(index + 1); entries.push(state); index = entries.length - 1; },
+        back() { if (index > 0) { index -= 1; listeners.forEach((listener) => listener()); } },
+      },
+      addEventListener: (_: string, listener: () => void) => { listeners.add(listener); },
+      removeEventListener: (_: string, listener: () => void) => { listeners.delete(listener); },
+      setTimeout: (fn: () => void) => { timers.push(fn); return 0; },
+    };
+    return { win, entries, at: () => index, flush: () => timers.splice(0).forEach((fn) => fn()) };
+  };
+
+  it("back closes the sheet and stays on the page", () => {
+    const fake = fakeWindow();
+    let closed = 0;
+    const release = sheetHistory(() => { closed += 1; }, fake.win as never);
+    expect(fake.entries).toHaveLength(2);
+    fake.win.history.back();
+    expect(closed).toBe(1);
+    expect(fake.at()).toBe(0);
+    release(); fake.flush();
+    expect(fake.at()).toBe(0);
+  });
+
+  it("closing with the X takes its history entry back off, so the next back leaves normally", () => {
+    const fake = fakeWindow();
+    let closed = 0;
+    const release = sheetHistory(() => { closed += 1; }, fake.win as never);
+    release(); fake.flush();
+    expect(fake.at()).toBe(0);
+    expect(closed).toBe(0);
+  });
+
+  it("a sheet that opens again at once keeps its own entry", () => {
+    const fake = fakeWindow();
+    let closed = 0;
+    const first = sheetHistory(() => { closed += 1; }, fake.win as never);
+    first();
+    sheetHistory(() => { closed += 1; }, fake.win as never);
+    fake.flush();
+    expect(fake.at()).toBe(2);
+    expect(closed).toBe(0);
   });
 });
 

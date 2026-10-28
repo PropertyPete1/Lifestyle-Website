@@ -12,7 +12,7 @@ import { Countdown } from "./Countdown";
 import { DealsFooter, Incentive, NewBadge, RedHotBadge, RedHotSavings, ReelCard, RetryImage, formatChicagoDate, money, type DealsIncentive } from "./shared";
 import { FeaturedDeals, type FeaturedDealsData } from "./FeaturedDeals";
 import { BrowseBar, BROWSE_COPY, ShowMore } from "./BrowseBar";
-import { AutoMore, LandingBrowse, type BrowseListContext, type LandingCommunity, type PublicHome } from "./LandingBrowse";
+import { AutoMore, LandingBrowse, sheetHistory, type BrowseListContext, type LandingCommunity, type PublicHome } from "./LandingBrowse";
 import { redHotDeal } from "@shared/dealsFeatured";
 import { BROWSE_PAGE, BROWSE_SORTS, EMPTY_FILTERS, OPEN_ALL_UP_TO, numberFrom, newThisWeekKnown, sortGatedCommunities, sortHomes, storiesKnown, builderChoices, dealSelection, gatedCommunityVisible, homeFiltersOn, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
 
@@ -387,6 +387,9 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [shown, photos.length]);
+  // The phone's back button closes the photos first, then the home (New Home Buddy), never the page.
+  const viewerOpen = shown !== null;
+  useEffect(() => viewerOpen ? sheetHistory(() => setShown(null)) : undefined, [viewerOpen]);
   const tile = (src: string, index: number, className: string) => <button key={src} type="button" onClick={() => setShown(index)} className={`relative min-h-0 min-w-0 overflow-hidden bg-secondary ${className}`} aria-label={`Photo ${index + 1} of ${photos.length}`}>
     <RetryImage src={src} alt="" loading={index === 0 ? "eager" : "lazy"} decoding="async" draggable={false} onGiveUp={() => setBroken((current) => new Set(current).add(src))} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
   </button>;

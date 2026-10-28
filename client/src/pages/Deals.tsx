@@ -206,7 +206,7 @@ function Team() {
     created={create.data ?? null} creating={create.isPending} createError={create.isError ? create.error.message : null}
     onCreate={(input) => create.mutate(input)} onRevoke={(id) => revoke.mutate({ id })} onCopy={(url) => { void copy(url); }} copiedUrl={copiedUrl}
     onText={(input) => text.mutateAsync(input)} texting={text.isPending}
-    picked={picked} onClearPicks={clearPicks} onSetPicks={(input) => setPicks.mutateAsync(input)} settingPicks={setPicks.isPending} />;
+    picked={picked} onClearPicks={clearPicks} onSetPicks={(input) => setPicks.mutateAsync(input)} settingPicks={setPicks.isPending} defaultClientsOpen={false} />;
   // Agents send the list; their own view has no Save hearts (a heart there would belong to no client). Pick buttons stand in.
   return <>
     <GatedCatalog lead={mine.data.lead} communities={communities} featured={mine.data.featured as FeaturedDealsData} tools={tools} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} pick={pick} />

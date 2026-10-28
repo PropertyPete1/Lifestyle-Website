@@ -556,7 +556,7 @@ export function PublicHomeCard({ home, onAddress, featured = false }: { home: Pu
 }
 
 /** Calls onNear when this marker comes within a screen of the viewport (infinite scroll, like New Home Buddy). */
-function AutoMore({ active, onNear }: { active: boolean; onNear: () => void }) {
+export function AutoMore({ active, onNear }: { active: boolean; onNear: () => void }) {
   const marker = useRef<HTMLDivElement>(null);
   const near = useRef(onNear);
   near.current = onNear;
@@ -574,7 +574,10 @@ function AutoMore({ active, onNear }: { active: boolean; onNear: () => void }) {
 /** What the featured row can do on the landing page: open a community's sheet on one of its homes, and light its area on the map. */
 export type LandingActions = { openHome: (key: string, focus?: SheetFocus) => boolean; hover: (key: string | null) => void };
 
-export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below }: {
+/** What a caller's own list (the unlocked list's flat home list) gets: the communities in view and how to open one. */
+export type BrowseListContext = { keys: ReadonlySet<string>; open: (key: string, focus?: SheetFocus) => void; hover: (key: string | null) => void; activeKey: string | null };
+
+export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList }: {
   communities: readonly LandingCommunity[]; onUnlock?: () => void; useHomes: UseCommunityHomes;
   /** The sheet's pieces for an unlocked list (see SheetOptions). */
   sheet?: SheetOptions;
@@ -582,6 +585,8 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   onOpenCommunity?: (key: string) => void;
   /** Rendered under the cards in the list column (the Coming Soon section). */
   below?: ReactNode;
+  /** Oct 27, 2026 (New Home Buddy lists homes, not communities): the caller's own list in place of the community cards. */
+  renderList?: (context: BrowseListContext) => ReactNode;
   /** A shared link's community (?k=key): its sheet opens once the catalog has it. */
   openKey?: string | null;
   /** Shown at the top of the list column (the featured row); a function gets the actions above. */
@@ -653,12 +658,14 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
         {top && <div className="mb-6 min-w-0">{typeof top === "function" ? top(actions) : top}</div>}
         <div ref={listTop} className="scroll-mt-4" />
         {selected && <div role="status" className="mb-4 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-2 text-sm"><span>{LANDING_COPY.areaFilter(matching.length)}</span><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
+        {renderList ? renderList({ keys: new Set(matching.map((item) => item.key)), open: (key, homeFocus) => { const community = keyed.find((item) => item.key === key) ?? lookup?.find((item) => item.key === key); if (community) { setFocus(homeFocus); setOpen(community); } }, hover: setActiveKey, activeKey }) : <>
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
           {shown.map((community) => <CommunityCard key={community.key} community={community} active={activeKey === community.key} onHover={(on) => setActiveKey(on ? community.key : null)} onOpen={() => { setFocus(undefined); setOpen(community); }} />)}
         </div>
         {/* The next page loads as the visitor nears the end of the list (the button stays for keyboards and old browsers). */}
         <AutoMore key={shown.length} active={matching.length > shown.length} onNear={() => setPages((value) => value + 1)} />
         <ShowMore remaining={matching.length - shown.length} onClick={() => setPages((value) => value + 1)} />
+        </>}
         {below}
       </div>
       {/* The map fills the side of the screen and stays there while the list scrolls (no empty space under it). */}

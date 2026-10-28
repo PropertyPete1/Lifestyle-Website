@@ -416,3 +416,25 @@ describe("picksAsText (Oct 27: the agent copies the picked homes as plain text)"
     expect(picksAsText([picked[0]!])).not.toContain("incentives:");
   });
 });
+
+describe("the home cards of the unlocked list (Oct 27: New Home Buddy parity)", async () => {
+  const { addressLines, gatedAsLanding, HomeTile } = await import("../client/src/components/deals/GatedCatalog");
+  it("splits an address into its street and city lines", () => {
+    expect(addressLines("118 Sienna Lakes Blvd, San Antonio, TX 78263")).toEqual({ street: "118 Sienna Lakes Blvd", city: "San Antonio, TX 78263" });
+    expect(addressLines("Lot 4")).toEqual({ street: "Lot 4", city: null });
+    expect(addressLines(null)).toBeNull();
+  });
+  it("shows a team card with its address, community and builder, one drop badge, and a Pick button", () => {
+    const community = { label: "East | Homes", area: "East San Antonio", reelUrl: null, homes: [], details: { builderName: "Chesmar", communityName: "Sienna Lakes" } } as GatedCommunity;
+    const home = { card: "a".repeat(20), kind: "quick_move_in", beds: "4", baths: "3", sqft: 2776, price: 499_000, previousPrice: 549_000, photos: ["/deals/mine/img/1"], details: { address: "118 Sienna Lakes Blvd, San Antonio, TX 78263", planName: "Brandon" } };
+    const html = renderToStaticMarkup(createElement(HomeTile, { home, community, onOpen: () => undefined, pick: { picked: new Set<string>(), onToggle: () => undefined } }));
+    expect(html).toContain("118 Sienna Lakes Blvd");
+    expect(html).toContain("San Antonio, TX 78263");
+    expect(html).toContain("Sienna Lakes · Chesmar");
+    expect(html).toContain("$499,000");
+    expect(html.match(/data-deals-tile-drop=/g)).toHaveLength(1);
+    expect(html).toContain('data-deals-pick="unpicked"');
+    // A landing card for the map: cheapest price, quick move-ins, the first photo as its cover.
+    expect(gatedAsLanding({ ...community, pin: { x: 0.5, y: 0.5 } }, "k1", [home as never])).toMatchObject({ key: "k1", fromPrice: 499_000, homesAvailable: 1, cover: "/deals/mine/img/1", pin: { x: 0.5, y: 0.5 } });
+  });
+});

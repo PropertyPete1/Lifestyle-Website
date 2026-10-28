@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ComingSoonSection, type ComingSoonItem } from "./ComingSoon";
 import { Link } from "wouter";
-import { Check, ChevronDown, Clock3, ExternalLink, Heart, Plus, X } from "lucide-react";
+import { ArrowDown, ArrowDownUp, Bath, BedDouble, Check, ChevronDown, Clock3, ExternalLink, Flame, Heart, Plus, Ruler, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
@@ -12,9 +12,9 @@ import { Countdown } from "./Countdown";
 import { DealsFooter, Incentive, NewBadge, RedHotBadge, RedHotSavings, ReelCard, RetryImage, formatChicagoDate, money, type DealsIncentive } from "./shared";
 import { FeaturedDeals, type FeaturedDealsData } from "./FeaturedDeals";
 import { BrowseBar, BROWSE_COPY, ShowMore } from "./BrowseBar";
-import { LandingBrowse, type LandingCommunity, type PublicHome } from "./LandingBrowse";
+import { AutoMore, LandingBrowse, type BrowseListContext, type LandingCommunity, type PublicHome } from "./LandingBrowse";
 import { redHotDeal } from "@shared/dealsFeatured";
-import { BROWSE_PAGE, EMPTY_FILTERS, OPEN_ALL_UP_TO, numberFrom, newThisWeekKnown, sortGatedCommunities, sortHomes, storiesKnown, builderChoices, dealSelection, gatedCommunityVisible, homeFiltersOn, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
+import { BROWSE_PAGE, BROWSE_SORTS, EMPTY_FILTERS, OPEN_ALL_UP_TO, numberFrom, newThisWeekKnown, sortGatedCommunities, sortHomes, storiesKnown, builderChoices, dealSelection, gatedCommunityVisible, homeFiltersOn, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export { countdownLabel } from "@/lib/dealsMine";
 export type { ProfileInput } from "@/lib/dealsMine";
@@ -284,6 +284,81 @@ export function gatedAsLanding(community: GatedCommunity, key: string, homes: re
   };
 }
 
+export const HOME_LIST_COPY = {
+  count: (count: number) => `${count.toLocaleString("en-US")} home${count === 1 ? "" : "s"}`,
+  homes: "Homes",
+  communities: "Communities",
+  moveIn: "Move-in ready",
+  build: "Build new",
+  pick: "Pick",
+  picked: "Picked",
+  noPhoto: "Photos on request",
+} as const;
+const HOME_PAGE = 24;
+
+/** The street line and the city line of a full address ("118 Main St, San Antonio, TX 78263"). */
+export function addressLines(address: string | null | undefined): { street: string; city: string | null } | null {
+  if (!address?.trim()) return null;
+  const [street, ...rest] = address.split(",").map((part) => part.trim()).filter(Boolean);
+  return street ? { street, city: rest.length ? rest.join(", ") : null } : null;
+}
+
+/** One home in the flat list, like a New Home Buddy card: photo, price, where, and the specs at a glance. */
+export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving, onSave }: { home: GatedHome; community: GatedCommunity; onOpen: () => void; onHover?: (on: boolean) => void; pick?: PickControl; saved?: boolean; saving?: boolean; onSave?: (card: string, saved: boolean) => void }) {
+  const [failed, setFailed] = useState(false);
+  const photo = !failed ? home.photos?.[0] : undefined;
+  const lines = addressLines(home.details?.address);
+  const plan = home.details?.planName ?? null;
+  const title = lines?.street ?? (plan ? `${plan} plan` : community.label);
+  const subtitle = lines?.city ?? (plan ? community.area : null);
+  const place = [community.details?.communityName, community.details?.builderName].filter(Boolean).join(" · ") || community.area;
+  const drop = home.previousPrice && home.price && home.previousPrice > home.price ? home.previousPrice - home.price : 0;
+  const picked = pick?.picked.has(home.card) ?? false;
+  const specs = [
+    home.beds ? { icon: BedDouble, text: `${home.beds} bd` } : null,
+    home.baths ? { icon: Bath, text: `${home.baths} ba` } : null,
+    home.sqft ? { icon: Ruler, text: `${home.sqft.toLocaleString("en-US")} sqft` } : null,
+  ].filter((item): item is { icon: typeof Bath; text: string } => Boolean(item));
+  return <article id={`tile-${home.card}`} data-deals-home-tile="true" data-deals-picked={picked ? "true" : undefined} onMouseEnter={() => onHover?.(true)} onMouseLeave={() => onHover?.(false)} className={`relative min-w-0 overflow-hidden rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md ${picked ? "border-gold ring-2 ring-gold/60" : "border-border"}`}>
+    <button type="button" onClick={onOpen} className="block w-full min-w-0 text-left" aria-label={`${title}, ${home.price ? money.format(home.price) : "price on request"}. Open details`}>
+      <div className="relative aspect-[16/10] w-full overflow-hidden bg-secondary">
+        {photo ? <RetryImage src={photo} alt="" loading="lazy" decoding="async" draggable={false} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
+          : <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">{HOME_LIST_COPY.noPhoto}</div>}
+        <div className="pointer-events-none absolute left-2 top-2 flex flex-wrap gap-1">
+          {/* One badge for a cut price: red for a Red Hot Deal, green like New Home Buddy's for any other drop. */}
+          {drop > 0 && <span data-deals-tile-drop={redHotDeal(home.price ?? null, home.previousPrice ?? null) ? "red-hot" : "drop"} className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-white shadow ${redHotDeal(home.price ?? null, home.previousPrice ?? null) ? "bg-red-600" : "bg-emerald-700"}`}>{redHotDeal(home.price ?? null, home.previousPrice ?? null) ? <Flame className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}{money.format(drop)}</span>}
+          <NewBadge isNew={home.isNew} />
+        </div>
+      </div>
+      <div className="min-w-0 p-3">
+        <div className="flex min-w-0 items-start justify-between gap-2"><p className="min-w-0 truncate text-sm font-medium text-foreground">{title}</p><p className="max-w-[48%] shrink-0 truncate text-right text-xs text-muted-foreground" title={place}>{place}</p></div>
+        {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
+        <p className="mt-2 flex min-w-0 flex-wrap items-baseline gap-x-2"><span className="text-xl font-semibold leading-none">{home.price ? money.format(home.price) : "Ask for pricing"}</span><span className="text-xs text-muted-foreground">{home.kind === "to_be_built" ? HOME_LIST_COPY.build : home.moveInDate ? `Ready ${home.moveInDate}` : HOME_LIST_COPY.moveIn}</span></p>
+        {specs.length > 0 && <p className="mt-1.5 flex flex-wrap gap-x-3 text-xs text-muted-foreground">{specs.map(({ icon: Icon, text }) => <span key={text} className="inline-flex items-center gap-1"><Icon className="h-3.5 w-3.5" />{text}</span>)}</p>}
+      </div>
+    </button>
+    {pick
+      ? <button type="button" aria-pressed={picked} aria-label={picked ? "Picked for your client. Tap to remove" : "Pick this home for a client"} onClick={() => pick.onToggle(home.card)} data-deals-pick={picked ? "picked" : "unpicked"} className={`absolute right-2 top-2 inline-flex min-h-9 items-center gap-1 rounded-full px-3 text-[11px] font-semibold uppercase tracking-wider shadow ${picked ? "bg-gold text-primary-foreground" : "bg-white/95 text-foreground hover:text-gold"}`}>{picked ? <Check className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}{picked ? HOME_LIST_COPY.picked : HOME_LIST_COPY.pick}</button>
+      : onSave ? <button type="button" aria-pressed={saved} aria-label={saved ? "Saved. Tap to unsave" : "Save this home"} disabled={saving} onClick={() => onSave(home.card, !saved)} data-deals-save={saved ? "saved" : "unsaved"} className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full bg-white/95 shadow"><Heart className={`h-4 w-4 ${saved ? "fill-red-600 text-red-600" : "text-foreground"}`} /></button> : null}
+  </article>;
+}
+
+/** The flat list: every matching home in the communities in view, sorted, 24 at a time as the reader scrolls. */
+function HomeList({ entries, context, pick, savedSet, savingCard, onSave }: { entries: ReadonlyArray<{ home: GatedHome; community: GatedCommunity; key: string }>; context: BrowseListContext; pick?: PickControl; savedSet: Set<string>; savingCard?: string | null; onSave?: (card: string, saved: boolean) => void }) {
+  const inView = entries.filter((entry) => context.keys.has(entry.key));
+  const [pages, setPages] = useState(1);
+  const keysSignature = Array.from(context.keys).join(",");
+  useEffect(() => setPages(1), [keysSignature, entries]);
+  const shown = inView.slice(0, pages * HOME_PAGE);
+  return <div data-deals-home-list="true">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">
+      {shown.map(({ home, community, key }) => <HomeTile key={home.card} home={home} community={community} onOpen={() => context.open(key, { card: home.card })} onHover={(on) => context.hover(on ? key : null)} pick={pick} saved={savedSet.has(home.card)} saving={savingCard === home.card} onSave={onSave} />)}
+    </div>
+    <AutoMore key={shown.length} active={inView.length > shown.length} onNear={() => setPages((value) => value + 1)} />
+    <ShowMore remaining={inView.length - shown.length} onClick={() => setPages((value) => value + 1)} />
+  </div>;
+}
+
 export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire, featured, onViewCommunity, comingSoon, pick, picks }: GatedCatalogProps) {
   const [promptDismissed, setPromptDismissed] = useState(false);
   const pickedForMe = useMemo(() => pickedHomes(communities, picks), [communities, picks]);
@@ -316,6 +391,12 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
   const landingAll = useMemo(() => communities.map((community, index) => gatedAsLanding(community, communityKey(community, index), community.homes)), [communities]);
   const byKey = useMemo(() => new Map(communities.map((community, index) => [communityKey(community, index), community])), [communities]);
   const matchingHomes = useMemo(() => new Map(matching.map(({ key, homes }) => [key, homes])), [matching]);
+  // Oct 27, 2026: homes first, like New Home Buddy; the community cards are one tap away.
+  const [listView, setListView] = useState<"homes" | "communities">("homes");
+  const homeEntries = useMemo(() => {
+    const entries = matching.flatMap(({ community, key, homes }) => homes.map((home) => ({ home, community, key })));
+    return filters.sort === "recommended" ? entries : sortHomes(entries.map((entry) => ({ ...entry.home, entry })), filters.sort).map((item) => item.entry);
+  }, [matching, filters.sort]);
   const keyByCard = useMemo(() => new Map(communities.flatMap((community, index) => community.homes.map((home) => [home.card, communityKey(community, index)] as const))), [communities]);
   const useSheetHomes = (key: string | undefined) => {
     const community = key ? byKey.get(key) : undefined;
@@ -348,7 +429,11 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
   return <main data-deals-gated="true" style={identityPatternStyle(lead.display)} className="deals-light min-h-screen max-w-full overflow-x-clip bg-background">
     <header className="deals-chrome flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link><span className="flex items-center gap-4 text-xs text-gold">{lead.teamPreview && <Link href="/deals/team" className="inline-flex min-h-11 items-center underline-offset-4 hover:underline">Agent tools</Link>}<span><Clock3 className="mr-1 inline h-3.5 w-3.5" /> <Countdown expiresAt={lead.expiresAt} now={now} onExpire={onExpire} /></span></span></header>
     <section className={many ? "px-4 py-6 sm:px-6" : "px-5 py-10 sm:px-8"}><div className={`mx-auto ${many ? "max-w-[1600px]" : "max-w-5xl"}`}>
-      <div className={`border-b border-border ${many ? "pb-4" : "pb-7"}`}><p className="eyebrow text-gold">{eyebrow}</p><h1 className={`mt-2 break-words ${many ? "text-3xl" : "text-4xl sm:text-5xl"}`}>Prepared for {lead.display}</h1><p className="mt-3 text-sm text-muted-foreground">Updated {formatChicagoDate(updatedAt)}. Your access expires in <Countdown expiresAt={lead.expiresAt} now={now} />.</p>{agent && !lead.teamPreview && <p className="mt-3 text-sm text-foreground" data-deals-agent-note="true">Shared with you by {agent.name}. Tap Save on any home and {agent.firstName ?? "your agent"} hears about it right away.{agent.phone ? ` Questions? Text ${agent.firstName ?? agent.name} at ${agent.phone}.` : ""}</p>}</div>
+      {many
+        // Oct 27, 2026 (New Home Buddy: a title line, then straight to the homes): one line instead of a hero heading.
+        ? <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1"><p className="eyebrow text-gold">{eyebrow}</p><h1 className="min-w-0 break-words font-serif text-2xl">Prepared for {lead.display}</h1><p className="text-xs text-muted-foreground">Updated {formatChicagoDate(updatedAt)} · access <Countdown expiresAt={lead.expiresAt} now={now} /></p></div>
+        : <div className="border-b border-border pb-7"><p className="eyebrow text-gold">{eyebrow}</p><h1 className="mt-2 break-words text-4xl sm:text-5xl">Prepared for {lead.display}</h1><p className="mt-3 text-sm text-muted-foreground">Updated {formatChicagoDate(updatedAt)}. Your access expires in <Countdown expiresAt={lead.expiresAt} now={now} />.</p></div>}
+      <div>{agent && !lead.teamPreview && <p className="mt-3 text-sm text-foreground" data-deals-agent-note="true">Shared with you by {agent.name}. Tap Save on any home and {agent.firstName ?? "your agent"} hears about it right away.{agent.phone ? ` Questions? Text ${agent.firstName ?? agent.name} at ${agent.phone}.` : ""}</p>}</div>
       {tools}
       {!promptDismissed && !profileSaved && !lead.name && !lead.teamPreview && <NamePrompt onSave={onSaveProfile} saving={savingProfile} error={profileError} onDismiss={() => setPromptDismissed(true)} />}
       {pickedForMe.length > 0 && <section aria-labelledby="deals-picked" data-deals-picked-for-you="true" className="mt-8 border border-gold/40 bg-gold/5 p-5 sm:p-6">
@@ -358,16 +443,28 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
         <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">{pickedForMe.map(({ home, community }) => <div key={`pick-${home.card}`} className="min-w-0"><p className="mb-2 truncate text-xs uppercase tracking-widest text-muted-foreground">{community.label}</p><HomeCard home={{ ...home, card: `pick-${home.card}` }} teamPreview={lead.teamPreview} saved={savedSet.has(home.card)} saving={savingCard === home.card} onRequest={onRequest ? (request) => onRequest({ ...request, card: home.card }) : undefined} onSave={onSave ? (_card, next) => onSave(home.card, next) : undefined} /></div>)}</div>
       </section>}
       {many ? <>
-      {(many || savedOnList.size > 0) && <BrowseBar filters={filters} onChange={(next) => {
+      {(many || savedOnList.size > 0) && <BrowseBar compact filters={filters} onChange={(next) => {
         // Turning Saved on opens the communities that hold a saved home; each can still be collapsed.
         if (next.savedOnly && !filters.savedOnly) setOpened((current) => new Set([...Array.from(current), ...communities.flatMap((community, index) => community.homes.some((home) => savedOnList.has(home.card)) ? [communityKey(community, index)] : [])]));
         setFilters(next); setPages(1);
       }} areas={communities} shown={shownHomes} total={homeCount} unit="homes" showBeds savedCount={savedOnList.size} showStories={storiesKnown(communities)} showNew={newThisWeekKnown(communities)} builders={lead.teamPreview ? builderChoices(communities) : []} />}
       {(filters.savedOnly || savedOnList.size === 0) && savedGone > 0 && <p role="status" className="mt-3 text-xs text-muted-foreground" data-deals-saved-gone="true">{savedGone === 1 ? "1 home you saved is no longer available." : `${savedGone} homes you saved are no longer available.`}</p>}
       {(many || savedOnList.size > 0) && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{filters.savedOnly && savedOnList.size > 0 ? BROWSE_COPY.noneSaved : BROWSE_COPY.none}</p>}
+        <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2" data-deals-results-bar="true">
+          <p className="text-sm font-semibold uppercase tracking-widest text-foreground" data-deals-result-count="true">{listView === "homes" ? HOME_LIST_COPY.count(shownHomes) : `${matching.length} communities`}</p>
+          <div className="flex min-w-0 flex-nowrap items-center gap-2">
+          <label className="inline-flex min-h-9 min-w-0 max-w-[9.5rem] items-center gap-1.5 rounded-full border border-border bg-card pl-3 text-xs text-foreground sm:max-w-none" data-deals-sort="true"><ArrowDownUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="sr-only">Sort</span>
+            <select aria-label="Sort" value={filters.sort} onChange={(event) => { setFilters((current) => ({ ...current, sort: event.target.value as BrowseFilters["sort"] })); setPages(1); }} className="min-h-9 min-w-0 bg-transparent pr-3 text-xs">{BROWSE_SORTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+          </label>
+          <div role="group" aria-label="Show homes or communities" className="inline-flex rounded-full border border-border bg-card p-0.5 text-xs">
+            {(["homes", "communities"] as const).map((value) => <button key={value} type="button" aria-pressed={listView === value} data-deals-list-view={value} onClick={() => setListView(value)} className={`min-h-9 rounded-full px-3 font-medium sm:px-4 ${listView === value ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}>{value === "homes" ? HOME_LIST_COPY.homes : HOME_LIST_COPY.communities}</button>)}
+          </div>
+          </div>
+        </div>
         <LandingBrowse communities={landing} lookup={landingAll} useHomes={useSheetHomes} filters={{ ...EMPTY_FILTERS, sort: filters.sort }}
+          renderList={listView === "homes" ? (context) => <HomeList entries={homeEntries} context={context} pick={pick} savedSet={savedSet} savingCard={savingCard} onSave={onSave} /> : undefined}
           onOpenCommunity={(key) => { const community = byKey.get(key); if (community?.key && onViewCommunity && !reported.has(key)) { reported.add(key); onViewCommunity(community.key); } }}
-          top={(actions) => <FeaturedDeals featured={featured} onSelect={(deal) => {
+          top={listView === "homes" ? undefined : (actions) => <FeaturedDeals featured={featured} onSelect={(deal) => {
             const key = deal.card ? keyByCard.get(deal.card) : undefined;
             if (!key) return;
             // A featured home the filters hide: the filters go so its sheet shows it.

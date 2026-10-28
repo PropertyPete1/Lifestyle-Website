@@ -151,9 +151,11 @@ export type AgentToolsProps = {
   /** Puts the current picks on one of the agent's links; resolves with how many stuck. */
   onSetPicks?: (input: { id: number; picks: string[] }) => Promise<{ pickCount: number }>;
   settingPicks?: boolean;
+  /** The client list starts open (the default) or folded to one line (the team page, so the homes start higher). */
+  defaultClientsOpen?: boolean;
 };
 
-export function AgentTools({ workspace, loading, error, created, creating, createError, onCreate, onRevoke, onCopy, copiedUrl, origin, confirm, onText, texting, picked = [], onClearPicks, onSetPicks, settingPicks }: AgentToolsProps) {
+export function AgentTools({ workspace, loading, error, created, creating, createError, onCreate, onRevoke, onCopy, copiedUrl, origin, confirm, onText, texting, picked = [], onClearPicks, onSetPicks, settingPicks, defaultClientsOpen = true }: AgentToolsProps) {
   const [clientName, setClientName] = useState("");
   const [putNote, setPutNote] = useState<{ id: number; text: string } | null>(null);
   const putPicks = async (client: AgentClient) => {
@@ -184,7 +186,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
   const [clientPhone, setClientPhone] = useState("");
   const [showMore, setShowMore] = useState(false);
   // Open: a client's saves and tour requests are the agent's to-do list. One tap folds it away to get to the homes.
-  const [clientsOpen, setClientsOpen] = useState(true);
+  const [clientsOpen, setClientsOpen] = useState(defaultClientsOpen);
   const [note, setNote] = useState("");
   const agentName = workspace?.agent.name ?? "Lifestyle Design Realty";
   const createdUrl = created ? absoluteLink(created.path, origin) : null;
@@ -198,17 +200,18 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
   const revoke = (client: AgentClient) => { confirmAndRevoke(client, confirm ?? ((message: string) => window.confirm(message)), onRevoke); };
   const createdMessage = createdUrl && created ? clientMessage({ clientName: created.clientName ?? "", agentName, url: createdUrl, pickCount: created.pickCount }) : null;
   return <section aria-labelledby="deals-agent-tools" data-deals-agent-tools="true" className="mt-5 min-w-0 space-y-4">
-    <div className="min-w-0 border border-gold/30 bg-gold/5 p-4">
-      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1"><h2 id="deals-agent-tools" className="text-xl">{AGENT_COPY.heading}</h2><p className="text-xs text-muted-foreground"><span className="uppercase tracking-widest text-gold">Agent tools · {agentName}</span> · {AGENT_COPY.short}</p></div>
-      {workspace && !workspace.agent.fubLinked && <p role="status" className="mt-2 text-xs text-gold">Your number is on the team list without a Follow Up Boss user, so your clients' contacts and tasks go to Peter in FUB until it is linked. Emails still reach you{workspace.agent.email ? ` at ${workspace.agent.email}` : ""}.</p>}
-      <form className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+    <div className="min-w-0 border border-gold/30 bg-gold/5 px-4 py-3">
+      {workspace && !workspace.agent.fubLinked && <p role="status" className="mb-2 text-xs text-gold">Your number is on the team list without a Follow Up Boss user, so your clients' contacts and tasks go to Peter in FUB until it is linked. Emails still reach you{workspace.agent.email ? ` at ${workspace.agent.email}` : ""}.</p>}
+      <form className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+        <h2 id="deals-agent-tools" className="shrink-0 font-serif text-lg sm:mr-2">{AGENT_COPY.heading}</h2>
         <Label htmlFor="deals-client-name" className="sr-only">Client name</Label>
-        <Input id="deals-client-name" value={clientName} maxLength={190} onChange={(event) => setClientName(event.target.value)} placeholder="Client name" autoComplete="off" className="min-h-11 min-w-0 flex-1 bg-background" />
-        <Button type="submit" disabled={creating || clientName.trim().length < 2} className="min-h-11 shrink-0 bg-gold text-primary-foreground"><Link2 className="mr-2 h-4 w-4" />{creating ? "Creating link…" : picked.length ? `Create link with ${picked.length} pick${picked.length === 1 ? "" : "s"}` : "Create client link"}</Button>
+        <Input id="deals-client-name" value={clientName} maxLength={190} onChange={(event) => setClientName(event.target.value)} placeholder="Client name" autoComplete="off" className="min-h-10 min-w-0 flex-1 bg-background" />
+        <Button type="submit" disabled={creating || clientName.trim().length < 2} className="min-h-10 shrink-0 bg-gold text-primary-foreground"><Link2 className="mr-2 h-4 w-4" />{creating ? "Creating link…" : picked.length ? `Create link with ${picked.length} pick${picked.length === 1 ? "" : "s"}` : "Create client link"}</Button>
       </form>
-      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-        <button type="button" onClick={() => setShowMore((value) => !value)} aria-expanded={showMore} data-deals-more-fields="true" className="min-h-11 text-muted-foreground underline-offset-4 hover:text-gold hover:underline">{showMore ? AGENT_COPY.less : AGENT_COPY.more}</button>
-        {onSetPicks && <span role="status" data-deals-picks-note={picked.length ? "some" : "none"} className={`flex flex-wrap items-center gap-x-3 ${picked.length ? "text-foreground" : "text-muted-foreground"}`}><ListChecks className="h-4 w-4 shrink-0 text-gold" />{picked.length ? AGENT_COPY.picksOnNew(picked.length) : AGENT_COPY.picksNone}{picked.length > 0 && onClearPicks && <button type="button" onClick={onClearPicks} className="min-h-11 uppercase tracking-widest text-gold hover:underline">Clear picks</button>}</span>}
+      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-4 text-xs">
+        <span className="text-muted-foreground"><span className="uppercase tracking-widest text-gold">Agent tools · {agentName}</span><span className="hidden sm:inline"> · {AGENT_COPY.short}</span></span>
+        <button type="button" onClick={() => setShowMore((value) => !value)} aria-expanded={showMore} data-deals-more-fields="true" className="min-h-9 text-muted-foreground underline underline-offset-4 hover:text-gold">{showMore ? AGENT_COPY.less : AGENT_COPY.more}</button>
+        {onSetPicks && picked.length > 0 && <span role="status" data-deals-picks-note="some" className="flex flex-wrap items-center gap-x-3 text-foreground"><ListChecks className="h-4 w-4 shrink-0 text-gold" />{AGENT_COPY.picksOnNew(picked.length)}{onClearPicks && <button type="button" onClick={onClearPicks} className="min-h-9 uppercase tracking-widest text-gold hover:underline">Clear picks</button>}</span>}
       </div>
       {showMore && <div className="mt-1 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
         <div className="min-w-0"><Label htmlFor="deals-client-phone" className="text-xs uppercase tracking-widest">Client mobile</Label><Input id="deals-client-phone" type="tel" inputMode="tel" value={clientPhone} onChange={(event) => setClientPhone(formatPhoneInput(event.target.value))} placeholder="(210) 555-0123" className="mt-1 min-h-11 bg-background" /><p className="mt-1 text-[11px] text-muted-foreground">{AGENT_COPY.phoneHint}</p></div>
@@ -230,7 +233,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
     </div>
 
     <div className="min-w-0">
-      <button type="button" onClick={() => setClientsOpen((value) => !value)} aria-expanded={clientsOpen} data-deals-clients-toggle="true" className="flex min-h-11 items-center gap-2 text-xs uppercase tracking-widest text-gold"><ChevronDown className={`h-4 w-4 transition-transform ${clientsOpen ? "rotate-180" : ""}`} />{AGENT_COPY.clients(workspace?.clients.length ?? 0)}</button>
+      <button type="button" onClick={() => setClientsOpen((value) => !value)} aria-expanded={clientsOpen} data-deals-clients-toggle="true" className="flex min-h-11 items-center gap-2 text-xs uppercase tracking-widest text-gold"><ChevronDown className={`h-4 w-4 transition-transform ${clientsOpen ? "rotate-180" : ""}`} />{AGENT_COPY.clients(workspace?.clients.length ?? 0)}{!clientsOpen && (() => { const asks = (workspace?.clients ?? []).reduce((total, client) => total + client.requests.length, 0); const saves = (workspace?.clients ?? []).reduce((total, client) => total + client.saves.length, 0); return asks + saves > 0 ? <span className="normal-case tracking-normal text-foreground" data-deals-clients-activity="true">· {[asks ? `${asks} tour/question request${asks === 1 ? "" : "s"}` : null, saves ? `${saves} saved home${saves === 1 ? "" : "s"}` : null].filter(Boolean).join(", ")}</span> : null; })()}</button>
       {clientsOpen && <>
       {loading && <p className="mt-3 text-sm text-muted-foreground">Loading your clients…</p>}
       {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}

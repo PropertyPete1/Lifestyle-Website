@@ -35,8 +35,8 @@ describe("the gated list's collapsed summary row (Reg Z)", () => {
     // More communities than open at once, so each one renders as a collapsed summary row.
     const communities = [community(1, rated), community(2, heldIncentivePublicEntry()), community(3, null), community(4, null), community(5, null)];
     const html = decode(renderToStaticMarkup(React.createElement(Router, { ssrPath: "/deals/mine" }, React.createElement(GatedCatalog, { lead: { display: "@demo", expiresAt: new Date(NOW + 3_600_000).toISOString(), name: null, timeline: null, teamPreview: false }, communities, now: NOW }))));
-    // Oct 27: a long list is cards; a card prints the rate only beside its APR, and a held offer prints no figure.
-    expect(html).toContain("4.25% rate · 6.051% APR");
-    expect(html).not.toMatch(/4\.25%(?! rate · 6\.051% APR)/);
+    // Oct 27: a long list opens on its homes; a home card prints no rate at all (the figures live in the community's sheet, beside the APR).
+    expect(html).toContain('data-deals-home-tile="true"');
+    expect(html).not.toMatch(/4\.25%/);
   });
 });

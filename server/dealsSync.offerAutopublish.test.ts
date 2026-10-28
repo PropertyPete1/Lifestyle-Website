@@ -3,7 +3,7 @@ import { dealCommunities, dealHomes, dealIncentives, dealLeads } from "../drizzl
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 import { normalizedText } from "../shared/deals";
 import type { DealAdapterResult, PrivatePlanOrHome, PromotionalRateFacts } from "./dealsAdapters";
-import { AUTO_ACCEPTED_ADMIN_STATUS, AUTO_ACCEPTED_NO_DEADLINE, HELD_INCENTIVE_ADMIN_STATUS, HELD_INCENTIVE_PUBLIC_LINE, heldIncentivePublicEntry, heldIncentiveShowsLine, unreadDateIn } from "../shared/dealsHeldIncentive";
+import { AUTO_ACCEPTED_ADMIN_STATUS, AUTO_ACCEPTED_NO_DEADLINE, HELD_INCENTIVE_ADMIN_STATUS, HELD_INCENTIVE_PUBLIC_LINE, heldIncentiveLine, heldIncentivePublicEntry, heldIncentiveShowsLine, unreadDateIn } from "../shared/dealsHeldIncentive";
 
 /**
  * The owner's 2026-10-21 rule for held offers: a text held only for a deadline it does not date publishes by itself
@@ -228,7 +228,9 @@ describe("a held offer for any other reason", () => {
   const NAMES = ["Fixture Gardens", "Fixture Patch", "M/I", "Financial", "mihomes"];
 
   for (const reason of REG_Z_REASONS) {
-    it(`${reason}: the public, gated and team lists show only the neutral line, with no figure or name`, async () => {
+    // Oct 28, 2026 (Peter: "yes show the incentives"): a rate-review hold shows its non-rate highlights in our words
+    // ("Special financing and $10,000 toward closing costs"); a private-name hold keeps the neutral line. Never a rate figure or name.
+    it(`${reason}: the public, gated and team lists show no rate figure or name (the highlights, or the neutral line)`, async () => {
       const id = seedCommunity();
       const lead = seedLead();
       const facts: PromotionalRateFacts = { ...parsePromotionalRate(FIGURES), holdReasons: reason === "private_text_remaining" ? [] : [reason], publishable: false };
@@ -236,17 +238,17 @@ describe("a held offer for any other reason", () => {
       expect(live()).toHaveLength(0);
       expect(heldRows()).toHaveLength(1);
       expect(JSON.parse(heldRows()[0]!.holdReason!)).toContain(reason);
+      const expected = reason === "private_text_remaining" ? HELD_INCENTIVE_PUBLIC_LINE : "Builder incentive: Special financing and $10,000 toward closing costs — ask us for details";
       for (const incentive of [await landing(), await gated(lead), await team(lead)]) {
-        expect(incentive).toEqual(heldIncentivePublicEntry());
-        expect(incentive!.text).toBe("Builder incentive available — ask us for details");
+        expect(incentive).toEqual(heldIncentivePublicEntry(expected));
         const json = JSON.stringify(incentive);
-        expect(json).not.toMatch(/\d/);
-        expect(json).not.toMatch(/[%$]/);
+        expect(json).not.toMatch(/%/);
+        expect(json.split("$10,000 toward closing costs").join("")).not.toMatch(/\d|\$/);
         for (const name of NAMES) expect(json).not.toContain(name);
       }
-      // Not one figure of the held text reaches any buyer field of the community entry.
-      expect(JSON.stringify((await publicDealsCatalog())[0])).not.toMatch(/4\.99|5\.62|3\.5%|10,000/);
-      expect(JSON.stringify(await gatedDealsCatalog(lead))).not.toMatch(/4\.99|5\.62|3\.5%|10,000/);
+      // Not one rate, APR or down-payment figure of the held text reaches any buyer field of the community entry.
+      expect(JSON.stringify((await publicDealsCatalog())[0])).not.toMatch(/4\.99|5\.62|3\.5%/);
+      expect(JSON.stringify(await gatedDealsCatalog(lead))).not.toMatch(/4\.99|5\.62|3\.5%/);
       expect((await listCommunityDiagnostics(at(1)))[0]!.heldIncentives[0]).toMatchObject({ status: HELD_INCENTIVE_ADMIN_STATUS });
       expect(holdEmails()[0]!.content).toContain(HELD_INCENTIVE_PUBLIC_LINE);
     });
@@ -257,10 +259,12 @@ describe("a held offer for any other reason", () => {
     const lead = seedLead();
     await run(A_NO_APR, 0, id);
     expect(JSON.parse(heldRows()[0]!.holdReason!)).toEqual(["missing_apr"]);
-    expect(await gated(lead)).toEqual(heldIncentivePublicEntry());
+    const line = heldIncentivePublicEntry(heldIncentiveLine(heldRows()[0]!));
+    expect(line.text).not.toMatch(/4\.99|APR/);
+    expect(await gated(lead)).toEqual(line);
     // Accept is refused without the field the reason needs: the line stays.
     await expect(acceptIncentiveHold({ id: heldRows()[0]!.id })).rejects.toThrow(/apr/);
-    expect(await landing()).toEqual(heldIncentivePublicEntry());
+    expect(await landing()).toEqual(line);
     await acceptIncentiveHold({ id: heldRows()[0]!.id, apr: "6.62%" });
     const shown = await gated(lead);
     expect(shown).toMatchObject({ text: A_NO_APR, headlineRate: "4.99%", apr: "6.62%" });
@@ -275,7 +279,7 @@ describe("a held offer for any other reason", () => {
     const id = seedCommunity();
     const lead = seedLead();
     await run({ text: TEXT, facts: misread }, 0, id);
-    expect(await gated(lead)).toEqual(heldIncentivePublicEntry());
+    expect(await gated(lead)).toEqual(heldIncentivePublicEntry(heldIncentiveLine(heldRows()[0]!)));
     await run(TEXT, 1, id);
     expect(heldRows()).toHaveLength(0);
     expect(live()[0]).toMatchObject({ apr: "5.62%", holdReason: null });

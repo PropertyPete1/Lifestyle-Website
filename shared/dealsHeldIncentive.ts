@@ -23,7 +23,7 @@ export const AUTO_ACCEPTED_NO_DEADLINE = "auto_accepted:no_deadline";
 export const DEADLINE_HOLD_REASONS: readonly string[] = ["missing_contract_deadline", "missing_closing_deadline"];
 
 /** Admin wording for the two states. */
-export const HELD_INCENTIVE_ADMIN_STATUS = "Showing 'Builder incentive available' until reviewed";
+export const HELD_INCENTIVE_ADMIN_STATUS = "Held for review: buyers see its non-rate highlights, or 'Builder incentive available'";
 export const AUTO_ACCEPTED_ADMIN_STATUS = "Published automatically: no deadline in the builder's text";
 /** The same, for a text with one readable deadline kept and one undated one left out. */
 export const AUTO_ACCEPTED_DATED_ADMIN_STATUS = "Published automatically: one deadline in the builder's text has no date; it comes off by the dated one";
@@ -65,11 +65,67 @@ export function heldIncentiveShowsLine(row: { held: boolean; holdReason: string 
   return row.confirmedAt > new Date(now.getTime() - lapseDays * 24 * 60 * 60_000);
 }
 
-/** The buyer-facing incentive for a held offer: the line and nothing else. */
-export function heldIncentivePublicEntry() {
+/**
+ * Oct 28, 2026 (Peter: "yes show the incentives"): a held offer shows what it gives that is not a rate or a loan term,
+ * in fixed words of our own (a buydown named without its figures, closing-cost help, a move-in package...), so buyers see
+ * more than the neutral line while the rate waits for review. Nothing is copied from the builder's text: no figure
+ * beside a rate, no payment, down payment or term (Reg Z), no name. Only rate-review holds (RATE_REVIEW_REASONS) do this.
+ */
+/**
+ * Only an offer held for the rate review shows its highlights. One held for a private name, a manual override, or a
+ * deadline the reader could not date keeps the neutral line (a dollar offer with an unread date could outlive it).
+ */
+export const RATE_REVIEW_REASONS: readonly string[] = ["ambiguous_rate", "apr_check", "adjustable_rate", "missing_apr", "missing_repayment_term", "missing_down_payment", "missing_follow_on_rate", "missing_follow_on_period", "missing_promotional_rate", "missing_promotional_period", "missing_loan_type"];
+const DOLLARS = "\\$\\s?(\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d{2})?\\s?([kK])?";
+
+function dollarsLabel(amount: string, thousands?: string): string | null {
+  const value = Number(amount.replace(/,/g, "")) * (thousands ? 1000 : 1);
+  if (!Number.isFinite(value) || value < 500 || value > 250_000) return null;
+  return `$${value.toLocaleString("en-US")}`;
+}
+
+/** The offer's parts that are not a rate or a loan term, in our own words, most valuable first (at most three). */
+export function heldIncentiveHighlights(text: string): string[] {
+  const t = text.replace(/\s+/g, " ");
+  const parts: string[] = [];
+  const add = (part: string | null) => { if (part && !parts.some((have) => have.toLowerCase() === part.toLowerCase())) parts.push(part); };
+  const buydown = t.match(/\b(3[\/-]2[\/-]1|2[\/-]1|1[\/-]0)\s*(?:temporary\s+)?(?:rate\s+)?(?:buy[- ]?down|program)\b/i) ?? t.match(/\btemporary\s+(3[\/-]2[\/-]1|2[\/-]1|1[\/-]0)\s*(?:rate\s+)?buy[- ]?down\b/i);
+  if (buydown) add(`${buydown[1]!.replace(/\//g, "-")} rate buydown`);
+  else if (/\bbuy[- ]?down\b/i.test(t)) add("Rate buydown");
+  const closingDollars = t.match(new RegExp(`(up to\\s+)?${DOLLARS}\\s+(?:in\\s+)?(?:paid\\s+)?(?:towards?\\s+|for\\s+)?(?:your\\s+|buyer'?s?\\s+)?closing costs?`, "i"));
+  const closingShare = t.match(/(up to\s+)?(\d{1,2}(?:\.\d+)?)%\s+(?:in\s+)?(?:paid\s+)?(?:towards?\s+|of\s+)?closing costs?/i);
+  if (closingDollars) { const label = dollarsLabel(closingDollars[2]!, closingDollars[3]); if (label) add(`${closingDollars[1] ? "Up to " : ""}${label} toward closing costs`); }
+  else if (closingShare) add(`${closingShare[1] ? "Up to " : ""}${closingShare[2]}% toward closing costs`);
+  else if (/\b(?:paid|free)\s+closing costs?\b/i.test(t)) add("Paid closing costs");
+  const flex = t.match(new RegExp(`(up to\\s+)?(?:${DOLLARS}|(\\d{1,2}(?:\\.\\d+)?)%)\\s+(?:in\\s+)?flex\\s+cash`, "i"));
+  if (flex) { const label = flex[2] ? dollarsLabel(flex[2], flex[3]) : flex[4] ? `${flex[4]}%` : null; if (label) add(`${flex[1] ? "Up to " : ""}${label} in flex cash`); }
+  if (/\bhalf[- ]off\s+(?:homesite|lot)\s+premiums?\b/i.test(t)) add("Half-off homesite premiums");
+  if (/\breduced\s+(?:sales\s+)?prices?\b/i.test(t)) add("Reduced prices");
+  if (/\b(?:paid|free)\s+owner'?s'?\s+title\s+(?:policy|insurance)\b/i.test(t)) add("Paid owner's title policy");
+  if (/\bprepaid\s+HOA\b/i.test(t)) add("Prepaid HOA fees");
+  if (/\bappliance\s+package\b/i.test(t)) add("Appliance package");
+  else if (/\bmove[- ]in\s+package\b/i.test(t)) add("Move-in package");
+  // A rate with no buydown named: the financing is mentioned without any figure.
+  if (!parts.some((part) => /buydown/i.test(part)) && /\b(?:rates?|financing|APR|fixed[- ]rate|mortgage)\b/i.test(t) && /\d(?:\.\d+)?\s?%/.test(t)) parts.unshift("Special financing");
+  return parts.slice(0, 3);
+}
+
+/** What the buyer pages show for a held offer: its highlights in our words when it may show them, else the neutral line. */
+export function heldIncentiveLine(row: { holdReason: string | null; publicText?: string | null }): string {
+  const reasons = heldReasonsOf(row.holdReason);
+  if (!row.publicText || !reasons.length || reasons.some((reason) => !RATE_REVIEW_REASONS.includes(reason))) return HELD_INCENTIVE_PUBLIC_LINE;
+  const parts = heldIncentiveHighlights(row.publicText);
+  if (!parts.length) return HELD_INCENTIVE_PUBLIC_LINE;
+  const scope = /\bselect\s+(?:quick[- ]move[- ]in\s+|inventory\s+|move[- ]in[- ]ready\s+)?homes\b/i.test(row.publicText) ? " on select homes" : "";
+  const joined = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]!.charAt(0).toLowerCase()}${parts[parts.length - 1]!.slice(1)}`;
+  return `Builder incentive: ${joined}${scope} — ask us for details`;
+}
+
+/** The buyer-facing incentive for a held offer: the line (the neutral one, or its highlights in our words) and nothing else. */
+export function heldIncentivePublicEntry(line: string = HELD_INCENTIVE_PUBLIC_LINE) {
   return {
-    text: HELD_INCENTIVE_PUBLIC_LINE,
-    teaser: HELD_INCENTIVE_PUBLIC_LINE,
+    text: line,
+    teaser: line,
     headlineRate: null,
     followOnRate: null,
     followOnPeriod: null,

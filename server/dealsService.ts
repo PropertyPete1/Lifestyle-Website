@@ -40,7 +40,7 @@ import { sendBuilderDealsEmail } from "./dealsEmail";
 import { effectiveScrubConfig } from "./dealsScrub";
 import { loanTypeLabel, newThisWeek, priceBandFloor, priceBandLabel, redHotDeal } from "../shared/dealsFeatured";
 import { incentiveTeaser } from "../shared/dealsTeaser";
-import { heldIncentivePublicEntry, heldIncentiveShowsLine } from "../shared/dealsHeldIncentive";
+import { heldIncentiveLine, heldIncentivePublicEntry, heldIncentiveShowsLine } from "../shared/dealsHeldIncentive";
 import { checkTwilioVerify } from "./dealsVerification";
 import { mentionsRate, mentionsTriggeringTerm } from "./dealsAdapters";
 
@@ -689,12 +689,13 @@ async function liveIncentivesByCommunity(db: NonNullable<Awaited<ReturnType<type
  * the neutral "Builder incentive available" line for them, never anything from the held text. Only consulted for a
  * community with no live incentive.
  */
-async function heldLineCommunities(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, communityIds: number[], now: Date, lapseDays: number): Promise<Set<number>> {
-  const shown = new Set<number>();
+async function heldLineCommunities(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, communityIds: number[], now: Date, lapseDays: number): Promise<Map<number, string>> {
+  const shown = new Map<number, string>();
   if (!communityIds.length) return shown;
-  const rows = await db.select({ communityId: dealIncentives.communityId, held: dealIncentives.held, holdReason: dealIncentives.holdReason, expiresAt: dealIncentives.expiresAt, confirmedAt: dealIncentives.confirmedAt })
-    .from(dealIncentives).where(and(inArray(dealIncentives.communityId, communityIds), eq(dealIncentives.held, true)));
-  for (const row of rows) if (heldIncentiveShowsLine(row, now, lapseDays)) shown.add(row.communityId);
+  // Newest read first: a community's line comes from its most recently confirmed held text (Oct 28: its highlights).
+  const rows = await db.select({ communityId: dealIncentives.communityId, held: dealIncentives.held, holdReason: dealIncentives.holdReason, expiresAt: dealIncentives.expiresAt, confirmedAt: dealIncentives.confirmedAt, publicText: dealIncentives.publicText })
+    .from(dealIncentives).where(and(inArray(dealIncentives.communityId, communityIds), eq(dealIncentives.held, true))).orderBy(desc(dealIncentives.confirmedAt), desc(dealIncentives.id));
+  for (const row of rows) if (!shown.has(row.communityId) && heldIncentiveShowsLine(row, now, lapseDays)) shown.set(row.communityId, heldIncentiveLine(row));
   return shown;
 }
 
@@ -880,7 +881,7 @@ export async function publicDealsCatalog(src?: string | null) {
       // The landing card shows the teaser and figures; the full wording and the deadlines wait for sign-up.
       // A held offer shows the neutral line only, never a figure or name from its text.
       // A rate never shows without its APR (rateDisclosedIncentive).
-      incentive: incentive ? (() => { const shown = rateDisclosedIncentive(incentive); return shown ? (({ text: _text, contractBy: _contractBy, closeBy: _closeBy, ...teaser }) => ({ ...teaser, text: teaser.teaser, contractBy: null, closeBy: null }))(publicIncentive(shown, (value) => scrubPrivateNames(value, communityScrubConfig(community)))) : null; })() : heldLine.has(community.id) ? heldIncentivePublicEntry() : null,
+      incentive: incentive ? (() => { const shown = rateDisclosedIncentive(incentive); return shown ? (({ text: _text, contractBy: _contractBy, closeBy: _closeBy, ...teaser }) => ({ ...teaser, text: teaser.teaser, contractBy: null, closeBy: null }))(publicIncentive(shown, (value) => scrubPrivateNames(value, communityScrubConfig(community)))) : null; })() : heldLine.has(community.id) ? heldIncentivePublicEntry(heldLine.get(community.id)) : null,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       // A wide circle around the ZIP code centroid: "this side of town", never the community.
       areaMap: communityAreaMap(community, { variant: "public", radiusMiles: publicRadius }),
@@ -1163,7 +1164,7 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
       reelUrl: community.reelUrl,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       // A held offer shows the neutral line only (the team reads the held text in Admin).
-      incentive: incentive ? (() => { const shown = rateDisclosedIncentive(incentive); return shown ? publicIncentive(shown, scrub, full) : null; })() : heldLine.has(community.id) ? heldIncentivePublicEntry() : null,
+      incentive: incentive ? (() => { const shown = rateDisclosedIncentive(incentive); return shown ? publicIncentive(shown, scrub, full) : null; })() : heldLine.has(community.id) ? heldIncentivePublicEntry(heldLine.get(community.id)) : null,
       homes,
       ...(full ? { details: { builderName: community.builder === "Manual" ? null : community.builder, communityName: community.privateName, address: community.privateAddress || null, salesLine: view.builderPages ? community.salesPhone : null, builderPage: view.builderPages && /^https?:\/\//i.test(community.sourceUrl) ? community.sourceUrl : null } } : {}),
     };

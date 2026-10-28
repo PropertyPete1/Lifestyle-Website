@@ -18,7 +18,7 @@ import { parsePromotionalRate, publicTextResidue } from "./dealsAdapters";
 import { refreshOfficialDeals, revalidateDealIncentives } from "./dealsSync";
 import { acceptIncentiveHold, dismissIncentiveHold, listCommunityDiagnostics, saveIncentiveForCommunity } from "./dealsSyncAdmin";
 import { gatedDealsCatalog, publicDealsCatalog } from "./dealsService";
-import { AUTO_ACCEPTED_NO_DEADLINE, heldIncentivePublicEntry, heldIncentiveShowsLine } from "../shared/dealsHeldIncentive";
+import { AUTO_ACCEPTED_NO_DEADLINE, heldIncentiveLine, heldIncentivePublicEntry, heldIncentiveShowsLine } from "../shared/dealsHeldIncentive";
 
 const COMMUNITY_URL = "https://www.mihomes.com/new-homes/texas/greater-san-antonio/southeast-san-antonio/fixture-gardens";
 const home = (slug: string) => `${COMMUNITY_URL}/fixture-a-plan/${slug}`;
@@ -797,9 +797,11 @@ describe("incentive state machine: random sequences with offerRead", () => {
           if (liveRow) check("a live offer is hidden behind the neutral line", Boolean(shown) && !shown!.pending);
           else if (heldRows().some((row) => heldIncentiveShowsLine(row, now, 14))) {
             bump("neutral line shown");
-            check("a held text shows more than the neutral line", JSON.stringify(shown) === JSON.stringify(heldIncentivePublicEntry()));
+            // Oct 28, 2026: the newest held text that shows a line gives it (its non-rate highlights, or the neutral line).
+            const newest = heldRows().filter((row) => heldIncentiveShowsLine(row, now, 14)).sort((a, b) => b.confirmedAt.getTime() - a.confirmedAt.getTime() || b.id - a.id)[0]!;
+            check("a held text shows more than its line", JSON.stringify(shown) === JSON.stringify(heldIncentivePublicEntry(heldIncentiveLine(newest))));
           }
-          if (shown?.pending) check("the neutral line carries a figure", !/[\d%$]/.test(JSON.stringify(shown)));
+          if (shown?.pending) check("the held line carries a rate or loan figure", !/[\d%$]/.test(JSON.stringify(shown).replace(/(?:Up to )?(?:\$[\d,]+|\d+(?:\.\d+)?%) toward closing costs/gi, "")));
         } else if (pick === 7) {
           log.push("empty read"); bump("empty read");
           await run({ text: null, offerRead: true }, hours++, communityId);

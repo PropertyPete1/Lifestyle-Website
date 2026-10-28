@@ -7,6 +7,7 @@ import { useIsMobile } from "@/hooks/useMobile";
 import { Button } from "@/components/ui/button";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
 import { identityPatternStyle } from "@/lib/dealsIdentityPattern";
+import { sharedFiltersSummary } from "@/lib/dealsListShare";
 import { PROFILE_NAME_MAX, PROFILE_TIMELINES, profileInput, type ProfileInput } from "@/lib/dealsMine";
 import { AreaMap } from "./AreaMap";
 import { Countdown } from "./Countdown";
@@ -192,6 +193,10 @@ export type GatedCatalogProps = {
   pick?: PickControl;
   /** A client's list: the card handles their agent picked for them, shown first in the agent's order. */
   picks?: readonly string[];
+  /** Oct 28, 2026 (New Home Buddy's bulk send): told the filters on screen and how many homes they show (the team page's next link). */
+  onListChange?: (state: { filters: BrowseFilters; count: number }) => void;
+  /** The filters an agent's link carried (?f=): the client's list opens on them, with a way back to every home. */
+  initialFilters?: BrowseFilters | null;
 };
 
 /**
@@ -509,7 +514,7 @@ function HomeList({ entries, context, pick, savedSet, savingCard, onSave }: { en
   </div>;
 }
 
-export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire, featured, onViewCommunity, comingSoon, pick, picks }: GatedCatalogProps) {
+export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire, featured, onViewCommunity, comingSoon, pick, picks, onListChange, initialFilters }: GatedCatalogProps) {
   const [promptDismissed, setPromptDismissed] = useState(false);
   const pickedForMe = useMemo(() => pickedHomes(communities, picks), [communities, picks]);
   const updatedAt = communities.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
@@ -522,7 +527,10 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
   const many = communities.length > OPEN_ALL_UP_TO;
   /** The header's "Agent tools" link is for a team member on their own list; on the team page it would point at itself. */
   const onTeamPage = typeof window !== "undefined" && window.location.pathname.startsWith("/deals/team");
-  const [filters, setFilters] = useState<BrowseFilters>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<BrowseFilters>(initialFilters ?? EMPTY_FILTERS);
+  // The note over a list an agent's link opened on stays until the client changes or clears those filters.
+  const [sharedFilters, setSharedFilters] = useState<BrowseFilters | null>(initialFilters ?? null);
+  const sharedActive = Boolean(sharedFilters && JSON.stringify(sharedFilters) === JSON.stringify(filters));
   const [pages, setPages] = useState(1);
   const [opened, setOpened] = useState<Set<string>>(() => new Set(communities.flatMap((community, index) => (community.fromYourReel || index === 0) ? [communityKey(community, index)] : [])));
   const [pendingCard, setPendingCard] = useState<string | null>(null);
@@ -538,6 +546,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
   const visible = many ? matching.slice(0, pages * BROWSE_PAGE) : matching;
   const homeCount = communities.reduce((total, community) => total + community.homes.length, 0);
   const shownHomes = matching.reduce((total, { community }) => total + (homeFilters ? homesMatching(community, filters, savedOnList) : community.homes).length, 0);
+  useEffect(() => { onListChange?.({ filters, count: shownHomes }); }, [filters, shownHomes]); // eslint-disable-line react-hooks/exhaustive-deps
   // The cards-and-map layout (a long list): every community as a landing card, its sheet showing the homes that match.
   const landing = useMemo(() => matching.map(({ community, key, homes }) => gatedAsLanding(community, key, homes)), [matching]);
   const landingAll = useMemo(() => communities.map((community, index) => gatedAsLanding(community, communityKey(community, index), community.homes)), [communities]);
@@ -610,6 +619,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
         if (next.savedOnly && !filters.savedOnly) setOpened((current) => new Set([...Array.from(current), ...communities.flatMap((community, index) => community.homes.some((home) => savedOnList.has(home.card)) ? [communityKey(community, index)] : [])]));
         setFilters(next); setPages(1);
       }} areas={communities} shown={shownHomes} total={homeCount} unit="homes" showBeds savedCount={savedOnList.size} showStories={storiesKnown(communities)} showNew={newThisWeekKnown(communities)} builders={lead.teamPreview ? builderChoices(communities) : []} />}
+      {sharedActive && sharedFilters && <p role="status" data-deals-shared-list="true" className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-2 text-sm"><span>{agent ? `${agent.firstName ?? agent.name} put these homes together for you` : "These homes were put together for you"}{sharedFiltersSummary(sharedFilters) ? `: ${sharedFiltersSummary(sharedFilters)}` : ""}.</span><button type="button" onClick={() => { setFilters(EMPTY_FILTERS); setSharedFilters(null); setPages(1); }} className="min-h-9 font-medium text-gold underline underline-offset-4">Show every home</button></p>}
       {(filters.savedOnly || savedOnList.size === 0) && savedGone > 0 && <p role="status" className="mt-3 text-xs text-muted-foreground" data-deals-saved-gone="true">{savedGone === 1 ? "1 home you saved is no longer available." : `${savedGone} homes you saved are no longer available.`}</p>}
       {(many || savedOnList.size > 0) && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{filters.savedOnly && savedOnList.size > 0 ? BROWSE_COPY.noneSaved : BROWSE_COPY.none}</p>}
         {/* Phone: count + Homes/Communities, then search + sort. Wider: count, search, sort, toggle in one row. */}

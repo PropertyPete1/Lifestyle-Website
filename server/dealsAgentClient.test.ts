@@ -177,7 +177,7 @@ describe("agent tools on /deals/team", () => {
     expect(html).toContain("without a Follow Up Boss user");
     expect(html).toContain("No client links yet. Send your first one above.");
     // The created link comes back from the server with the client's normalized number, so Text it is addressed.
-    expect(html).toContain("Link ready. Text it or copy it.");
+    expect(html).toContain("Maria's link is ready. Text it or copy it.");
     expect(html).toContain(`https://lifestyledesignrealty.com/deals?c=${TOKEN}`);
     expect(html).toContain('data-deals-text-it="true"');
     expect(html).not.toContain('href="sms:+12105550202');

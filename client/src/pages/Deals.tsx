@@ -12,6 +12,7 @@ import { TRANSIENT_GATE_PARAMS, agentRecruitRedirect, clientLinkTokenInUrl, forg
 import { GateSheet } from "@/components/deals/GateSheet";
 import { GatedCatalog, HOME_LIST_COPY, ListSkeleton, pickedHomes, picksAsText, type GatedCommunity, type HomeRequest, type PickControl } from "@/components/deals/GatedCatalog";
 import { PublicHomeList, publicHomeEntries } from "@/components/deals/PublicHomeList";
+import { keepSharedFilters, takeSharedFilters } from "@/lib/dealsListShare";
 import { FeaturedStrip, type FeaturedDealsData } from "@/components/deals/FeaturedDeals";
 import { AgentTools, type AgentWorkspaceData } from "@/components/deals/AgentTools";
 import { ComingSoonSection } from "@/components/deals/ComingSoon";
@@ -52,6 +53,8 @@ const useLandingHomes: UseCommunityHomes = (key) => {
 function Landing() {
   // An agent's client link (?c=, or the one this tab kept) goes to the state query, the gate and the start call.
   const [clientToken, setClientToken] = useState(() => rememberClientLinkToken(window.location.search));
+  // Oct 28, 2026: an agent's link may carry the filters they sent (?f=); kept so the list opens on them after the code check.
+  useState(() => { if (clientToken) keepSharedFilters(window.location.search); return null; });
   const state = trpc.deals.state.useQuery(clientToken ? { c: clientToken } : undefined);
   // Oct 26, 2026: /deals/team with no session is the agent sign-in page (the same sheet, agent wording, phone only).
   const [teamSignIn] = useState(() => (/^\/deals\/team/.test(window.location.pathname) || new URLSearchParams(window.location.search).get("team") === "1") && !clientToken);
@@ -148,6 +151,8 @@ function Mine() {
   const [request, setRequest] = useState<HomeRequest | null>(null);
   const { savingCard, onSave } = useSaveHome(() => { void mine.refetch(); });
   const communities = useMemo(() => parseMineCommunities<GatedCommunity>(mine.data?.communitiesJson), [mine.data?.communitiesJson]);
+  // The filters an agent's link carried (kept by the landing page through the code check), taken once.
+  const [sharedFilters] = useState(() => takeSharedFilters());
   useInstagramEmbeds();
   if (mine.isLoading) return <ListSkeleton label="Preparing your private list…" />;
   // Only "no live session" falls back to the landing page and its gate; any other
@@ -155,7 +160,7 @@ function Mine() {
   if (mine.isError && isUnauthorizedDealsError(mine.error)) return <Landing />;
   if (mine.isError || !mine.data) return <MineRetry onRetry={() => { void mine.refetch(); }} retrying={mine.isFetching} />;
   return <>
-    <GatedCatalog lead={mine.data.lead} communities={communities} featured={mine.data.featured as FeaturedDealsData} saved={mine.data.saved} picks={mine.data.picks} savingCard={savingCard} onSave={onSave} agent={mine.data.agent} onRequest={setRequest} onViewCommunity={(key) => viewed.mutate({ key })} onSaveProfile={(input) => update.mutate(input)} savingProfile={update.isPending} profileSaved={update.isSuccess} profileError={profileErrorCopy(update.error)} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} />
+    <GatedCatalog initialFilters={sharedFilters} lead={mine.data.lead} communities={communities} featured={mine.data.featured as FeaturedDealsData} saved={mine.data.saved} picks={mine.data.picks} savingCard={savingCard} onSave={onSave} agent={mine.data.agent} onRequest={setRequest} onViewCommunity={(key) => viewed.mutate({ key })} onSaveProfile={(input) => update.mutate(input)} savingProfile={update.isPending} profileSaved={update.isSuccess} profileError={profileErrorCopy(update.error)} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} />
     <HomeRequestSheet key={request ? `${request.requestType}:${request.card}` : "closed"} request={request} onClose={() => setRequest(null)} />
   </>;
 }
@@ -189,6 +194,8 @@ function Team() {
   const workspace = trpc.deals.team.workspace.useQuery(undefined, { retry: false });
   const comingSoon = trpc.deals.comingSoon.useQuery();
   const [picked, setPicked] = useState<string[]>(() => readPicks());
+  // Oct 28, 2026 (New Home Buddy's bulk send): the filters on the list and their home count, for a link with no picks.
+  const [listShare, setListShare] = useState<{ filters: BrowseFilters; count: number } | null>(null);
   useEffect(() => { writePicks(picked); }, [picked]);
   const communities = useMemo(() => parseMineCommunities<GatedCommunity>(mine.data?.communitiesJson), [mine.data?.communitiesJson]);
   const pick: PickControl = useMemo(() => ({ picked: new Set(picked), onToggle: (card) => setPicked((current) => current.includes(card) ? current.filter((entry) => entry !== card) : current.length >= PICKS_MAX ? (toast.error(`Up to ${PICKS_MAX} picks per client.`), current) : [...current, card]), sendOne: (card) => sendOneRef.current(card) }), [picked]);
@@ -232,10 +239,10 @@ function Team() {
     created={create.data ?? null} creating={create.isPending} createError={create.isError ? create.error.message : null}
     onCreate={(input) => create.mutate(input)} onRevoke={(id) => revoke.mutate({ id })} onCopy={(url) => { void copy(url); }} copiedUrl={copiedUrl}
     onText={(input) => text.mutateAsync(input)} texting={text.isPending}
-    picked={picked} onClearPicks={clearPicks} onSetPicks={(input) => setPicks.mutateAsync(input)} settingPicks={setPicks.isPending} defaultClientsOpen={false} />;
+    picked={picked} onClearPicks={clearPicks} onSetPicks={(input) => setPicks.mutateAsync(input)} settingPicks={setPicks.isPending} defaultClientsOpen={false} listShare={listShare} />;
   // Agents send the list; their own view has no Save hearts (a heart there would belong to no client). Pick buttons stand in.
   return <>
-    <GatedCatalog lead={mine.data.lead} communities={communities} featured={mine.data.featured as FeaturedDealsData} tools={tools} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} pick={pick} />
+    <GatedCatalog lead={mine.data.lead} communities={communities} featured={mine.data.featured as FeaturedDealsData} tools={tools} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} pick={pick} onListChange={setListShare} />
     <PickTray count={picked.length} onClear={clearPicks} onSend={sendPicksToClient} onCopy={() => { void copyPicks(); }} />
   </>;
 }

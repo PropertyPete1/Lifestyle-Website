@@ -514,6 +514,9 @@ type HistoryWindow = Pick<Window, "addEventListener" | "removeEventListener" | "
  * adds one history entry on the same address; going back closes the sheet, and closing it any other way takes that
  * entry back off. Returns the clean-up to run when the sheet closes.
  */
+/** Sheets closed but still stepping back off their history entry (a photo viewer and its home can close together). */
+const releasedSheets = new Set<string>();
+
 export function sheetHistory(onBack: () => void, win: HistoryWindow = window): () => void {
   const token = `sheet-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const mine = () => (win.history.state as { dealsSheet?: string } | null)?.dealsSheet === token;
@@ -523,8 +526,19 @@ export function sheetHistory(onBack: () => void, win: HistoryWindow = window): (
   win.addEventListener("popstate", onPop);
   return () => {
     win.removeEventListener("popstate", onPop);
+    if (popped) return;
+    releasedSheets.add(token);
+    let tries = 0;
     // Checked a moment later, so a sheet that opens again at once (React's development double run) keeps its own entry.
-    if (!popped) win.setTimeout(() => { if (mine()) win.history.back(); }, 0);
+    const settle = () => {
+      const top = (win.history.state as { dealsSheet?: string } | null)?.dealsSheet;
+      // Kept on the released list a little longer: an outer sheet closing with this one looks for it until back lands.
+      if (top === token) { win.history.back(); win.setTimeout(() => releasedSheets.delete(token), 1000); return; }
+      // A sheet inside this one closed in the same moment and is still stepping back off its entry: look again after.
+      if (top && releasedSheets.has(top) && tries++ < 10) { win.setTimeout(settle, 30); return; }
+      releasedSheets.delete(token);
+    };
+    win.setTimeout(settle, 0);
   };
 }
 

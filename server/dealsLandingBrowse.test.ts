@@ -143,13 +143,14 @@ describe("the phone's back button closes an open home (Oct 28, New Home Buddy), 
       history: {
         get state() { return entries[index] ?? null; },
         pushState(state: unknown) { entries.splice(index + 1); entries.push(state); index = entries.length - 1; },
-        back() { if (index > 0) { index -= 1; listeners.forEach((listener) => listener()); } },
+        // Like a browser, going back happens a moment later, not inside the call.
+        back() { timers.push(() => { if (index > 0) { index -= 1; listeners.forEach((listener) => listener()); } }); },
       },
       addEventListener: (_: string, listener: () => void) => { listeners.add(listener); },
       removeEventListener: (_: string, listener: () => void) => { listeners.delete(listener); },
       setTimeout: (fn: () => void) => { timers.push(fn); return 0; },
     };
-    return { win, entries, at: () => index, flush: () => timers.splice(0).forEach((fn) => fn()) };
+    return { win, entries, at: () => index, flush: () => { for (let guard = 0; timers.length && guard < 100; guard++) timers.shift()!(); } };
   };
 
   it("back closes the sheet and stays on the page", () => {
@@ -157,7 +158,7 @@ describe("the phone's back button closes an open home (Oct 28, New Home Buddy), 
     let closed = 0;
     const release = sheetHistory(() => { closed += 1; }, fake.win as never);
     expect(fake.entries).toHaveLength(2);
-    fake.win.history.back();
+    fake.win.history.back(); fake.flush();
     expect(closed).toBe(1);
     expect(fake.at()).toBe(0);
     release(); fake.flush();
@@ -169,6 +170,17 @@ describe("the phone's back button closes an open home (Oct 28, New Home Buddy), 
     let closed = 0;
     const release = sheetHistory(() => { closed += 1; }, fake.win as never);
     release(); fake.flush();
+    expect(fake.at()).toBe(0);
+    expect(closed).toBe(0);
+  });
+
+  it("photos and their home closing together both leave history (no dead back press after)", () => {
+    const fake = fakeWindow();
+    let closed = 0;
+    const home = sheetHistory(() => { closed += 1; }, fake.win as never);
+    const photos = sheetHistory(() => { closed += 1; }, fake.win as never);
+    expect(fake.at()).toBe(2);
+    photos(); home(); fake.flush();
     expect(fake.at()).toBe(0);
     expect(closed).toBe(0);
   });

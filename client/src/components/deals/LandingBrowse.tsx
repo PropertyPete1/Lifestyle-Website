@@ -582,7 +582,7 @@ export type LandingActions = { openHome: (key: string, focus?: SheetFocus) => bo
 /** What a caller's own list (the unlocked list's flat home list) gets: the communities in view and how to open one. */
 export type BrowseListContext = { keys: ReadonlySet<string>; open: (key: string, focus?: SheetFocus) => void; hover: (key: string | null) => void; activeKey: string | null };
 
-export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6", mapSide = "right", areaStatus, onAreaChange }: {
+export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6", mapSide = "right", areaStatus, onAreaChange, phoneMap = "top" }: {
   communities: readonly LandingCommunity[]; onUnlock?: () => void; useHomes: UseCommunityHomes;
   /** The sheet's pieces for an unlocked list (see SheetOptions). */
   sheet?: SheetOptions;
@@ -598,6 +598,8 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   mapSide?: "left" | "right";
   /** The "Showing N in this part of town" line for a caller's own list (the home list counts homes, not communities). */
   areaStatus?: (keys: readonly string[]) => string;
+  /** Oct 28, 2026: "floating" puts the phone's only Map button at the bottom from the start (New Home Buddy), no top button. */
+  phoneMap?: "top" | "floating";
   /** Told which communities a map bubble narrowed the list to (null when cleared), so the caller's count follows. */
   onAreaChange?: (keys: readonly string[] | null) => void;
   /** A shared link's community (?k=key): its sheet opens once the catalog has it. */
@@ -674,8 +676,8 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
     <div className={`mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 ${mapSide === "left" ? "mt-3 gap-4 lg:grid-cols-[minmax(360px,44%)_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,1fr)_minmax(360px,42%)]"}`}>
       <div className="min-w-0">
         {/* On a phone the map button sits right under the search, before the featured row (Peter: map and search first). */}
-        <div ref={phoneMapTop} className="mb-4 flex min-w-0 scroll-mt-2 flex-wrap items-center gap-2 lg:hidden">
-          <button type="button" onClick={() => setMapOnPhone((value) => !value)} aria-expanded={mapOnPhone} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border bg-card px-4 text-sm shadow-sm"><MapPin className="h-4 w-4 text-gold" />{mapOnPhone ? LANDING_COPY.hideMap : LANDING_COPY.showMap}</button>
+        <div ref={phoneMapTop} className={`flex min-w-0 scroll-mt-2 flex-wrap items-center gap-2 lg:hidden ${phoneMap === "floating" ? "" : "mb-4"}`}>
+          {phoneMap === "top" && <button type="button" onClick={() => setMapOnPhone((value) => !value)} aria-expanded={mapOnPhone} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border bg-card px-4 text-sm shadow-sm"><MapPin className="h-4 w-4 text-gold" />{mapOnPhone ? LANDING_COPY.hideMap : LANDING_COPY.showMap}</button>}
         </div>
         {mapOnPhone && <div className="mb-6 lg:hidden">{map}
           {/* The bubble the visitor tapped narrows the list below; on a phone that is said right under the map. */}
@@ -694,7 +696,7 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
         </>}
         {below}
       </div>
-      {mapButtonAway && <button type="button" onClick={openPhoneMap} data-deals-floating-map="true" className={`fixed ${floatingMapBottom} left-1/2 z-30 inline-flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-5 text-sm font-semibold text-background shadow-xl lg:hidden`}><MapPin className="h-4 w-4" />{LANDING_COPY.mapButton}</button>}
+      {(mapButtonAway || phoneMap === "floating") && <button type="button" onClick={phoneMap === "floating" && mapOnPhone ? () => setMapOnPhone(false) : openPhoneMap} aria-expanded={mapOnPhone} data-deals-floating-map="true" className={`fixed ${floatingMapBottom} left-1/2 z-30 inline-flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-5 text-sm font-semibold text-background shadow-xl lg:hidden`}><MapPin className="h-4 w-4" />{phoneMap === "floating" && mapOnPhone ? LANDING_COPY.hideMap : LANDING_COPY.mapButton}</button>}
       {/* The map fills the side of the screen and stays there while the list scrolls (no empty space under it). */}
       <aside className={`hidden min-w-0 lg:block ${mapSide === "left" ? "lg:order-first" : ""}`} data-deals-map-side={mapSide}><div className={`sticky top-0 h-[100dvh] ${mapSide === "left" ? "py-2" : "py-4"}`}><RegionMap {...mapProps} className="h-full w-full" /></div></aside>
     </div>

@@ -2,6 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { AGENT_CLIENT_SOURCE, completeVerification, currentDealSource, dealsCsp, dealsPublicHeaders, ensureDealsCookies, exchangeAccessToken, getDealSettings, isDealsCrawler, randomOpaqueToken, recordDealsLanding, setDealCookie, setGoogleDealsIdentity } from "./dealsService";
 import { DEALS_COOKIE } from "../shared/deals";
 import { parse as parseCookie } from "cookie";
+import { noteInteractiveRequest } from "./interactiveLoad";
 
 /** An agent's client-link token, carried back onto every gate redirect so the visitor keeps their agent's gate. */
 function linkSuffix(value: unknown) {
@@ -27,6 +28,8 @@ const safe = (handler: (req: Request, res: Response, next: NextFunction) => Prom
  */
 export function registerDealsRoutes(app: Express) {
   app.use("/deals", (req: Request, res: Response, next: NextFunction) => {
+    // A person is waiting on this process: the photo backlog holds its next photo (see interactiveLoad).
+    noteInteractiveRequest();
     dealsPublicHeaders(res);
     dealsCsp(res);
     // The landing response—not a later API response—must establish the device

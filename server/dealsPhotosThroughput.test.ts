@@ -33,6 +33,7 @@ vi.mock("tesseract.js", () => ({
 import { getDb } from "./db";
 import { storageDelete, storagePut, storageReadPrivate } from "./storage";
 import * as photos from "./dealsPhotos";
+import { INTERACTIVE_QUIET_MS, interactiveBusy, noteInteractiveRequest, resetInteractiveLoad } from "./interactiveLoad";
 
 const sha256 = (value: string | Buffer) => crypto.createHash("sha256").update(value).digest("hex");
 const objects = new Map<string, Buffer>();
@@ -289,6 +290,39 @@ describe("time-budgeted drain", () => {
     // The priority query itself ran (no plain-order fallback).
     expect(rest.warning).toBeUndefined();
     expect(rest).toMatchObject({ processed: 1, stoppedForTime: false });
+  });
+});
+
+describe("people first (Oct 28: the photo backlog shares a CPU with the pages people are waiting on)", () => {
+  afterEach(() => resetInteractiveLoad());
+  it("holds the next photo while people are being served, always does one, and catches up once they are done", async () => {
+    simulatedQueue({
+      communities: [community(1, "Perry Homes")],
+      homes: [home(1, 1), home(2, 1), home(3, 1)],
+      photos: [1, 2, 3].map((id) => ({ id, homeId: id, sourceUrl: `https://res.cloudinary.com/perryhomes/p/${id}.jpg` })),
+      settings: { "Perry Homes": off("Perry Homes") },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => imageResponse(jpeg)));
+    noteInteractiveRequest();
+    const keepBusy = setInterval(() => noteInteractiveRequest(), 50);
+    let busy: Awaited<ReturnType<typeof photos.processPendingDealPhotos>>;
+    try {
+      busy = await photos.processPendingDealPhotos({ budgetMs: 1_200, concurrency: 1 });
+    } finally {
+      clearInterval(keepBusy);
+      resetInteractiveLoad();
+    }
+    expect(busy).toMatchObject({ processed: 1, stoppedForTime: true });
+    expect(busy.yieldedMs).toBeGreaterThan(0);
+    const quiet = await photos.processPendingDealPhotos({ budgetMs: 60_000 });
+    expect(quiet).toMatchObject({ processed: 2 });
+    expect(quiet.yieldedMs).toBeUndefined();
+  }, 20_000);
+
+  it("counts a person as gone after the quiet window", () => {
+    noteInteractiveRequest(1_000);
+    expect(interactiveBusy(1_000 + INTERACTIVE_QUIET_MS - 1)).toBe(true);
+    expect(interactiveBusy(1_000 + INTERACTIVE_QUIET_MS)).toBe(false);
   });
 });
 

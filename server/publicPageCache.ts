@@ -20,7 +20,10 @@ export type PublicPageCacheOptions = {
 type Entry<T> = { at: number; value: Promise<T>; lastRead: number; lastAttempt: number; refreshing: Promise<T> | null; timer: unknown };
 
 export function createPublicPageCache(options: PublicPageCacheOptions = {}) {
-  const freshMs = options.freshMs ?? 60_000;
+  // Oct 28, 2026: three minutes, not one. Each rebuild reads every community, home and photo row (5–10 s of database
+  // time), every process rebuilt each list it served once a minute, and that load slowed every other read (a photo's
+  // check, the list itself). Prices move on the builder sync and new photos trickle in; three minutes is still current.
+  const freshMs = options.freshMs ?? 3 * 60_000;
   const staleMs = options.staleMs ?? 15 * 60_000;
   const keepWarmMs = options.keepWarmMs ?? 10 * 60_000;
   const now = options.now ?? (() => Date.now());
@@ -52,7 +55,7 @@ export function createPublicPageCache(options: PublicPageCacheOptions = {}) {
     if (!warm(entry, key)) return;
     const load = loaders.get(key);
     if (!load) return;
-    // A full interval from the last attempt, so a failing rebuild (database down) retries once a minute, never in a loop.
+    // A full interval from the last attempt, so a failing rebuild (database down) retries once per interval, never in a loop.
     entry.timer = setTimer(() => { entry.timer = null; if (warm(entry, key)) void rebuild(key, load).catch(() => undefined); }, Math.max(1, freshMs - (now() - Math.max(entry.at, entry.lastAttempt))));
   }
 

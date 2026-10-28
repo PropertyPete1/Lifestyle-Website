@@ -16,6 +16,7 @@ import { scheduledDealsHandler } from "../scheduledDealsHandler";
 import { SUPPLIED_IMPORT_PATH, suppliedImportBodyLimit, suppliedImportHandler } from "../dealsSuppliedImport";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { noteInteractiveRequest } from "../interactiveLoad";
 
 process.on("unhandledRejection", (error) => {
   // Keep a failed optional Deals side effect from terminating the web process;
@@ -62,6 +63,8 @@ async function startServer() {
   app.post("/api/scheduled/refreshDeals", scheduledDealsHandler);
   // The owner's browser agent posts what it saw on a builder's pages (docs/builder-deals-supplied-import.md).
   app.post(SUPPLIED_IMPORT_PATH, suppliedImportHandler);
+  // A person is waiting on every API call: the photo backlog holds its next photo meanwhile (see interactiveLoad).
+  app.use("/api/trpc", (_req, _res, next) => { noteInteractiveRequest(); next(); });
   // tRPC API
   app.use(
     "/api/trpc",

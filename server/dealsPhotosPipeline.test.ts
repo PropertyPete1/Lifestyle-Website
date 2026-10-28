@@ -524,6 +524,28 @@ describe("renderDealPhotoForLead", () => {
     expect(vi.mocked(storagePut)).not.toHaveBeenCalled();
   });
 
+  it("serves a stored render while every render lane is busy (Oct 28: a list of 24 photos waited up to 10 s)", async () => {
+    for (let id = 1; id <= 3; id++) objects.set(`builder-deals-private/masters/${id}.webp`, await master(64 + id, 64));
+    objects.set("builder-deals-private/masters/7.webp", await master(90, 64));
+    objects.set("builder-deals-private/renders/9/7-stored-card.webp", Buffer.from("stored-card"));
+    const fake = renderScenario();
+    fake.onSelect(dealPhotoRenders, (op: FakeOp) => renderWhere(op.where).params[0] === 7 ? [{ id: 1, photoId: 7, leadId: 9, version: "any", storageKey: "builder-deals-private/renders/9/7-stored-card.webp", expiresAt: future }] : []);
+    const gates: Array<() => void> = [];
+    vi.mocked(storageReadPrivate).mockImplementation(async (key) => {
+      if (key.includes("/masters/")) await new Promise<void>((resolve) => gates.push(resolve));
+      const data = objects.get(key);
+      if (!data) throw new Error("missing object");
+      return { data, contentType: "image/webp" };
+    });
+    const busy = Promise.all([1, 2, 3].map((id) => photos.renderDealPhotoForLead(id, 9, "card")));
+    await waitFor(() => gates.length === 3);
+    const stored = await photos.renderDealPhotoForLead(7, 9, "card");
+    expect(stored?.data.toString()).toBe("stored-card");
+    expect(gates.length).toBe(3);
+    for (const release of gates.splice(0)) release();
+    expect((await busy).every((result) => result?.contentType === "image/webp")).toBe(true);
+  });
+
   it("limits uncached renders to three in flight and keeps a fifty-entry in-memory LRU", async () => {
     // Distinct bytes per photo: the render cache is keyed by master version, so identical masters would share one render.
     for (let id = 1; id <= 60; id++) objects.set(`builder-deals-private/masters/${id}.webp`, await master(64 + id, 64));

@@ -10,6 +10,7 @@ import { storageDelete, storageExistsPrivate, storagePut, storageReadPrivate } f
 import { dealScrubTerms, displayForLead } from "../shared/deals";
 import { effectiveScrubConfig } from "./dealsScrub";
 import { recordDealPhotoDrainStatus } from "./dealsPhotoDrainStatus";
+import { interactiveBusy } from "./interactiveLoad";
 
 /**
  * libvips memory on the web instance. On October 22, 2026 the instance restarted about every three minutes with
@@ -123,6 +124,13 @@ const PHOTO_SIBLINGS_PER_REFILL = 200;
  */
 const STORED_WEBP_EFFORT = 2;
 const RENDER_CONCURRENCY = 3;
+/**
+ * Oct 28, 2026: a render already stored (by this process or another) is a storage read, not image work, so it no
+ * longer queues behind renders in progress (a list of 24 photos waited up to 10 s for three render lanes).
+ */
+const STORED_RENDER_READ_CONCURRENCY = 8;
+/** How long a photo lane waits before checking again whether the people being served are done. */
+const INTERACTIVE_YIELD_STEP_MS = 250;
 const RENDER_MEMORY_ENTRIES = 50;
 /** Parked queue state: the builder is enabled for removal but has no saved region yet. */
 export const AWAITING_REGION = "awaiting_region";
@@ -1356,6 +1364,8 @@ export type DealPhotoDrainResult = {
   partial?: boolean;
   /** A drain in this process looked hung (older than DRAIN_STALE_MS), so this call ran its own beside it. */
   steppedAroundStaleDrain?: boolean;
+  /** Time lanes held off starting a photo because this process was serving people (see interactiveLoad). */
+  yieldedMs?: number;
   /** Busy milliseconds per pipeline stage over this drain (live while it runs). */
   stageMs?: DealPhotoStageTimings;
 };
@@ -1392,6 +1402,7 @@ function mergeDrainResults(a: DealPhotoDrainResult, b: DealPhotoDrainResult): De
     reused: { originals: (a.reused?.originals ?? 0) + (b.reused?.originals ?? 0), masters: (a.reused?.masters ?? 0) + (b.reused?.masters ?? 0), ocr: (a.reused?.ocr ?? 0) + (b.reused?.ocr ?? 0) },
     stoppedForTime: Boolean(a.stoppedForTime || b.stoppedForTime),
     elapsedMs: (a.elapsedMs ?? 0) + (b.elapsedMs ?? 0),
+    ...(a.yieldedMs || b.yieldedMs ? { yieldedMs: (a.yieldedMs ?? 0) + (b.yieldedMs ?? 0) } : {}),
     ...(a.timedOut || b.timedOut ? { timedOut: (a.timedOut ?? 0) + (b.timedOut ?? 0) } : {}),
     ...(a.stageMs || b.stageMs ? { stageMs: Object.fromEntries(DEAL_PHOTO_STAGES.map((stage) => [stage, (a.stageMs?.[stage] ?? 0) + (b.stageMs?.[stage] ?? 0)])) as DealPhotoStageTimings } : {}),
     ...(a.error || b.error ? { error: a.error ?? b.error } : {}),
@@ -1668,6 +1679,13 @@ async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: numbe
         if (queue.length || !exhausted) result.stoppedForTime = true;
         return null;
       }
+      // Oct 28, 2026: someone is waiting on this process (a page or a photo), so the next photo waits for a quiet moment.
+      if (started > 0 && interactiveBusy()) {
+        const pausedAt = Date.now();
+        await new Promise((resolve) => setTimeout(resolve, INTERACTIVE_YIELD_STEP_MS));
+        result.yieldedMs = (result.yieldedMs ?? 0) + (Date.now() - pausedAt);
+        continue;
+      }
       const id = queue.shift();
       if (id !== undefined) {
         started++;
@@ -1855,6 +1873,7 @@ const CARD_RENDER_MEMORY_ENTRIES = 200;
 
 type RenderedPhoto = { data: Buffer; contentType: string };
 const renderLimiter = createLimiter(RENDER_CONCURRENCY);
+const storedRenderReadLimiter = createLimiter(STORED_RENDER_READ_CONCURRENCY);
 const renderMemory = new LruCache<RenderedPhoto>(RENDER_MEMORY_ENTRIES);
 /** Card renders are small (tens of KB): more of them stay in memory, so scrolling back up is instant. */
 const cardRenderMemory = new LruCache<RenderedPhoto>(CARD_RENDER_MEMORY_ENTRIES);
@@ -1942,8 +1961,8 @@ export async function renderDealPhotoForPublic(photoId: number): Promise<Rendere
     if (inMemory) return inMemory;
     // Kept in storage too (keyed by the master's version), so a restart or a busy page does not redo the work.
     const storedKey = `${PRIVATE_PREFIX}public/${photoId}-${row.photo.processedVersion.slice(0, 16)}.webp`;
-    if (publicRenderLimiter.waiting() >= PUBLIC_RENDER_QUEUE_MAX) return PUBLIC_RENDER_BUSY;
-    return await publicRenderLimiter(async () => {
+    // A render stored earlier is read back without waiting behind renders in progress.
+    const storedRender = await storedRenderReadLimiter(async () => {
       const raced = renderMemory.get(cacheVersion);
       if (raced) return raced;
       try {
@@ -1954,6 +1973,13 @@ export async function renderDealPhotoForPublic(photoId: number): Promise<Rendere
           return value;
         }
       } catch { /* not rendered yet */ }
+      return null;
+    });
+    if (storedRender) return storedRender;
+    if (publicRenderLimiter.waiting() >= PUBLIC_RENDER_QUEUE_MAX) return PUBLIC_RENDER_BUSY;
+    return await publicRenderLimiter(async () => {
+      const raced = renderMemory.get(cacheVersion);
+      if (raced) return raced;
       let source: { data: Buffer };
       try { source = await storageReadPrivate(row.photo.processedStorageKey as string); } catch (error) {
         // The stored master is gone (storage answered 4xx): the photo is processed again rather than staying a broken image.
@@ -2007,7 +2033,8 @@ export async function renderDealPhotoForLead(photoId: number, leadId: number, si
     const inMemory = memory.get(cacheVersion);
     if (inMemory) return inMemory;
 
-    return await renderLimiter(async () => {
+    // A render stored earlier is read back without waiting behind renders in progress.
+    const storedRender = await storedRenderReadLimiter(async () => {
       const raced = memory.get(cacheVersion);
       if (raced) return raced;
       const cached = (await db.select().from(dealPhotoRenders).where(and(
@@ -2016,17 +2043,23 @@ export async function renderDealPhotoForLead(photoId: number, leadId: number, si
         eq(dealPhotoRenders.version, cacheVersion),
         gt(dealPhotoRenders.expiresAt, now),
       )).limit(1))[0];
-      if (cached) {
-        try {
-          const stored = await storageReadPrivate(cached.storageKey);
-          const value = { data: stored.data, contentType: stored.contentType || "image/webp" };
-          memory.set(cacheVersion, value);
-          return value;
-        } catch {
-          // A stale/missing cache object is regenerated below. Do not leak the
-          // signed-store error to a protected image response.
-        }
+      if (!cached) return null;
+      try {
+        const stored = await storageReadPrivate(cached.storageKey);
+        const value = { data: stored.data, contentType: stored.contentType || "image/webp" };
+        memory.set(cacheVersion, value);
+        return value;
+      } catch {
+        // A stale/missing cache object is regenerated below. Do not leak the
+        // signed-store error to a protected image response.
+        return null;
       }
+    });
+    if (storedRender) return storedRender;
+
+    return await renderLimiter(async () => {
+      const raced = memory.get(cacheVersion);
+      if (raced) return raced;
 
       const source = await storageReadPrivate(row.photo.processedStorageKey as string);
       // Fail closed: only the exact master the row's checks passed is ever rendered.

@@ -46,7 +46,7 @@ import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clien
 import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, adminTurnedOffLeadIds, browserIsAdminPaused, browserIsRealtorBlocked, dealsCardHandle, isTeamPhone, pausedAccessMessage, staleSessionLeadId, turnOffBuyerAccess, turnOnBuyerAccess } from "./dealsService";
 /** What a realtor sees for the moment before the recruiting page opens. */
 /**
- * The landing's two public reads (every community, the featured row) are the same for every visitor: kept for a minute
+ * The landing's two public reads (every community, the featured row) are the same for every visitor: kept for three minutes
  * and shared by requests that arrive together (Oct 24: the first paint waited 3.7 s on them). Oct 26: served stale
  * while a rebuild runs in the background and kept warm on a timer while the page is being read, so a visitor who
  * arrives as the minute ends no longer waits 5–10 s for the rebuild (see publicPageCache). Off under tests.
@@ -60,7 +60,7 @@ function publicPageCache<T>(key: string, load: () => Promise<T>): Promise<T> {
 export function cachedPublicCatalog(): Promise<Awaited<ReturnType<typeof publicDealsCatalog>>> {
   return publicPageCache("catalog:", () => publicDealsCatalog(undefined));
 }
-/** At boot: the landing's two reads are built before the first visitor and rebuilt every minute for the life of the process. */
+/** At boot: the landing's two reads are built before the first visitor and rebuilt every three minutes for the life of the process. */
 export function warmPublicPages(): void {
   if (process.env.VITEST) return;
   publicPages.pin("catalog:", () => publicDealsCatalog(undefined));
@@ -449,7 +449,7 @@ export const dealsRouter = router({
     const { clientLinkPicksForLead } = await import("./dealsClientLinks");
     // Oct 26, 2026: the homes the client's agent picked for them lead their list; nobody else has picks.
     // Oct 27, 2026: the list and its featured row are the same for every lead with this view and took ~4 s to build
-    // on every open ("Preparing the team list…"); they are built once a minute per view and shared (see publicPageCache).
+    // on every open ("Preparing the team list…"); they are built every three minutes per view and shared (see publicPageCache).
     const viewKey = gatedCatalogViewKey(view);
     const builtList = () => publicPageCache(`mine:${viewKey}`, () => buildGatedCatalog(view));
     const cardsOf = (built: Awaited<ReturnType<typeof buildGatedCatalog>>) => new Set(built.flatMap(({ entry }) => ((entry.homes as Array<{ card?: string }> | undefined) ?? []).flatMap((home) => home.card ? [home.card] : [])));

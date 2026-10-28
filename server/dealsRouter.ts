@@ -44,6 +44,7 @@ import {
 import { createPublicPageCache } from "./publicPageCache";
 import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
 import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, adminTurnedOffLeadIds, browserIsAdminPaused, browserIsRealtorBlocked, dealsCardHandle, isTeamPhone, pausedAccessMessage, staleSessionLeadId, turnOffBuyerAccess, turnOnBuyerAccess } from "./dealsService";
+import { catalogWithSnapshot } from "./dealsCatalogSnapshot";
 /** What a realtor sees for the moment before the recruiting page opens. */
 /**
  * The landing's two public reads (every community, the featured row) are the same for every visitor: kept for three minutes
@@ -65,6 +66,13 @@ export function warmPublicPages(): void {
   if (process.env.VITEST) return;
   publicPages.pin("catalog:", () => publicDealsCatalog(undefined));
   publicPages.pin("featured", async () => (await import("./dealsFeatured")).featuredDeals("public"));
+}
+/** A stored list (see dealsCatalogSnapshot) keeps only the communities that are still on now (one read of the live ids). */
+async function liveCommunitiesOnly(built: Awaited<ReturnType<typeof buildGatedCatalog>>) {
+  const db = await getDb();
+  if (!db) return [];
+  const live = new Set((await db.select({ id: dealCommunities.id }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)))).map((row) => row.id));
+  return built.filter((entry) => live.has(entry.id));
 }
 export const REALTOR_GATE_MESSAGE = "Builder Deals are for home buyers. Agents: these deals are open to our team for your clients. Taking you to our agent page.";
 
@@ -470,7 +478,8 @@ export const dealsRouter = router({
     // Oct 27, 2026: the list and its featured row are the same for every lead with this view and took ~4 s to build
     // on every open ("Preparing the team list…"); they are built every three minutes per view and shared (see publicPageCache).
     const viewKey = gatedCatalogViewKey(view);
-    const builtList = () => publicPageCache(`mine:${viewKey}`, () => buildGatedCatalog(view));
+    // Oct 28, 2026: a fresh server process answers from the last stored build instead of building while the visitor waits.
+    const builtList = () => publicPageCache(`mine:${viewKey}`, () => process.env.VITEST ? buildGatedCatalog(view) : catalogWithSnapshot(viewKey, () => buildGatedCatalog(view), { recheck: liveCommunitiesOnly }));
     const cardsOf = (built: Awaited<ReturnType<typeof buildGatedCatalog>>) => new Set(built.flatMap(({ entry }) => ((entry.homes as Array<{ card?: string }> | undefined) ?? []).flatMap((home) => home.card ? [home.card] : [])));
     const [communities, saved, picks, featured] = await Promise.all([
       gatedDealsCatalog(session.leadId, view, { built: builtList }),

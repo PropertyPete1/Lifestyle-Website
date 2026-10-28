@@ -15,7 +15,7 @@ import type { GatedCatalogProps, GatedCommunity, GatedLead } from "../client/src
 (globalThis as { React?: typeof React }).React = React;
 const { GateSheetView } = await import("../client/src/components/deals/GateSheet");
 const { GatedCatalog } = await import("../client/src/components/deals/GatedCatalog");
-const { AgentTools, clientMessage, clientStatus, confirmAndRevoke, smsHref, absoluteLink } = await import("../client/src/components/deals/AgentTools");
+const { AgentTools, clientMessage, clientStatus, confirmAndRevoke, smsHref, absoluteLink, gmailComposeHref } = await import("../client/src/components/deals/AgentTools");
 const { clientLinkState } = await import("../client/src/components/builder-deals/ClientLinksSection");
 const { createElement } = React;
 const decode = (value: string) => value.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
@@ -125,6 +125,14 @@ describe("agent tools on /deals/team", () => {
   const noop = () => undefined;
   const renderTools = (overrides: Partial<Parameters<typeof AgentTools>[0]> = {}) => decode(renderToStaticMarkup(createElement(AgentTools, { workspace, onCreate: noop, onRevoke: noop, onCopy: noop, origin: "https://lifestyledesignrealty.com", ...overrides })));
 
+  it("Email it opens Gmail in the agent's Lifestyle account (Oct 28, Peter: confirm Google with their Lifestyle Gmail)", () => {
+    const lifestyle = gmailComposeHref({ clientName: "Maria", agentName: "Tiffany Agent", url: "https://lifestyledesignrealty.com/deals?c=x", agentEmail: "Tiffany@LifestyleDesignRealty.com" });
+    expect(lifestyle.startsWith("https://mail.google.com/mail/u/tiffany%40lifestyledesignrealty.com/?view=cm&fs=1&tf=1&su=")).toBe(true);
+    expect(decodeURIComponent(lifestyle)).toContain("https://lifestyledesignrealty.com/deals?c=x");
+    // A personal address on file is never picked for them: Google's own account comes up instead.
+    expect(gmailComposeHref({ clientName: "Maria", agentName: "Tiffany Agent", url: "u", agentEmail: "tiffany@gmail.com" })).toMatch(/^https:\/\/mail\.google\.com\/mail\/u\/0\//);
+  });
+
   it("an agent with no client links yet gets no empty Your clients row (Oct 28: dead space)", () => {
     const empty = renderTools({ workspace: { ...workspace, clients: [] }, defaultClientsOpen: false });
     expect(empty).not.toContain('data-deals-clients-toggle="true"');
@@ -156,7 +164,9 @@ describe("agent tools on /deals/team", () => {
     expect(html).not.toContain('href="sms:+12105550202');
     // Oct 27: Email it opens the agent's mail app with the same message (the agent adds the address).
     expect(html).toContain('data-deals-email-it="true"');
-    expect(html).toMatch(/href="mailto:\?subject=Your%20private%20list%20of%20new-build%20deals&(?:amp;)?body=Hi%20(?:Maria|Sam)/);
+    // Oct 28: Email it opens a Gmail draft in the agent's Lifestyle Google account (Peter: "make click email go to Gmail").
+    expect(html).toMatch(/href="https:\/\/mail\.google\.com\/mail\/u\/[^/"]+\/\?view=cm&(?:amp;)?fs=1&(?:amp;)?tf=1&(?:amp;)?su=Your%20private%20list%20of%20new-build%20deals&(?:amp;)?body=Hi%20(?:Maria|Sam)/);
+    expect(html).not.toContain("mailto:");
     // The expired, never-used link offers nothing to send.
     expect(html.match(/ Text it</g)?.length).toBe(2);
     expect(html).not.toContain("Follow Up Boss user");

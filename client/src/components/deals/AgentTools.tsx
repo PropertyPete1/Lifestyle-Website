@@ -95,6 +95,18 @@ export function mailtoHref(input: { clientName: string; agentName: string; url: 
   return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
+/**
+ * Oct 28, 2026 (Peter: "make click email go to Gmail, make the agent confirm Google to use their Lifestyle Gmail"): Email
+ * it opens a Gmail draft in the agent's own Lifestyle Google account (/mail/u/<their email>/), so Google asks them to sign
+ * in to that account if they are not, and never sends from a personal address by mistake.
+ */
+export function gmailComposeHref(input: { clientName: string; agentName: string; url: string; pickCount?: number; agentEmail?: string | null }) {
+  const subject = input.pickCount && input.pickCount > 0 ? `${input.pickCount} new-build home${input.pickCount === 1 ? "" : "s"} I picked for you` : "Your private list of new-build deals";
+  const body = `${clientMessage(input)}\n\n${input.agentName}\nLifestyle Design Realty`;
+  const account = input.agentEmail && /@lifestyledesignrealty\.com$/i.test(input.agentEmail.trim()) ? encodeURIComponent(input.agentEmail.trim().toLowerCase()) : "0";
+  return `https://mail.google.com/mail/u/${account}/?view=cm&fs=1&tf=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 /** iOS wants "sms:number&body=", Android "sms:number?body="; "?&body=" is read by both. */
 export function smsHref(body: string, phoneDigits?: string | null) {
   const digits = phoneDigits?.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "") ?? "";
@@ -226,7 +238,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
           {created.clientPhoneDigits
             ? <button type="button" data-deals-text-it="true" onClick={() => openText({ id: created.id, clientName: created.clientName ?? "", clientPhoneDigits: created.clientPhoneDigits }, createdMessage)} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground"><MessageSquareText className="h-4 w-4" /> Text it</button>
             : <a href={smsHref(createdMessage, null)} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground"><MessageSquareText className="h-4 w-4" /> Text it</a>}
-          <a href={mailtoHref({ clientName: created.clientName ?? "", agentName, url: createdUrl, pickCount: created.pickCount })} data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>
+          <a href={gmailComposeHref({ clientName: created.clientName ?? "", agentName, url: createdUrl, pickCount: created.pickCount, agentEmail: workspace?.agent.email })} target="_blank" rel="noreferrer" data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>
           <Button type="button" variant="outline" onClick={() => onCopy(createdUrl)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === createdUrl ? AGENT_COPY.copied : "Copy link"}</Button>
         </div>
       </div>}
@@ -258,7 +270,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
             {client.clientPhoneDigits
               ? <button type="button" data-deals-text-it="true" onClick={() => openText(client, clientMessage({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length }))} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> {client.lastTextedAt ? "Text it again" : "Text it"}</button>
               : <a href={smsHref(clientMessage({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length }), null)} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> Text it</a>}
-            <a href={mailtoHref({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length })} data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>
+            <a href={gmailComposeHref({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length, agentEmail: workspace?.agent.email })} target="_blank" rel="noreferrer" data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>
             <Button type="button" variant="outline" onClick={() => onCopy(url)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === url ? AGENT_COPY.copied : "Copy link"}</Button>
           </div>}
         </article>;

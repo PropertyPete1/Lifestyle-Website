@@ -285,6 +285,20 @@ describe("the landing catalog", () => {
     for (const secret of ["Fixture Lakes", "Fixture Hills", "100 Fixture", "chesmar", "29.355424", "-98.319795", `"id"`]) expect(json).not.toContain(secret);
   });
 
+  it("covers a community with its model home's photo when the builder labels one (Oct 28, Peter), never listing the model", async () => {
+    const lakes = community({});
+    const cheap = home(lakes, 300_000);
+    photo(cheap, 0);
+    const model = home(lakes, 0, { status: "model", price: null, sourceUrl: "https://www.chesmar.com/x/model/" });
+    photo(model, 1);
+    const front = photo(model, 0);
+    const entries = await publicDealsCatalog() as Array<{ cover: string | null; homesAvailable: number; homeFacts: unknown[] }>;
+    expect(photoIdFromToken(entries[0]!.cover!.replace("/deals/pub/img/", ""))).toBe(front);
+    // The model is never a home on the list.
+    expect(entries[0]!.homeFacts).toHaveLength(1);
+    expect(entries[0]!.homesAvailable).toBe(1);
+  });
+
   it("shows a community's homes with prices, specs and photos, never an address, a plan or a name", async () => {
     const lakes = community({});
     const ready = home(lakes, 300_000, { previousPrice: 320_000, moveInDate: "Nov 2026" });

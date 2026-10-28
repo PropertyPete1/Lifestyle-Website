@@ -53,6 +53,7 @@ export const LANDING_COPY = {
   mapLabel: "Map of the communities",
   mapAttribution: "Map data and imagery from Google. Markers show the general area only, never the community.",
   showMap: "Show map",
+  mapButton: "Map",
   hideMap: "Hide map",
   unlock: "Schedule a tour",
   homeAddress: "Schedule a tour",
@@ -577,7 +578,7 @@ export type LandingActions = { openHome: (key: string, focus?: SheetFocus) => bo
 /** What a caller's own list (the unlocked list's flat home list) gets: the communities in view and how to open one. */
 export type BrowseListContext = { keys: ReadonlySet<string>; open: (key: string, focus?: SheetFocus) => void; hover: (key: string | null) => void; activeKey: string | null };
 
-export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList }: {
+export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6" }: {
   communities: readonly LandingCommunity[]; onUnlock?: () => void; useHomes: UseCommunityHomes;
   /** The sheet's pieces for an unlocked list (see SheetOptions). */
   sheet?: SheetOptions;
@@ -587,6 +588,8 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   below?: ReactNode;
   /** Oct 27, 2026 (New Home Buddy lists homes, not communities): the caller's own list in place of the community cards. */
   renderList?: (context: BrowseListContext) => ReactNode;
+  /** Where the phone's floating Map button sits (the team page lifts it above its pick tray). */
+  floatingMapBottom?: string;
   /** A shared link's community (?k=key): its sheet opens once the catalog has it. */
   openKey?: string | null;
   /** Shown at the top of the list column (the featured row); a function gets the actions above. */
@@ -602,6 +605,17 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   const openKeyRef = useRef<string | null>(null);
   useEffect(() => { const key = open?.key ?? null; if (key && key !== openKeyRef.current) onOpenCommunity?.(key); openKeyRef.current = key; }, [open, onOpenCommunity]);
   const [mapOnPhone, setMapOnPhone] = useState(false);
+  // Oct 27, 2026 (New Home Buddy's floating MAP button): once the top Map button scrolls away, a pill stays at the bottom.
+  const phoneMapTop = useRef<HTMLDivElement>(null);
+  const [mapButtonAway, setMapButtonAway] = useState(false);
+  useEffect(() => {
+    const element = phoneMapTop.current;
+    if (!element || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => setMapButtonAway(entries.every((entry) => !entry.isIntersecting && entry.boundingClientRect.top < 0)));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const openPhoneMap = () => { setMapOnPhone(true); window.setTimeout(() => phoneMapTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 30); };
   const [pages, setPages] = useState(1);
   const keyed = useMemo(() => communities.map((community, index) => ({ ...community, key: keyOf(community, index) })), [communities]);
   // New filters start the list from the top again.
@@ -648,7 +662,7 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
     <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,42%)]">
       <div className="min-w-0">
         {/* On a phone the map button sits right under the search, before the featured row (Peter: map and search first). */}
-        <div className="mb-4 flex min-w-0 flex-wrap items-center gap-2 lg:hidden">
+        <div ref={phoneMapTop} className="mb-4 flex min-w-0 scroll-mt-2 flex-wrap items-center gap-2 lg:hidden">
           <button type="button" onClick={() => setMapOnPhone((value) => !value)} aria-expanded={mapOnPhone} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border bg-card px-4 text-sm shadow-sm"><MapPin className="h-4 w-4 text-gold" />{mapOnPhone ? LANDING_COPY.hideMap : LANDING_COPY.showMap}</button>
         </div>
         {mapOnPhone && <div className="mb-6 lg:hidden">{map}
@@ -668,6 +682,7 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
         </>}
         {below}
       </div>
+      {mapButtonAway && <button type="button" onClick={openPhoneMap} data-deals-floating-map="true" className={`fixed ${floatingMapBottom} left-1/2 z-30 inline-flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-5 text-sm font-semibold text-background shadow-xl lg:hidden`}><MapPin className="h-4 w-4" />{LANDING_COPY.mapButton}</button>}
       {/* The map fills the side of the screen and stays there while the list scrolls (no empty space under it). */}
       <aside className="hidden min-w-0 lg:block"><div className="sticky top-0 h-[100dvh] py-4"><RegionMap {...mapProps} className="h-full w-full" /></div></aside>
     </div>

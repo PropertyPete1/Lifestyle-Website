@@ -426,7 +426,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
     const frame = window.requestAnimationFrame(() => { scrollToHomeCard(pendingCard); setPendingCard(null); });
     return () => window.cancelAnimationFrame(frame);
   }, [pendingCard, opened, pages, filters]);
-  return <main data-deals-gated="true" style={identityPatternStyle(lead.display)} className="deals-light min-h-screen max-w-full overflow-x-clip bg-background">
+  return <main data-deals-gated="true" style={identityPatternStyle(lead.display)} className="deals-light min-h-screen max-w-full overflow-x-clip bg-background [overflow-anchor:none]">
     <header className="deals-chrome flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link><span className="flex items-center gap-4 text-xs text-gold">{lead.teamPreview && <Link href="/deals/team" className="inline-flex min-h-11 items-center underline-offset-4 hover:underline">Agent tools</Link>}<span><Clock3 className="mr-1 inline h-3.5 w-3.5" /> <Countdown expiresAt={lead.expiresAt} now={now} onExpire={onExpire} /></span></span></header>
     <section className={many ? "px-4 py-6 sm:px-6" : "px-5 py-10 sm:px-8"}><div className={`mx-auto ${many ? "max-w-[1600px]" : "max-w-5xl"}`}>
       {many
@@ -461,7 +461,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
           </div>
           </div>
         </div>
-        <LandingBrowse communities={landing} lookup={landingAll} useHomes={useSheetHomes} filters={{ ...EMPTY_FILTERS, sort: filters.sort }}
+        <LandingBrowse communities={landing} lookup={landingAll} floatingMapBottom={pick && pick.picked.size > 0 ? "bottom-24" : "bottom-6"} useHomes={useSheetHomes} filters={{ ...EMPTY_FILTERS, sort: filters.sort }}
           renderList={listView === "homes" ? (context) => <HomeList entries={homeEntries} context={context} pick={pick} savedSet={savedSet} savingCard={savingCard} onSave={onSave} /> : undefined}
           onOpenCommunity={(key) => { const community = byKey.get(key); if (community?.key && onViewCommunity && !reported.has(key)) { reported.add(key); onViewCommunity(community.key); } }}
           top={listView === "homes" ? undefined : (actions) => <FeaturedDeals featured={featured} onSelect={(deal) => {

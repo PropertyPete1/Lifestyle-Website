@@ -665,6 +665,9 @@ describe("an agent's own page link (Oct 28, Peter: agents put it on their Instag
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
     expect(await agentPageForLead(agent)).toEqual({ slug: "tiffany-agent", path: "/deals/u/tiffany-agent" });
     expect((await agentForPageSlug("tiffany-agent"))?.teamId).toBe(teamId);
+    // The name with the agent's row number on the end always works too (a link made before a rename stays good).
+    expect((await agentForPageSlug(`tiffany-agent-${teamId}`))?.teamId).toBe(teamId);
+    expect(await agentForPageSlug(`tiffany-agent-${teamId + 999}`)).toBeNull();
     expect(await agentForPageSlug("nobody-here")).toBeNull();
     expect(await agentForPageSlug("../admin")).toBeNull();
 
@@ -705,10 +708,14 @@ describe("an agent's own page link (Oct 28, Peter: agents put it on their Instag
     expect(agentNameSlug("  Zoë  O'Neil-Brown ")).toBe("zoe-o-neil-brown");
     const entries = agentPageEntries([row(1, "Sam Lee", "5"), row(2, "Sam Lee", "5"), row(3, "Sam Lee", "9"), row(4, "Ana Ruiz", null), row(5, "Gone Agent", "7", false), row(6, null, "8")]);
     expect(entries).toEqual([
-      { slug: "sam-lee-1", teamId: 1, rowIds: [1, 2] },
-      { slug: "sam-lee-3", teamId: 3, rowIds: [3] },
-      { slug: "ana-ruiz", teamId: 4, rowIds: [4] },
+      { slug: "sam-lee", teamId: 1, rowIds: [1, 2], base: "sam-lee" },
+      { slug: "sam-lee-3", teamId: 3, rowIds: [3], base: "sam-lee" },
+      { slug: "ana-ruiz", teamId: 4, rowIds: [4], base: "ana-ruiz" },
     ]);
+    // Live, Oct 28: Peter has a hand-added row and his FUB row; they are one person with one plain link.
+    expect(agentPageEntries([row(30001, "Peter Allen", null), row(10, "Peter Allen", "2")])).toEqual([{ slug: "peter-allen", teamId: 10, rowIds: [30001, 10], base: "peter-allen" }]);
+    // A hand-added row whose name matches two different FUB users stays its own.
+    expect(agentPageEntries([row(40, "Sam Lee", null), row(1, "Sam Lee", "5"), row(3, "Sam Lee", "9")]).map((entry) => entry.slug)).toEqual(["sam-lee-40", "sam-lee", "sam-lee-3"]);
   });
 });
 

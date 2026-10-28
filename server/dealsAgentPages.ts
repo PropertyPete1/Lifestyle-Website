@@ -41,27 +41,37 @@ export function validAgentPageSlug(value: unknown): string | null {
 }
 
 type TeamRow = typeof dealTeamAllowlist.$inferSelect;
-type PageEntry = { slug: string; teamId: number; rowIds: number[] };
+type PageEntry = { slug: string; teamId: number; rowIds: number[]; base: string };
 
 /**
- * One page per person on the active team list: rows of the same Follow Up Boss user (one per phone) share it; a
- * hand-added row with no FUB user is its own. The slug is the name; two different people with the same name both get
- * the name plus their row number, so neither one's link can ever land on the other.
+ * One page per person on the active team list: rows of the same Follow Up Boss user (one per phone) share it, and a
+ * hand-added row joins the one FUB user of the same name. The slug is the name; when two different people share a name,
+ * the later one gets their row number on the end, so neither one's link can ever land on the other.
  */
 export function agentPageEntries(rows: readonly TeamRow[]): PageEntry[] {
+  const named = rows.filter((row) => row.active && row.name?.trim() && agentNameSlug(row.name));
+  // A hand-added row with no FUB user joins the one FUB user of the same name (Peter's manual row and his FUB row are
+  // one person, one link); with no such user, or two of them, it stands alone.
+  const fubByName = new Map<string, Set<string>>();
+  for (const row of named) if (row.fubUserId?.trim()) {
+    const slug = agentNameSlug(row.name);
+    fubByName.set(slug, new Set([...Array.from(fubByName.get(slug) ?? []), row.fubUserId.trim()]));
+  }
   const groups = new Map<string, TeamRow[]>();
-  for (const row of rows) {
-    if (!row.active || !row.name?.trim() || !agentNameSlug(row.name)) continue;
-    const key = row.fubUserId?.trim() ? `fub:${row.fubUserId.trim()}` : `row:${row.id}`;
+  for (const row of named) {
+    const sameName = fubByName.get(agentNameSlug(row.name));
+    const key = row.fubUserId?.trim() ? `fub:${row.fubUserId.trim()}` : sameName?.size === 1 ? `fub:${Array.from(sameName)[0]}` : `row:${row.id}`;
     groups.set(key, [...(groups.get(key) ?? []), row]);
   }
   const people = Array.from(groups.values()).map((group) => {
     const primary = [...group].sort((a, b) => Number(Boolean(b.fubUserId?.trim())) - Number(Boolean(a.fubUserId?.trim())) || a.id - b.id)[0]!;
     return { base: agentNameSlug(primary.name), teamId: primary.id, rowIds: group.map((row) => row.id) };
   });
-  const counts = new Map<string, number>();
-  for (const person of people) counts.set(person.base, (counts.get(person.base) ?? 0) + 1);
-  return people.map((person) => ({ slug: (counts.get(person.base) ?? 0) > 1 ? `${person.base}-${person.teamId}` : person.base, teamId: person.teamId, rowIds: person.rowIds }));
+  // Same name, different people: the first on the team keeps the plain link (so a link already in someone's bio never
+  // changes when a namesake joins); the others get their row number on the end.
+  const firstByName = new Map<string, number>();
+  for (const person of people) firstByName.set(person.base, Math.min(firstByName.get(person.base) ?? Number.POSITIVE_INFINITY, person.teamId));
+  return people.map((person) => ({ slug: firstByName.get(person.base) === person.teamId ? person.base : `${person.base}-${person.teamId}`, teamId: person.teamId, rowIds: person.rowIds, base: person.base }));
 }
 
 let cached: { at: number; entries: PageEntry[] } | null = null;
@@ -81,7 +91,9 @@ async function pages(now = Date.now()): Promise<PageEntry[]> {
 export async function agentForPageSlug(value: unknown): Promise<DealsAgent | null> {
   const slug = validAgentPageSlug(value);
   if (!slug) return null;
-  const entry = (await pages()).find((page) => page.slug === slug);
+  const all = await pages();
+  // The page's own name, or the name with any of the person's row numbers on the end (always unambiguous).
+  const entry = all.find((page) => page.slug === slug) ?? all.find((page) => page.rowIds.some((id) => slug === `${page.base}-${id}`));
   if (!entry) return null;
   const agent = await agentForTeamId(entry.teamId);
   return agent?.active ? agent : null;

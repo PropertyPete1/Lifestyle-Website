@@ -232,7 +232,8 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
       </div>}
     </div>
 
-    <div className="min-w-0">
+    {/* Oct 28, 2026 (dead space): an agent with no client links yet gets no empty "Your clients (0)" row. */}
+    {!(workspace && workspace.clients.length === 0 && !clientsOpen) && <div className="min-w-0">
       <button type="button" onClick={() => setClientsOpen((value) => !value)} aria-expanded={clientsOpen} data-deals-clients-toggle="true" className="flex min-h-11 items-center gap-2 text-left text-xs uppercase tracking-widest text-gold"><ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${clientsOpen ? "rotate-180" : ""}`} /><span className="shrink-0 whitespace-nowrap">{AGENT_COPY.clients(workspace?.clients.length ?? 0)}</span>{!clientsOpen && (() => { const asks = (workspace?.clients ?? []).reduce((total, client) => total + client.requests.length, 0); const saves = (workspace?.clients ?? []).reduce((total, client) => total + client.saves.length, 0); return asks + saves > 0 ? <span className="min-w-0 normal-case tracking-normal text-foreground" data-deals-clients-activity="true">· {[asks ? `${asks} tour/question request${asks === 1 ? "" : "s"}` : null, saves ? `${saves} saved home${saves === 1 ? "" : "s"}` : null].filter(Boolean).join(", ")}</span> : null; })()}</button>
       {clientsOpen && <>
       {loading && <p className="mt-3 text-sm text-muted-foreground">Loading your clients…</p>}
@@ -262,7 +263,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
           </div>}
         </article>;
       })}</div></>}
-    </div>
+    </div>}
     <Dialog open={Boolean(textFor)} onOpenChange={(open) => { if (!open) setTextFor(null); }}>
       <DialogContent className="max-w-lg" data-deals-text-dialog="true">
         <DialogHeader><DialogTitle>{AGENT_COPY.textTitle}{textFor ? ` · ${textFor.name}` : ""}</DialogTitle><DialogDescription>{AGENT_COPY.textIntro}</DialogDescription></DialogHeader>

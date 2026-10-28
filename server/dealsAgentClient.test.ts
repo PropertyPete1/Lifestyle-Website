@@ -125,6 +125,14 @@ describe("agent tools on /deals/team", () => {
   const noop = () => undefined;
   const renderTools = (overrides: Partial<Parameters<typeof AgentTools>[0]> = {}) => decode(renderToStaticMarkup(createElement(AgentTools, { workspace, onCreate: noop, onRevoke: noop, onCopy: noop, origin: "https://lifestyledesignrealty.com", ...overrides })));
 
+  it("an agent with no client links yet gets no empty Your clients row (Oct 28: dead space)", () => {
+    const empty = renderTools({ workspace: { ...workspace, clients: [] }, defaultClientsOpen: false });
+    expect(empty).not.toContain('data-deals-clients-toggle="true"');
+    expect(empty).toContain("Send the list to a client");
+    const some = renderTools({ defaultClientsOpen: false });
+    expect(some).toContain('data-deals-clients-toggle="true"');
+  });
+
   it("lists each client with their status, saves and requests, and a text/copy pair per live link", () => {
     const html = renderTools();
     expect(html).toContain("Agent tools · Tiffany Agent");

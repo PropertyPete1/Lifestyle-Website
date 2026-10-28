@@ -30,6 +30,15 @@ describe("a held offer's highlights (Oct 28: show what it gives that is not a ra
     expect(heldIncentiveLine({ holdReason: "[\"missing_apr\"]", publicText: dollars })).toBe("Builder incentive: Up to $10,000 toward closing costs and half-off homesite premiums on select homes — ask us for details");
   });
 
+  it("counts the same dollars once, reads a choice as \"or\", and keeps mid-sentence parts lower case", () => {
+    const flex = "Rates as low as 4.5% (6.43% APR) + $10,000 Flex Cash!* Use up to $10,000 toward closing costs on select quick move-in homes.";
+    expect(heldIncentiveHighlights(flex)).toEqual(["Special financing", "$10,000 in flex cash"]);
+    const choice = "Purchase a quick move-in home closing by 11/30 and choose a 5.25% Fixed-Rate or up to $55,000 in flex cash! The builder has locked in a buydown.";
+    expect(heldIncentiveLine({ holdReason: "[\"missing_apr\"]", publicText: choice })).toBe("Builder incentive: Rate buydown or up to $55,000 in flex cash — ask us for details");
+    const custom = "4.99% fixed rate FHA/VA financing or Up to $50,000 in Customized Incentives on select quick move-in homes.";
+    expect(heldIncentiveLine({ holdReason: "[\"ambiguous_rate\"]", publicText: custom })).toBe("Builder incentive: Special financing or up to $50,000 in incentives on select homes — ask us for details");
+  });
+
   it("keeps the neutral line for a private name, a manual override, an unread deadline, or nothing to name", () => {
     expect(heldIncentiveLine({ holdReason: JSON.stringify(["missing_apr", "missing_contract_deadline"]), publicText: dollars })).toBe(HELD_INCENTIVE_PUBLIC_LINE);
     expect(heldIncentiveLine({ holdReason: JSON.stringify(["ambiguous_rate", "private_text_remaining"]), publicText: closing })).toBe(HELD_INCENTIVE_PUBLIC_LINE);

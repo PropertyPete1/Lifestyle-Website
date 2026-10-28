@@ -98,7 +98,13 @@ export function heldIncentiveHighlights(text: string): string[] {
   else if (closingShare) add(`${closingShare[1] ? "Up to " : ""}${closingShare[2]}% toward closing costs`);
   else if (/\b(?:paid|free)\s+closing costs?\b/i.test(t)) add("Paid closing costs");
   const flex = t.match(new RegExp(`(up to\\s+)?(?:${DOLLARS}|(\\d{1,2}(?:\\.\\d+)?)%)\\s+(?:in\\s+)?flex\\s+cash`, "i"));
-  if (flex) { const label = flex[2] ? dollarsLabel(flex[2], flex[3]) : flex[4] ? `${flex[4]}%` : null; if (label) add(`${flex[1] ? "Up to " : ""}${label} in flex cash`); }
+  if (flex) {
+    const label = flex[2] ? dollarsLabel(flex[2], flex[3]) : flex[4] ? `${flex[4]}%` : null;
+    // The same dollars named twice (flex cash a buyer may put toward closing costs) count once, as flex cash.
+    if (label) { const same = parts.findIndex((part) => part.endsWith(`${label} toward closing costs`)); if (same >= 0) parts.splice(same, 1); add(`${flex[1] ? "Up to " : ""}${label} in flex cash`); }
+  }
+  const incentives = t.match(new RegExp(`(up to\\s+)?${DOLLARS}\\s+(?:in\\s+)?(?:customi[sz]ed\\s+|builder\\s+|bonus\\s+)?incentives\\b`, "i"));
+  if (incentives) { const label = dollarsLabel(incentives[2]!, incentives[3]); if (label) add(`${incentives[1] ? "Up to " : ""}${label} in incentives`); }
   if (/\bhalf[- ]off\s+(?:homesite|lot)\s+premiums?\b/i.test(t)) add("Half-off homesite premiums");
   if (/\breduced\s+(?:sales\s+)?prices?\b/i.test(t)) add("Reduced prices");
   if (/\b(?:paid|free)\s+owner'?s'?\s+title\s+(?:policy|insurance)\b/i.test(t)) add("Paid owner's title policy");
@@ -117,7 +123,14 @@ export function heldIncentiveLine(row: { holdReason: string | null; publicText?:
   const parts = heldIncentiveHighlights(row.publicText);
   if (!parts.length) return HELD_INCENTIVE_PUBLIC_LINE;
   const scope = /\bselect\s+(?:quick[- ]move[- ]in\s+|inventory\s+|move[- ]in[- ]ready\s+)?homes\b/i.test(row.publicText) ? " on select homes" : "";
-  const joined = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]!.charAt(0).toLowerCase()}${parts[parts.length - 1]!.slice(1)}`;
+  // Mid-sentence parts start lower case ("and up to $10,000..."); a choice the builder offers ("a rate OR flex cash") reads "or".
+  const lower = (part: string) => /^[A-Z][a-z]/.test(part) ? `${part.charAt(0).toLowerCase()}${part.slice(1)}` : part;
+  const list = (items: string[]) => items.length === 1 ? items[0]! : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]!}`;
+  const financing = parts.filter((part) => /buydown|special financing/i.test(part));
+  const perks = parts.filter((part) => !financing.includes(part));
+  const either = financing.length > 0 && perks.length > 0 && /(?:rates?|financing|buy[- ]?down)\b[^.!?]{0,160}\bor\b[^.!?]{0,60}(?:flex cash|closing costs?|incentives)/i.test(row.publicText);
+  const ordered = [...financing, ...perks].map((part, index) => index === 0 ? part : lower(part));
+  const joined = either ? `${list(ordered.slice(0, financing.length))} or ${list(ordered.slice(financing.length))}` : list(ordered);
   return `Builder incentive: ${joined}${scope} — ask us for details`;
 }
 

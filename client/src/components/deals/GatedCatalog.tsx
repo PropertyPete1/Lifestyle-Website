@@ -358,6 +358,17 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
   const toBeBuilt = home.kind === "to_be_built";
   const picked = pick?.picked.has(home.card) ?? false;
   const grid = photos.length >= 5;
+  // While the photo viewer is open, Escape and the arrow keys belong to it (not to the sheet, which closes on Escape).
+  useEffect(() => {
+    if (shown === null) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.stopImmediatePropagation(); setShown(null); }
+      else if (event.key === "ArrowRight") setShown((value) => value === null ? value : (value + 1) % photos.length);
+      else if (event.key === "ArrowLeft") setShown((value) => value === null ? value : (value + photos.length - 1) % photos.length);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [shown, photos.length]);
   const tile = (src: string, index: number, className: string) => <button key={src} type="button" onClick={() => setShown(index)} className={`relative min-h-0 min-w-0 overflow-hidden bg-secondary ${className}`} aria-label={`Photo ${index + 1} of ${photos.length}`}>
     <RetryImage src={src} alt="" loading={index === 0 ? "eager" : "lazy"} decoding="async" draggable={false} onGiveUp={() => setBroken((current) => new Set(current).add(src))} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
   </button>;
@@ -386,7 +397,7 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
       {!teamPreview && <Button type="button" onClick={() => onRequest?.({ card: home.card, requestType: toBeBuilt ? "ask" : "tour" })} className="h-auto min-h-11 whitespace-normal bg-gold px-6 text-primary-foreground">{toBeBuilt ? "Ask about this one" : "Tour this home with us"}</Button>}
       {home.details?.builderPage && <a href={home.details.builderPage} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-1 px-2 text-xs uppercase tracking-widest text-gold underline-offset-4 hover:underline">Builder page <ExternalLink className="h-3.5 w-3.5" /></a>}
     </div>
-    {shown !== null && photos[shown] && <div role="dialog" aria-modal="true" aria-label="Photos" data-deals-photo-viewer="true" className="fixed inset-0 z-[110] flex flex-col bg-black/95" onClick={() => setShown(null)}>
+    {shown !== null && photos[shown] && <div role="dialog" aria-modal="true" aria-label="Photos" data-deals-photo-viewer="true" className="fixed inset-0 z-[110] flex flex-col bg-black" onClick={() => setShown(null)}>
       <div className="flex items-center justify-between p-3 text-sm text-white"><span>{shown + 1} / {photos.length}</span><button type="button" onClick={() => setShown(null)} aria-label="Close photos" className="flex h-11 w-11 items-center justify-center"><X className="h-6 w-6" /></button></div>
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-2 pb-6" onClick={(event) => event.stopPropagation()}>
         <RetryImage key={photos[shown]} src={photos[shown]!} alt={`Photo ${shown + 1} of ${photos.length}`} draggable={false} onContextMenu={(event) => event.preventDefault()} className="max-h-full max-w-full select-none object-contain" />

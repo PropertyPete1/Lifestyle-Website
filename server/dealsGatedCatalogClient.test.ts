@@ -460,6 +460,12 @@ describe("the opened home leads its sheet (Oct 27: New Home Buddy's home view)",
     expect(html).toContain("Tour this home with us");
     expect(html).not.toContain("data-deals-pick");
     expect(html).toContain("Photos on request");
+    expect(html).not.toContain("data-deals-hero-agent");
+    // A client's agent: New Home Buddy's "Get more info" card, as a text with the home named.
+    const withAgent = renderToStaticMarkup(createElement(HomeHero, { home, community, teamPreview: false, onRequest: () => undefined, agent: { name: "Tiffany Agent", firstName: "Tiffany", phone: "(210) 555-0101" } }));
+    expect(withAgent).toContain('data-deals-hero-agent="true"');
+    expect(withAgent).toContain("Text Tiffany");
+    expect(withAgent).toMatch(/href="sms:2105550101\?&amp;body=Hi%20Tiffany%2C%20I%20have%20a%20question%20about%20118%20Sienna%20Lakes%20Blvd/);
   });
 });
 

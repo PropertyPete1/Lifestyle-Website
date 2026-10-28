@@ -365,7 +365,7 @@ export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving
  * Oct 27, 2026 (New Home Buddy opens a home on its photos): the home a card opened, shown first in its community's
  * sheet: a photo grid (one big, four small, "See all"), the price and where, the specs, and the card's own buttons.
  */
-export function HomeHero({ home, community, teamPreview, pick, saved, saving, onSave, onRequest }: { home: GatedHome; community: GatedCommunity; teamPreview: boolean; pick?: PickControl; saved?: boolean; saving?: boolean; onSave?: (card: string, saved: boolean) => void; onRequest?: (request: HomeRequest) => void }) {
+export function HomeHero({ home, community, teamPreview, pick, saved, saving, onSave, onRequest, agent }: { home: GatedHome; community: GatedCommunity; teamPreview: boolean; pick?: PickControl; saved?: boolean; saving?: boolean; onSave?: (card: string, saved: boolean) => void; onRequest?: (request: HomeRequest) => void; /** A client's agent: New Home Buddy's "Get more info" card, as a text to them. */ agent?: GatedAgent }) {
   const [shown, setShown] = useState<number | null>(null);
   const [broken, setBroken] = useState<ReadonlySet<string>>(() => new Set());
   const photos = (home.photos ?? []).filter((src) => !broken.has(src));
@@ -416,6 +416,11 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
       {!teamPreview && <Button type="button" onClick={() => onRequest?.({ card: home.card, requestType: toBeBuilt ? "ask" : "tour" })} className="h-auto min-h-11 whitespace-normal bg-gold px-6 text-primary-foreground">{toBeBuilt ? "Ask about this one" : "Tour this home with us"}</Button>}
       {home.details?.builderPage && <a href={home.details.builderPage} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-1 px-2 text-xs uppercase tracking-widest text-gold underline-offset-4 hover:underline">Builder page <ExternalLink className="h-3.5 w-3.5" /></a>}
     </div>
+    {!teamPreview && agent?.phone && <div className="mt-4 flex min-w-0 flex-wrap items-center justify-between gap-3 border border-gold/30 bg-gold/5 px-4 py-3" data-deals-hero-agent="true">
+      <p className="min-w-0 text-sm"><span className="block text-[10px] uppercase tracking-[0.2em] text-gold">Questions about this home?</span><span className="font-medium">{agent.name}</span> <span className="text-muted-foreground">· Lifestyle Design Realty</span></p>
+      <a href={`sms:${agent.phone.replace(/[^\d+]/g, "")}?&body=${encodeURIComponent(`Hi ${agent.firstName ?? agent.name}, I have a question about ${title} (${home.price ? money.format(home.price) : "this home"}).`)}`} className="inline-flex min-h-11 items-center rounded-full bg-foreground px-5 text-sm font-semibold text-background">Text {agent.firstName ?? agent.name}</a>
+    </div>}
+    {community.updatedAt && <p className="mt-3 text-[11px] text-muted-foreground">Last checked with the builder {formatChicagoDate(community.updatedAt)}</p>}
     {shown !== null && photos[shown] && <div role="dialog" aria-modal="true" aria-label="Photos" data-deals-photo-viewer="true" className="fixed inset-0 z-[110] flex flex-col bg-black" onClick={() => setShown(null)}>
       <div className="flex items-center justify-between p-3 text-sm text-white"><span>{shown + 1} / {photos.length}</span><button type="button" onClick={() => setShown(null)} aria-label="Close photos" className="flex h-11 w-11 items-center justify-center"><X className="h-6 w-6" /></button></div>
       <div className="relative flex min-h-0 flex-1 items-center justify-center px-2 pb-6" onClick={(event) => event.stopPropagation()}>
@@ -569,7 +574,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
           }} />}
           sheet={{
             unlock: false, share: false, publicAreaMap: false,
-            focusHero: (home, item) => { const community = item.key ? byKey.get(item.key) : undefined; return community ? <HomeHero home={home as unknown as GatedHome} community={community} teamPreview={lead.teamPreview} pick={pick} saved={savedSet.has(home.card)} saving={savingCard === home.card} onSave={onSave} onRequest={onRequest} /> : null; },
+            focusHero: (home, item) => { const community = item.key ? byKey.get(item.key) : undefined; return community ? <HomeHero home={home as unknown as GatedHome} community={community} teamPreview={lead.teamPreview} agent={agent} pick={pick} saved={savedSet.has(home.card)} saving={savingCard === home.card} onSave={onSave} onRequest={onRequest} /> : null; },
             details: (item) => { const community = item.key ? byKey.get(item.key) : undefined; return community ? <><CommunityDetails details={community.details} />{community.lotSizes && <p className="mt-2 text-sm text-muted-foreground">{community.lotSizes}</p>}</> : null; },
             area: (item) => { const community = item.key ? byKey.get(item.key) : undefined; return community ? <><AreaMap chips={community.driveTimes} map={community.areaMap} />{community.amenities && community.amenities.length > 0 && <div className="mt-4 flex flex-wrap gap-2">{community.amenities.map((amenity) => <span key={amenity} className="border border-border px-3 py-1.5 text-xs text-muted-foreground">{amenity}</span>)}</div>}</> : null; },
             renderHome: (home, featuredHome) => <div className={featuredHome ? "ring-2 ring-gold/60" : undefined} data-deals-featured-home={featuredHome ? "true" : undefined}><HomeCard home={home as unknown as GatedHome} teamPreview={lead.teamPreview} saved={savedSet.has(home.card)} saving={savingCard === home.card} onRequest={onRequest} onSave={onSave} pick={pick} /></div>,

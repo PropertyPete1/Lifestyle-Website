@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Flame, Home, LockKeyhole, MapPin, Play, Share2, Sparkles, X } from "lucide-react";
+import { Flame, Home, LockKeyhole, MapPin, Play, Search, Share2, Sparkles, X } from "lucide-react";
 import { AreaMap } from "./AreaMap";
 import { Incentive, NEW_COPY, NewBadge, RedHotBadge, RedHotSavings, ReelCard, RetryImage, money, type DealsIncentive } from "./shared";
 import { ProtectedGallery } from "./GatedCatalog";
@@ -47,6 +47,8 @@ export const LANDING_COPY = {
   areaFilter: (count: number) => `Showing ${count} in this part of town`,
   clearArea: "Show all",
   seeList: "See the list",
+  searchArea: "Search this area",
+  searchAreaEmpty: "Nothing in this part of the map. Zoom out",
   featuredHome: "Featured deal",
   sheetFiltered: (shown: number, total: number) => `${shown} of ${total} homes match your filters.`,
   sheetShowAll: "Show every home",
@@ -198,7 +200,21 @@ export function fanOffsets(count: number): Array<{ dx: number; dy: number }> {
   });
 }
 
-export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, className = "" }: {
+/**
+ * The communities whose map points are inside the visible part of the map (New Home Buddy's "Search this area"):
+ * the view is the picture's on-screen width z and its offset, the box the map's size in pixels.
+ */
+export function keysInView(items: ReadonlyArray<{ key: string; pin?: { x: number; y: number } | null }>, view: View, w: number, h: number): string[] {
+  const height = view.z / REGION_VIEW.aspect;
+  return items.filter((item) => {
+    if (!item.pin) return false;
+    const x = item.pin.x * view.z + view.tx;
+    const y = item.pin.y * height + view.ty;
+    return x >= 0 && x <= w && y >= 0 && y <= h;
+  }).map((item) => item.key);
+}
+
+export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, className = "", onSearchArea }: {
   items: ReadonlyArray<{ key: string; pin?: { x: number; y: number } | null; fromPriceLabel?: string | null; homesAvailable?: number }>;
   activeKey: string | null;
   onHover: (key: string | null) => void;
@@ -206,6 +222,8 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
   selectedId: string | null;
   /** The box's size (the page gives it a height); the map covers the whole box. */
   className?: string;
+  /** Oct 28, 2026 (New Home Buddy): after the visitor drags or zooms, a "Search this area" button narrows the list to what is in view. */
+  onSearchArea?: (keys: string[]) => void;
 }) {
   const [failed, setFailed] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -215,6 +233,20 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
   viewRef.current = view;
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<{ moved: number; pinch: number | null }>({ moved: 0, pinch: null });
+  /** True once the visitor has moved the map since the last "Search this area" (the button shows then). */
+  const [areaMoved, setAreaMoved] = useState(false);
+  const [areaEmpty, setAreaEmpty] = useState(false);
+  const markMoved = () => { if (onSearchArea) { setAreaMoved(true); setAreaEmpty(false); } };
+  const searchArea = () => {
+    const current = viewRef.current;
+    const now = measure();
+    if (!current || !now || !onSearchArea) return;
+    const keys = keysInView(items, current, now.w, now.h);
+    if (!keys.length) { setAreaEmpty(true); return; }
+    setAreaMoved(false);
+    setFanned(null);
+    onSearchArea(keys);
+  };
 
   const minWidth = (w: number, h: number) => Math.max(w, h * REGION_VIEW.aspect);
   const clamp = (next: View, w: number, h: number): View => {
@@ -267,6 +299,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
     touched.current = true;
     setFanned(null);
     setView(goTo(spot, now.w, now.h));
+    markMoved();
   };
   // Communities whose public points sit on top of each other even fully zoomed in fan out around that point.
   const [fanned, setFanned] = useState<string[] | null>(null);
@@ -292,6 +325,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
       event.preventDefault();
       const rect = element.getBoundingClientRect();
       zoomAt(Math.exp(-event.deltaY * 0.0015), event.clientX - rect.left, event.clientY - rect.top);
+      markMoved();
     };
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
@@ -324,6 +358,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
     }
   };
   const onPointerUp = (event: React.PointerEvent) => {
+    if (pointers.current.has(event.pointerId) && gesture.current.moved > 6) markMoved();
     pointers.current.delete(event.pointerId);
     if (pointers.current.size < 2) gesture.current.pinch = null;
   };
@@ -353,7 +388,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
     return () => window.clearTimeout(timer);
   }, [activePin?.x, activePin?.y]); // eslint-disable-line react-hooks/exhaustive-deps
   if (failed) return null;
-  const zoomButton = (factor: number) => () => { const now = measure(); if (now) zoomAt(factor, now.w / 2, now.h / 2); };
+  const zoomButton = (factor: number) => () => { const now = measure(); if (now) { zoomAt(factor, now.w / 2, now.h / 2); markMoved(); } };
   return <figure aria-label={LANDING_COPY.mapLabel} data-deals-region-map="true" className={`relative min-w-0 overflow-hidden rounded-xl border border-border bg-[#e8eaed] shadow-sm ${className}`}>
     <div ref={box} className="absolute inset-0 cursor-grab touch-none select-none active:cursor-grabbing" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
       onClickCapture={(event) => { if (gesture.current.moved > 6) { event.stopPropagation(); event.preventDefault(); } }}
@@ -412,6 +447,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
         <button type="button" onClick={zoomButton(1 / 1.5)} aria-label="Zoom out" className="flex h-9 w-9 items-center justify-center border-t border-border text-lg font-semibold hover:bg-secondary">−</button>
       </div>
     </div>
+    {onSearchArea && areaMoved && <button type="button" onClick={searchArea} data-deals-search-area="true" className="absolute bottom-12 left-1/2 z-30 inline-flex min-h-10 -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full bg-gold px-4 text-sm font-semibold text-primary-foreground shadow-lg hover:brightness-105"><Search className="h-4 w-4" />{areaEmpty ? LANDING_COPY.searchAreaEmpty : LANDING_COPY.searchArea}</button>}
     <figcaption className="pointer-events-none absolute bottom-2 left-2 right-2 rounded bg-white/85 px-2 py-1 text-[10px] leading-snug text-muted-foreground">{LANDING_COPY.mapAttribution}</figcaption>
   </figure>;
 }
@@ -582,7 +618,7 @@ export type LandingActions = { openHome: (key: string, focus?: SheetFocus) => bo
 /** What a caller's own list (the unlocked list's flat home list) gets: the communities in view and how to open one. */
 export type BrowseListContext = { keys: ReadonlySet<string>; open: (key: string, focus?: SheetFocus) => void; hover: (key: string | null) => void; activeKey: string | null };
 
-export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6", mapSide = "right", areaStatus, onAreaChange, phoneMap = "top" }: {
+export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6", mapSide = "right", areaStatus, onAreaChange, phoneMap = "top", searchArea = false }: {
   communities: readonly LandingCommunity[]; onUnlock?: () => void; useHomes: UseCommunityHomes;
   /** The sheet's pieces for an unlocked list (see SheetOptions). */
   sheet?: SheetOptions;
@@ -600,6 +636,8 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   areaStatus?: (keys: readonly string[]) => string;
   /** Oct 28, 2026: "floating" puts the phone's only Map button at the bottom from the start (New Home Buddy), no top button. */
   phoneMap?: "top" | "floating";
+  /** Oct 28, 2026 (New Home Buddy): the map offers "Search this area" after the visitor moves it. */
+  searchArea?: boolean;
   /** Told which communities a map bubble narrowed the list to (null when cleared), so the caller's count follows. */
   onAreaChange?: (keys: readonly string[] | null) => void;
   /** A shared link's community (?k=key): its sheet opens once the catalog has it. */
@@ -670,7 +708,11 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
     },
     hover: setActiveKey,
   };
-  const mapProps = { items: keyed, activeKey, onHover: setActiveKey, onSelect: selectMarker, selectedId: selected?.id ?? null };
+  const searchThisArea = (keys: string[]) => {
+    setSelected({ id: "area", keys });
+    if (window.matchMedia?.("(min-width: 1024px)").matches) window.setTimeout(() => listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+  const mapProps = { items: keyed, activeKey, onHover: setActiveKey, onSelect: selectMarker, selectedId: selected?.id ?? null, onSearchArea: searchArea ? searchThisArea : undefined };
   const map = <RegionMap {...mapProps} className="h-[65vh] w-full" />;
   return <>
     <div className={`mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 ${mapSide === "left" ? "mt-3 gap-4 lg:grid-cols-[minmax(360px,44%)_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,1fr)_minmax(360px,42%)]"}`}>

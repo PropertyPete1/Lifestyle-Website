@@ -18,7 +18,7 @@ import { photoIdFromToken, publicPhotoAllowed, resetPublicPhotoLimits } from "./
 import { regionHomeView, regionPin, spreadStackedPins, SAN_ANTONIO_REGION } from "./dealsRegionMap";
 
 (globalThis as { React?: typeof React }).React = React;
-const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW, clusterView, stillStacked, fanOffsets, isFocusHome, communityShareUrl } = await import("../client/src/components/deals/LandingBrowse");
+const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW, clusterView, stillStacked, fanOffsets, isFocusHome, communityShareUrl, keysInView } = await import("../client/src/components/deals/LandingBrowse");
 
 describe("the region map", () => {
   it("places a point by the map's own projection and leaves off anything outside the picture", () => {
@@ -120,6 +120,16 @@ describe("clicking a numbered bubble (Peter, Oct 25: it zooms into the neighborh
     expect(spots.size).toBe(7);
     // Far enough apart to tap one (each bubble is about 30 pixels wide).
     for (let i = 0; i < ring.length; i++) for (let j = i + 1; j < ring.length; j++) expect(Math.hypot(ring[i]!.dx - ring[j]!.dx, ring[i]!.dy - ring[j]!.dy)).toBeGreaterThanOrEqual(56);
+  });
+});
+
+describe("Search this area (Oct 28, New Home Buddy): the list narrows to what the map shows", () => {
+  it("keeps the communities whose points are inside the visible map and drops the rest", () => {
+    const items = [{ key: "in", pin: { x: 0.43, y: 0.53 } }, { key: "edge", pin: { x: 0.40, y: 0.50 } }, { key: "out", pin: { x: 0.9, y: 0.1 } }, { key: "nopin", pin: null }];
+    const view = clusterView([{ x: 0.40, y: 0.50 }, { x: 0.46, y: 0.56 }], 800, 600);
+    expect(keysInView(items, view, 800, 600)).toEqual(["in", "edge"]);
+    // The whole picture in view keeps every placed community.
+    expect(keysInView(items, { z: 800, tx: 0, ty: 0 }, 800, 800 / REGION_VIEW.aspect)).toEqual(["in", "edge", "out"]);
   });
 });
 

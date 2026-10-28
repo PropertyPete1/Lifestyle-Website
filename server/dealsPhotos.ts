@@ -87,6 +87,14 @@ const MIN_REMAINING_HEIGHT_FRACTION = 0.4;
  * would mostly add memory and libuv threadpool pressure on the web instance.
  */
 export const PHOTO_PROCESSING_CONCURRENCY = 2;
+/**
+ * Oct 28, 2026 (Peter: "speed up photo processing to the fastest you think is efficient without breaking anything"):
+ * a scheduled drain runs one more lane, but that lane starts a photo only while the process is under
+ * PHOTO_EXTRA_LANE_MAX_MB, well below the PHOTO_RSS_STOP_MB guard, so a busy or memory-heavy process stays at two.
+ * OCR stays on one worker; the extra lane overlaps its download and image work with the other two.
+ */
+export const PHOTO_EXTRA_LANES = 1;
+export const PHOTO_EXTRA_LANE_MAX_MB = 320;
 /** At most this many downloads from one builder image host at a time, whatever the lane count. */
 const HOST_DOWNLOAD_CONCURRENCY = 2;
 /**
@@ -1589,7 +1597,7 @@ async function nextDrainBatch(db: PhotoDb, now: Date, limit: number, exclude: Re
   return order;
 }
 
-async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: number; clock: () => number; concurrency: number; photoTimeoutMs: number; progress?: DealPhotoDrainResult }): Promise<DealPhotoDrainResult> {
+async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: number; clock: () => number; concurrency: number; steadyLanes?: number; photoTimeoutMs: number; progress?: DealPhotoDrainResult }): Promise<DealPhotoDrainResult> {
   const startedAt = options.clock();
   const result: DealPhotoDrainResult = Object.assign(options.progress ?? {}, { ...emptyDrainResult(), stoppedForTime: false });
   const db = await getDb();
@@ -1646,9 +1654,11 @@ async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: numbe
   };
   // Lanes pull ids one at a time, so a lane never idles at a batch boundary and
   // nothing is claimed before a lane is free to work on it.
-  const next = async (): Promise<number | null> => {
+  const next = async (lane = 0): Promise<number | null> => {
     for (;;) {
       if (started >= options.maxPhotos) return null;
+      // An extra lane (past steadyLanes) stops when memory is no longer low; the steady lanes carry on.
+      if (lane >= (options.steadyLanes ?? options.concurrency) && overMb(PHOTO_EXTRA_LANE_MAX_MB)) return null;
       // Each drain still does one photo, so a process whose memory does not come back keeps the queue moving.
       if (started > 0 && overMb(PHOTO_RSS_STOP_MB)) {
         result.stoppedForMemory = true;
@@ -1673,8 +1683,8 @@ async function drainDealPhotoQueue(options: { maxPhotos: number; deadline: numbe
       await refilling;
     }
   };
-  const lane = async () => {
-    for (let id = await next(); id !== null; id = await next()) {
+  const lane = async (_: unknown, index: number) => {
+    for (let id = await next(index); id !== null; id = await next(index)) {
       const outcome = await processDealPhoto(id, ctx, { timeoutMs: options.photoTimeoutMs }).catch((): DealPhotoProcessResult => ({ ok: false, skipped: true }));
       if (outcome.timedOut) {
         // Its work may still be running; this lane starts nothing more, so the request ends on time and memory stays bounded.
@@ -1746,7 +1756,9 @@ export async function processPendingDealPhotos(input: number | DealPhotoDrainOpt
   const maxPhotos = budgeted
     ? Math.max(1, Math.floor(options.maxPhotos ?? Number.MAX_SAFE_INTEGER))
     : Math.max(1, Math.min(50, Math.floor(options.maxPhotos ?? 20)));
-  const concurrency = Math.max(1, Math.min(4, Math.floor(options.concurrency ?? PHOTO_PROCESSING_CONCURRENCY)));
+  const concurrency = Math.max(1, Math.min(4, Math.floor(options.concurrency ?? PHOTO_PROCESSING_CONCURRENCY + (budgeted ? PHOTO_EXTRA_LANES : 0))));
+  // Lanes past the base two (when the caller did not set a count) start photos only while memory is low.
+  const steadyLanes = options.concurrency === undefined ? Math.min(concurrency, PHOTO_PROCESSING_CONCURRENCY) : concurrency;
   const photoTimeoutMs = Math.max(1, options.photoTimeoutMs ?? PHOTO_TIMEOUT_MS);
   if (!budgeted && activeDrains.size) {
     drainRerunRequested = true;
@@ -1775,11 +1787,11 @@ export async function processPendingDealPhotos(input: number | DealPhotoDrainOpt
   }
   const drain: ActiveDrain = { startedAt: clock(), done: Promise.resolve(emptyDrainResult()) };
   drain.done = (async () => {
-    let total = await drainDealPhotoQueue({ maxPhotos, deadline, clock, concurrency, photoTimeoutMs, progress: options.progress });
+    let total = await drainDealPhotoQueue({ maxPhotos, deadline, clock, concurrency, steadyLanes, photoTimeoutMs, progress: options.progress });
     // A budgeted drain refills until its budget is spent, so it already picks up rows a kick asked for.
     for (let reruns = 0; !budgeted && drainRerunRequested && reruns < 3; reruns++) {
       drainRerunRequested = false;
-      total = mergeDrainResults(total, await drainDealPhotoQueue({ maxPhotos, deadline, clock, concurrency, photoTimeoutMs }));
+      total = mergeDrainResults(total, await drainDealPhotoQueue({ maxPhotos, deadline, clock, concurrency, steadyLanes, photoTimeoutMs }));
     }
     if (!budgeted) drainRerunRequested = false;
     if (steppedAround) total.steppedAroundStaleDrain = true;

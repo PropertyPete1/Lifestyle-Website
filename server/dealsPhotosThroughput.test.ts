@@ -293,7 +293,7 @@ describe("time-budgeted drain", () => {
 });
 
 describe("lanes and per-host politeness", () => {
-  async function peakDownloads(concurrency: number, hostFor: (id: number) => string) {
+  async function peakDownloads(concurrency: number | undefined, hostFor: (id: number) => string) {
     photos.resetDealPhotoRuntimeState();
     simulatedQueue({
       communities: [community(1, "Perry Homes")],
@@ -317,7 +317,7 @@ describe("lanes and per-host politeness", () => {
       perHost.set(host, (perHost.get(host) ?? 0) - 1);
       return imageResponse(jpeg);
     }));
-    const drain = photos.processPendingDealPhotos({ budgetMs: 60_000, concurrency });
+    const drain = photos.processPendingDealPhotos(concurrency === undefined ? { budgetMs: 60_000 } : { budgetMs: 60_000, concurrency });
     for (let released = 0; released < 8; released++) {
       await waitFor(() => gates.length > 0);
       (gates.shift() as () => void)();
@@ -333,6 +333,18 @@ describe("lanes and per-host politeness", () => {
     expect(await peakDownloads(4, (id) => `https://res.cloudinary.com/perryhomes/p/${id}.jpg`)).toEqual({ peak: 2, peakPerHost: 2 });
     // Four lanes over two hosts: four in flight, still two per host.
     expect(await peakDownloads(4, (id) => id % 2 ? `https://res.cloudinary.com/perryhomes/p/${id}.jpg` : `https://www.drhorton.com/p/${id}.jpg`)).toEqual({ peak: 4, peakPerHost: 2 });
+  }, 60_000);
+
+  it("a scheduled drain adds a third lane only while memory is low (Oct 28: faster photos without risking the server)", async () => {
+    const twoHosts = (id: number) => id % 2 ? `https://res.cloudinary.com/perryhomes/p/${id}.jpg` : `https://www.drhorton.com/p/${id}.jpg`;
+    try {
+      photos.setDealPhotoRssReader(() => 200 * 1024 * 1024);
+      expect(await peakDownloads(undefined, twoHosts)).toEqual({ peak: 3, peakPerHost: 2 });
+      photos.setDealPhotoRssReader(() => (photos.PHOTO_EXTRA_LANE_MAX_MB + 20) * 1024 * 1024);
+      expect((await peakDownloads(undefined, twoHosts)).peak).toBe(2);
+    } finally {
+      photos.setDealPhotoRssReader(null);
+    }
   }, 60_000);
 });
 

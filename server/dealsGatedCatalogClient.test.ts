@@ -459,3 +459,11 @@ describe("the opened home leads its sheet (Oct 27: New Home Buddy's home view)",
     expect(html).toContain("Photos on request");
   });
 });
+
+describe("home search (Oct 27: New Home Buddy's search by address)", async () => {
+  const { homeSearchText } = await import("../client/src/components/deals/GatedCatalog");
+  it("matches the address, plan, community and builder", () => {
+    const text = homeSearchText({ card: "c".repeat(20), kind: "quick_move_in", details: { address: "9923 Monte Carmel Place, Converse, TX 78109", planName: "Kemp" } }, { label: "East | Homes", area: "East San Antonio", reelUrl: null, homes: [], details: { builderName: "Chesmar", communityName: "Sienna Lakes" } } as GatedCommunity);
+    for (const needle of ["monte carmel", "kemp", "sienna lakes", "chesmar", "converse", "east san antonio"]) expect(text).toContain(needle);
+  });
+});

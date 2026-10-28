@@ -397,6 +397,11 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
   </section>;
 }
 
+/** What the home search matches: the street address, plan, community label and area, community name and builder. */
+export function homeSearchText(home: GatedHome, community: GatedCommunity): string {
+  return [home.details?.address, home.details?.planName, community.label, community.area, community.details?.communityName, community.details?.builderName].filter(Boolean).join(" ").toLowerCase();
+}
+
 /** The flat list: every matching home in the communities in view, sorted, 24 at a time as the reader scrolls. */
 function HomeList({ entries, context, pick, savedSet, savingCard, onSave }: { entries: ReadonlyArray<{ home: GatedHome; community: GatedCommunity; key: string }>; context: BrowseListContext; pick?: PickControl; savedSet: Set<string>; savingCard?: string | null; onSave?: (card: string, saved: boolean) => void }) {
   const inView = entries.filter((entry) => context.keys.has(entry.key));
@@ -447,10 +452,14 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
   const matchingHomes = useMemo(() => new Map(matching.map(({ key, homes }) => [key, homes])), [matching]);
   // Oct 27, 2026: homes first, like New Home Buddy; the community cards are one tap away.
   const [listView, setListView] = useState<"homes" | "communities">("homes");
+  // New Home Buddy's "Search homes by address": a street, plan, community or builder narrows the homes.
+  const [homeQuery, setHomeQuery] = useState("");
   const homeEntries = useMemo(() => {
-    const entries = matching.flatMap(({ community, key, homes }) => homes.map((home) => ({ home, community, key })));
+    const needle = homeQuery.trim().toLowerCase();
+    const entries = matching.flatMap(({ community, key, homes }) => homes.map((home) => ({ home, community, key })))
+      .filter(({ home, community }) => !needle || homeSearchText(home, community).includes(needle));
     return filters.sort === "recommended" ? entries : sortHomes(entries.map((entry) => ({ ...entry.home, entry })), filters.sort).map((item) => item.entry);
-  }, [matching, filters.sort]);
+  }, [matching, filters.sort, homeQuery]);
   const keyByCard = useMemo(() => new Map(communities.flatMap((community, index) => community.homes.map((home) => [home.card, communityKey(community, index)] as const))), [communities]);
   const useSheetHomes = (key: string | undefined) => {
     const community = key ? byKey.get(key) : undefined;
@@ -505,7 +514,8 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
       {(filters.savedOnly || savedOnList.size === 0) && savedGone > 0 && <p role="status" className="mt-3 text-xs text-muted-foreground" data-deals-saved-gone="true">{savedGone === 1 ? "1 home you saved is no longer available." : `${savedGone} homes you saved are no longer available.`}</p>}
       {(many || savedOnList.size > 0) && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{filters.savedOnly && savedOnList.size > 0 ? BROWSE_COPY.noneSaved : BROWSE_COPY.none}</p>}
         <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2" data-deals-results-bar="true">
-          <p className="text-sm font-semibold uppercase tracking-widest text-foreground" data-deals-result-count="true">{listView === "homes" ? HOME_LIST_COPY.count(shownHomes) : `${matching.length} communities`}</p>
+          <p className="text-sm font-semibold uppercase tracking-widest text-foreground" data-deals-result-count="true">{listView === "homes" ? HOME_LIST_COPY.count(homeQuery.trim() ? homeEntries.length : shownHomes) : `${matching.length} communities`}</p>
+          {listView === "homes" && <label className="order-last w-full min-w-0 sm:order-none sm:w-auto sm:flex-1 sm:max-w-sm"><span className="sr-only">Search homes by address</span><input type="search" value={homeQuery} onChange={(event) => setHomeQuery(event.target.value)} placeholder="Search by address, plan, community or builder" data-deals-home-search="true" className="min-h-9 w-full rounded-full border border-border bg-card px-4 text-sm" /></label>}
           <div className="flex min-w-0 flex-nowrap items-center gap-2">
           <label className="inline-flex min-h-9 min-w-0 max-w-[9.5rem] items-center gap-1.5 rounded-full border border-border bg-card pl-3 text-xs text-foreground sm:max-w-none" data-deals-sort="true"><ArrowDownUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="sr-only">Sort</span>
             <select aria-label="Sort" value={filters.sort} onChange={(event) => { setFilters((current) => ({ ...current, sort: event.target.value as BrowseFilters["sort"] })); setPages(1); }} className="min-h-9 min-w-0 bg-transparent pr-3 text-xs">{BROWSE_SORTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>

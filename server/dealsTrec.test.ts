@@ -92,6 +92,24 @@ describe("TREC CSV import streaming", () => {
     expect(db.writes.filter((write) => write.op === "delete")).toHaveLength(0);
   });
 
+  it("skips a row the database refuses and keeps the rest of its batch, judging each batch on its own (Oct 28)", async () => {
+    mockTrecDownload({ chunks: [HEADER, ...ROWS], gapMs: 1 });
+    const db = createFakeDealsDb([[dealTrecImports, []]]);
+    const insert = db.insert.bind(db);
+    // The database refuses one row: a batch holding it fails, and so does that row alone.
+    (db as unknown as { insert: typeof db.insert }).insert = ((table: unknown) => {
+      const builder = insert(table as never);
+      if (table !== dealTrecLicenses) return builder;
+      return { values: (values: unknown) => {
+        const list = Array.isArray(values) ? values : [values];
+        if (list.some((row) => (row as { fullName?: string }).fullName === "MARIA LOPEZ")) return Promise.reject(Object.assign(new Error("Failed query: insert into deal_trec_licenses"), { cause: new Error("Data too long for column 'county' at row 3") }));
+        return builder.values(values as never);
+      } };
+    }) as typeof db.insert;
+    mocks.getDb.mockResolvedValue(db);
+    await expect(importTrecLicenses({ headersTimeoutMs: 2_000, readInactivityMs: 2_000 })).resolves.toMatchObject({ ok: true, rows: 4, skipped: 1, firstSkip: "Data too long for column 'county' at row 3" });
+  });
+
   it("aborts a download whose body stops delivering bytes and removes the partial import", async () => {
     mockTrecDownload({ chunks: [HEADER, ROWS[0]!], gapMs: 5, stall: true });
     const db = createFakeDealsDb([[dealTrecImports, []]]);

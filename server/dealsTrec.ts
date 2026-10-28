@@ -84,11 +84,15 @@ export async function importTrecLicenses(options: TrecImportOptions = {}) {
     const rows = batch; batch = [];
     try { await db.insert(dealTrecLicenses).values(rows); count += rows.length; return; }
     catch (error) {
+      // Judged per batch (Oct 28: the old test compared the night's running total to one batch, so a few stray rows
+      // spread over the file would have failed the whole import once 250 had been skipped).
+      let refused = 0;
       for (const row of rows) {
         try { await db.insert(dealTrecLicenses).values(row); count += 1; }
-        catch (rowError) { skipped += 1; if (!firstSkip) firstSkip = (rowError instanceof Error ? (rowError.cause instanceof Error ? rowError.cause.message : rowError.message) : String(rowError)).split(/\r?\n/)[0]!.slice(0, 160); }
+        catch (rowError) { refused += 1; skipped += 1; if (!firstSkip) firstSkip = (rowError instanceof Error ? (rowError.cause instanceof Error ? rowError.cause.message : rowError.message) : String(rowError)).split(/\r?\n/)[0]!.slice(0, 160); }
       }
-      if (skipped > rows.length / 2) throw error;
+      // Most of a batch refused is the database (or the file) failing, not a stray row: stop with the real cause.
+      if (refused > rows.length / 2) throw error;
     }
   };
   const readChunk = async () => {

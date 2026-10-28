@@ -321,13 +321,30 @@ export function homeStatusLabel(home: Pick<GatedHome, "kind" | "moveInDate">, no
   return /now|ready|complete|available/i.test(raw) ? HOME_LIST_COPY.moveIn : `Ready ${raw}`;
 }
 
+/**
+ * A buyer's card has no address or plan to lead with, and its area already sits on the right: the community's own
+ * line after "Area | " reads better than the area twice ("Northwest San Antonio | Hal…" beside "Northwest San Antonio").
+ */
+export function labelHook(label: string, fallback?: string): string {
+  const cut = label.indexOf(" | ");
+  if (cut < 0) return label;
+  // The card shows its own price, so a price band in the line ("From the $300s") is dropped; nothing left, the fallback.
+  const hook = label.slice(cut + 3).replace(/\s*(?:\band\s+)?(?:From the \$\d00s|Over \$1M|Under \$100K)(?:\s+and\b)?\s*/g, " ").trim();
+  return hook || fallback || label;
+}
+
+/** "4-bed new home": a buyer's card title when the community's line is only a price band. */
+function homeNoun(home: GatedHome): string {
+  return `${home.beds ? `${home.beds}-bed ` : ""}${home.kind === "to_be_built" ? "home to build" : "new home"}`;
+}
+
 /** One home in the flat list, like a New Home Buddy card: photo, price, where, and the specs at a glance. */
 export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving, onSave }: { home: GatedHome; community: GatedCommunity; onOpen: () => void; onHover?: (on: boolean) => void; pick?: PickControl; saved?: boolean; saving?: boolean; onSave?: (card: string, saved: boolean) => void }) {
   const [failed, setFailed] = useState(false);
   const photo = !failed ? home.photos?.[0] : undefined;
   const lines = addressLines(home.details?.address);
   const plan = home.details?.planName ?? null;
-  const title = lines?.street ?? (plan ? `${plan} plan` : community.label);
+  const title = lines?.street ?? (plan ? `${plan} plan` : labelHook(community.label, homeNoun(home)));
   const subtitle = lines?.city ?? (plan ? community.area : null);
   const place = [community.details?.communityName, community.details?.builderName].filter(Boolean).join(" · ") || community.area;
   const drop = home.previousPrice && home.price && home.previousPrice > home.price ? home.previousPrice - home.price : 0;
@@ -372,7 +389,9 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
   const photos = (home.photos ?? []).filter((src) => !broken.has(src));
   const lines = addressLines(home.details?.address);
   const plan = home.details?.planName ?? null;
-  const title = lines?.street ?? (plan ? `${plan} plan` : community.label);
+  const title = lines?.street ?? (plan ? `${plan} plan` : labelHook(community.label, homeNoun(home)));
+  /** What a text to the agent names: the street, the plan, or the community's whole line. */
+  const named = lines?.street ?? (plan ? `${plan} plan` : community.label);
   const place = [community.details?.communityName, community.details?.builderName].filter(Boolean).join(" by ") || community.area;
   const toBeBuilt = home.kind === "to_be_built";
   const picked = pick?.picked.has(home.card) ?? false;
@@ -422,7 +441,7 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
     </div>
     {!teamPreview && agent?.phone && <div className="mt-4 flex min-w-0 flex-wrap items-center justify-between gap-3 border border-gold/30 bg-gold/5 px-4 py-3" data-deals-hero-agent="true">
       <p className="min-w-0 text-sm"><span className="block text-[10px] uppercase tracking-[0.2em] text-gold">Questions about this home?</span><span className="font-medium">{agent.name}</span> <span className="text-muted-foreground">· Lifestyle Design Realty</span></p>
-      <a href={`sms:${agent.phone.replace(/[^\d+]/g, "")}?&body=${encodeURIComponent(`Hi ${agent.firstName ?? agent.name}, I have a question about ${title} (${home.price ? money.format(home.price) : "this home"}).`)}`} className="inline-flex min-h-11 items-center rounded-full bg-foreground px-5 text-sm font-semibold text-background">Text {agent.firstName ?? agent.name}</a>
+      <a href={`sms:${agent.phone.replace(/[^\d+]/g, "")}?&body=${encodeURIComponent(`Hi ${agent.firstName ?? agent.name}, I have a question about ${named} (${home.price ? money.format(home.price) : "this home"}).`)}`} className="inline-flex min-h-11 items-center rounded-full bg-foreground px-5 text-sm font-semibold text-background">Text {agent.firstName ?? agent.name}</a>
     </div>}
     {community.updatedAt && <p className="mt-3 text-[11px] text-muted-foreground">Last checked with the builder {formatChicagoDate(community.updatedAt)}</p>}
     {shown !== null && photos[shown] && <div role="dialog" aria-modal="true" aria-label="Photos" data-deals-photo-viewer="true" className="fixed inset-0 z-[110] flex flex-col bg-black" onClick={() => setShown(null)}>

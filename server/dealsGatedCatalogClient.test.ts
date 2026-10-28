@@ -418,7 +418,21 @@ describe("picksAsText (Oct 27: the agent copies the picked homes as plain text)"
 });
 
 describe("the home cards of the unlocked list (Oct 27: New Home Buddy parity)", async () => {
-  const { addressLines, gatedAsLanding, HomeTile } = await import("../client/src/components/deals/GatedCatalog");
+  const { addressLines, gatedAsLanding, HomeTile, labelHook } = await import("../client/src/components/deals/GatedCatalog");
+  it("a buyer's card leads with the community's own line, not the area twice (Oct 28)", () => {
+    expect(labelHook("Northwest San Antonio | Half-Acre Lots and Lakes")).toBe("Half-Acre Lots and Lakes");
+    expect(labelHook("New Braunfels")).toBe("New Braunfels");
+    expect(labelHook("East | ")).toBe("East | ");
+    // A price band is dropped (the card shows the price); nothing left, the fallback.
+    expect(labelHook("New Braunfels | From the $300s", "4-bed new home")).toBe("4-bed new home");
+    expect(labelHook("East | From the $200s and Move-In Ready Homes")).toBe("Move-In Ready Homes");
+    expect(labelHook("Boerne | Lakes and From the $400s")).toBe("Lakes");
+    expect(labelHook("Boerne | Acre Lots and Over $1M")).toBe("Acre Lots");
+    const community = { label: "Northwest San Antonio | Half-Acre Lots and Lakes", area: "Northwest San Antonio", reelUrl: null, homes: [] } as GatedCommunity;
+    const html = renderToStaticMarkup(createElement(HomeTile, { home: { card: "d".repeat(20), kind: "quick_move_in", beds: "4", price: 387_990 }, community, onOpen: () => undefined }));
+    expect(html).toContain(">Half-Acre Lots and Lakes</p>");
+    expect(html).toContain(">Northwest San Antonio</p>");
+  });
   it("splits an address into its street and city lines", () => {
     expect(addressLines("118 Sienna Lakes Blvd, San Antonio, TX 78263")).toEqual({ street: "118 Sienna Lakes Blvd", city: "San Antonio, TX 78263" });
     expect(addressLines("Lot 4")).toEqual({ street: "Lot 4", city: null });

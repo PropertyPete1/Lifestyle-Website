@@ -166,8 +166,8 @@ export function registerDealsRoutes(app: Express) {
     res.type(rendered.contentType).send(rendered.data);
   }));
   app.get("/deals/mine/img/:photoId", safe(async (req, res) => {
-    const { isLiveDealSession } = await import("./dealsService");
-    const session = await isLiveDealSession(req);
+    const { isLiveDealSessionForPhotos } = await import("./dealsService");
+    const session = await isLiveDealSessionForPhotos(req);
     if (!session) return res.status(401).end();
     const id = Number(req.params.photoId);
     if (!Number.isSafeInteger(id) || id < 1) return res.status(404).end();

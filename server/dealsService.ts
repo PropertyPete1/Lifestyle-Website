@@ -1197,6 +1197,33 @@ export async function isLiveDealSession(req: Request): Promise<{ leadId: number;
   return lead ? { leadId: lead.id, lead, deviceHash } : null;
 }
 
+type LiveDealSession = NonNullable<Awaited<ReturnType<typeof isLiveDealSession>>>;
+/** How long a photo request may reuse a session check this process just made (see isLiveDealSessionForPhotos). */
+export const PHOTO_SESSION_REUSE_MS = 10_000;
+const photoSessionChecks = new Map<string, { at: number; session: LiveDealSession }>();
+/** Test seam. */
+export function resetPhotoSessionChecks() { photoSessionChecks.clear(); }
+
+/**
+ * Oct 28, 2026 (Peter: "make sure everything looks efficient"): a list opens 24 photos at once, and each one checked
+ * the session again (two database reads each, 48 reads queued behind the list's own). Photo requests reuse a passing
+ * check for ten seconds. Only a pass is reused; the photo's own query still checks the lead's status and expiry on
+ * every request, so a buyer who is turned off stops getting photos straight away.
+ */
+export async function isLiveDealSessionForPhotos(req: Request, now = Date.now()): Promise<LiveDealSession | null> {
+  const token = parseCookie(req.headers.cookie || "")[DEALS_COOKIE.session];
+  const deviceHash = dealDeviceHash(req);
+  if (!token || !deviceHash) return null;
+  const key = `${hashSecret(token)}:${deviceHash}`;
+  const reused = photoSessionChecks.get(key);
+  if (reused && now - reused.at < PHOTO_SESSION_REUSE_MS && reused.session.lead.expiresAt.getTime() > now) return reused.session;
+  const session = await isLiveDealSession(req);
+  if (!session) { photoSessionChecks.delete(key); return null; }
+  if (photoSessionChecks.size > 500) photoSessionChecks.clear();
+  photoSessionChecks.set(key, { at: now, session });
+  return session;
+}
+
 /**
  * A buyer keeps the session cookie 30 days past their access. A lapsed cookie
  * unlocks nothing (the session row has expired). For an agent's client it names

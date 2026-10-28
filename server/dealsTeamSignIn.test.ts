@@ -11,7 +11,7 @@ vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }))
 vi.mock("./dealsMap", () => ({ communityAreaMap: () => null, areaMapGeometry: () => null, areaMapRadius: () => 5 }));
 
 import { teamEmailKnown, teamSessionFromSiteLogin } from "./dealsTeamSignIn";
-import { TEAM_ACCESS_HOURS, browserIsRealtorBlocked, hashSecret, isLiveDealSession } from "./dealsService";
+import { PHOTO_SESSION_REUSE_MS, TEAM_ACCESS_HOURS, browserIsRealtorBlocked, hashSecret, isLiveDealSession, isLiveDealSessionForPhotos, resetPhotoSessionChecks } from "./dealsService";
 
 const HOUR = 3_600_000;
 let db: FakeDealsDb;
@@ -32,6 +32,31 @@ beforeEach(() => {
   db.seed(dealTeamAllowlist, { name: "No Phone", phoneE164: null, email: "nophone@lifestyledesignrealty.com", source: "manual", active: true });
 });
 afterEach(() => vi.clearAllMocks());
+
+describe("photo requests reuse a passing session check (Oct 28: 24 photos at once)", () => {
+  it("checks once per ten seconds per browser, never reuses a failure, and re-checks after the window", async () => {
+    resetPhotoSessionChecks();
+    const res = responseRecorder();
+    expect(await teamSessionFromSiteLogin(request(browser), res.response, { authenticate: async () => ({ email: "tiffany@lifestyledesignrealty.com", name: "Tiffany" }) })).toBe("ok");
+    const cookies = { ...browser, [DEALS_COOKIE.session]: res.cookie(DEALS_COOKIE.session)! };
+    const reads = vi.spyOn(db, "select");
+    const now = Date.now();
+    const first = await isLiveDealSessionForPhotos(request(cookies), now);
+    expect(first?.lead.status).toBe("team");
+    const afterFirst = reads.mock.calls.length;
+    expect(afterFirst).toBeGreaterThan(0);
+    expect(await isLiveDealSessionForPhotos(request(cookies), now + 5_000)).toBe(first);
+    expect(reads.mock.calls.length).toBe(afterFirst);
+    // Past the window the session is read again; a revoked session is refused then, and the refusal is not kept.
+    db.rows(dealAccessTokens)[0]!.revokedAt = new Date();
+    expect(await isLiveDealSessionForPhotos(request(cookies), now + PHOTO_SESSION_REUSE_MS + 1)).toBeNull();
+    db.rows(dealAccessTokens)[0]!.revokedAt = null;
+    expect(await isLiveDealSessionForPhotos(request(cookies), now + PHOTO_SESSION_REUSE_MS + 2)).not.toBeNull();
+    // Another browser (device cookie) never shares this browser's check.
+    expect(await isLiveDealSessionForPhotos(request({ ...cookies, [DEALS_COOKIE.device]: "other-mac" }), now + PHOTO_SESSION_REUSE_MS + 3)).toBeNull();
+    resetPhotoSessionChecks();
+  });
+});
 
 describe("team session from the site login", () => {
   it("signs an active team e-mail in for 90 days on this browser, creating the lead when there is none", async () => {

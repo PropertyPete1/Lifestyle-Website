@@ -419,10 +419,11 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
 export type UseCommunityHomes = (key: string | undefined) => { isLoading: boolean; data?: readonly PublicHome[] | null };
 
 /** The home a featured card stands for, by its public figures (the sheet's homes carry no shared key). */
-export type SheetFocus = { price?: number | null; sqft?: number | null; beds?: string | number | null; kind?: string };
+export type SheetFocus = { price?: number | null; sqft?: number | null; beds?: string | number | null; kind?: string; /** The unlocked list knows the home by its card handle. */ card?: string };
 
 /** True when a sheet home is the featured one: same kind, price and size. */
 export function isFocusHome(home: PublicHome, focus: SheetFocus | undefined): boolean {
+  if (focus?.card) return home.card === focus.card;
   if (!focus || !focus.price) return false;
   return home.price === focus.price && (!focus.sqft || home.sqft === focus.sqft) && (!focus.kind || home.kind === focus.kind);
 }
@@ -447,7 +448,26 @@ function ShareButton({ community }: { community: LandingCommunity }) {
   return <button type="button" onClick={() => void share()} data-deals-share="true" aria-live="polite" className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-4 text-sm font-medium text-foreground hover:border-gold hover:text-gold"><Share2 className="h-4 w-4" />{copied ? LANDING_COPY.shareCopied : LANDING_COPY.share}</button>;
 }
 
-export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters, focus }: { community: LandingCommunity; onClose: () => void; onUnlock: () => void; useHomes: UseCommunityHomes; /** The page's filters: the homes that match come first, the rest one tap away. */ filters?: BrowseFilters; /** A featured home: shown first and marked. */ focus?: SheetFocus }) {
+/**
+ * Oct 27, 2026: the unlocked list (team and clients) opens the same sheet with its own pieces: the community's private
+ * details and gated area map above the homes, its own home cards (address, pick, save, tour) and no unlock button.
+ */
+export type SheetOptions = {
+  /** Rendered under the price line, before the offer: the full list's builder, community name and address block. */
+  details?: (community: LandingCommunity) => ReactNode;
+  /** Rendered after the offer: the gated area map with drive times, the lot sizes and amenities. */
+  area?: (community: LandingCommunity) => ReactNode;
+  /** A home card of the caller's own (the unlocked list's, with its buttons); the public card otherwise. */
+  renderHome?: (home: PublicHome, featured: boolean, community: LandingCommunity) => ReactNode;
+  /** The unlock ("Schedule a tour") button and its privacy line; off on a list that is already unlocked. */
+  unlock?: boolean;
+  /** The public share button (a link to the landing page's sheet); off on a private list. */
+  share?: boolean;
+  /** The public area map under the offer; off when `area` draws the gated one. */
+  publicAreaMap?: boolean;
+};
+
+export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters, focus, options = {} }: { community: LandingCommunity; onClose: () => void; onUnlock?: () => void; useHomes: UseCommunityHomes; /** The page's filters: the homes that match come first, the rest one tap away. */ filters?: BrowseFilters; focus?: SheetFocus; options?: SheetOptions }) {
   const dialog = useRef<HTMLElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   // The latest close handler, so the effect below runs once per opening (not on every parent render).
@@ -494,17 +514,19 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
           <h2 id="deals-community-title" className="mt-2 text-3xl leading-tight">{community.label}</h2>
           {community.fromPriceLabel && <p className="mt-3 text-2xl font-semibold">{community.fromPriceLabel}</p>}
           <p className="mt-1 text-sm text-muted-foreground">{community.homesAvailable > 0 ? LANDING_COPY.homesReady(community.homesAvailable) : LANDING_COPY.toBeBuilt}</p>
+          {options.details?.(community)}
           {community.incentive && <div className="mt-5"><Incentive incentive={community.incentive} compact /></div>}
-          {community.areaMap ? <AreaMap map={community.areaMap} variant="public" /> : null}
-          <button type="button" onClick={onUnlock} className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-gold px-5 text-sm font-semibold text-primary-foreground shadow hover:opacity-95">{LANDING_COPY.unlock}<LockKeyhole className="h-4 w-4" /></button>
-          <p className="mt-2 text-xs text-muted-foreground">{LANDING_COPY.privacy}</p>
-          <ShareButton community={community} />
+          {options.publicAreaMap !== false && community.areaMap ? <AreaMap map={community.areaMap} variant="public" /> : null}
+          {options.area?.(community)}
+          {options.unlock !== false && onUnlock && <><button type="button" onClick={onUnlock} className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-gold px-5 text-sm font-semibold text-primary-foreground shadow hover:opacity-95">{LANDING_COPY.unlock}<LockKeyhole className="h-4 w-4" /></button>
+          <p className="mt-2 text-xs text-muted-foreground">{LANDING_COPY.privacy}</p></>}
+          {options.share !== false && <ShareButton community={community} />}
         </div>
       </div>
       <div ref={homesTop} className="scroll-mt-2 border-t border-border px-5 pb-8 pt-6 sm:px-6" data-deals-public-homes="true">
         <h3 className="text-xl font-semibold">{homes.isLoading ? LANDING_COPY.homesLoading : list.length ? LANDING_COPY.homesHeading(list.length) : LANDING_COPY.homesNone}</h3>
         {narrowed && narrowed.length > 0 && narrowed.length < all.length && <p role="status" className="mt-2 flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground" data-deals-sheet-filtered="true">{LANDING_COPY.sheetFiltered(narrowed.length, all.length)}<button type="button" onClick={() => setShowAll(true)} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.sheetShowAll}</button></p>}
-        {list.length > 0 && <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2 lg:grid-cols-3">{list.map((home) => <PublicHomeCard key={home.card} home={home} onAddress={onUnlock} featured={home === featuredHome} />)}</div>}
+        {list.length > 0 && <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2 lg:grid-cols-3">{list.map((home) => options.renderHome ? <div key={home.card} className="min-w-0">{options.renderHome(home, home === featuredHome, community)}</div> : <PublicHomeCard key={home.card} home={home} onAddress={() => onUnlock?.()} featured={home === featuredHome} />)}</div>}
       </div>
     </section>
   </div>, document.body);
@@ -552,8 +574,14 @@ function AutoMore({ active, onNear }: { active: boolean; onNear: () => void }) {
 /** What the featured row can do on the landing page: open a community's sheet on one of its homes, and light its area on the map. */
 export type LandingActions = { openHome: (key: string, focus?: SheetFocus) => boolean; hover: (key: string | null) => void };
 
-export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey }: {
-  communities: readonly LandingCommunity[]; onUnlock: () => void; useHomes: UseCommunityHomes;
+export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below }: {
+  communities: readonly LandingCommunity[]; onUnlock?: () => void; useHomes: UseCommunityHomes;
+  /** The sheet's pieces for an unlocked list (see SheetOptions). */
+  sheet?: SheetOptions;
+  /** Called with the community's key each time its sheet opens (the unlocked list logs the view). */
+  onOpenCommunity?: (key: string) => void;
+  /** Rendered under the cards in the list column (the Coming Soon section). */
+  below?: ReactNode;
   /** A shared link's community (?k=key): its sheet opens once the catalog has it. */
   openKey?: string | null;
   /** Shown at the top of the list column (the featured row); a function gets the actions above. */
@@ -566,6 +594,8 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   const [selected, setSelected] = useState<{ id: string; keys: string[] } | null>(null);
   const [open, setOpen] = useState<LandingCommunity | null>(null);
   const [focus, setFocus] = useState<SheetFocus | undefined>(undefined);
+  const openKeyRef = useRef<string | null>(null);
+  useEffect(() => { const key = open?.key ?? null; if (key && key !== openKeyRef.current) onOpenCommunity?.(key); openKeyRef.current = key; }, [open, onOpenCommunity]);
   const [mapOnPhone, setMapOnPhone] = useState(false);
   const [pages, setPages] = useState(1);
   const keyed = useMemo(() => communities.map((community, index) => ({ ...community, key: keyOf(community, index) })), [communities]);
@@ -629,10 +659,11 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
         {/* The next page loads as the visitor nears the end of the list (the button stays for keyboards and old browsers). */}
         <AutoMore key={shown.length} active={matching.length > shown.length} onNear={() => setPages((value) => value + 1)} />
         <ShowMore remaining={matching.length - shown.length} onClick={() => setPages((value) => value + 1)} />
+        {below}
       </div>
       {/* The map fills the side of the screen and stays there while the list scrolls (no empty space under it). */}
       <aside className="hidden min-w-0 lg:block"><div className="sticky top-0 h-[100dvh] py-4"><RegionMap {...mapProps} className="h-full w-full" /></div></aside>
     </div>
-    {open && <CommunitySheet community={open} useHomes={useHomes} filters={filters} focus={focus} onClose={() => setOpen(null)} onUnlock={() => { setOpen(null); onUnlock(); }} />}
+    {open && <CommunitySheet community={open} useHomes={useHomes} filters={filters} focus={focus} options={sheet} onClose={() => setOpen(null)} onUnlock={onUnlock ? () => { setOpen(null); onUnlock(); } : undefined} />}
   </>;
 }

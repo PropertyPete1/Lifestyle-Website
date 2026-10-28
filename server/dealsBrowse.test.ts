@@ -235,18 +235,18 @@ describe("list order", () => {
 describe("a long private list", () => {
   const render = (communities: GatedCommunity[]) => renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead, communities, now: NOW })));
 
-  it("opens only the buyer's reel community, shows the rest as rows with a summary, and pages after 12", () => {
+  it("lays a long list out like the landing page: cards beside one map, the reel's community first, 12 at a time (Oct 27)", () => {
     const many = Array.from({ length: 20 }, (_, index) => community(index, index === 0 ? { fromYourReel: true, reelUrl: "https://www.instagram.com/reel/abc/" } : {}));
     const html = render(many);
     expect(html).toContain('data-deals-browse="true"');
-    expect(html.match(/data-deals-community="open"/g)).toHaveLength(1);
-    expect(html.match(/data-deals-community="closed"/g)).toHaveLength(11);
+    expect(html.match(/data-deals-card="true"/g)).toHaveLength(12);
+    expect(html).not.toContain('data-deals-community="open"');
     expect(html).toContain("From your reel");
-    expect(html).toContain("From $310,000 · 1 quick move-in");
+    expect(html).toContain("From $310,000");
     expect(html).toContain("Show 8 more of 8");
     expect(html).toContain("40 homes");
-    // The open community's reel loads; nothing else on the page embeds Instagram.
-    expect(html.match(/instagram-media/g)).toHaveLength(1);
+    // No reel embeds on the list itself: a community's video loads when its sheet opens.
+    expect(html.match(/instagram-media/g) ?? []).toHaveLength(0);
   });
 
   it("shows a Saved toggle with the count once the buyer has saved a home, and the under-$200K price choice", () => {

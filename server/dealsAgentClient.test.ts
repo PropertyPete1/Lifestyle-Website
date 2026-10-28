@@ -129,7 +129,10 @@ describe("agent tools on /deals/team", () => {
     const html = renderTools();
     expect(html).toContain("Agent tools · Tiffany Agent");
     expect(html).toContain("Send the list to a client");
-    expect(html).toContain("Each link works for one client");
+    expect(html).toContain("Type a name, get a private link");
+    // Oct 27: name only up front; the mobile and the note fold away.
+    expect(html).not.toContain('id="deals-client-phone"');
+    expect(html).toContain('data-deals-more-fields="true"');
     expect(html.match(/data-deals-client="true"/g)?.length).toBe(3);
     expect(html).toContain("Verified Oct 19, 6:30 AM · list open until Oct 21, 7:00 PM");
     expect(html).toContain("Not opened yet");

@@ -1087,7 +1087,8 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
   const full = view.view === "full";
   const now = new Date();
   const settings = await getDealSettings();
-  const { areaMapRadius, communityAreaMap } = await import("./dealsMap");
+  const { areaMapRadius, areaMapGeometry, communityAreaMap } = await import("./dealsMap");
+  const { regionPin } = await import("./dealsRegionMap");
   const gatedRadius = areaMapRadius(settings, "gated");
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
   const data = [] as GatedCatalogBuilt[];
@@ -1156,6 +1157,8 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
       driveTimes: (JSON.parse(community.driveTimeChips ?? "[]") as string[]).map(scrub),
       // Only the ZIP centroid and radius; never the community's own coordinates.
       areaMap: communityAreaMap(community, { radiusMiles: gatedRadius }),
+      // Oct 27, 2026: the unlocked list is laid out like the landing page (cards beside one map); its marker sits at the ZIP centroid.
+      pin: (() => { const geometry = areaMapGeometry(community, "gated", gatedRadius); return geometry ? regionPin(geometry.center) : null; })(),
       fromPrice: community.fromPrice,
       reelUrl: community.reelUrl,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),

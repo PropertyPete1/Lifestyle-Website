@@ -12,6 +12,8 @@ import { Countdown } from "./Countdown";
 import { DealsFooter, Incentive, NewBadge, RedHotBadge, RedHotSavings, ReelCard, RetryImage, formatChicagoDate, money, type DealsIncentive } from "./shared";
 import { FeaturedDeals, type FeaturedDealsData } from "./FeaturedDeals";
 import { BrowseBar, BROWSE_COPY, ShowMore } from "./BrowseBar";
+import { LandingBrowse, type LandingCommunity, type PublicHome } from "./LandingBrowse";
+import { redHotDeal } from "@shared/dealsFeatured";
 import { BROWSE_PAGE, EMPTY_FILTERS, OPEN_ALL_UP_TO, numberFrom, newThisWeekKnown, sortGatedCommunities, sortHomes, storiesKnown, builderChoices, dealSelection, gatedCommunityVisible, homeFiltersOn, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export { countdownLabel } from "@/lib/dealsMine";
@@ -54,6 +56,8 @@ export type GatedCommunity = {
   amenities?: string[];
   driveTimes?: unknown;
   areaMap?: unknown;
+  /** The region map marker (the ZIP centroid's coarse cell), like the landing page's. */
+  pin?: { x: number; y: number } | null;
   fromPrice?: number | null;
   reelUrl: string | null;
   updatedAt?: string | null;
@@ -262,6 +266,24 @@ export const PICKS_COPY = {
   intro: "Start here. The full list is below if you want to see everything else.",
 } as const;
 
+/**
+ * Oct 27, 2026 (Peter: "the client page is nicer", "where is the map"): the unlocked list as the landing page's cards
+ * beside one map. A community as a landing card: its own homes (after the filters) give the price, cover and badges.
+ */
+export function gatedAsLanding(community: GatedCommunity, key: string, homes: readonly GatedHome[]): LandingCommunity {
+  const priced = homes.filter((home) => typeof home.price === "number" && home.price > 0).sort((a, b) => a.price! - b.price!);
+  const from = priced[0]?.price ?? community.fromPrice ?? null;
+  const cover = [...priced, ...homes].find((home) => home.photos?.length)?.photos?.[0] ?? null;
+  return {
+    key, label: community.label, area: community.area, schoolDistrict: community.schoolDistrict || null, reelUrl: community.reelUrl, fromYourReel: community.fromYourReel,
+    fromPrice: from, fromPriceLabel: from ? `From ${money.format(from)}` : null,
+    homesAvailable: homes.filter((home) => home.kind === "quick_move_in").length,
+    incentive: (community.incentive ?? null) as LandingCommunity["incentive"], cover, pin: community.pin ?? null,
+    redHotDeals: homes.filter((home) => redHotDeal(home.price ?? null, home.previousPrice ?? null)).length,
+    newThisWeek: homes.filter((home) => home.isNew).length,
+  };
+}
+
 export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave, agent, tools, onRequest, onSaveProfile, savingProfile, profileSaved, profileError, onExpire, featured, onViewCommunity, comingSoon, pick, picks }: GatedCatalogProps) {
   const [promptDismissed, setPromptDismissed] = useState(false);
   const pickedForMe = useMemo(() => pickedHomes(communities, picks), [communities, picks]);
@@ -289,6 +311,17 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
   const visible = many ? matching.slice(0, pages * BROWSE_PAGE) : matching;
   const homeCount = communities.reduce((total, community) => total + community.homes.length, 0);
   const shownHomes = matching.reduce((total, { community }) => total + (homeFilters ? homesMatching(community, filters, savedOnList) : community.homes).length, 0);
+  // The cards-and-map layout (a long list): every community as a landing card, its sheet showing the homes that match.
+  const landing = useMemo(() => matching.map(({ community, key, homes }) => gatedAsLanding(community, key, homes)), [matching]);
+  const landingAll = useMemo(() => communities.map((community, index) => gatedAsLanding(community, communityKey(community, index), community.homes)), [communities]);
+  const byKey = useMemo(() => new Map(communities.map((community, index) => [communityKey(community, index), community])), [communities]);
+  const matchingHomes = useMemo(() => new Map(matching.map(({ key, homes }) => [key, homes])), [matching]);
+  const keyByCard = useMemo(() => new Map(communities.flatMap((community, index) => community.homes.map((home) => [home.card, communityKey(community, index)] as const))), [communities]);
+  const useSheetHomes = (key: string | undefined) => {
+    const community = key ? byKey.get(key) : undefined;
+    const homes = key ? matchingHomes.get(key) : undefined;
+    return { isLoading: false, data: (homes?.length ? sortHomes(homes, filters.sort) : sortHomes(community?.homes ?? [], filters.sort)) as unknown as PublicHome[] };
+  };
   // A Best Deals tap opens that home's community (clearing filters that hide it) and scrolls to the card once it is on the page.
   const selectDeal = (card: string | undefined) => {
     if (!card) return;
@@ -314,8 +347,8 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
   }, [pendingCard, opened, pages, filters]);
   return <main data-deals-gated="true" style={identityPatternStyle(lead.display)} className="deals-light min-h-screen max-w-full overflow-x-clip bg-background">
     <header className="deals-chrome flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link><span className="flex items-center gap-4 text-xs text-gold">{lead.teamPreview && <Link href="/deals/team" className="inline-flex min-h-11 items-center underline-offset-4 hover:underline">Agent tools</Link>}<span><Clock3 className="mr-1 inline h-3.5 w-3.5" /> <Countdown expiresAt={lead.expiresAt} now={now} onExpire={onExpire} /></span></span></header>
-    <section className="px-5 py-10 sm:px-8"><div className="mx-auto max-w-5xl">
-      <div className="border-b border-border pb-7"><p className="eyebrow text-gold">{eyebrow}</p><h1 className="mt-2 break-words text-4xl sm:text-5xl">Prepared for {lead.display}</h1><p className="mt-3 text-sm text-muted-foreground">Updated {formatChicagoDate(updatedAt)}. Your access expires in <Countdown expiresAt={lead.expiresAt} now={now} />.</p>{agent && !lead.teamPreview && <p className="mt-3 text-sm text-foreground" data-deals-agent-note="true">Shared with you by {agent.name}. Tap Save on any home and {agent.firstName ?? "your agent"} hears about it right away.{agent.phone ? ` Questions? Text ${agent.firstName ?? agent.name} at ${agent.phone}.` : ""}</p>}</div>
+    <section className={many ? "px-4 py-6 sm:px-6" : "px-5 py-10 sm:px-8"}><div className={`mx-auto ${many ? "max-w-[1600px]" : "max-w-5xl"}`}>
+      <div className={`border-b border-border ${many ? "pb-4" : "pb-7"}`}><p className="eyebrow text-gold">{eyebrow}</p><h1 className={`mt-2 break-words ${many ? "text-3xl" : "text-4xl sm:text-5xl"}`}>Prepared for {lead.display}</h1><p className="mt-3 text-sm text-muted-foreground">Updated {formatChicagoDate(updatedAt)}. Your access expires in <Countdown expiresAt={lead.expiresAt} now={now} />.</p>{agent && !lead.teamPreview && <p className="mt-3 text-sm text-foreground" data-deals-agent-note="true">Shared with you by {agent.name}. Tap Save on any home and {agent.firstName ?? "your agent"} hears about it right away.{agent.phone ? ` Questions? Text ${agent.firstName ?? agent.name} at ${agent.phone}.` : ""}</p>}</div>
       {tools}
       {!promptDismissed && !profileSaved && !lead.name && !lead.teamPreview && <NamePrompt onSave={onSaveProfile} saving={savingProfile} error={profileError} onDismiss={() => setPromptDismissed(true)} />}
       {pickedForMe.length > 0 && <section aria-labelledby="deals-picked" data-deals-picked-for-you="true" className="mt-8 border border-gold/40 bg-gold/5 p-5 sm:p-6">
@@ -324,6 +357,31 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
         <p className="mt-2 text-sm text-muted-foreground">{PICKS_COPY.intro}</p>
         <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">{pickedForMe.map(({ home, community }) => <div key={`pick-${home.card}`} className="min-w-0"><p className="mb-2 truncate text-xs uppercase tracking-widest text-muted-foreground">{community.label}</p><HomeCard home={{ ...home, card: `pick-${home.card}` }} teamPreview={lead.teamPreview} saved={savedSet.has(home.card)} saving={savingCard === home.card} onRequest={onRequest ? (request) => onRequest({ ...request, card: home.card }) : undefined} onSave={onSave ? (_card, next) => onSave(home.card, next) : undefined} /></div>)}</div>
       </section>}
+      {many ? <>
+      {(many || savedOnList.size > 0) && <BrowseBar filters={filters} onChange={(next) => {
+        // Turning Saved on opens the communities that hold a saved home; each can still be collapsed.
+        if (next.savedOnly && !filters.savedOnly) setOpened((current) => new Set([...Array.from(current), ...communities.flatMap((community, index) => community.homes.some((home) => savedOnList.has(home.card)) ? [communityKey(community, index)] : [])]));
+        setFilters(next); setPages(1);
+      }} areas={communities} shown={shownHomes} total={homeCount} unit="homes" showBeds savedCount={savedOnList.size} showStories={storiesKnown(communities)} showNew={newThisWeekKnown(communities)} builders={lead.teamPreview ? builderChoices(communities) : []} />}
+      {(filters.savedOnly || savedOnList.size === 0) && savedGone > 0 && <p role="status" className="mt-3 text-xs text-muted-foreground" data-deals-saved-gone="true">{savedGone === 1 ? "1 home you saved is no longer available." : `${savedGone} homes you saved are no longer available.`}</p>}
+      {(many || savedOnList.size > 0) && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{filters.savedOnly && savedOnList.size > 0 ? BROWSE_COPY.noneSaved : BROWSE_COPY.none}</p>}
+        <LandingBrowse communities={landing} lookup={landingAll} useHomes={useSheetHomes} filters={{ ...EMPTY_FILTERS, sort: filters.sort }}
+          onOpenCommunity={(key) => { const community = byKey.get(key); if (community?.key && onViewCommunity && !reported.has(key)) { reported.add(key); onViewCommunity(community.key); } }}
+          top={(actions) => <FeaturedDeals featured={featured} onSelect={(deal) => {
+            const key = deal.card ? keyByCard.get(deal.card) : undefined;
+            if (!key) return;
+            // A featured home the filters hide: the filters go so its sheet shows it.
+            if (!(matchingHomes.get(key) ?? []).some((home) => home.card === deal.card)) setFilters(EMPTY_FILTERS);
+            actions.openHome(key, { card: deal.card });
+          }} />}
+          sheet={{
+            unlock: false, share: false, publicAreaMap: false,
+            details: (item) => { const community = item.key ? byKey.get(item.key) : undefined; return community ? <><CommunityDetails details={community.details} />{community.lotSizes && <p className="mt-2 text-sm text-muted-foreground">{community.lotSizes}</p>}</> : null; },
+            area: (item) => { const community = item.key ? byKey.get(item.key) : undefined; return community ? <><AreaMap chips={community.driveTimes} map={community.areaMap} />{community.amenities && community.amenities.length > 0 && <div className="mt-4 flex flex-wrap gap-2">{community.amenities.map((amenity) => <span key={amenity} className="border border-border px-3 py-1.5 text-xs text-muted-foreground">{amenity}</span>)}</div>}</> : null; },
+            renderHome: (home, featuredHome) => <div className={featuredHome ? "ring-2 ring-gold/60" : undefined} data-deals-featured-home={featuredHome ? "true" : undefined}><HomeCard home={home as unknown as GatedHome} teamPreview={lead.teamPreview} saved={savedSet.has(home.card)} saving={savingCard === home.card} onRequest={onRequest} onSave={onSave} pick={pick} /></div>,
+          }}
+          below={<ComingSoonSection items={comingSoon} action={{ kind: "text", phone: !lead.teamPreview ? agent?.phone ?? null : null, name: !lead.teamPreview ? agent?.firstName ?? agent?.name ?? null : null }} />} />
+      </> : <>
       <FeaturedDeals featured={featured} onSelect={(deal) => selectDeal(deal.card)} />
       {(many || savedOnList.size > 0) && <BrowseBar filters={filters} onChange={(next) => {
         // Turning Saved on opens the communities that hold a saved home; each can still be collapsed.
@@ -335,6 +393,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
       <div className="mt-10 space-y-12">{visible.map(({ community, key, homes }, position) => <CommunitySection key={key} id={`deals-community-${position}`} community={community} homes={sortHomes(homes, filters.sort)} open={!many || opened.has(key)} onToggle={many ? () => setOpened((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; }) : undefined} autoLoadReel={!many || position === 0} teamPreview={lead.teamPreview} savedSet={savedSet} savingCard={savingCard} onRequest={onRequest} onSave={onSave} pick={pick} />)}</div>
       {many && <ShowMore remaining={matching.length - visible.length} onClick={() => setPages((value) => value + 1)} />}
       <ComingSoonSection items={comingSoon} action={{ kind: "text", phone: !lead.teamPreview ? agent?.phone ?? null : null, name: !lead.teamPreview ? agent?.firstName ?? agent?.name ?? null : null }} />
+      </>}
     </div></section>
     <DealsFooter agentSignIn={!lead.teamPreview} />
   </main>;

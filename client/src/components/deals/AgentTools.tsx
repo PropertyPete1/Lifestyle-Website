@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Copy, Heart, Link2, ListChecks, Mail, MessageSquareText, Send, X } from "lucide-react";
+import { Check, ChevronDown, Copy, Heart, Link2, ListChecks, Mail, MessageSquareText, Send, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -46,6 +46,12 @@ export const AGENT_COPY = {
   created: "Link ready. Text it or copy it.",
   copied: "Link copied.",
   noClients: "No client links yet. Send your first one above.",
+  /** Oct 27, 2026 (Peter: "too much to say", "adding a number is a waste"): one line, name only; the rest folds away. */
+  short: "Type a name, get a private link to text or email. Picks you tap go on it.",
+  more: "Lock to their mobile · add a note",
+  less: "Hide mobile and note",
+  phoneHint: "Optional. Only that number can open the link, and their saves land on the right FUB contact.",
+  clients: (count: number) => `Your clients (${count})`,
   notOpened: "Not opened yet",
   opened: "Opened",
   verified: "Verified",
@@ -176,6 +182,9 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
     }
   };
   const [clientPhone, setClientPhone] = useState("");
+  const [showMore, setShowMore] = useState(false);
+  // Open: a client's saves and tour requests are the agent's to-do list. One tap folds it away to get to the homes.
+  const [clientsOpen, setClientsOpen] = useState(true);
   const [note, setNote] = useState("");
   const agentName = workspace?.agent.name ?? "Lifestyle Design Realty";
   const createdUrl = created ? absoluteLink(created.path, origin) : null;
@@ -188,19 +197,23 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
   };
   const revoke = (client: AgentClient) => { confirmAndRevoke(client, confirm ?? ((message: string) => window.confirm(message)), onRevoke); };
   const createdMessage = createdUrl && created ? clientMessage({ clientName: created.clientName ?? "", agentName, url: createdUrl, pickCount: created.pickCount }) : null;
-  return <section aria-labelledby="deals-agent-tools" data-deals-agent-tools="true" className="mt-8 min-w-0 space-y-8">
-    <div className="min-w-0 border border-gold/30 bg-gold/5 p-5">
-      <p className="eyebrow text-gold">Agent tools · {agentName}</p>
-      <h2 id="deals-agent-tools" className="mt-2 text-3xl">{AGENT_COPY.heading}</h2>
-      <p className="mt-3 text-sm text-muted-foreground">{AGENT_COPY.intro}</p>
-      {onSetPicks && <p role="status" data-deals-picks-note={picked.length ? "some" : "none"} className={`mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm ${picked.length ? "text-foreground" : "text-muted-foreground"}`}><ListChecks className="h-4 w-4 shrink-0 text-gold" />{picked.length ? AGENT_COPY.picksOnNew(picked.length) : AGENT_COPY.picksNone}{picked.length > 0 && onClearPicks && <button type="button" onClick={onClearPicks} className="min-h-11 text-xs uppercase tracking-widest text-gold underline-offset-4 hover:underline">{AGENT_COPY.picksClear}</button>}</p>}
-      {workspace && !workspace.agent.fubLinked && <p role="status" className="mt-3 text-xs text-gold">Your number is on the team list without a Follow Up Boss user, so your clients' contacts and tasks go to Peter in FUB until it is linked. Emails still reach you{workspace.agent.email ? ` at ${workspace.agent.email}` : ""}.</p>}
-      <div className="mt-5 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3">
-        <div className="min-w-0"><Label htmlFor="deals-client-name" className="text-xs uppercase tracking-widest">Client name</Label><Input id="deals-client-name" value={clientName} maxLength={190} onChange={(event) => setClientName(event.target.value)} placeholder="Maria Lopez" className="mt-2 min-h-11" /></div>
-        <div className="min-w-0"><Label htmlFor="deals-client-phone" className="text-xs uppercase tracking-widest">Client mobile</Label><Input id="deals-client-phone" type="tel" inputMode="tel" value={clientPhone} onChange={(event) => setClientPhone(formatPhoneInput(event.target.value))} placeholder="(210) 555-0123" className="mt-2 min-h-11" /></div>
-        <div className="min-w-0"><Label htmlFor="deals-client-note" className="text-xs uppercase tracking-widest">Private note (optional)</Label><Input id="deals-client-note" value={note} maxLength={500} onChange={(event) => setNote(event.target.value)} placeholder="Pre-approved, wants 4 beds" className="mt-2 min-h-11" /></div>
+  return <section aria-labelledby="deals-agent-tools" data-deals-agent-tools="true" className="mt-5 min-w-0 space-y-4">
+    <div className="min-w-0 border border-gold/30 bg-gold/5 p-4">
+      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1"><h2 id="deals-agent-tools" className="text-xl">{AGENT_COPY.heading}</h2><p className="text-xs text-muted-foreground"><span className="uppercase tracking-widest text-gold">Agent tools · {agentName}</span> · {AGENT_COPY.short}</p></div>
+      {workspace && !workspace.agent.fubLinked && <p role="status" className="mt-2 text-xs text-gold">Your number is on the team list without a Follow Up Boss user, so your clients' contacts and tasks go to Peter in FUB until it is linked. Emails still reach you{workspace.agent.email ? ` at ${workspace.agent.email}` : ""}.</p>}
+      <form className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+        <Label htmlFor="deals-client-name" className="sr-only">Client name</Label>
+        <Input id="deals-client-name" value={clientName} maxLength={190} onChange={(event) => setClientName(event.target.value)} placeholder="Client name" autoComplete="off" className="min-h-11 min-w-0 flex-1 bg-background" />
+        <Button type="submit" disabled={creating || clientName.trim().length < 2} className="min-h-11 shrink-0 bg-gold text-primary-foreground"><Link2 className="mr-2 h-4 w-4" />{creating ? "Creating link…" : picked.length ? `Create link with ${picked.length} pick${picked.length === 1 ? "" : "s"}` : "Create client link"}</Button>
+      </form>
+      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        <button type="button" onClick={() => setShowMore((value) => !value)} aria-expanded={showMore} data-deals-more-fields="true" className="min-h-11 text-muted-foreground underline-offset-4 hover:text-gold hover:underline">{showMore ? AGENT_COPY.less : AGENT_COPY.more}</button>
+        {onSetPicks && <span role="status" data-deals-picks-note={picked.length ? "some" : "none"} className={`flex flex-wrap items-center gap-x-3 ${picked.length ? "text-foreground" : "text-muted-foreground"}`}><ListChecks className="h-4 w-4 shrink-0 text-gold" />{picked.length ? AGENT_COPY.picksOnNew(picked.length) : AGENT_COPY.picksNone}{picked.length > 0 && onClearPicks && <button type="button" onClick={onClearPicks} className="min-h-11 uppercase tracking-widest text-gold hover:underline">Clear picks</button>}</span>}
       </div>
-      <Button type="button" disabled={creating || clientName.trim().length < 2} onClick={submit} className="mt-4 min-h-11 w-full bg-gold text-primary-foreground sm:w-auto"><Link2 className="mr-2 h-4 w-4" />{creating ? "Creating link…" : "Create client link"}</Button>
+      {showMore && <div className="mt-1 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
+        <div className="min-w-0"><Label htmlFor="deals-client-phone" className="text-xs uppercase tracking-widest">Client mobile</Label><Input id="deals-client-phone" type="tel" inputMode="tel" value={clientPhone} onChange={(event) => setClientPhone(formatPhoneInput(event.target.value))} placeholder="(210) 555-0123" className="mt-1 min-h-11 bg-background" /><p className="mt-1 text-[11px] text-muted-foreground">{AGENT_COPY.phoneHint}</p></div>
+        <div className="min-w-0"><Label htmlFor="deals-client-note" className="text-xs uppercase tracking-widest">Private note</Label><Input id="deals-client-note" value={note} maxLength={500} onChange={(event) => setNote(event.target.value)} placeholder="Pre-approved, wants 4 beds" className="mt-1 min-h-11 bg-background" /></div>
+      </div>}
       {createError && <p role="alert" className="mt-3 text-sm text-destructive">{createError}</p>}
       {createdUrl && createdMessage && created && <div className="mt-5 min-w-0 border border-gold/40 bg-background/60 p-4" data-deals-created-link="true">
         <p role="status" className="text-sm text-gold">{AGENT_COPY.created}</p>
@@ -217,7 +230,8 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
     </div>
 
     <div className="min-w-0">
-      <p className="eyebrow text-gold">Your clients</p>
+      <button type="button" onClick={() => setClientsOpen((value) => !value)} aria-expanded={clientsOpen} data-deals-clients-toggle="true" className="flex min-h-11 items-center gap-2 text-xs uppercase tracking-widest text-gold"><ChevronDown className={`h-4 w-4 transition-transform ${clientsOpen ? "rotate-180" : ""}`} />{AGENT_COPY.clients(workspace?.clients.length ?? 0)}</button>
+      {clientsOpen && <>
       {loading && <p className="mt-3 text-sm text-muted-foreground">Loading your clients…</p>}
       {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
       {workspace && workspace.clients.length === 0 && <p className="mt-3 text-sm text-muted-foreground">{AGENT_COPY.noClients}</p>}
@@ -244,7 +258,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
             <Button type="button" variant="outline" onClick={() => onCopy(url)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === url ? AGENT_COPY.copied : "Copy link"}</Button>
           </div>}
         </article>;
-      })}</div>
+      })}</div></>}
     </div>
     <Dialog open={Boolean(textFor)} onOpenChange={(open) => { if (!open) setTextFor(null); }}>
       <DialogContent className="max-w-lg" data-deals-text-dialog="true">

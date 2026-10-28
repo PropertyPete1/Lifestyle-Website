@@ -58,8 +58,6 @@ export type GatedCommunity = {
   amenities?: string[];
   driveTimes?: unknown;
   areaMap?: unknown;
-  /** Oct 28, 2026: the model home's photo, when the builder labels a model; the page's cover for the community. */
-  cover?: string | null;
   /** The region map marker (the ZIP centroid's coarse cell), like the landing page's. */
   pin?: { x: number; y: number } | null;
   fromPrice?: number | null;
@@ -282,8 +280,7 @@ export function gatedAsLanding(community: GatedCommunity, key: string, homes: re
   const priced = homes.filter((home) => typeof home.price === "number" && home.price > 0).sort((a, b) => a.price! - b.price!);
   const from = priced[0]?.price ?? community.fromPrice ?? null;
   const first = [...priced, ...homes].find((home) => home.photos?.length)?.photos?.[0];
-  // The model home's photo leads when the builder labels one (Oct 28); else the cheapest home's.
-  const cover = community.cover ?? (first ? cardPhoto(first) : null);
+  const cover = first ? cardPhoto(first) : null;
   return {
     key, label: community.label, area: community.area, schoolDistrict: community.schoolDistrict || null, reelUrl: community.reelUrl, fromYourReel: community.fromYourReel,
     fromPrice: from, fromPriceLabel: from ? `From ${money.format(from)}` : null,

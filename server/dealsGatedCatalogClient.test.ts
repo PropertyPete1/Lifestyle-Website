@@ -449,7 +449,9 @@ describe("the home cards of the unlocked list (Oct 27: New Home Buddy parity)", 
     expect(html.match(/data-deals-tile-drop=/g)).toHaveLength(1);
     expect(html).toContain('data-deals-pick="unpicked"');
     // A landing card for the map: cheapest price, quick move-ins, the first photo as its cover.
-    expect(gatedAsLanding({ ...community, pin: { x: 0.5, y: 0.5 } }, "k1", [home as never])).toMatchObject({ key: "k1", fromPrice: 499_000, homesAvailable: 1, cover: "/deals/mine/img/1", pin: { x: 0.5, y: 0.5 } });
+    expect(gatedAsLanding({ ...community, pin: { x: 0.5, y: 0.5 } }, "k1", [home as never])).toMatchObject({ key: "k1", fromPrice: 499_000, homesAvailable: 1, cover: "/deals/mine/img/1?s=card", pin: { x: 0.5, y: 0.5 } });
+    // Oct 28: list cards ask for the card-size render (Peter: photos arrived seconds late while scrolling).
+    expect(html).toContain('src="/deals/mine/img/1?s=card"');
   });
 });
 

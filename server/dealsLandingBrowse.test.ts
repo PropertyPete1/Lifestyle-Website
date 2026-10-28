@@ -18,7 +18,7 @@ import { photoIdFromToken, publicPhotoAllowed, resetPublicPhotoLimits } from "./
 import { regionHomeView, regionPin, spreadStackedPins, SAN_ANTONIO_REGION } from "./dealsRegionMap";
 
 (globalThis as { React?: typeof React }).React = React;
-const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW, clusterView, stillStacked, fanOffsets, isFocusHome, communityShareUrl, keysInView, sheetHistory } = await import("../client/src/components/deals/LandingBrowse");
+const { CommunityCard, groupMarkers, rateBadge, REGION_VIEW, clusterView, stillStacked, fanOffsets, isFocusHome, communityShareUrl, keysInView, sheetHistory, mapWheelZooms } = await import("../client/src/components/deals/LandingBrowse");
 
 describe("the region map", () => {
   it("places a point by the map's own projection and leaves off anything outside the picture", () => {
@@ -120,6 +120,14 @@ describe("clicking a numbered bubble (Peter, Oct 25: it zooms into the neighborh
     expect(spots.size).toBe(7);
     // Far enough apart to tap one (each bubble is about 30 pixels wide).
     for (let i = 0; i < ring.length; i++) for (let j = i + 1; j < ring.length; j++) expect(Math.hypot(ring[i]!.dx - ring[j]!.dx, ring[i]!.dy - ring[j]!.dy)).toBeGreaterThanOrEqual(56);
+  });
+});
+
+describe("scrolling over the map moves the page (Oct 28, Peter: \"trying to drag the screen down, it won't let me\")", () => {
+  it("zooms only for a pinch (Ctrl + wheel) or Ctrl/⌘ + scroll", () => {
+    expect(mapWheelZooms({ ctrlKey: false, metaKey: false })).toBe(false);
+    expect(mapWheelZooms({ ctrlKey: true, metaKey: false })).toBe(true);
+    expect(mapWheelZooms({ ctrlKey: false, metaKey: true })).toBe(true);
   });
 });
 

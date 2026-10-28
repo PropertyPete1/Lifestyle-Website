@@ -1827,18 +1827,30 @@ export async function runScheduledDealPhotoDrain(options: { budgetMs?: number; r
   return partial;
 }
 
-export function dealPhotoRenderCacheVersion(photoVersion: string, leadId: number, identity: string) {
+export function dealPhotoRenderCacheVersion(photoVersion: string, leadId: number, identity: string, size: DealPhotoRenderSize = "full") {
   // v2: renders made before masters were verified against processedVersion are not reused.
-  return digest(`watermark-v2\u0000${photoVersion}\u0000${leadId}\u0000${identity}`).slice(0, 64);
+  return digest(`watermark-v2${size === "card" ? "-card" : ""}\u0000${photoVersion}\u0000${leadId}\u0000${identity}`).slice(0, 64);
 }
+
+/**
+ * Oct 28, 2026 (Peter: "when I scroll down it's no photos, then they populate a couple seconds after"): the home list's
+ * cards are drawn about 500 px wide (1,000 on a sharp screen), yet each one was the full-size photo watermarked on
+ * request. A card-size render is a fraction of the pixels to watermark, encode and send.
+ */
+export type DealPhotoRenderSize = "full" | "card";
+export const CARD_RENDER_WIDTH = 960;
+const CARD_RENDER_MEMORY_ENTRIES = 200;
 
 type RenderedPhoto = { data: Buffer; contentType: string };
 const renderLimiter = createLimiter(RENDER_CONCURRENCY);
 const renderMemory = new LruCache<RenderedPhoto>(RENDER_MEMORY_ENTRIES);
+/** Card renders are small (tens of KB): more of them stay in memory, so scrolling back up is instant. */
+const cardRenderMemory = new LruCache<RenderedPhoto>(CARD_RENDER_MEMORY_ENTRIES);
 
 /** Test seam: clears in-process caches and the drain guard. Never called by product code. */
 export function resetDealPhotoRuntimeState() {
   renderMemory.clear();
+  cardRenderMemory.clear();
   activeDrains.clear();
   hostLimiters.clear();
   drainRerunRequested = false;
@@ -1955,7 +1967,8 @@ export async function renderDealPhotoForPublic(photoId: number): Promise<Rendere
 }
 
 /** Produces only per-lead watermarked image bytes; no object URL leaves the server. */
-export async function renderDealPhotoForLead(photoId: number, leadId: number): Promise<RenderedPhoto | null> {
+export async function renderDealPhotoForLead(photoId: number, leadId: number, size: DealPhotoRenderSize = "full"): Promise<RenderedPhoto | null> {
+  const memory = size === "card" ? cardRenderMemory : renderMemory;
   try {
     const db = await getDb();
     if (!db) return null;
@@ -1978,12 +1991,12 @@ export async function renderDealPhotoForLead(photoId: number, leadId: number): P
     if (!row?.photo.processedStorageKey || !row.photo.processedVersion) return null;
 
     const identity = displayForLead(row.lead);
-    const cacheVersion = dealPhotoRenderCacheVersion(row.photo.processedVersion, leadId, identity);
-    const inMemory = renderMemory.get(cacheVersion);
+    const cacheVersion = dealPhotoRenderCacheVersion(row.photo.processedVersion, leadId, identity, size);
+    const inMemory = memory.get(cacheVersion);
     if (inMemory) return inMemory;
 
     return await renderLimiter(async () => {
-      const raced = renderMemory.get(cacheVersion);
+      const raced = memory.get(cacheVersion);
       if (raced) return raced;
       const cached = (await db.select().from(dealPhotoRenders).where(and(
         eq(dealPhotoRenders.photoId, photoId),
@@ -1995,7 +2008,7 @@ export async function renderDealPhotoForLead(photoId: number, leadId: number): P
         try {
           const stored = await storageReadPrivate(cached.storageKey);
           const value = { data: stored.data, contentType: stored.contentType || "image/webp" };
-          renderMemory.set(cacheVersion, value);
+          memory.set(cacheVersion, value);
           return value;
         } catch {
           // A stale/missing cache object is regenerated below. Do not leak the
@@ -2011,12 +2024,18 @@ export async function renderDealPhotoForLead(photoId: number, leadId: number): P
       }
       const meta = await sharp(source.data, { limitInputPixels: MAX_INPUT_PIXELS, animated: false }).metadata();
       if (!meta.width || !meta.height) return null;
-      const rendered = await sharp(source.data, { limitInputPixels: MAX_INPUT_PIXELS, animated: false })
-        .composite([{ input: tiledWatermarkSvg(`Prepared for ${identity} | Lifestyle Design Realty`, meta.width, meta.height), gravity: "center" }])
-        .webp({ quality: 88, effort: 4, smartSubsample: true })
+      // A card is scaled down first, then watermarked at its own size (the labels keep their proportions).
+      const scale = size === "card" ? Math.min(1, CARD_RENDER_WIDTH / meta.width) : 1;
+      const width = Math.max(1, Math.round(meta.width * scale));
+      const height = Math.max(1, Math.round(meta.height * scale));
+      let pipeline = sharp(source.data, { limitInputPixels: MAX_INPUT_PIXELS, animated: false });
+      if (scale < 1) pipeline = pipeline.resize({ width, height, fit: "fill" });
+      const rendered = await pipeline
+        .composite([{ input: tiledWatermarkSvg(`Prepared for ${identity} | Lifestyle Design Realty`, width, height), gravity: "center" }])
+        .webp(size === "card" ? { quality: 82, effort: 2, smartSubsample: true } : { quality: 88, effort: 4, smartSubsample: true })
         .toBuffer();
       const value = { data: rendered, contentType: "image/webp" };
-      renderMemory.set(cacheVersion, value);
+      memory.set(cacheVersion, value);
       const expiry = new Date(Math.min(row.lead.expiresAt.getTime(), Date.now() + 48 * 60 * 60_000));
       // The versioned database cache key includes lead identity. The physical key
       // is stable per lead/photo/identity so reprocesses overwrite obsolete
@@ -2025,7 +2044,7 @@ export async function renderDealPhotoForLead(photoId: number, leadId: number): P
       // request and make a previous cache row read another lead label.
       const identityKey = digest(`${leadId}\u0000${identity}`).slice(0, 32);
       // The response does not wait for the durable cache write.
-      void storagePut(`${PRIVATE_PREFIX}renders/${leadId}/${photoId}-${identityKey}.webp`, rendered, "image/webp", { unique: false })
+      void storagePut(`${PRIVATE_PREFIX}renders/${leadId}/${photoId}-${identityKey}${size === "card" ? "-card" : ""}.webp`, rendered, "image/webp", { unique: false })
         .then((stored) => db.insert(dealPhotoRenders).values({ photoId, leadId, version: cacheVersion, storageKey: stored.key, expiresAt: expiry })
           .onDuplicateKeyUpdate({ set: { storageKey: stored.key, expiresAt: expiry } }))
         .catch((error) => console.warn(`[deals-photo] render cache write skipped: ${error instanceof Error ? error.message : "unknown"}`));

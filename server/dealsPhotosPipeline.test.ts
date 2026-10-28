@@ -493,6 +493,24 @@ describe("renderDealPhotoForLead", () => {
     expect(vi.mocked(storagePut)).toHaveBeenCalledTimes(1);
   });
 
+  it("renders a card-size copy for the list (Oct 28), cached apart from the full photo", async () => {
+    objects.set("builder-deals-private/masters/8.webp", await master(2400, 1600));
+    renderScenario();
+    const card = await photos.renderDealPhotoForLead(8, 9, "card");
+    const full = await photos.renderDealPhotoForLead(8, 9);
+    const cardMeta = await sharp(card?.data as Buffer).metadata();
+    const fullMeta = await sharp(full?.data as Buffer).metadata();
+    expect(cardMeta.width).toBe(photos.CARD_RENDER_WIDTH);
+    expect(cardMeta.height).toBe(640);
+    expect(fullMeta.width).toBe(2400);
+    expect((card?.data as Buffer).length).toBeLessThan((full?.data as Buffer).length);
+    expect(await litPixels(card?.data as Buffer)).toBeGreaterThan(0);
+    const keys = vi.mocked(storagePut).mock.calls.map((call) => String(call[0]));
+    expect(keys.some((key) => key.endsWith("-card.webp"))).toBe(true);
+    expect(keys.some((key) => /\/8-[a-f0-9]+\.webp$/.test(key))).toBe(true);
+    expect(photos.dealPhotoRenderCacheVersion("v", 9, "x", "card")).not.toBe(photos.dealPhotoRenderCacheVersion("v", 9, "x"));
+  });
+
   it("returns nothing when the processed row is not eligible and uses a durable cached render when present", async () => {
     const fake = createFakeDb();
     fake.onSelect(dealPhotos, []);

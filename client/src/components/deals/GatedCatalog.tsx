@@ -274,7 +274,8 @@ export const PICKS_COPY = {
 export function gatedAsLanding(community: GatedCommunity, key: string, homes: readonly GatedHome[]): LandingCommunity {
   const priced = homes.filter((home) => typeof home.price === "number" && home.price > 0).sort((a, b) => a.price! - b.price!);
   const from = priced[0]?.price ?? community.fromPrice ?? null;
-  const cover = [...priced, ...homes].find((home) => home.photos?.length)?.photos?.[0] ?? null;
+  const first = [...priced, ...homes].find((home) => home.photos?.length)?.photos?.[0];
+  const cover = first ? cardPhoto(first) : null;
   return {
     key, label: community.label, area: community.area, schoolDistrict: community.schoolDistrict || null, reelUrl: community.reelUrl, fromYourReel: community.fromYourReel,
     fromPrice: from, fromPriceLabel: from ? `From ${money.format(from)}` : null,
@@ -360,10 +361,18 @@ function homeNoun(home: GatedHome): string {
   return `${home.beds ? `${home.beds}-bed ` : ""}${home.kind === "to_be_built" ? "home to build" : "new home"}`;
 }
 
+/**
+ * Oct 28, 2026 (Peter: photos showed up a couple of seconds late while scrolling): a list card asks for the card-size
+ * render of its photo (a fraction of the full photo's pixels to watermark and send); the opened home keeps full size.
+ */
+export function cardPhoto(src: string): string {
+  return src.startsWith("/deals/mine/img/") && !src.includes("?") ? `${src}?s=card` : src;
+}
+
 /** One home in the flat list, like a New Home Buddy card: photo, price, where, and the specs at a glance. */
 export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving, onSave }: { home: GatedHome; community: GatedCommunity; onOpen: () => void; onHover?: (on: boolean) => void; pick?: PickControl; saved?: boolean; saving?: boolean; onSave?: (card: string, saved: boolean) => void }) {
   const [failed, setFailed] = useState(false);
-  const photo = !failed ? home.photos?.[0] : undefined;
+  const photo = !failed && home.photos?.[0] ? cardPhoto(home.photos[0]) : undefined;
   const lines = addressLines(home.details?.address);
   const plan = home.details?.planName ?? null;
   const title = lines?.street ?? (plan ? `${plan} plan` : labelHook(community.label, homeNoun(home)));
@@ -432,8 +441,9 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
   // The phone's back button closes the photos first, then the home (New Home Buddy), never the page.
   const viewerOpen = shown !== null;
   useEffect(() => viewerOpen ? sheetHistory(() => setShown(null)) : undefined, [viewerOpen]);
-  const tile = (src: string, index: number, className: string) => <button key={src} type="button" onClick={() => setShown(index)} className={`relative min-h-0 min-w-0 overflow-hidden bg-secondary ${className}`} aria-label={`Photo ${index + 1} of ${photos.length}`}>
-    <RetryImage src={src} alt="" loading={index === 0 ? "eager" : "lazy"} decoding="async" draggable={false} onGiveUp={() => setBroken((current) => new Set(current).add(src))} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
+  // The big photo shows its card-size copy (already loaded by the list) until the full one arrives; the small ones are cards.
+  const tile = (src: string, index: number, className: string) => <button key={src} type="button" onClick={() => setShown(index)} style={index === 0 ? { backgroundImage: `url("${cardPhoto(src)}")`, backgroundSize: "cover", backgroundPosition: "center" } : undefined} className={`relative min-h-0 min-w-0 overflow-hidden bg-secondary ${className}`} aria-label={`Photo ${index + 1} of ${photos.length}`}>
+    <RetryImage src={index === 0 ? src : cardPhoto(src)} alt="" loading={index === 0 ? "eager" : "lazy"} decoding="async" draggable={false} onGiveUp={() => setBroken((current) => new Set(current).add(src))} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
   </button>;
   return <section aria-label={`${title}, the home you opened`} className="min-w-0 p-5 pt-14 sm:p-6 sm:pt-6">
     {photos.length === 0

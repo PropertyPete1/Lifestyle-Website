@@ -48,6 +48,7 @@ export const LANDING_COPY = {
   clearArea: "Show all",
   seeList: "See the list",
   searchArea: "Search this area",
+  zoomHint: "Pinch, or hold ⌘/Ctrl and scroll, to zoom the map",
   searchAreaEmpty: "Nothing in this part of the map. Zoom out",
   featuredHome: "Featured deal",
   sheetFiltered: (shown: number, total: number) => `${shown} of ${total} homes match your filters.`,
@@ -200,6 +201,11 @@ export function fanOffsets(count: number): Array<{ dx: number; dy: number }> {
   });
 }
 
+/** A scroll over the map zooms it only with Ctrl/⌘ held (a trackpad pinch arrives as Ctrl + wheel); otherwise the page scrolls. */
+export function mapWheelZooms(event: Pick<WheelEvent, "ctrlKey" | "metaKey">): boolean {
+  return event.ctrlKey || event.metaKey;
+}
+
 /**
  * The communities whose map points are inside the visible part of the map (New Home Buddy's "Search this area"):
  * the view is the picture's on-screen width z and its offset, the box the map's size in pixels.
@@ -317,18 +323,47 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
     // phone, "See the list" under it), and its smaller bubbles fan out in turn.
     setFanned(stacked && marker.keys.length <= FAN_MAX ? marker.keys : null);
   };
-  // The wheel zooms the map, not the page (a passive listener could not stop the page scrolling).
+  // Oct 28, 2026 (Peter: "trying to drag the screen down, it won't let me"): the map fills the side of the screen, so a
+  // plain scroll over it moves the page. A trackpad pinch (sent as Ctrl + wheel), Ctrl/⌘ + scroll, Safari's pinch
+  // gesture, the +/− buttons and a double-click zoom the map; a plain scroll shows how for a moment.
+  const [zoomHint, setZoomHint] = useState(false);
+  const hintTimer = useRef<number | null>(null);
+  const showZoomHint = () => {
+    setZoomHint(true);
+    if (hintTimer.current) window.clearTimeout(hintTimer.current);
+    hintTimer.current = window.setTimeout(() => setZoomHint(false), 1400);
+  };
+  useEffect(() => () => { if (hintTimer.current) window.clearTimeout(hintTimer.current); }, []);
   useEffect(() => {
     const element = box.current;
     if (!element) return;
     const onWheel = (event: WheelEvent) => {
+      if (!mapWheelZooms(event)) { if (Math.abs(event.deltaY) > 4) showZoomHint(); return; }
       event.preventDefault();
       const rect = element.getBoundingClientRect();
-      zoomAt(Math.exp(-event.deltaY * 0.0015), event.clientX - rect.left, event.clientY - rect.top);
+      zoomAt(Math.exp(-Math.max(-150, Math.min(150, event.deltaY)) * 0.004), event.clientX - rect.left, event.clientY - rect.top);
+      markMoved();
+    };
+    // Safari reports a trackpad pinch as gesture events, not Ctrl + wheel.
+    let lastScale = 1;
+    const onGestureStart = (event: Event) => { event.preventDefault(); lastScale = 1; };
+    const onGestureChange = (event: Event) => {
+      event.preventDefault();
+      const gesture = event as Event & { scale?: number; clientX?: number; clientY?: number };
+      const scale = gesture.scale ?? 1;
+      const rect = element.getBoundingClientRect();
+      zoomAt(scale / lastScale, (gesture.clientX ?? rect.left + rect.width / 2) - rect.left, (gesture.clientY ?? rect.top + rect.height / 2) - rect.top);
+      lastScale = scale;
       markMoved();
     };
     element.addEventListener("wheel", onWheel, { passive: false });
-    return () => element.removeEventListener("wheel", onWheel);
+    element.addEventListener("gesturestart", onGestureStart, { passive: false } as AddEventListenerOptions);
+    element.addEventListener("gesturechange", onGestureChange, { passive: false } as AddEventListenerOptions);
+    return () => {
+      element.removeEventListener("wheel", onWheel);
+      element.removeEventListener("gesturestart", onGestureStart);
+      element.removeEventListener("gesturechange", onGestureChange);
+    };
   });
   const onPointerDown = (event: React.PointerEvent) => {
     measure();
@@ -391,6 +426,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
   const zoomButton = (factor: number) => () => { const now = measure(); if (now) { zoomAt(factor, now.w / 2, now.h / 2); markMoved(); } };
   return <figure aria-label={LANDING_COPY.mapLabel} data-deals-region-map="true" className={`relative min-w-0 overflow-hidden rounded-xl border border-border bg-[#e8eaed] shadow-sm ${className}`}>
     <div ref={box} className="absolute inset-0 cursor-grab touch-none select-none active:cursor-grabbing" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
+      onDoubleClick={(event) => { if ((event.target as HTMLElement).closest("button")) return; const rect = box.current?.getBoundingClientRect(); if (rect) { zoomAt(event.shiftKey ? 1 / 1.6 : 1.6, event.clientX - rect.left, event.clientY - rect.top); markMoved(); } }}
       onClickCapture={(event) => { if (gesture.current.moved > 6) { event.stopPropagation(); event.preventDefault(); } }}
       onClick={(event) => { if (!(event.target as HTMLElement).closest("button")) setFanned(null); }}>
       {view && <div data-deals-map-content="true" className="absolute left-0 top-0" style={{ width: view.z, height: view.z / REGION_VIEW.aspect, transform: `translate(${view.tx}px, ${view.ty}px)`, transition: gliding ? "transform 400ms ease-out" : undefined }}>
@@ -447,6 +483,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
         <button type="button" onClick={zoomButton(1 / 1.5)} aria-label="Zoom out" className="flex h-9 w-9 items-center justify-center border-t border-border text-lg font-semibold hover:bg-secondary">−</button>
       </div>
     </div>
+    {zoomHint && <div aria-hidden="true" data-deals-zoom-hint="true" className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-black/35"><span className="rounded-full bg-black/75 px-4 py-2 text-sm font-medium text-white">{LANDING_COPY.zoomHint}</span></div>}
     {onSearchArea && areaMoved && <button type="button" onClick={searchArea} data-deals-search-area="true" className="absolute bottom-12 left-1/2 z-30 inline-flex min-h-10 -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full bg-gold px-4 text-sm font-semibold text-primary-foreground shadow-lg hover:brightness-105"><Search className="h-4 w-4" />{areaEmpty ? LANDING_COPY.searchAreaEmpty : LANDING_COPY.searchArea}</button>}
     <figcaption className="pointer-events-none absolute bottom-2 left-2 right-2 rounded bg-white/85 px-2 py-1 text-[10px] leading-snug text-muted-foreground">{LANDING_COPY.mapAttribution}</figcaption>
   </figure>;

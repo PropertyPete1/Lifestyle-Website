@@ -168,7 +168,8 @@ export function registerDealsRoutes(app: Express) {
     if (!session) return res.status(401).end();
     const id = Number(req.params.photoId);
     if (!Number.isSafeInteger(id) || id < 1) return res.status(404).end();
-    const rendered = await (await import("./dealsPhotos")).renderDealPhotoForLead(id, session.leadId);
+    // ?s=card: the list's card size (Oct 28); anything else is the full photo.
+    const rendered = await (await import("./dealsPhotos")).renderDealPhotoForLead(id, session.leadId, req.query.s === "card" ? "card" : "full");
     if (!rendered) return res.status(404).end();
     res.setHeader("Cache-Control", "private, no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");

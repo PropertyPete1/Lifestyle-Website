@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, Copy, Heart, Link2, ListChecks, Mail, MessageSquareText, Send, X } from "lucide-react";
+import { Check, ChevronDown, Copy, ExternalLink, Heart, Link2, ListChecks, Mail, MessageSquareText, Send, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -35,7 +35,19 @@ export type AgentClient = {
   /** Oct 26, 2026: the homes the agent picked for this client, in their order. */
   picks?: Array<{ card: string; description: string; price: number | null; communityLabel: string }>;
 };
-export type AgentWorkspaceData = { agent: { name: string; email: string | null; fubLinked: boolean }; clients: AgentClient[] };
+/** Oct 28, 2026: a buyer Follow Up Boss has assigned to this agent right now, wherever they came from. */
+export type AssignedClientData = {
+  leadId: number;
+  name: string;
+  phone: string | null;
+  phoneDigits: string | null;
+  fubUrl: string | null;
+  viaAgent: string | null;
+  lastViewedAt: string | null;
+  saves: AgentClient["saves"];
+  requests: AgentClient["requests"];
+};
+export type AgentWorkspaceData = { agent: { name: string; email: string | null; fubLinked: boolean }; clients: AgentClient[]; assigned?: AssignedClientData[] };
 export type NewClientLink = { id: number; path: string; expiresAt: string; clientName?: string; clientPhoneDigits?: string | null; pickCount?: number };
 export type CreateClientInput = { clientName: string; clientPhone?: string; note?: string; picks?: string[] };
 /** deals.team.textClientLink: the message the phone sends and where; how FUB took the record. */
@@ -54,6 +66,10 @@ export const AGENT_COPY = {
   less: "Hide mobile and note",
   phoneHint: "Optional. Only that number can open the link, and their saves land on the right FUB contact.",
   clients: (count: number) => `Your clients (${count})`,
+  /** Oct 28, 2026 (Peter: whoever the lead is assigned to sees what they hearted, even after it moves agents). */
+  assignedHeading: (count: number) => `Assigned to you in Follow Up Boss (${count})`,
+  assignedIntro: "Builder Deals buyers FUB has with you right now, from any link or reel: what they saved and asked for. The same saves are on their FUB contact as notes.",
+  openFub: "Open in Follow Up Boss",
   notOpened: "Not opened yet",
   opened: "Opened",
   verified: "Verified",
@@ -143,6 +159,17 @@ export function confirmAndRevoke(client: Pick<AgentClient, "id" | "clientName">,
   return false;
 }
 
+/** What a client saved (hearted), newest last as they came in. */
+function SavedHomes({ saves }: { saves: AgentClient["saves"] }) {
+  if (!saves.length) return null;
+  return <div className="mt-4" data-deals-client-saves="true"><p className="text-xs uppercase tracking-widest text-gold"><Heart className="mr-1 inline h-3.5 w-3.5 fill-current" />Saved homes</p><ul className="mt-2 space-y-1 text-sm">{saves.map((save) => <li key={`${save.card}-${save.savedAt}`} className="break-words">{save.description}{save.price ? ` · ${money.format(save.price)}` : ""}{save.communityLabel ? ` · ${save.communityLabel}` : ""} <span className="text-xs text-muted-foreground">{when(save.savedAt)}</span></li>)}</ul></div>;
+}
+
+function TourRequests({ requests }: { requests: AgentClient["requests"] }) {
+  if (!requests.length) return null;
+  return <div className="mt-4"><p className="text-xs uppercase tracking-widest text-gold"><Send className="mr-1 inline h-3.5 w-3.5" />Tour and question requests</p><ul className="mt-2 space-y-1 text-sm">{requests.map((request) => <li key={`${request.kind}-${request.createdAt}`} className="break-words">{request.kind === "tour" ? "Tour" : "Question"}: {request.description} <span className="text-xs text-muted-foreground">preferred {when(request.preferredAt)}</span></li>)}</ul></div>;
+}
+
 export type AgentToolsProps = {
   workspace: AgentWorkspaceData | undefined;
   loading?: boolean;
@@ -207,6 +234,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
   const [clientsOpen, setClientsOpen] = useState(defaultClientsOpen);
   const [note, setNote] = useState("");
   const agentName = workspace?.agent.name ?? "Lifestyle Design Realty";
+  const assigned = workspace?.assigned ?? [];
   // With no picks, the filters on screen go on the next link (New Home Buddy's bulk send); kept with the link it made.
   const share = !picked.length && listShare && sharedFiltersOn(listShare.filters) && listShare.count > 0 ? { query: encodeSharedFilters(listShare.filters), count: listShare.count, summary: sharedFiltersSummary(listShare.filters) } : null;
   const [pendingShare, setPendingShare] = useState<typeof share>(null);
@@ -263,12 +291,12 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
     </div>
 
     {/* Oct 28, 2026 (dead space): an agent with no client links yet gets no empty "Your clients (0)" row. */}
-    {!(workspace && workspace.clients.length === 0 && !clientsOpen) && <div className="min-w-0">
-      <button type="button" onClick={() => setClientsOpen((value) => !value)} aria-expanded={clientsOpen} data-deals-clients-toggle="true" className="flex min-h-11 items-center gap-2 text-left text-xs uppercase tracking-widest text-gold"><ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${clientsOpen ? "rotate-180" : ""}`} /><span className="shrink-0 whitespace-nowrap">{AGENT_COPY.clients(workspace?.clients.length ?? 0)}</span>{!clientsOpen && (() => { const asks = (workspace?.clients ?? []).reduce((total, client) => total + client.requests.length, 0); const saves = (workspace?.clients ?? []).reduce((total, client) => total + client.saves.length, 0); return asks + saves > 0 ? <span className="min-w-0 normal-case tracking-normal text-foreground" data-deals-clients-activity="true">· {[asks ? `${asks} tour/question request${asks === 1 ? "" : "s"}` : null, saves ? `${saves} saved home${saves === 1 ? "" : "s"}` : null].filter(Boolean).join(", ")}</span> : null; })()}</button>
+    {!(workspace && workspace.clients.length === 0 && assigned.length === 0 && !clientsOpen) && <div className="min-w-0">
+      <button type="button" onClick={() => setClientsOpen((value) => !value)} aria-expanded={clientsOpen} data-deals-clients-toggle="true" className="flex min-h-11 items-center gap-2 text-left text-xs uppercase tracking-widest text-gold"><ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${clientsOpen ? "rotate-180" : ""}`} /><span className="shrink-0 whitespace-nowrap">{AGENT_COPY.clients((workspace?.clients.length ?? 0) + assigned.length)}</span>{!clientsOpen && (() => { const everyone = [...(workspace?.clients ?? []), ...assigned]; const asks = everyone.reduce((total, client) => total + client.requests.length, 0); const saves = everyone.reduce((total, client) => total + client.saves.length, 0); return asks + saves > 0 ? <span className="min-w-0 normal-case tracking-normal text-foreground" data-deals-clients-activity="true">· {[asks ? `${asks} tour/question request${asks === 1 ? "" : "s"}` : null, saves ? `${saves} saved home${saves === 1 ? "" : "s"}` : null].filter(Boolean).join(", ")}</span> : null; })()}</button>
       {clientsOpen && <>
       {loading && <p className="mt-3 text-sm text-muted-foreground">Loading your clients…</p>}
       {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
-      {workspace && workspace.clients.length === 0 && <p className="mt-3 text-sm text-muted-foreground">{AGENT_COPY.noClients}</p>}
+      {workspace && workspace.clients.length === 0 && assigned.length === 0 && <p className="mt-3 text-sm text-muted-foreground">{AGENT_COPY.noClients}</p>}
       <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2">{(workspace?.clients ?? []).map((client) => {
         const status = clientStatus(client);
         const url = absoluteLink(client.path, origin);
@@ -281,8 +309,8 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
           {(client.picks?.length ?? 0) > 0 && <div className="mt-4" data-deals-client-picks="true"><p className="text-xs uppercase tracking-widest text-gold"><Check className="mr-1 inline h-3.5 w-3.5" />{AGENT_COPY.picksFor} ({client.picks!.length})</p><ul className="mt-2 space-y-1 text-sm">{client.picks!.map((pick) => <li key={pick.card} className="break-words">{pick.description}{pick.price ? ` · ${money.format(pick.price)}` : ""}{pick.communityLabel ? ` · ${pick.communityLabel}` : ""}</li>)}</ul></div>}
           {putNote?.id === client.id && <p role="status" className="mt-3 text-sm text-gold">{putNote.text}</p>}
           {client.lastViewedAt && <p className="mt-2 text-xs text-muted-foreground">Last looked at the list {when(client.lastViewedAt)}</p>}
-          {client.saves.length > 0 && <div className="mt-4"><p className="text-xs uppercase tracking-widest text-gold"><Heart className="mr-1 inline h-3.5 w-3.5 fill-current" />Saved homes</p><ul className="mt-2 space-y-1 text-sm">{client.saves.map((save) => <li key={`${save.card}-${save.savedAt}`} className="break-words">{save.description}{save.price ? ` · ${money.format(save.price)}` : ""}{save.communityLabel ? ` · ${save.communityLabel}` : ""} <span className="text-xs text-muted-foreground">{when(save.savedAt)}</span></li>)}</ul></div>}
-          {client.requests.length > 0 && <div className="mt-4"><p className="text-xs uppercase tracking-widest text-gold"><Send className="mr-1 inline h-3.5 w-3.5" />Tour and question requests</p><ul className="mt-2 space-y-1 text-sm">{client.requests.map((request) => <li key={`${request.kind}-${request.createdAt}`} className="break-words">{request.kind === "tour" ? "Tour" : "Question"}: {request.description} <span className="text-xs text-muted-foreground">preferred {when(request.preferredAt)}</span></li>)}</ul></div>}
+          <SavedHomes saves={client.saves} />
+          <TourRequests requests={client.requests} />
           {sendable && <div className="mt-5 flex flex-wrap gap-3">
             {onSetPicks && picked.length > 0 && <button type="button" data-deals-put-picks="true" disabled={settingPicks} onClick={() => { void putPicks(client); }} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground disabled:opacity-60"><ListChecks className="h-4 w-4" /> {AGENT_COPY.picksOnLink(picked.length)}</button>}
             {client.clientPhoneDigits
@@ -292,7 +320,22 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
             <Button type="button" variant="outline" onClick={() => onCopy(url)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === url ? AGENT_COPY.copied : "Copy link"}</Button>
           </div>}
         </article>;
-      })}</div></>}
+      })}</div>
+      {assigned.length > 0 && <div className="mt-6 min-w-0" data-deals-assigned="true">
+        <h3 className="text-xs uppercase tracking-widest text-gold">{AGENT_COPY.assignedHeading(assigned.length)}</h3>
+        <p className="mt-1 text-xs text-muted-foreground">{AGENT_COPY.assignedIntro}</p>
+        <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2">{assigned.map((client) => <article key={client.leadId} data-deals-assigned-client="true" className="min-w-0 border border-border bg-card p-5">
+          <h4 className="break-words text-2xl">{client.name}</h4>
+          <p className="mt-1 text-xs text-muted-foreground">{[client.phone, client.viaAgent ? `came in through ${client.viaAgent}'s link` : null].filter(Boolean).join(" · ")}</p>
+          {client.lastViewedAt && <p className="mt-2 text-xs text-muted-foreground">Last looked at the list {when(client.lastViewedAt)}</p>}
+          <SavedHomes saves={client.saves} />
+          <TourRequests requests={client.requests} />
+          <div className="mt-5 flex flex-wrap gap-3">
+            {client.fubUrl && <a href={client.fubUrl} target="_blank" rel="noreferrer" data-deals-open-fub="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><ExternalLink className="h-4 w-4" /> {AGENT_COPY.openFub}</a>}
+            {client.phoneDigits && <a href={smsHref("", client.phoneDigits)} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> Text</a>}
+          </div>
+        </article>)}</div>
+      </div>}</>}
     </div>}
     <Dialog open={Boolean(textFor)} onOpenChange={(open) => { if (!open) setTextFor(null); }}>
       <DialogContent className="max-w-lg" data-deals-text-dialog="true">

@@ -7,10 +7,12 @@ import {
   createBuilderDealsTourTask,
   detectPriorOptOut,
   formatChicagoDateTime,
+  fubAssignedUserIds,
   fubNameIsPlaceholder,
   fubPersonLink,
   isBuilderDealsSystemNote,
   peterUserId,
+  resetFubAssignmentCache,
   resetPeterUserCache,
   sendBuilderDealsLeadToFub,
   stripBuilderDealsTestTag,
@@ -46,6 +48,7 @@ const peterUsers = { users: [{ id: 456, email: "peter@lifestyledesignrealty.com"
 beforeEach(() => {
   process.env.FUB_API_KEY = "test-key";
   resetPeterUserCache();
+  resetFubAssignmentCache();
 });
 afterEach(() => {
   if (savedKey === undefined) delete process.env.FUB_API_KEY; else process.env.FUB_API_KEY = savedKey;
@@ -363,6 +366,55 @@ describe("Builder Deals daily request notes", () => {
     expect(saveTask!.body).toMatchObject({ name: "Builder Deals saved home: 118 Fixture Lakes Blvd (Brandon), $489,990", assignedUserId: 77, type: "Follow Up" });
     expect(String(saveTask!.body?.description)).toContain("Saved: 118 Fixture Lakes Blvd (Brandon), $489,990");
     expect(tourTask!.body).toMatchObject({ name: "Builder Deals tour: 1 Private Street", assignedUserId: 77, type: "Appointment" });
+  });
+
+  it("gives the task to whoever FUB has the contact assigned to now, after Peter hands the lead to an agent (Oct 28, 2026)", async () => {
+    const calls = mockFub((call) => {
+      if (path(call).startsWith("/people?")) return jsonResponse({ people: [{ id: 81, assignedUserId: 88 }] });
+      if (path(call).startsWith("/users?")) return jsonResponse(peterUsers);
+      if (path(call) === "/tasks" && call.method === "POST") return jsonResponse({ id: 502 });
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    const save = { ...firstRequest, id: 44, requestType: "save" as const };
+    await expect(createBuilderDealsTourTask({ lead: requestLead, request: save, privateDescription: "118 Fixture Lakes Blvd (Brandon), $489,990" })).resolves.toMatchObject({ ok: true, taskId: "502" });
+    expect(calls.find((call) => path(call) === "/tasks")!.body).toMatchObject({ personId: 81, assignedUserId: 88, type: "Follow Up" });
+    // An agent's client the agent still owns in FUB keeps going to the agent; a contact in a pond falls back to the link agent.
+    resetFubAssignmentCache();
+    const pond = mockFub((call) => {
+      if (path(call).startsWith("/people?")) return jsonResponse({ people: [{ id: 81, assignedUserId: 0 }] });
+      if (path(call) === "/tasks" && call.method === "POST") return jsonResponse({ id: 503 });
+      throw new Error(`unexpected FUB request ${call.method} ${path(call)}`);
+    });
+    await createBuilderDealsTourTask({ lead: { ...requestLead, agent: { name: "Tiffany Agent", fubUserId: "77", email: null } }, request: save, privateDescription: "1 Private Street" });
+    expect(pond.find((call) => path(call) === "/tasks")!.body).toMatchObject({ assignedUserId: 77 });
+  });
+
+  it("reads who each contact is assigned to 100 at a time, remembers it briefly, and never remembers a failed read", async () => {
+    const ids = Array.from({ length: 150 }, (_, index) => String(1000 + index));
+    const calls = mockFub((call) => {
+      const asked = new URL(call.url).searchParams.get("id")!.split(",");
+      return jsonResponse({ people: asked.filter((id) => id !== "1003").map((id) => ({ id: Number(id), assignedUserId: id === "1001" ? 0 : 77 })) });
+    });
+    const now = Date.now();
+    const first = await fubAssignedUserIds([...ids, "1000", "not-an-id"], now);
+    expect(calls).toHaveLength(2);
+    expect(new URL(calls[0]!.url).searchParams.get("id")!.split(",")).toHaveLength(100);
+    expect(new URL(calls[0]!.url).searchParams.get("fields")).toBe("id,assignedUserId");
+    expect(first.get("1000")).toBe("77");
+    expect(first.get("1001")).toBeNull();
+    expect(first.get("1003")).toBeNull();
+    expect(first.has("not-an-id")).toBe(false);
+    await fubAssignedUserIds(["1000", "1149"], now + 60_000);
+    expect(calls).toHaveLength(2);
+    await fubAssignedUserIds(["1000"], now + 4 * 60_000);
+    expect(calls).toHaveLength(3);
+    resetFubAssignmentCache();
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("FUB down"));
+    expect((await fubAssignedUserIds(["2000"], now)).size).toBe(0);
+    const back = mockFub(() => jsonResponse({ people: [{ id: 2000, assignedUserId: 12 }] }));
+    expect((await fubAssignedUserIds(["2000"], now + 1_000)).get("2000")).toBe("12");
+    expect(back).toHaveLength(1);
   });
 
   it("writes one activity note per lead per Chicago day and records its id", async () => {

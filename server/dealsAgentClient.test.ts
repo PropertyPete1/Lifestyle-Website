@@ -125,6 +125,26 @@ describe("agent tools on /deals/team", () => {
   const noop = () => undefined;
   const renderTools = (overrides: Partial<Parameters<typeof AgentTools>[0]> = {}) => decode(renderToStaticMarkup(createElement(AgentTools, { workspace, onCreate: noop, onRevoke: noop, onCopy: noop, origin: "https://lifestyledesignrealty.com", ...overrides })));
 
+  it("shows the buyers FUB assigns to the agent, with their saved homes and a way into FUB (Oct 28, 2026)", () => {
+    const assigned = [{ leadId: 9, name: "Reel Buyer", phone: "(210) 555-0404", phoneDigits: "2105550404", fubUrl: "https://app.followupboss.com/2/people/view/501", viaAgent: "Other Agent", lastViewedAt: new Date(NOW - 600_000).toISOString(), saves: [{ card: "b".repeat(20), description: "9 Demo Way (Ash)", price: 399990, communityLabel: "Demo Park (North demo area)", savedAt: new Date(NOW - 500_000).toISOString() }], requests: [] }];
+    const html = renderToStaticMarkup(createElement(AgentTools, { workspace: { ...workspace, assigned }, onCreate: noop, onRevoke: noop, onCopy: noop, origin: "https://lifestyledesignrealty.com" }));
+    const text = decode(html);
+    expect(text).toContain("Your clients (4)");
+    expect(text).toContain("Assigned to you in Follow Up Boss (1)");
+    expect(text).toContain("Reel Buyer");
+    expect(text).toContain("came in through Other Agent's link");
+    expect(text).toContain("9 Demo Way (Ash) · $399,990 · Demo Park (North demo area)");
+    expect(text).toContain('href="https://app.followupboss.com/2/people/view/501"');
+    expect(text).toContain('href="sms:+12105550404?&body="');
+    // Folded, the one-line summary counts the assigned buyers' saves too.
+    const folded = decode(renderToStaticMarkup(createElement(AgentTools, { workspace: { ...workspace, assigned }, defaultClientsOpen: false, onCreate: noop, onRevoke: noop, onCopy: noop })));
+    expect(folded).toContain("2 saved homes");
+    // An agent with no links but assigned buyers still gets the row.
+    const onlyAssigned = decode(renderToStaticMarkup(createElement(AgentTools, { workspace: { ...workspace, clients: [], assigned }, defaultClientsOpen: false, onCreate: noop, onRevoke: noop, onCopy: noop })));
+    expect(onlyAssigned).toContain("Your clients (1)");
+    expect(renderTools()).not.toContain("Assigned to you");
+  });
+
   it("Email it opens Gmail in the agent's Lifestyle account (Oct 28, Peter: confirm Google with their Lifestyle Gmail)", () => {
     const lifestyle = gmailComposeHref({ clientName: "Maria", agentName: "Tiffany Agent", url: "https://lifestyledesignrealty.com/deals?c=x", agentEmail: "Tiffany@LifestyleDesignRealty.com" });
     expect(lifestyle.startsWith("https://mail.google.com/mail/u/tiffany%40lifestyledesignrealty.com/?view=cm&fs=1&tf=1&su=")).toBe(true);

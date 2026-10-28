@@ -532,7 +532,7 @@ export const dealsRouter = router({
         const shared = (await agentRowsForLead(session.lead)).kind === "shared";
         throw new TRPCError({ code: "FORBIDDEN", message: shared ? SHARED_TEAM_NUMBER_MESSAGE : settings_testTeamNote(session.lead.phoneE164, await getDealSettings()) });
       }
-      return { lead: leadPresentation(session.lead), agent: { name: workspace.agent.name, email: workspace.agent.email, fubLinked: Boolean(workspace.agent.fubUserId) }, clients: workspace.clients };
+      return { lead: leadPresentation(session.lead), agent: { name: workspace.agent.name, email: workspace.agent.email, fubLinked: Boolean(workspace.agent.fubUserId) }, clients: workspace.clients, assigned: workspace.assigned };
     }),
     createClientLink: publicProcedure.input(z.object({ clientName: z.string().trim().min(2).max(190), clientPhone: z.string().trim().max(60).optional(), note: z.string().trim().max(500).optional(), picks: z.array(z.string().regex(/^[a-f0-9]{20}$/)).max(30).optional() })).mutation(async ({ input, ctx }) => {
       dealsPublicHeaders(ctx.res);

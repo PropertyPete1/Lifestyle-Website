@@ -119,6 +119,50 @@ export function fubPersonLink(personId: string | number) {
   return `${FUB_APP_PERSON_URL}/${encodeURIComponent(String(personId))}`;
 }
 
+const ASSIGNMENT_TTL_MS = 3 * 60_000;
+const ASSIGNMENT_CACHE_MAX = 5_000;
+const assignmentCache = new Map<string, { userId: string | null; at: number }>();
+/** Test seam: forget the remembered assignments. */
+export function resetFubAssignmentCache() { assignmentCache.clear(); }
+
+/**
+ * Oct 28, 2026 (Peter: whichever agent a lead is assigned to sees what they hearted, even after the lead moves between
+ * agents): who each FUB contact is assigned to right now, read 100 contacts per call and remembered for three minutes.
+ * A contact FUB no longer returns (trashed, merged, deleted) or one sitting in a pond maps to null. When FUB does not
+ * answer, those contacts are left out of the result (and not remembered), so a hiccup never moves anything.
+ */
+export async function fubAssignedUserIds(personIds: readonly string[], now = Date.now()): Promise<Map<string, string | null>> {
+  const result = new Map<string, string | null>();
+  const missing: string[] = [];
+  for (const id of Array.from(new Set(personIds.map((value) => String(value).trim()).filter((value) => /^\d{1,18}$/.test(value))))) {
+    const cached = assignmentCache.get(id);
+    if (cached && now - cached.at < ASSIGNMENT_TTL_MS) result.set(id, cached.userId);
+    else missing.push(id);
+  }
+  if (assignmentCache.size > ASSIGNMENT_CACHE_MAX) assignmentCache.clear();
+  for (let start = 0; start < missing.length; start += FUB_PAGE_SIZE) {
+    const chunk = missing.slice(start, start + FUB_PAGE_SIZE);
+    try {
+      const params = new URLSearchParams({ id: chunk.join(","), fields: "id,assignedUserId", limit: String(FUB_PAGE_SIZE) });
+      const res = await fub(`/people?${params.toString()}`);
+      const body = await res.json().catch(() => null) as { people?: FubPerson[] } | null;
+      if (!body || !Array.isArray(body.people)) continue;
+      const found = new Map<string, string | null>();
+      for (const person of body.people) {
+        const id = stringValue(person.id);
+        const userId = stringValue(person.assignedUserId);
+        if (id) found.set(id, userId && userId !== "0" ? userId : null);
+      }
+      for (const id of chunk) {
+        const userId = found.get(id) ?? null;
+        result.set(id, userId);
+        assignmentCache.set(id, { userId, at: now });
+      }
+    } catch { /* FUB unavailable: these contacts are simply not matched this time. */ }
+  }
+  return result;
+}
+
 async function fub(path: string, init: RequestInit = {}) {
   const apiKey = process.env.FUB_API_KEY;
   if (!apiKey) throw new Error("FUB_API_KEY not configured");
@@ -563,11 +607,16 @@ function requestLine(request: TourRequest, privateDescription: string) {
   return `${REQUEST_LABEL[request.requestType]}: ${privateDescription}\nPreferred: ${formatChicagoDateTime(request.preferredAt)}`;
 }
 
-/** Create one FUB task for a Chicago-day request group; it belongs to the buyer's agent when they have one. */
+/**
+ * Create one FUB task for a Chicago-day request group. It goes to whoever the contact is assigned to in FUB right now
+ * (Oct 28, 2026: a lead Peter hands to an agent keeps sending that agent the saves and tours), else the agent who sent
+ * the buyer, else Peter.
+ */
 export async function createBuilderDealsTourTask(input: { lead: RequestLead; request: TourRequest; privateDescription: string }): Promise<FubDeliveryResult> {
   try {
     const personId = await taskPersonId(input.lead);
-    const assignedUserId = await assigneeFor(input.lead);
+    const current = personId ? (await fubAssignedUserIds([personId])).get(personId) ?? null : null;
+    const assignedUserId = current ?? await assigneeFor(input.lead);
     if (!personId || !assignedUserId) return { ok: false, error: "FUB contact or Peter assignment unavailable" };
     const description = [requestMarker(input.lead.id, input.request.id), ...testLines(input.lead), requestLine(input.request, input.privateDescription)].join("\n");
     const save = input.request.requestType === "save";

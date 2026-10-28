@@ -27,6 +27,7 @@ vi.mock("./dealsFubJobs", () => ({
 
 import { agentDisplayPhone, agentForLead, agentForTeamId, agentRowsForLead, agentWorkspace, attachLeadToClientLink, attachLiveSessionToClientLink, clientLinkForPhone, clientLinkPicksForLead, clientLinkTextMessage, clientLinkTokenForLead, connectOfferFor, createClientLink, liveAgentForClient, parsePicks, presentClientLink, reassignTeamRowBeforeRemoval, resolveClientLink, resolvePickCards, revokeClientLink, setClientLinkPicks } from "./dealsClientLinks";
 import { dealEvents } from "../drizzle/schema";
+import { resetFubAssignmentCache } from "./dealsFub";
 import { classifyDealsAccess, revokeNonTeamMatchingDealLinks } from "./dealsEligibility";
 import { createDealsHomeRequest, setDealsHomeSaved } from "./dealsRequests";
 import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, builderPageFor, catalogViewForSession, completeVerification, createPendingVerification, dealsCardHandle, exchangeAccessToken, gatedDealsCatalog, getActiveBlock, hashSecret, issueAccessToken, savedDealCards } from "./dealsService";
@@ -351,6 +352,47 @@ describe("saving a home", () => {
 });
 
 describe("the agent's workspace", () => {
+  it("adds the buyers Follow Up Boss assigns to the agent now, from any link or reel, with what they saved (Oct 28, 2026)", async () => {
+    resetFubAssignmentCache();
+    vi.stubEnv("FUB_API_KEY", "test-key");
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const otherTeam = db.seed(dealTeamAllowlist, { name: "Other Agent", phoneE164: "+12105550303", fubUserId: "12", source: "manual", active: true });
+    const reel = lead({ phoneE164: "+12105550404", name: "Reel Buyer", fubPersonId: "501" });
+    const viaOther = lead({ phoneE164: "+12105550505", name: "Linked Buyer", fubPersonId: "502", agentTeamId: otherTeam });
+    const noFub = lead({ phoneE164: "+12105550606", name: "Not In FUB" });
+    for (const buyer of [reel, viaOther, noFub]) await setDealsHomeSaved({ leadId: buyer.id, card: card(homeId), saved: true, sourceCode: "sl1", deviceHash: "d".repeat(64) });
+    await createDealsHomeRequest({ leadId: viaOther.id, card: card(planHomeId), requestType: "tour", preferredAt: new Date(Date.now() + 2 * HOUR), sourceCode: "sl1", deviceHash: "d".repeat(64) });
+    let assignments: Record<string, number> = { "501": 77, "502": 12 };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname !== "/v1/people") return new Response("{}", { status: 404 });
+      const asked = url.searchParams.get("id")!.split(",");
+      return new Response(JSON.stringify({ people: asked.map((id) => ({ id: Number(id), assignedUserId: assignments[id] ?? 0 })) }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    try {
+      const workspace = await agentWorkspace(agent);
+      expect(workspace?.clients).toEqual([]);
+      expect(workspace?.assigned).toEqual([expect.objectContaining({ leadId: reel.id, name: "Reel Buyer", phone: "(210) 555-0404", phoneDigits: "2105550404", fubUrl: "https://app.followupboss.com/2/people/view/501", viaAgent: null, saves: [expect.objectContaining({ description: "118 Fixture Lakes Blvd (Brandon)", price: 489_990, communityLabel: "Fixture Lakes (Southeast San Antonio | Half-Acre Lots)" })], requests: [] })]);
+      expect(new URL(String(fetchMock.mock.calls[0]![0])).searchParams.get("id")!.split(",").sort()).toEqual(["501", "502"]);
+      // Peter moves the other agent's buyer to Tiffany in FUB: their saves and tour follow; the reel buyer moves away.
+      resetFubAssignmentCache();
+      assignments = { "501": 12, "502": 77 };
+      const moved = await agentWorkspace(agent);
+      expect(moved?.assigned.map((client) => client.leadId)).toEqual([viaOther.id]);
+      expect(moved?.assigned[0]).toMatchObject({ viaAgent: "Other Agent", saves: [expect.objectContaining({ price: 489_990 })], requests: [expect.objectContaining({ kind: "tour" })] });
+      // An unsaved home leaves the list; FUB down leaves the list empty, never an error.
+      await setDealsHomeSaved({ leadId: viaOther.id, card: card(homeId), saved: false, sourceCode: "sl1", deviceHash: "d".repeat(64) });
+      expect((await agentWorkspace(agent))?.assigned[0]?.saves).toEqual([]);
+      resetFubAssignmentCache();
+      fetchMock.mockRejectedValue(new Error("FUB down"));
+      expect((await agentWorkspace(agent))?.assigned).toEqual([]);
+    } finally {
+      fetchMock.mockRestore();
+      resetFubAssignmentCache();
+    }
+  });
+
+
   it("lists only the agent's own clients with their verification, saves and requests", async () => {
     const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
     const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez", clientPhone: CLIENT_PHONE, note: "Wants 4 beds" });

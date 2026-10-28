@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { dealClientLinks, dealCommunities, dealCommunityViews, dealEvents, dealHomes, dealLeads, dealTeamAllowlist, dealTourRequests } from "../drizzle/schema";
 import { normalizeUsPhone } from "../shared/deals";
 import { getDb } from "./db";
@@ -557,7 +557,102 @@ export type ClientSummary = {
   picks: Array<{ card: string; description: string; price: number | null; communityLabel: string }>;
 };
 
-export type AgentWorkspace = { agent: DealsAgent; clients: ClientSummary[] };
+/**
+ * Oct 28, 2026 (Peter: "any agent assigned to that lead can see what they hearted", whichever agent the lead moves to):
+ * a Builder Deals buyer assigned to this agent in Follow Up Boss right now, with everything they saved or asked for,
+ * whether they came in through this agent's link, another agent's link, or one of Peter's reels.
+ */
+export type AssignedClient = {
+  leadId: number;
+  name: string;
+  phone: string | null;
+  phoneDigits: string | null;
+  /** The contact in Follow Up Boss, where the notes and tasks are. */
+  fubUrl: string | null;
+  /** The agent whose client link brought them in, when that was someone else. */
+  viaAgent: string | null;
+  lastViewedAt: string | null;
+  saves: ClientSummary["saves"];
+  requests: ClientSummary["requests"];
+};
+
+export type AgentWorkspace = { agent: DealsAgent; clients: ClientSummary[]; assigned: AssignedClient[] };
+
+/** How far back an assigned buyer's saves and requests count, and how many buyers the list carries. */
+const ASSIGNED_LOOKBACK_MS = 180 * 24 * 60 * 60_000;
+const ASSIGNED_MAX = 60;
+
+type HomeDescriber = (homeId: number | null, card?: string) => { card: string; description: string; price: number | null; communityLabel: string };
+async function homeDescriber(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, homeIds: number[], pickCards: Set<string> = new Set()): Promise<HomeDescriber> {
+  const homes = [
+    ...(homeIds.length ? await db.select().from(dealHomes).where(inArray(dealHomes.id, homeIds)) : []),
+    // Picks are stored as card handles, so the available homes are scanned for the ones that match.
+    ...(pickCards.size ? (await db.select().from(dealHomes).where(eq(dealHomes.status, "available"))).filter((home) => pickCards.has(dealsCardHandle(home.sourceKey)) && !homeIds.includes(home.id)) : []),
+  ];
+  const communityIds = Array.from(new Set(homes.map((home) => home.communityId)));
+  const communities = communityIds.length ? await db.select({ id: dealCommunities.id, publicLabel: dealCommunities.publicLabel, privateName: dealCommunities.privateName }).from(dealCommunities).where(inArray(dealCommunities.id, communityIds)) : [];
+  return (homeId, card) => {
+    const home = homeId !== null ? homes.find((row) => row.id === homeId) : homes.find((row) => dealsCardHandle(row.sourceKey) === card);
+    const community = home ? communities.find((row) => row.id === home.communityId) : undefined;
+    return {
+      card: home ? dealsCardHandle(home.sourceKey) : "",
+      description: home ? [home.privateAddress, home.privatePlanName ? `(${home.privatePlanName})` : null].filter(Boolean).join(" ") || "Home" : "Home no longer listed",
+      price: home?.price ?? null,
+      communityLabel: community ? `${community.privateName} (${community.publicLabel})` : "",
+    };
+  };
+}
+
+/**
+ * The buyers FUB has assigned to this agent right now who saved a home or asked for a tour in the last six months.
+ * FUB is asked only about contacts we created or matched (deal_leads.fub_person_id), 100 per call and remembered for
+ * a few minutes; when FUB is down or the agent has no FUB user, the list is simply empty.
+ */
+async function assignedClients(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, agent: DealsAgent, shownLeadIds: Set<number>): Promise<AssignedClient[]> {
+  const fubUserId = agent.fubUserId?.trim();
+  if (!fubUserId) return [];
+  const since = new Date(Date.now() - ASSIGNED_LOOKBACK_MS);
+  const activity = await db.select().from(dealTourRequests).where(and(isNull(dealTourRequests.removedAt), gte(dealTourRequests.createdAt, since))).orderBy(desc(dealTourRequests.createdAt)).limit(5000);
+  const activeLeadIds = unique(activity.map((row) => row.leadId)).filter((id) => !shownLeadIds.has(id));
+  if (!activeLeadIds.length) return [];
+  const leads = (await db.select({ id: dealLeads.id, name: dealLeads.name, phoneE164: dealLeads.phoneE164, status: dealLeads.status, fubPersonId: dealLeads.fubPersonId, agentTeamId: dealLeads.agentTeamId })
+    .from(dealLeads).where(and(inArray(dealLeads.id, activeLeadIds), isNotNull(dealLeads.fubPersonId))))
+    .filter((lead) => lead.status !== "team" && lead.status !== "blocked" && lead.fubPersonId);
+  if (!leads.length) return [];
+  const { fubAssignedUserIds, fubPersonLink } = await import("./dealsFub");
+  const assignment = await fubAssignedUserIds(leads.map((lead) => lead.fubPersonId!));
+  // Most recent activity first, so the newest saves lead the list.
+  const order = new Map<number, number>();
+  activity.forEach((row, index) => { if (!order.has(row.leadId)) order.set(row.leadId, index); });
+  const mine = leads.filter((lead) => assignment.get(lead.fubPersonId!.trim()) === fubUserId)
+    .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
+    .slice(0, ASSIGNED_MAX);
+  if (!mine.length) return [];
+  const mineIds = new Set(mine.map((lead) => lead.id));
+  const requests = activity.filter((row) => mineIds.has(row.leadId));
+  const describe = await homeDescriber(db, unique(requests.map((row) => row.homeId)));
+  const views = (await Promise.all(mine.map((lead) => db.select({ leadId: dealCommunityViews.leadId, viewedAt: dealCommunityViews.viewedAt }).from(dealCommunityViews).where(eq(dealCommunityViews.leadId, lead.id)).orderBy(desc(dealCommunityViews.viewedAt)).limit(1)))).flat();
+  const viaNames = new Map<number, string | null>();
+  for (const teamId of unique(mine.flatMap((lead) => lead.agentTeamId ? [lead.agentTeamId] : []))) {
+    const via = await agentForTeamId(teamId);
+    viaNames.set(teamId, via && via.fubUserId?.trim() !== fubUserId ? via.name : null);
+  }
+  return mine.map((lead) => {
+    const own = requests.filter((row) => row.leadId === lead.id);
+    const lastView = views.find((row) => row.leadId === lead.id)?.viewedAt;
+    return {
+      leadId: lead.id,
+      name: lead.name?.trim() || agentDisplayPhone({ phoneE164: lead.phoneE164 }) || "Builder Deals buyer",
+      phone: agentDisplayPhone({ phoneE164: lead.phoneE164 }),
+      phoneDigits: nationalDigits(lead.phoneE164),
+      fubUrl: fubPersonLink(lead.fubPersonId!.trim()),
+      viaAgent: lead.agentTeamId ? viaNames.get(lead.agentTeamId) ?? null : null,
+      lastViewedAt: lastView ? new Date(lastView).toISOString() : null,
+      saves: own.filter((row) => row.requestType === "save").map((row) => ({ ...describe(row.homeId), savedAt: row.createdAt.toISOString() })),
+      requests: own.filter((row): row is typeof row & { requestType: "tour" | "ask" } => row.requestType !== "save").map((row) => ({ kind: row.requestType, description: describe(row.homeId).description, preferredAt: row.preferredAt.toISOString(), createdAt: row.createdAt.toISOString() })),
+    };
+  });
+}
 
 /**
  * The agent's own clients only. Activity is shown while the client is still
@@ -589,23 +684,7 @@ export async function agentWorkspace(agentLead: LeadRow): Promise<AgentWorkspace
   }
   const homeIds = Array.from(new Set(requests.map((request) => request.homeId)));
   const pickCards = new Set(links.flatMap((link) => parsePicks(link.picks)));
-  const homes = [
-    ...(homeIds.length ? await db.select().from(dealHomes).where(inArray(dealHomes.id, homeIds)) : []),
-    // Picks are stored as card handles, so the available homes are scanned for the ones that match.
-    ...(pickCards.size ? (await db.select().from(dealHomes).where(eq(dealHomes.status, "available"))).filter((home) => pickCards.has(dealsCardHandle(home.sourceKey)) && !homeIds.includes(home.id)) : []),
-  ];
-  const communityIds = Array.from(new Set(homes.map((home) => home.communityId)));
-  const communities = communityIds.length ? await db.select({ id: dealCommunities.id, publicLabel: dealCommunities.publicLabel, privateName: dealCommunities.privateName }).from(dealCommunities).where(inArray(dealCommunities.id, communityIds)) : [];
-  const describe = (homeId: number | null, card?: string) => {
-    const home = homeId !== null ? homes.find((row) => row.id === homeId) : homes.find((row) => dealsCardHandle(row.sourceKey) === card);
-    const community = home ? communities.find((row) => row.id === home.communityId) : undefined;
-    return {
-      card: home ? dealsCardHandle(home.sourceKey) : "",
-      description: home ? [home.privateAddress, home.privatePlanName ? `(${home.privatePlanName})` : null].filter(Boolean).join(" ") || "Home" : "Home no longer listed",
-      price: home?.price ?? null,
-      communityLabel: community ? `${community.privateName} (${community.publicLabel})` : "",
-    };
-  };
+  const describe = await homeDescriber(db, homeIds, pickCards);
   const clients: ClientSummary[] = links.map((link) => {
     const lead = link.leadId ? leads.find((row) => row.id === link.leadId) : undefined;
     // Only while this link is the client's link, and only what they did after verifying through it.
@@ -636,7 +715,14 @@ export async function agentWorkspace(agentLead: LeadRow): Promise<AgentWorkspace
       picks: parsePicks(link.picks).map((card) => ({ ...describe(null, card), card })),
     };
   });
-  return { agent, clients };
+  // Buyers already on one of this agent's live links are shown there; the rest of the agent's FUB leads come after.
+  const shown = new Set(links.flatMap((link) => {
+    const lead = link.leadId ? leads.find((row) => row.id === link.leadId) : undefined;
+    return lead && lead.clientLinkId === link.id ? [lead.id] : [];
+  }));
+  let assigned: AssignedClient[] = [];
+  try { assigned = await assignedClients(db, agent, shown); } catch { assigned = []; }
+  return { agent, clients, assigned };
 }
 
 /**

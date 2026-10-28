@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { toast } from "sonner";
 import { ListChecks, LockKeyhole, RotateCcw, X } from "lucide-react";
@@ -173,8 +173,16 @@ function Team() {
   const [picked, setPicked] = useState<string[]>(() => readPicks());
   useEffect(() => { writePicks(picked); }, [picked]);
   const communities = useMemo(() => parseMineCommunities<GatedCommunity>(mine.data?.communitiesJson), [mine.data?.communitiesJson]);
-  const pick: PickControl = useMemo(() => ({ picked: new Set(picked), onToggle: (card) => setPicked((current) => current.includes(card) ? current.filter((entry) => entry !== card) : current.length >= PICKS_MAX ? (toast.error(`Up to ${PICKS_MAX} picks per client.`), current) : [...current, card]) }), [picked]);
+  const pick: PickControl = useMemo(() => ({ picked: new Set(picked), onToggle: (card) => setPicked((current) => current.includes(card) ? current.filter((entry) => entry !== card) : current.length >= PICKS_MAX ? (toast.error(`Up to ${PICKS_MAX} picks per client.`), current) : [...current, card]), sendOne: (card) => sendOneRef.current(card) }), [picked]);
   const clearPicks = () => setPicked([]);
+  // "Send this home to a client" (the opened home's sheet): it joins the picks, the sheet closes, and the cursor waits in Client name.
+  const sendOneRef = useRef<(card: string) => void>(() => undefined);
+  sendOneRef.current = (card: string) => sendOne(card);
+  const sendOne = (card: string) => {
+    setPicked((current) => current.includes(card) ? current : current.length >= PICKS_MAX ? current : [...current, card]);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    window.setTimeout(sendPicksToClient, 60);
+  };
   // "Send to a client" lands the agent in the form with the cursor in the client-name field (focus after the smooth scroll settles).
   const sendPicksToClient = () => {
     document.getElementById("deals-agent-tools")?.scrollIntoView({ behavior: "smooth", block: "start" });

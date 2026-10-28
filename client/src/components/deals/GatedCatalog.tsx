@@ -120,7 +120,7 @@ export function SaveButton({ saved, saving, onToggle }: { saved: boolean; saving
 }
 
 /** Oct 26, 2026: an agent picks homes for a client; the picks ride the client link. Team view only. */
-export type PickControl = { picked: ReadonlySet<string>; onToggle: (card: string) => void };
+export type PickControl = { picked: ReadonlySet<string>; onToggle: (card: string) => void; /** Oct 27, 2026: "Send this home": pick it (keeping other picks) and go to the client form. */ sendOne?: (card: string) => void };
 
 export function PickButton({ picked, onToggle }: { picked: boolean; onToggle: () => void }) {
   return <button type="button" aria-pressed={picked} aria-label={picked ? "Picked for your client. Tap to remove" : "Pick this home for a client"} onClick={onToggle} data-deals-pick={picked ? "picked" : "unpicked"} className={`flex min-h-11 items-center gap-2 border px-3 text-xs uppercase tracking-widest transition-colors ${picked ? "border-gold bg-gold text-primary-foreground" : "border-border text-muted-foreground hover:border-gold hover:text-gold"}`}>{picked ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}{picked ? "Picked" : "Pick for client"}</button>;
@@ -394,6 +394,7 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
     <div className="mt-4 flex flex-wrap items-stretch gap-3">
       {onSave && <SaveButton saved={Boolean(saved)} saving={saving} onToggle={() => onSave(home.card, !saved)} />}
       {pick && <PickButton picked={picked} onToggle={() => pick.onToggle(home.card)} />}
+      {pick?.sendOne && <Button type="button" onClick={() => pick.sendOne!(home.card)} data-deals-send-one="true" className="h-auto min-h-11 whitespace-normal bg-gold px-5 text-primary-foreground">Send this home to a client</Button>}
       {!teamPreview && <Button type="button" onClick={() => onRequest?.({ card: home.card, requestType: toBeBuilt ? "ask" : "tour" })} className="h-auto min-h-11 whitespace-normal bg-gold px-6 text-primary-foreground">{toBeBuilt ? "Ask about this one" : "Tour this home with us"}</Button>}
       {home.details?.builderPage && <a href={home.details.builderPage} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-1 px-2 text-xs uppercase tracking-widest text-gold underline-offset-4 hover:underline">Builder page <ExternalLink className="h-3.5 w-3.5" /></a>}
     </div>

@@ -451,6 +451,9 @@ describe("the opened home leads its sheet (Oct 27: New Home Buddy's home view)",
     expect(html).toContain("San Antonio, TX 78263 · Sienna Lakes by Chesmar");
     expect(html).toContain('data-deals-pick="unpicked"');
     expect(html).not.toContain("Tour this home with us");
+    expect(html).not.toContain("data-deals-send-one");
+    const withSend = renderToStaticMarkup(createElement(HomeHero, { home, community, teamPreview: true, pick: { picked: new Set<string>(), onToggle: () => undefined, sendOne: () => undefined } }));
+    expect(withSend).toContain("Send this home to a client");
   });
   it("gives a client the tour button and no Pick", () => {
     const html = renderToStaticMarkup(createElement(HomeHero, { home: { ...home, photos: [] }, community, teamPreview: false, onRequest: () => undefined }));

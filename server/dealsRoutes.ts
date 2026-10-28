@@ -3,6 +3,7 @@ import { AGENT_CLIENT_SOURCE, completeVerification, currentDealSource, dealsCsp,
 import { DEALS_COOKIE } from "../shared/deals";
 import { parse as parseCookie } from "cookie";
 import { noteInteractiveRequest } from "./interactiveLoad";
+import { AGENT_PAGE_SOURCE, validAgentPageSlug } from "./dealsAgentPages";
 
 /** An agent's client-link token, carried back onto every gate redirect so the visitor keeps their agent's gate. */
 function linkSuffix(value: unknown) {
@@ -39,11 +40,25 @@ export function registerDealsRoutes(app: Express) {
       const cookies = ensureDealsCookies(req, res);
       if (req.path === "/" && !isDealsCrawler(req)) {
         const agentLink = Boolean(linkSuffix(req.query.c));
-        void getDealSettings().then((settings) => recordDealsLanding({ sourceCode: agentLink ? AGENT_CLIENT_SOURCE : currentDealSource(String(req.query.src ?? ""), settings), deviceHash: cookies.deviceHash, ip: req.ip || req.socket.remoteAddress || "0.0.0.0" })).catch(() => console.error("[deals] landing event failed"));
+        const agentPage = !agentLink && Boolean(validAgentPageSlug(req.query.a));
+        void getDealSettings().then((settings) => recordDealsLanding({ sourceCode: agentLink ? AGENT_CLIENT_SOURCE : agentPage ? AGENT_PAGE_SOURCE : currentDealSource(String(req.query.src ?? ""), settings), deviceHash: cookies.deviceHash, ip: req.ip || req.socket.remoteAddress || "0.0.0.0" })).catch(() => console.error("[deals] landing event failed"));
       }
     }
     next();
   });
+
+  /**
+   * Oct 28, 2026 (Peter: agents put their own link on their Instagram profile): /deals/u/<agent-name> opens the home
+   * search with that agent's name on it, and this browser remembers the agent for the sign-up (30 days). A name that
+   * is not on the team (or an agent who left) opens the plain landing page.
+   */
+  app.get("/deals/u/:slug", safe(async (req, res) => {
+    const slug = validAgentPageSlug(req.params.slug);
+    const { agentForPageSlug, rememberAgentPage } = await import("./dealsAgentPages");
+    if (!slug || !(await agentForPageSlug(slug))) return res.redirect(302, "/deals");
+    rememberAgentPage(res, slug);
+    res.redirect(302, `/deals?a=${encodeURIComponent(slug)}`);
+  }));
 
   app.get("/deals/v/:token", safe(async (req, res) => {
     // Validate before touching storage. Do not log this route: token-bearing

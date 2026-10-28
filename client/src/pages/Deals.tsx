@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import { startLogin } from "@/const";
 import { MINE_COPY, isUnauthorizedDealsError, parseMineCommunities, profileErrorCopy } from "@/lib/dealsMine";
-import { TRANSIENT_GATE_PARAMS, agentRecruitRedirect, clientLinkTokenInUrl, forgetClientLinkToken, keepClientLinkToken, rememberClientLinkToken } from "@/lib/dealsGate";
+import { TRANSIENT_GATE_PARAMS, agentRecruitRedirect, clientLinkTokenInUrl, forgetClientLinkToken, keepClientLinkToken, readGateParams, rememberClientLinkToken } from "@/lib/dealsGate";
 import { GateSheet } from "@/components/deals/GateSheet";
 import { GatedCatalog, HOME_LIST_COPY, ListSkeleton, pickedHomes, picksAsText, type GatedCommunity, type HomeRequest, type PickControl } from "@/components/deals/GatedCatalog";
 import { PublicHomeList, publicHomeEntries } from "@/components/deals/PublicHomeList";
@@ -55,7 +55,9 @@ function Landing() {
   const [clientToken, setClientToken] = useState(() => rememberClientLinkToken(window.location.search));
   // Oct 28, 2026: an agent's link may carry the filters they sent (?f=); kept so the list opens on them after the code check.
   useState(() => { if (clientToken) keepSharedFilters(window.location.search); return null; });
-  const state = trpc.deals.state.useQuery(clientToken ? { c: clientToken } : undefined);
+  // Oct 28, 2026: an agent's own page (/deals/u/<name> → ?a=<name>); the server also remembers it for this browser.
+  const [agentPageSlug] = useState(() => readGateParams(window.location.search).a);
+  const state = trpc.deals.state.useQuery(clientToken ? { c: clientToken } : agentPageSlug ? { a: agentPageSlug } : undefined);
   // Oct 26, 2026: /deals/team with no session is the agent sign-in page (the same sheet, agent wording, phone only).
   const [teamSignIn] = useState(() => (/^\/deals\/team/.test(window.location.pathname) || new URLSearchParams(window.location.search).get("team") === "1") && !clientToken);
   // An agent kept off Builder Deals (their own answer or the screening) is sent to the agent recruiting page — unless
@@ -92,6 +94,7 @@ function Landing() {
   const hasSession = Boolean(state.data?.session);
   const teamSession = Boolean(state.data?.session?.teamPreview);
   const shared = state.data?.clientLink?.state === "live" ? state.data.clientLink : null;
+  const agentPage = !shared && state.data && "agentPage" in state.data ? state.data.agentPage ?? null : null;
   // A buyer with a live list is asked before a new agent's link is connected; their own link, or one made for another number, goes straight to their list.
   const askToConnect = hasSession && !teamSession && Boolean(linkToken && shared) && state.data?.connectOffer === "ask";
   // A lapsed reel buyer back from a bookmark sees "comment again or reach out"; a fresh DM link (?src=) still opens the gate.
@@ -108,7 +111,7 @@ function Landing() {
   const paused = Boolean(state.data && "paused" in state.data && state.data.paused);
   useEffect(() => { if (paused) setGateOpen(true); }, [paused]);
   const updatedAt = catalog.data?.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
-  return <main className="deals-light min-h-screen max-w-full overflow-x-clip bg-background [overflow-anchor:none]"><header className="deals-chrome relative flex min-w-0 items-center justify-center border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link><Link href="/deals/team" data-deals-agent-signin="true" className="absolute right-5 top-1/2 hidden -translate-y-1/2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground underline-offset-4 hover:text-gold hover:underline sm:inline">Agent sign-in</Link></header><section className="ambient-section px-4 pb-28 pt-6 sm:px-6"><div className="mx-auto max-w-[1600px]"><p className="eyebrow text-gold">{shared ? `Shared by ${shared.agentName}` : "New construction deals"}</p><h1 className="mt-2 max-w-3xl text-3xl leading-tight sm:text-4xl">{sourceLabel}</h1><p className="mt-2 text-sm text-muted-foreground">{shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : "Hand-picked by Property Pete."}{updatedAt ? ` Updated ${formatChicagoDate(updatedAt)}.` : ""}</p>{all.length > BROWSE_PAGE / 2 && <BrowseBar compact filters={filters} onChange={changeFilters} areas={all} shown={homeEntries.length} total={all.reduce((sum, community) => sum + (community.homeFacts?.length ?? 0), 0)} unit="homes" showBeds showStories={storiesKnown(all)} showNew={newThisWeekKnown(all)} />}{all.length > 0 && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{BROWSE_COPY.none}</p>}
+  return <main className="deals-light min-h-screen max-w-full overflow-x-clip bg-background [overflow-anchor:none]"><header className="deals-chrome relative flex min-w-0 items-center justify-center border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link><Link href="/deals/team" data-deals-agent-signin="true" className="absolute right-5 top-1/2 hidden -translate-y-1/2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground underline-offset-4 hover:text-gold hover:underline sm:inline">Agent sign-in</Link></header><section className="ambient-section px-4 pb-28 pt-6 sm:px-6"><div className="mx-auto max-w-[1600px]"><p className="eyebrow text-gold" data-deals-landing-agent={agentPage ? "true" : undefined}>{shared ? `Shared by ${shared.agentName}` : agentPage ? `${agentPage.agentName}'s new home search` : "New construction deals"}</p><h1 className="mt-2 max-w-3xl text-3xl leading-tight sm:text-4xl">{sourceLabel}</h1><p className="mt-2 text-sm text-muted-foreground">{shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : agentPage ? `Hand-picked by ${agentPage.agentName} at Lifestyle Design Realty.` : "Hand-picked by Property Pete."}{updatedAt ? ` Updated ${formatChicagoDate(updatedAt)}.` : ""}</p>{all.length > BROWSE_PAGE / 2 && <BrowseBar compact filters={filters} onChange={changeFilters} areas={all} shown={homeEntries.length} total={all.reduce((sum, community) => sum + (community.homeFacts?.length ?? 0), 0)} unit="homes" showBeds showStories={storiesKnown(all)} showNew={newThisWeekKnown(all)} />}{all.length > 0 && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{BROWSE_COPY.none}</p>}
       {all.length > 0 && <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2" data-deals-results-bar="true">
         <p className="text-sm font-semibold uppercase tracking-widest text-foreground" data-deals-result-count="true">{listView === "homes" ? HOME_LIST_COPY.count(shownHomeCount) : `${areaKeys ? areaKeys.size : matching.length} communities`}</p>
         <div className="flex min-w-0 items-center gap-2">

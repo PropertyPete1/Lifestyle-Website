@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   notifyClientLinkAttached: vi.fn(),
   staleSessionLeadId: vi.fn(),
   clientLinkTokenForLead: vi.fn(),
+  agentForPageSlug: vi.fn(),
 }));
 vi.mock("./dealsTeamSignIn", () => ({ teamSessionFromSiteLogin: (...args: unknown[]) => mocks.teamSessionFromSiteLogin(...args) }));
 vi.mock("./dealsService", async (importOriginal) => ({
@@ -26,6 +27,10 @@ vi.mock("./dealsService", async (importOriginal) => ({
   staleSessionLeadId: (...args: unknown[]) => mocks.staleSessionLeadId(...args),
 }));
 vi.mock("./dealsClientLinks", () => ({ clientLinkTokenForLead: (...args: unknown[]) => mocks.clientLinkTokenForLead(...args) }));
+vi.mock("./dealsAgentPages", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./dealsAgentPages")>()),
+  agentForPageSlug: (...args: unknown[]) => mocks.agentForPageSlug(...args),
+}));
 vi.mock("./dealsFubJobs", () => ({
   enqueueDealsFubJob: (...args: unknown[]) => mocks.enqueueDealsFubJob(...args),
   runPendingDealsFubJobs: (...args: unknown[]) => mocks.runPendingDealsFubJobs(...args),
@@ -71,6 +76,24 @@ async function verify() {
   await new Promise((resolve) => setTimeout(resolve, 20));
   return response;
 }
+
+describe("an agent's own page link (Oct 28: /deals/u/<name> for their Instagram bio)", () => {
+  it("opens the home search with the agent remembered for 30 days; an unknown or malformed name opens the plain page", async () => {
+    mocks.agentForPageSlug.mockImplementation(async (slug: string) => slug === "tiffany-agent" ? { teamId: 5, name: "Tiffany Agent", active: true } : null);
+    const known = await fetch(`${baseUrl}/deals/u/tiffany-agent`, { redirect: "manual" });
+    expect(known.status).toBe(302);
+    expect(known.headers.get("location")).toBe("/deals?a=tiffany-agent");
+    const cookie = known.headers.getSetCookie().find((value) => value.startsWith("ldr_deals_agent="));
+    expect(cookie).toContain("ldr_deals_agent=tiffany-agent");
+    expect(cookie).toMatch(/Max-Age=2592000/);
+    expect(cookie).toMatch(/HttpOnly/);
+    for (const path of ["/deals/u/nobody", "/deals/u/Bad_Name!"]) {
+      const response = await fetch(`${baseUrl}${path}`, { redirect: "manual" });
+      expect(response.headers.get("location")).toBe("/deals");
+      expect(response.headers.getSetCookie().some((value) => value.startsWith("ldr_deals_agent="))).toBe(false);
+    }
+  });
+});
 
 describe("Builder Deals verify route side effects", () => {
   it("hands the deferred FUB check to the outbox job and leaves the unlock alert to the job runner", async () => {

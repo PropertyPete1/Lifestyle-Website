@@ -22,6 +22,7 @@ import {
   updateBuilderDealsProfileInFub,
   recordClientLinkText,
   BUILDER_DEALS_CLIENT_TAG,
+  AGENT_PAGE_TAG,
 } from "./dealsFub";
 import { jsonResponse } from "./dealsFubFakeDb.test-support";
 import { notifyOwner } from "./_core/notification";
@@ -124,6 +125,14 @@ describe("Builder Deals first unlock through the FUB events endpoint", () => {
     expect(String(event.body?.message)).toContain("First Builder Deals unlock through an agent's client link.");
     const put = calls.find((call) => call.method === "PUT")!;
     expect(String(put.body?.assignedUserId)).toBe("77");
+    // Oct 28, 2026: a buyer from the agent's own bio link goes to the agent too, tagged so FUB can tell them apart.
+    calls.length = 0;
+    await sendBuilderDealsLeadToFub({ ...lead, name: "Jordan Ellis", sourceCode: "agent-page", agent: { name: "Tiffany Agent", fubUserId: "77", email: "tiffany@example.com" } });
+    const pageEvent = calls.find((call) => path(call) === "/events")!;
+    expect(String((pageEvent.body?.person as Record<string, unknown>).assignedUserId)).toBe("77");
+    expect((pageEvent.body?.person as Record<string, unknown>).tags).toEqual(expect.arrayContaining(["IG Builder Deals", "Agent Client", AGENT_PAGE_TAG]));
+    expect(String(pageEvent.body?.message)).toContain("First Builder Deals unlock through Tiffany Agent's own Builder Deals link.");
+    expect(String(pageEvent.body?.message)).toContain("LDR agent: Tiffany Agent (signed up through their own Builder Deals link)");
     // An agent row without a FUB user falls back to Peter.
     calls.length = 0;
     await sendBuilderDealsLeadToFub({ ...lead, agent: { name: "Manual Agent", fubUserId: null, email: null } });

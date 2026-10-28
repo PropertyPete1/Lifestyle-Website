@@ -571,6 +571,8 @@ export type AssignedClient = {
   fubUrl: string | null;
   /** The agent whose client link brought them in, when that was someone else. */
   viaAgent: string | null;
+  /** Signed up through this agent's own page link (their Instagram link). */
+  viaPage: boolean;
   lastViewedAt: string | null;
   saves: ClientSummary["saves"];
   requests: ClientSummary["requests"];
@@ -611,24 +613,35 @@ async function homeDescriber(db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
  * FUB is asked only about contacts we created or matched (deal_leads.fub_person_id), 100 per call and remembered for
  * a few minutes; when FUB is down or the agent has no FUB user, the list is simply empty.
  */
-async function assignedClients(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, agent: DealsAgent, shownLeadIds: Set<number>): Promise<AssignedClient[]> {
-  const fubUserId = agent.fubUserId?.trim();
-  if (!fubUserId) return [];
+async function assignedClients(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, agent: DealsAgent, shownLeadIds: Set<number>, teamIds: readonly number[] = []): Promise<AssignedClient[]> {
+  const fubUserId = agent.fubUserId?.trim() || null;
   const since = new Date(Date.now() - ASSIGNED_LOOKBACK_MS);
   const activity = await db.select().from(dealTourRequests).where(and(isNull(dealTourRequests.removedAt), gte(dealTourRequests.createdAt, since))).orderBy(desc(dealTourRequests.createdAt)).limit(5000);
-  const activeLeadIds = unique(activity.map((row) => row.leadId)).filter((id) => !shownLeadIds.has(id));
-  if (!activeLeadIds.length) return [];
+  // Oct 28, 2026: buyers who signed up through this agent's own page link are theirs from the start, saves or not.
+  const pageLeadIds = new Set(teamIds.length
+    ? (await db.select({ id: dealLeads.id }).from(dealLeads).where(and(inArray(dealLeads.agentTeamId, [...teamIds]), isNull(dealLeads.clientLinkId)))).map((row) => row.id)
+    : []);
+  const activeLeadIds = (fubUserId ? unique(activity.map((row) => row.leadId)) : []).filter((id) => !shownLeadIds.has(id));
+  const candidateIds = unique([...activeLeadIds, ...Array.from(pageLeadIds)]).filter((id) => !shownLeadIds.has(id));
+  if (!candidateIds.length) return [];
   const leads = (await db.select({ id: dealLeads.id, name: dealLeads.name, phoneE164: dealLeads.phoneE164, status: dealLeads.status, fubPersonId: dealLeads.fubPersonId, agentTeamId: dealLeads.agentTeamId })
-    .from(dealLeads).where(and(inArray(dealLeads.id, activeLeadIds), isNotNull(dealLeads.fubPersonId))))
-    .filter((lead) => lead.status !== "team" && lead.status !== "blocked" && lead.fubPersonId);
+    .from(dealLeads).where(inArray(dealLeads.id, candidateIds)))
+    .filter((lead) => lead.status !== "team" && lead.status !== "blocked" && (lead.fubPersonId || pageLeadIds.has(lead.id)));
   if (!leads.length) return [];
   const { fubAssignedUserIds, fubPersonLink } = await import("./dealsFub");
-  const assignment = await fubAssignedUserIds(leads.map((lead) => lead.fubPersonId!));
-  // Most recent activity first, so the newest saves lead the list.
+  const withFub = leads.flatMap((lead) => lead.fubPersonId?.trim() ? [lead.fubPersonId.trim()] : []);
+  const assignment = fubUserId && withFub.length ? await fubAssignedUserIds(withFub) : new Map<string, string | null>();
+  // Most recent activity first, so the newest saves lead the list; page sign-ups with no activity yet follow, newest first.
   const order = new Map<number, number>();
   activity.forEach((row, index) => { if (!order.has(row.leadId)) order.set(row.leadId, index); });
-  const mine = leads.filter((lead) => assignment.get(lead.fubPersonId!.trim()) === fubUserId)
-    .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
+  const rank = (lead: { id: number }) => order.get(lead.id) ?? activity.length + (1_000_000_000 - lead.id);
+  const mine = leads.filter((lead) => {
+    const assigned = lead.fubPersonId?.trim() ? assignment.get(lead.fubPersonId.trim()) : undefined;
+    if (fubUserId && assigned === fubUserId) return true;
+    // A page sign-up stays with the agent until FUB says someone else has them (or the agent has no FUB user to check).
+    return pageLeadIds.has(lead.id) && (!fubUserId || assigned === undefined || assigned === null);
+  })
+    .sort((a, b) => rank(a) - rank(b))
     .slice(0, ASSIGNED_MAX);
   if (!mine.length) return [];
   const mineIds = new Set(mine.map((lead) => lead.id));
@@ -638,7 +651,7 @@ async function assignedClients(db: NonNullable<Awaited<ReturnType<typeof getDb>>
   const viaNames = new Map<number, string | null>();
   for (const teamId of unique(mine.flatMap((lead) => lead.agentTeamId ? [lead.agentTeamId] : []))) {
     const via = await agentForTeamId(teamId);
-    viaNames.set(teamId, via && via.fubUserId?.trim() !== fubUserId ? via.name : null);
+    viaNames.set(teamId, via && !(fubUserId && via.fubUserId?.trim() === fubUserId) && !teamIds.includes(teamId) ? via.name : null);
   }
   return mine.map((lead) => {
     const own = requests.filter((row) => row.leadId === lead.id);
@@ -648,8 +661,9 @@ async function assignedClients(db: NonNullable<Awaited<ReturnType<typeof getDb>>
       name: lead.name?.trim() || agentDisplayPhone({ phoneE164: lead.phoneE164 }) || "Builder Deals buyer",
       phone: agentDisplayPhone({ phoneE164: lead.phoneE164 }),
       phoneDigits: nationalDigits(lead.phoneE164),
-      fubUrl: fubPersonLink(lead.fubPersonId!.trim()),
-      viaAgent: lead.agentTeamId ? viaNames.get(lead.agentTeamId) ?? null : null,
+      fubUrl: lead.fubPersonId?.trim() ? fubPersonLink(lead.fubPersonId.trim()) : null,
+      viaAgent: lead.agentTeamId && !pageLeadIds.has(lead.id) ? viaNames.get(lead.agentTeamId) ?? null : null,
+      viaPage: pageLeadIds.has(lead.id),
       lastViewedAt: lastView ? new Date(lastView).toISOString() : null,
       saves: own.filter((row) => row.requestType === "save").map((row) => ({ ...describe(row.homeId), savedAt: row.createdAt.toISOString() })),
       requests: own.filter((row): row is typeof row & { requestType: "tour" | "ask" } => row.requestType !== "save").map((row) => ({ kind: row.requestType, description: describe(row.homeId).description, preferredAt: row.preferredAt.toISOString(), createdAt: row.createdAt.toISOString() })),
@@ -724,7 +738,7 @@ export async function agentWorkspace(agentLead: LeadRow): Promise<AgentWorkspace
     return lead && lead.clientLinkId === link.id ? [lead.id] : [];
   }));
   let assigned: AssignedClient[] = [];
-  try { assigned = await assignedClients(db, agent, shown); } catch { assigned = []; }
+  try { assigned = await assignedClients(db, agent, shown, teamIds); } catch { assigned = []; }
   return { agent, clients, assigned };
 }
 

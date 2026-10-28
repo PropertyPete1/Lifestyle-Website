@@ -133,6 +133,18 @@ describe("alerts for an agent's client", () => {
     }
   });
 
+  it("tells the agent a buyer signed up through their own bio link, and that they see the list without addresses (Oct 28)", async () => {
+    const db = createFakeDealsDb([[dealTeamAllowlist, [tiffany]], [dealTeamAllowlist, [tiffany]], [dealAlerts, []]]);
+    mocks.getDb.mockResolvedValue(db);
+    await queueFirstUnlockAlert({ ...lead, name: "Jordan Ellis", sourceCode: "agent-page", agentTeamId: 5, clientLinkId: null }, { fubPersonId: "9001" });
+    expect(ownersCopy(db)).toMatchObject({ subject: "Builder Deals: Tiffany Agent's link brought a new buyer" });
+    expect(String(ownersCopy(db).content)).toContain("Tiffany Agent's lead signed up through their own Builder Deals link. The FUB contact is assigned to Tiffany Agent.");
+    const agent = agentCopy(db)!;
+    expect(agent).toMatchObject({ subject: "Builder Deals: Jordan Ellis signed up through your link" });
+    expect(String(agent.content)).toContain("They see the home list without addresses; send them a client link from Agent tools when you want them to see every address.");
+    expect(String(agent.content)).toContain("Their Follow Up Boss contact is assigned to you.");
+  });
+
   it("sends the agent's copy right away even when the owners take an hourly digest", async () => {
     mocks.getDealSettings.mockResolvedValue({ ...settings, alertMode: "hourly_digest" });
     const db = createFakeDealsDb([[dealTeamAllowlist, [tiffany]], [dealTeamAllowlist, [tiffany]], [dealClientLinks, [link]], [dealAlerts, []]]);

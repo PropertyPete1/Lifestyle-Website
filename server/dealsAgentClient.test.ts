@@ -55,6 +55,20 @@ describe("the gate for an agent's client", () => {
     expect(html).toContain("By tapping Continue");
   });
 
+  it("an agent's own page link names the agent, asks no agent question, and still needs name and email (Oct 28)", () => {
+    expect(readGateParams("?a=tiffany-agent").a).toBe("tiffany-agent");
+    expect(readGateParams("?a=Bad_Name!").a).toBeUndefined();
+    const state = { pending: null, clientLink: null, consentText: "consent", agentPage: { agentName: "Tiffany Agent", firstName: "Tiffany" } } as GateDealsState;
+    const html = render(state);
+    expect(html).toContain("Tiffany Agent · Lifestyle Design Realty");
+    expect(html).toContain("and Tiffany will reach out to set up your tour");
+    expect(html).not.toContain("Are you a realtor, or working with one?");
+    expect(html).toContain('id="deals-name"');
+    const continueButton = (markup: string) => markup.match(/<button[^>]*>(?:(?!<\/button>).)*Continue(?:(?!<\/button>).)*<\/button>/)?.[0] ?? "";
+    expect(continueButton(html)).toContain('disabled=""');
+    expect(continueButton(render(state, { name: "Jordan Ellis", email: "jordan@example.com" }))).not.toContain('disabled=""');
+  });
+
   it("asks the realtor question as before when there is no client link", () => {
     const html = render({ pending: null, clientLink: null, consentText: "consent" } as GateDealsState);
     expect(html).toContain("Are you a realtor, or working with one?");
@@ -124,6 +138,18 @@ describe("agent tools on /deals/team", () => {
   };
   const noop = () => undefined;
   const renderTools = (overrides: Partial<Parameters<typeof AgentTools>[0]> = {}) => decode(renderToStaticMarkup(createElement(AgentTools, { workspace, onCreate: noop, onRevoke: noop, onCopy: noop, origin: "https://lifestyledesignrealty.com", ...overrides })));
+
+  it("gives the agent their bio link to copy, and marks the buyers who signed up through it (Oct 28)", () => {
+    const copied: string[] = [];
+    const assigned = [{ leadId: 11, name: "Jordan Ellis", phone: "(210) 555-0404", phoneDigits: "2105550404", fubUrl: null, viaAgent: null, viaPage: true, lastViewedAt: null, saves: [], requests: [] }];
+    const html = decode(renderToStaticMarkup(createElement(AgentTools, { workspace: { ...workspace, pagePath: "/deals/u/tiffany-agent", assigned }, onCreate: noop, onRevoke: noop, onCopy: (url: string) => copied.push(url), origin: "https://lifestyledesignrealty.com" })));
+    expect(html).toContain("Your bio link:");
+    expect(html).toContain("lifestyledesignrealty.com/deals/u/tiffany-agent");
+    expect(html).toContain("data-deals-page-copy");
+    expect(html).toContain("signed up through your bio link");
+    expect(html).not.toContain("Open in Follow Up Boss");
+    expect(renderTools()).not.toContain("Your bio link");
+  });
 
   it("shows the buyers FUB assigns to the agent, with their saved homes and a way into FUB (Oct 28, 2026)", () => {
     const assigned = [{ leadId: 9, name: "Reel Buyer", phone: "(210) 555-0404", phoneDigits: "2105550404", fubUrl: "https://app.followupboss.com/2/people/view/501", viaAgent: "Other Agent", lastViewedAt: new Date(NOW - 600_000).toISOString(), saves: [{ card: "b".repeat(20), description: "9 Demo Way (Ash)", price: 399990, communityLabel: "Demo Park (North demo area)", savedAt: new Date(NOW - 500_000).toISOString() }], requests: [] }];

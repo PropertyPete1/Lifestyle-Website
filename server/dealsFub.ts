@@ -27,6 +27,9 @@ export type FubAgentRef = { name: string; fubUserId: string | null; email: strin
 type BuilderLead = { id: number; phone: string; email?: string | null; name?: string | null; instagramHandle?: string | null; sourceCode: string; consentText: string; consentAt: Date; consentIp: string | null; flags?: string[]; timeline?: string | null; isTest?: boolean; fubPersonId?: string | null; agent?: FubAgentRef | null };
 type FubIdentity = { phone?: string | null; email?: string | null };
 const AGENT_CLIENT_TAG = "Agent Client";
+/** Oct 28, 2026: a buyer who signed up through an agent's own page link (their Instagram profile link). */
+export const AGENT_PAGE_TAG = "Agent Page Link";
+const AGENT_PAGE_SOURCE_CODE = "agent-page";
 
 export type FubRecordWrite = { kind: "person" | "event" | "note" | "task"; fubId: string; createdByUs: boolean };
 /** Facts about the pre-existing FUB contact that only the unlock alert needs. */
@@ -44,7 +47,7 @@ function intentTag(timeline?: string | null) {
   return "Intent - Cold";
 }
 function tagsFor(lead: BuilderLead) {
-  return Array.from(new Set([BASE_TAG, ...(lead.flags ?? []).filter((flag) => flag === "Possible Agent - TREC Name Match" || flag === "Possible Agent - Handle"), intentTag(lead.timeline), lead.agent ? AGENT_CLIENT_TAG : null, lead.isTest ? "TEST" : null].filter(Boolean) as string[]));
+  return Array.from(new Set([BASE_TAG, ...(lead.flags ?? []).filter((flag) => flag === "Possible Agent - TREC Name Match" || flag === "Possible Agent - Handle"), intentTag(lead.timeline), lead.agent ? AGENT_CLIENT_TAG : null, lead.agent && lead.sourceCode === AGENT_PAGE_SOURCE_CODE ? AGENT_PAGE_TAG : null, lead.isTest ? "TEST" : null].filter(Boolean) as string[]));
 }
 function stringValue(value: unknown): string | null {
   return typeof value === "string" || typeof value === "number" ? String(value).trim() || null : null;
@@ -429,7 +432,7 @@ async function unlockScreening(existing: FubPerson | null, notes: unknown[], pet
 function leadNote(lead: BuilderLead, action: string, operation: "first_unlock" | "reverify", occurrenceId?: string) {
   return [
     `Builder Deals ${builderDealsOperationMarker(lead.id, operation, occurrenceId)}`, action, `Source: ${lead.sourceCode}`,
-    lead.agent ? `LDR agent: ${lead.agent.name} (sent through their client link)` : undefined,
+    lead.agent ? `LDR agent: ${lead.agent.name} (${lead.sourceCode === AGENT_PAGE_SOURCE_CODE ? "signed up through their own Builder Deals link" : "sent through their client link"})` : undefined,
     lead.instagramHandle ? `Instagram: @${lead.instagramHandle}` : undefined,
     lead.isTest ? "TEST RECORD - eligible for Builder Deals cleanup" : undefined,
     `TCPA consent captured: ${lead.consentAt.toISOString()}`,
@@ -514,7 +517,7 @@ export async function sendBuilderDealsLeadToFub(lead: BuilderLead): Promise<FubD
     if (!existing?.assignedUserId && !assigneeId) return { ok: false, error: "Peter FUB user not found" };
     const body = {
       source: "IG Builder Deals", system: "Lifestyle Design Realty Website", type: "General Inquiry",
-      message: leadNote(lead, lead.agent ? "First Builder Deals unlock through an agent's client link." : "First Builder Deals unlock.", "first_unlock"),
+      message: leadNote(lead, lead.agent ? (lead.sourceCode === AGENT_PAGE_SOURCE_CODE ? `First Builder Deals unlock through ${lead.agent.name}'s own Builder Deals link.` : "First Builder Deals unlock through an agent's client link.") : "First Builder Deals unlock.", "first_unlock"),
       person: personBody(lead, existing, { assignedUserId: assigneeId }),
     };
     const res = await fub("/events", { method: "POST", body: JSON.stringify(body) });

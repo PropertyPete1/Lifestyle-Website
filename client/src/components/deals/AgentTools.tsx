@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, Copy, ExternalLink, Heart, Link2, ListChecks, Mail, MessageSquareText, Send, X } from "lucide-react";
+import { Check, ChevronDown, Copy, ExternalLink, Heart, Instagram, Link2, ListChecks, Mail, MessageSquareText, Send, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -43,11 +43,14 @@ export type AssignedClientData = {
   phoneDigits: string | null;
   fubUrl: string | null;
   viaAgent: string | null;
+  /** Signed up through this agent's own page link. */
+  viaPage?: boolean;
   lastViewedAt: string | null;
   saves: AgentClient["saves"];
   requests: AgentClient["requests"];
 };
-export type AgentWorkspaceData = { agent: { name: string; email: string | null; fubLinked: boolean }; clients: AgentClient[]; assigned?: AssignedClientData[] };
+/** `pagePath`: the agent's own page link (Oct 28, 2026), for their Instagram bio. */
+export type AgentWorkspaceData = { agent: { name: string; email: string | null; fubLinked: boolean }; clients: AgentClient[]; assigned?: AssignedClientData[]; pagePath?: string | null };
 export type NewClientLink = { id: number; path: string; expiresAt: string; clientName?: string; clientPhoneDigits?: string | null; pickCount?: number };
 export type CreateClientInput = { clientName: string; clientPhone?: string; note?: string; picks?: string[] };
 /** deals.team.textClientLink: the message the phone sends and where; how FUB took the record. */
@@ -70,6 +73,10 @@ export const AGENT_COPY = {
   assignedHeading: (count: number) => `Assigned to you in Follow Up Boss (${count})`,
   assignedIntro: "Builder Deals buyers FUB has with you right now, from any link or reel: what they saved and asked for. The same saves are on their FUB contact as notes.",
   openFub: "Open in Follow Up Boss",
+  /** Oct 28, 2026 (Peter: agents put their own link on their Instagram profile, sign-ups go to them in FUB). */
+  pageLink: "Your bio link",
+  pageHint: "Put it in your Instagram bio. Anyone who signs up through it goes into Follow Up Boss under you.",
+  viaPage: "signed up through your bio link",
   notOpened: "Not opened yet",
   opened: "Opened",
   verified: "Verified",
@@ -235,6 +242,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
   const [note, setNote] = useState("");
   const agentName = workspace?.agent.name ?? "Lifestyle Design Realty";
   const assigned = workspace?.assigned ?? [];
+  const pageUrl = workspace?.pagePath ? absoluteLink(workspace.pagePath, origin) : null;
   // With no picks, the filters on screen go on the next link (New Home Buddy's bulk send); kept with the link it made.
   const share = !picked.length && listShare && sharedFiltersOn(listShare.filters) && listShare.count > 0 ? { query: encodeSharedFilters(listShare.filters), count: listShare.count, summary: sharedFiltersSummary(listShare.filters) } : null;
   const [pendingShare, setPendingShare] = useState<typeof share>(null);
@@ -267,7 +275,8 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
       <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-4 text-xs">
         <span className="hidden text-muted-foreground sm:inline"><span className="uppercase tracking-widest text-gold">Agent tools · {agentName}</span> · {AGENT_COPY.short}</span>
         <button type="button" onClick={() => setShowMore((value) => !value)} aria-expanded={showMore} data-deals-more-fields="true" className="min-h-9 text-muted-foreground underline underline-offset-4 hover:text-gold">{showMore ? AGENT_COPY.less : AGENT_COPY.more}</button>
-        {onSetPicks && picked.length > 0 && <span role="status" data-deals-picks-note="some" className="flex flex-wrap items-center gap-x-3 text-foreground"><ListChecks className="h-4 w-4 shrink-0 text-gold" />{AGENT_COPY.picksOnNew(picked.length)}{onClearPicks && <button type="button" onClick={onClearPicks} className="min-h-9 uppercase tracking-widest text-gold hover:underline">Clear picks</button>}</span>}
+        {pageUrl && <span className="flex min-w-0 max-w-full items-center gap-1.5" data-deals-page-link="true" title={AGENT_COPY.pageHint}><Instagram className="h-3.5 w-3.5 shrink-0 text-gold" aria-hidden="true" /><span className="shrink-0 text-muted-foreground">{AGENT_COPY.pageLink}:</span><span className="min-w-0 break-all text-foreground">{pageUrl.replace(/^https?:\/\//, "")}</span><button type="button" onClick={() => onCopy(pageUrl)} data-deals-page-copy="true" className="min-h-9 shrink-0 uppercase tracking-widest text-gold hover:underline">{copiedUrl === pageUrl ? "Copied" : "Copy"}</button></span>}
+      {onSetPicks && picked.length > 0 && <span role="status" data-deals-picks-note="some" className="flex flex-wrap items-center gap-x-3 text-foreground"><ListChecks className="h-4 w-4 shrink-0 text-gold" />{AGENT_COPY.picksOnNew(picked.length)}{onClearPicks && <button type="button" onClick={onClearPicks} className="min-h-9 uppercase tracking-widest text-gold hover:underline">Clear picks</button>}</span>}
       </div>
       {showMore && <div className="mt-1 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
         <div className="min-w-0"><Label htmlFor="deals-client-phone" className="text-xs uppercase tracking-widest">Client mobile</Label><Input id="deals-client-phone" type="tel" inputMode="tel" value={clientPhone} onChange={(event) => setClientPhone(formatPhoneInput(event.target.value))} placeholder="(210) 555-0123" className="mt-1 min-h-11 bg-background" /><p className="mt-1 text-[11px] text-muted-foreground">{AGENT_COPY.phoneHint}</p></div>
@@ -326,7 +335,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
         <p className="mt-1 text-xs text-muted-foreground">{AGENT_COPY.assignedIntro}</p>
         <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2">{assigned.map((client) => <article key={client.leadId} data-deals-assigned-client="true" className="min-w-0 border border-border bg-card p-5">
           <h4 className="break-words text-2xl">{client.name}</h4>
-          <p className="mt-1 text-xs text-muted-foreground">{[client.phone, client.viaAgent ? `came in through ${client.viaAgent}'s link` : null].filter(Boolean).join(" · ")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{[client.phone, client.viaPage ? AGENT_COPY.viaPage : client.viaAgent ? `came in through ${client.viaAgent}'s link` : null].filter(Boolean).join(" · ")}</p>
           {client.lastViewedAt && <p className="mt-2 text-xs text-muted-foreground">Last looked at the list {when(client.lastViewedAt)}</p>}
           <SavedHomes saves={client.saves} />
           <TourRequests requests={client.requests} />

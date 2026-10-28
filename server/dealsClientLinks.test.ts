@@ -28,6 +28,7 @@ vi.mock("./dealsFubJobs", () => ({
 import { agentDisplayPhone, agentForLead, agentForTeamId, agentRowsForLead, agentWorkspace, attachLeadToClientLink, attachLiveSessionToClientLink, clientLinkForPhone, clientLinkPicksForLead, clientLinkTextMessage, clientLinkTokenForLead, connectOfferFor, createClientLink, liveAgentForClient, parsePicks, presentClientLink, reassignTeamRowBeforeRemoval, resolveClientLink, resolvePickCards, revokeClientLink, setClientLinkPicks } from "./dealsClientLinks";
 import { dealEvents } from "../drizzle/schema";
 import { resetFubAssignmentCache } from "./dealsFub";
+import { AGENT_PAGE_SOURCE, agentForPageSlug, agentNameSlug, agentPageEntries, agentPageForLead, resetAgentPageCache } from "./dealsAgentPages";
 import { classifyDealsAccess, revokeNonTeamMatchingDealLinks } from "./dealsEligibility";
 import { createDealsHomeRequest, setDealsHomeSaved } from "./dealsRequests";
 import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, builderPageFor, catalogViewForSession, completeVerification, createPendingVerification, dealsCardHandle, exchangeAccessToken, gatedDealsCatalog, getActiveBlock, hashSecret, issueAccessToken, savedDealCards } from "./dealsService";
@@ -645,6 +646,69 @@ describe("a realtor at the gate (Oct 24: realtors go to recruiting and stay off 
     // A buyer who says they have an agent is not sent to recruiting.
     const hasAgent = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: "buyer-device", [DEALS_COOKIE.probe]: "p" }), res: responseRecorder().response, rawPhone: "+12105550999", choice: "has_agent" });
     expect(hasAgent).toEqual({ ok: false, kind: "has_agent" });
+  });
+});
+
+describe("an agent's own page link (Oct 28, Peter: agents put it on their Instagram profile)", () => {
+  async function verifyThroughPage(slug: string | null, rawPhone: string, device = `device-${Math.random()}`) {
+    const start = responseRecorder();
+    const pending = await createPendingVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.probe]: "p" }), res: start.response, rawPhone, choice: "buyer", name: "Jordan Ellis", email: "jordan@example.com", agentPageSlug: slug });
+    if (!pending.ok) return { pending, done: null };
+    const done = await completeVerification({ req: request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.pending]: start.cookie(DEALS_COOKIE.pending)! }), res: responseRecorder().response, code: TEST_OTP });
+    return { pending, done };
+  }
+
+  it("names each agent's page after them, makes the sign-up that agent's lead on the buyer list, and shows it in their tools", async () => {
+    vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
+    testSettings();
+    resetAgentPageCache();
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    expect(await agentPageForLead(agent)).toEqual({ slug: "tiffany-agent", path: "/deals/u/tiffany-agent" });
+    expect((await agentForPageSlug("tiffany-agent"))?.teamId).toBe(teamId);
+    expect(await agentForPageSlug("nobody-here")).toBeNull();
+    expect(await agentForPageSlug("../admin")).toBeNull();
+
+    const { pending, done } = await verifyThroughPage("tiffany-agent", CLIENT_PHONE);
+    expect(pending).toMatchObject({ ok: true, sourceCode: AGENT_PAGE_SOURCE });
+    expect(done).toMatchObject({ ok: true, firstUnlock: true });
+    const buyer = db.rows(dealLeads).find((row) => row.phoneE164 === CLIENT_PHONE)!;
+    expect(buyer).toMatchObject({ agentTeamId: teamId, clientLinkId: null, sourceCode: AGENT_PAGE_SOURCE, name: "Jordan Ellis" });
+    // The agent-client window (72 h in these settings), not the reel buyer's 24 h.
+    expect(buyer.expiresAt.getTime() - Date.now()).toBeGreaterThan(70 * HOUR);
+    // A public link: the buyer list without addresses, with their agent named on it.
+    const view = await catalogViewForSession(buyer);
+    expect(view.view).toEqual({ view: "gated" });
+    expect(view.agent).toMatchObject({ teamId, name: "Tiffany Agent" });
+    // The agent sees them right away (no saves yet, not in FUB yet), marked as their link's sign-up.
+    const workspace = await agentWorkspace(agent);
+    expect(workspace?.assigned).toEqual([expect.objectContaining({ leadId: buyer.id, name: "Jordan Ellis", viaPage: true, viaAgent: null, fubUrl: null, saves: [] })]);
+    resetAgentPageCache();
+  });
+
+  it("never takes over a buyer another agent already has, and a page that is not on the team attributes nobody", async () => {
+    vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
+    testSettings();
+    resetAgentPageCache();
+    const otherTeam = db.seed(dealTeamAllowlist, { name: "Other Agent", phoneE164: "+12105550303", fubUserId: "12", source: "fub", active: true });
+    lead({ phoneE164: OTHER_PHONE, agentTeamId: otherTeam, sourceCode: AGENT_PAGE_SOURCE, expiresAt: new Date(Date.now() - HOUR) });
+    await verifyThroughPage("tiffany-agent", OTHER_PHONE);
+    expect(db.rows(dealLeads).find((row) => row.phoneE164 === OTHER_PHONE)?.agentTeamId).toBe(otherTeam);
+    const { pending } = await verifyThroughPage("someone-else", "+12105550404");
+    expect(pending.ok && pending.sourceCode).not.toBe(AGENT_PAGE_SOURCE);
+    expect(pending.ok).toBe(true);
+    expect(db.rows(dealLeads).find((row) => row.phoneE164 === "+12105550404")?.agentTeamId ?? null).toBeNull();
+    resetAgentPageCache();
+  });
+
+  it("gives two agents with the same name each their own link, and drops inactive and nameless rows", () => {
+    const row = (id: number, name: string | null, fubUserId: string | null, active = true) => ({ id, name, fubUserId, active, phoneE164: null, email: null, source: "fub", fubIdentityKey: null, createdAt: new Date() }) as never;
+    expect(agentNameSlug("  Zoë  O'Neil-Brown ")).toBe("zoe-o-neil-brown");
+    const entries = agentPageEntries([row(1, "Sam Lee", "5"), row(2, "Sam Lee", "5"), row(3, "Sam Lee", "9"), row(4, "Ana Ruiz", null), row(5, "Gone Agent", "7", false), row(6, null, "8")]);
+    expect(entries).toEqual([
+      { slug: "sam-lee-1", teamId: 1, rowIds: [1, 2] },
+      { slug: "sam-lee-3", teamId: 3, rowIds: [3] },
+      { slug: "ana-ruiz", teamId: 4, rowIds: [4] },
+    ]);
   });
 });
 

@@ -21,6 +21,8 @@ export type GateSheetState = {
   googleEnabled?: boolean;
   /** The visitor opened an LDR agent's client link: the agent question is skipped and the sheet names the agent. */
   clientLink?: { state: "live"; agentName: string; clientFirstName: string } | { state: "dead"; agentName: string | null } | null;
+  /** Oct 28, 2026: the visitor came through an LDR agent's own page link: the sheet names the agent and skips the agent question. */
+  agentPage?: { agentName: string; firstName: string } | null;
 } | undefined;
 
 /** Continue needs a name (2+ characters) and an email that looks like one. */
@@ -102,6 +104,7 @@ export function GateSheetView({ gate, state, phone, name = "", email = "", onNam
   const { step } = gate;
   const shared = state?.clientLink?.state === "live" ? state.clientLink : null;
   const deadLink = state?.clientLink?.state === "dead" ? state.clientLink : null;
+  const page = !shared && !deadLink && !teamSignIn ? state?.agentPage ?? null : null;
   const displayPhone = gate.pendingDisplayPhone ?? state?.pending?.displayPhone ?? formatPhoneInput(phone);
   const gateAlert = step === "gate" ? gateStepAlert(gate, state) : null;
   const codeAlert = step === "code" ? codeStepAlert(gate) : null;
@@ -139,16 +142,19 @@ export function GateSheetView({ gate, state, phone, name = "", email = "", onNam
       // An agent's client is working with an agent by definition: no question, Continue needs only the phone.
       // The agent already knows their own client: name and email are optional there, and required for everyone else.
       // The team sign-in needs only the phone: the team list already knows the agent's name and email.
-      const ready = shared || teamSignIn ? true : Boolean(choice) && gateContactReady(name, email);
+      // An agent's page visitor is that agent's buyer: no question either, but name and email are still needed.
+      const ready = shared || teamSignIn ? true : page ? gateContactReady(name, email) : Boolean(choice) && gateContactReady(name, email);
       return <>{shared
         ? <><p className="eyebrow text-gold" data-deals-shared-by="true">Shared by {shared.agentName}</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">{shared.clientFirstName ? `${shared.clientFirstName}, your list is ready.` : "Your list is ready."}</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{shared.agentName} shared this week's new-build deals with you. Verify your mobile number once and the full list opens, with every address, photo and current incentive.</p></>
         : teamSignIn
           ? <><p className="eyebrow text-gold" data-deals-team-signin="true">{GATE_TEAM_COPY.eyebrow}</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">{GATE_TEAM_COPY.heading}</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{GATE_TEAM_COPY.body}</p></>
-          : <><p className="eyebrow text-gold">Tours</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Schedule a tour.</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground" data-deals-gate-intro="true">Add your name, email and number, and one of our agents will reach out to set up your tour and answer your questions.</p></>}
+          : page
+            ? <><p className="eyebrow text-gold" data-deals-agent-page="true">{page.agentName} · Lifestyle Design Realty</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Schedule a tour.</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground" data-deals-gate-intro="true">Add your name, email and number, and {page.firstName} will reach out to set up your tour and answer your questions.</p></>
+            : <><p className="eyebrow text-gold">Tours</p><h2 id="deals-gate-title" className="mt-2 text-4xl leading-none">Schedule a tour.</h2><p className="mt-3 text-sm leading-relaxed text-muted-foreground" data-deals-gate-intro="true">Add your name, email and number, and one of our agents will reach out to set up your tour and answer your questions.</p></>}
       {state?.googleEnabled && !shared && !teamSignIn && <Button variant="outline" onClick={() => window.location.assign("/deals/auth/google")} className="mt-5 w-full py-6">Continue with Google</Button>}
       {teamSignIn && onSiteLogin && <><Button type="button" data-deals-site-login="true" onClick={onSiteLogin} className="mt-6 w-full bg-gold py-6 text-primary-foreground">{GATE_TEAM_COPY.siteLogin} <ArrowRight className="ml-2 h-4 w-4" /></Button><p className="mt-5 text-center text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{GATE_TEAM_COPY.or}</p></>}{!teamSignIn && <div className="mt-6 grid gap-4 sm:grid-cols-2"><div><Label htmlFor="deals-name" className="block text-xs uppercase tracking-widest">Name</Label><Input id="deals-name" autoComplete="name" placeholder="First and last name" value={name} onChange={(event) => onName?.(event.target.value.slice(0, 190))} className="mt-2 h-14 text-lg" /></div><div><Label htmlFor="deals-email" className="block text-xs uppercase tracking-widest">Email</Label><Input id="deals-email" type="email" autoComplete="email" inputMode="email" placeholder="you@example.com" value={email} onChange={(event) => onEmail?.(event.target.value.slice(0, 320))} className="mt-2 h-14 text-lg" /></div></div>}<Label htmlFor="deals-phone" className={`${teamSignIn ? "mt-6" : "mt-4"} block text-xs uppercase tracking-widest`}>Mobile phone</Label><Input id="deals-phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="(210) 555-0123" value={phone} onChange={(event) => onPhone(formatPhoneInput(event.target.value))} onFocus={onFocusPhone} className="mt-2 h-14 text-lg" />
       {teamSignIn && <p className="mt-3 text-xs text-muted-foreground">{GATE_TEAM_COPY.hint} <a href={GATE_REALTOR_COPY.path} className="text-gold underline-offset-4 hover:underline">{GATE_TEAM_COPY.joinLabel}</a></p>}
-      {!shared && !teamSignIn && <><p id="deals-agent-question" className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Are you a realtor, or working with one?</p><div role="group" aria-labelledby="deals-agent-question" className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">{GATE_CHOICES.map((option) => <button key={option.value} type="button" aria-pressed={choice === option.value} data-deals-choice={option.value} onClick={() => onChoice(option.value)} className={`min-h-14 border px-2 text-sm leading-tight transition-colors ${choice === option.value ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>{option.label}</button>)}</div><p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">Lifestyle Design Realty agents: enter your own mobile number to open your agent tools.</p></>}
+      {!shared && !teamSignIn && !page && <><p id="deals-agent-question" className="mt-5 text-xs uppercase tracking-widest text-muted-foreground">Are you a realtor, or working with one?</p><div role="group" aria-labelledby="deals-agent-question" className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">{GATE_CHOICES.map((option) => <button key={option.value} type="button" aria-pressed={choice === option.value} data-deals-choice={option.value} onClick={() => onChoice(option.value)} className={`min-h-14 border px-2 text-sm leading-tight transition-colors ${choice === option.value ? "border-gold bg-gold/10 text-gold" : "border-border text-foreground"}`}>{option.label}</button>)}</div><p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">Lifestyle Design Realty agents: enter your own mobile number to open your agent tools.</p></>}
       {/* Continue waits for deals.state so the consent line below is on screen before anyone can agree to it. */}<Button disabled={!ready || phone.replace(/\D/g, "").length < 10 || starting || state === undefined} onClick={onContinue} className="mt-5 w-full bg-gold py-6 text-primary-foreground">{starting ? "Sending…" : "Continue"} <ArrowRight className="ml-2 h-4 w-4" /></Button>{gateAlert && notice(gateAlert)}<p className="mt-5 text-xs leading-relaxed text-foreground">{state?.consentText}</p></>;
     })()}
   </motion.section></motion.div></AnimatePresence>;
@@ -209,19 +215,21 @@ export function GateSheet({ state, onClose, clientToken, lapsed = false, teamSig
     if (state?.clientLink?.state === "live") { start.mutate({ phone, name, email, choice: "buyer", src: params.src, ig: params.ig, c: params.c }); return; }
     // The agent sign-in posts as a buyer: a team number is the team either way, and a stranger's number just gets the buyer screening (never a realtor block for landing here).
     if (teamSignIn) { start.mutate({ phone, name, email, choice: "buyer", src: params.src, ig: params.ig, c: params.c }); return; }
+    // An agent's page: the visitor is that agent's buyer (the server still screens them like any visitor).
+    if (state?.agentPage && state?.clientLink?.state !== "dead") { start.mutate({ phone, name, email, choice: "buyer", src: params.src, ig: params.ig, a: params.a }); return; }
     if (choice === "has_agent") { dispatch({ type: "go", step: "confirm-agent" }); return; }
     if (choice === "realtor") { dispatch({ type: "go", step: "confirm-realtor" }); return; }
-    if (choice) start.mutate({ phone, name, email, choice, src: params.src, ig: params.ig, c: params.c });
+    if (choice) start.mutate({ phone, name, email, choice, src: params.src, ig: params.ig, c: params.c, a: params.a });
   };
   const focusPhone = () => {
     if (focusSent.current) return;
     focusSent.current = true;
-    focused.mutate({ src: params.src, c: params.c });
+    focused.mutate({ src: params.src, c: params.c, a: params.a });
   };
   return <GateSheetView gate={gate} state={state} phone={phone} name={name} email={email} onName={setName} onEmail={setEmail} code={code} choice={choice} starting={start.isPending} resending={resend.isPending}
     onPhone={setPhone} onCode={setCode} onChoice={setChoice} onFocusPhone={focusPhone} onContinue={continueGate}
-    onConfirmAgent={() => start.mutate({ phone, name, email, choice: "has_agent", src: params.src, ig: params.ig, c: params.c })}
-    onConfirmRealtor={() => start.mutate({ phone, name, email, choice: "realtor", src: params.src, ig: params.ig, c: params.c })}
+    onConfirmAgent={() => start.mutate({ phone, name, email, choice: "has_agent", src: params.src, ig: params.ig, c: params.c, a: params.a })}
+    onConfirmRealtor={() => start.mutate({ phone, name, email, choice: "realtor", src: params.src, ig: params.ig, c: params.c, a: params.a })}
     onGo={(step) => { dispatch({ type: "go", step }); if (step === "gate") setCode(""); }}
     onResend={(channel) => resend.mutate({ channel })} onChangeNumber={() => change.mutate()} onCopyLink={() => { void copyLink(); }} onClose={onClose} clientToken={params.c} teamSignIn={teamSignIn} onSiteLogin={onSiteLogin} />;
 }

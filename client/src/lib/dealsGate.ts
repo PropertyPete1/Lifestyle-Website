@@ -12,6 +12,8 @@ export type GateParams = {
   ig?: string;
   /** An LDR agent's client link token (?c=); it survives reloads like src and ig. */
   c?: string;
+  /** Oct 28, 2026: an LDR agent's own page (/deals/u/<name> lands on ?a=<name>); the sign-up is that agent's lead. */
+  a?: string;
   expired: boolean;
   error: boolean;
   cookieBlocked: boolean;
@@ -115,6 +117,12 @@ export function boundInstagramHandle(value: string | null | undefined): string |
 
 /** The client link token exactly as the server validates it: 20 to 64 URL-safe characters, else nothing. */
 export const CLIENT_LINK_TOKEN_MAX = 64;
+/** An agent page name as the link carries it ("tiffany-proske"); anything else is dropped. */
+export function boundAgentPage(value: string | null | undefined): string | undefined {
+  const slug = value?.trim().toLowerCase() ?? "";
+  return slug.length > 0 && slug.length <= 80 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ? slug : undefined;
+}
+
 export function boundClientLinkToken(value: string | null | undefined): string | undefined {
   if (!value) return undefined;
   const token = value.trim();
@@ -167,6 +175,7 @@ export function readGateParams(search: string): GateParams {
     src: boundSourceCode(params.get("src")),
     ig: boundInstagramHandle(params.get("ig")),
     c: boundClientLinkToken(params.get("c")),
+    a: boundAgentPage(params.get("a")),
     expired: params.get("expired") === "1",
     error: params.get("error") === "1",
     cookieBlocked: params.get("cookieBlocked") === "1",

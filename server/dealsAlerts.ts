@@ -145,6 +145,8 @@ export type FirstUnlockAlertDetails = {
 export async function queueFirstUnlockAlert(lead: AlertLead, details: FirstUnlockAlertDetails = {}) {
   const flags = Array.from(new Set((details.flags ?? []).map((flag) => flag.trim()).filter(Boolean)));
   const agent = await alertAgent(lead);
+  // Oct 28, 2026: signed up through the agent's own page link (no client link): the reel buyers' list, no addresses.
+  const viaPage = Boolean(agent && !lead.clientLinkId);
   if (agent?.email) {
     const client = await clientLabel(lead);
     await queueDealAlert({
@@ -152,9 +154,11 @@ export async function queueFirstUnlockAlert(lead: AlertLead, details: FirstUnloc
       lead,
       kind: "agent_update",
       agentEmail: agent.email,
-      subject: `Builder Deals: ${client} opened the list you sent`,
+      subject: viaPage ? `Builder Deals: ${client} signed up through your link` : `Builder Deals: ${client} opened the list you sent`,
       content: [
-        `${client} opened the Builder Deals list you sent and verified their number. They see every address, and you get an email when they save a home or ask for a tour.`,
+        viaPage
+          ? `${client} signed up for Builder Deals through your link and verified their number. They see the home list without addresses; send them a client link from Agent tools when you want them to see every address. You get an email when they save a home or ask for a tour.`
+          : `${client} opened the Builder Deals list you sent and verified their number. They see every address, and you get an email when they save a home or ask for a tour.`,
         agentAssignmentLine(agent, details),
         "",
         ...agentClientLines(lead, details.fubPersonId),
@@ -165,9 +169,9 @@ export async function queueFirstUnlockAlert(lead: AlertLead, details: FirstUnloc
     dedupeKey: `first_unlock:${lead.id}`,
     lead,
     kind: "first_unlock",
-    subject: agent ? `Builder Deals: ${agent.name}'s client unlocked the list` : "Builder Deals: new buyer unlocked the list",
+    subject: agent ? `Builder Deals: ${agent.name}'s ${viaPage ? "link brought a new buyer" : "client unlocked the list"}` : "Builder Deals: new buyer unlocked the list",
     content: [
-      agent ? `${agent.name}'s client unlocked Builder Deals through their client link. ${assignmentLine(agent, details)}` : "A buyer unlocked Builder Deals for the first time.",
+      agent ? `${agent.name}'s ${viaPage ? "lead signed up through their own Builder Deals link" : "client unlocked Builder Deals through their client link"}. ${assignmentLine(agent, details)}` : "A buyer unlocked Builder Deals for the first time.",
       ...(details.previouslyOptedOut ? ["", "Previously opted out, do not text manually."] : []),
       "",
       ...privateLeadLines(lead),

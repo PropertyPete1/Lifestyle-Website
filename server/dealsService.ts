@@ -1038,9 +1038,13 @@ export type DealsCatalogView = { view: "gated" } | { view: "full"; builderPages:
  */
 export async function catalogViewForSession(lead: Pick<typeof dealLeads.$inferSelect, "id" | "status" | "agentTeamId" | "clientLinkId">): Promise<{ view: DealsCatalogView; agent: import("./dealsClientLinks").DealsAgent | null }> {
   if (lead.status === "team") return { view: { view: "full", builderPages: true }, agent: null };
-  const { liveAgentForClient } = await import("./dealsClientLinks");
+  const { liveAgentForClient, agentForTeamId } = await import("./dealsClientLinks");
   const agent = await liveAgentForClient(lead);
-  return agent ? { view: { view: "full", builderPages: false }, agent } : { view: { view: "gated" }, agent: null };
+  if (agent) return { view: { view: "full", builderPages: false }, agent };
+  // Oct 28, 2026: a buyer who signed up through an agent's own page (no client link) sees the reel buyers' list, with
+  // their agent named on it; the agent's private client link is what opens the addresses.
+  const pageAgent = lead.agentTeamId && !lead.clientLinkId ? await agentForTeamId(lead.agentTeamId) : null;
+  return { view: { view: "gated" }, agent: pageAgent?.active ? pageAgent : null };
 }
 
 /** One built list entry with the community facts the per-lead pass needs (its reel, for ordering and "from your reel"). */
@@ -1298,7 +1302,7 @@ export function typedIdentity(name?: string | null, email?: string | null): { na
   return { name: cleanName.length >= 2 ? cleanName : null, email: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanEmail) ? cleanEmail : null };
 }
 
-export async function createPendingVerification(input: { req: Request; res: Response; rawPhone: string; choice: "buyer" | "has_agent" | "realtor"; source?: string | null; ig?: string | null; clientLinkToken?: string | null; /** Typed on the gate (Oct 24, Peter: "we want their name and email"); unverified, so never a block key on its own. */ name?: string | null; email?: string | null }) {
+export async function createPendingVerification(input: { req: Request; res: Response; rawPhone: string; choice: "buyer" | "has_agent" | "realtor"; source?: string | null; ig?: string | null; clientLinkToken?: string | null; /** Typed on the gate (Oct 24, Peter: "we want their name and email"); unverified, so never a block key on its own. */ name?: string | null; email?: string | null; /** Oct 28, 2026: the agent page (/deals/u/<name>) this browser came through. */ agentPageSlug?: string | null }) {
   const settings = await getDealSettings();
   const normalized = normalizeUsPhone(input.rawPhone, { allowCanada: settings.allowCanada });
   if (!normalized.ok) return { ok: false as const, kind: normalized.reason === "outside_us" ? "outside_us" : "invalid_phone" };
@@ -1325,7 +1329,11 @@ export async function createPendingVerification(input: { req: Request; res: Resp
     }
   }
   const clientLink = linkCheck?.ok ? linkCheck.resolved : null;
-  const sourceCode = input.clientLinkToken ? AGENT_CLIENT_SOURCE : currentDealSource(input.source, settings);
+  // An agent's own page (no client link): the sign-up is that agent's lead. The buyer gets the full screening like any
+  // reel visitor (nobody vouched for them), only the "working with an agent?" question is not asked.
+  const { AGENT_PAGE_SOURCE, agentForPageSlug } = await import("./dealsAgentPages");
+  const pageAgent = !input.clientLinkToken && input.agentPageSlug ? await agentForPageSlug(input.agentPageSlug) : null;
+  const sourceCode = input.clientLinkToken ? AGENT_CLIENT_SOURCE : pageAgent ? AGENT_PAGE_SOURCE : currentDealSource(input.source, settings);
   const { classifyDealsAccess } = await import("./dealsEligibility");
   const eligibility = await classifyDealsAccess({
     phone: normalized.e164, email: screeningEmail, deviceHash, isTest,
@@ -1384,7 +1392,7 @@ export async function createPendingVerification(input: { req: Request; res: Resp
   if (!db) return { ok: false as const, kind: "unavailable" };
   const opaque = randomOpaqueToken(24);
   // A team member who opens a client link is still the team member: the link is not attached.
-  const clientLinkRef = clientLink && !eligibility.team ? { clientLinkId: clientLink.link.id, agentTeamId: clientLink.agent.teamId } : {};
+  const clientLinkRef = clientLink && !eligibility.team ? { clientLinkId: clientLink.link.id, agentTeamId: clientLink.agent.teamId } : pageAgent && !eligibility.team ? { agentPageTeamId: pageAgent.teamId } : {};
   await db.insert(dealPendingVerifications).values({
     opaqueIdHash: hashSecret(opaque), phoneE164: normalized.e164, choice: "buyer", sourceCode, instagramHandle: ig,
     deviceHash, clientIp: ip, consentAt: new Date(), flags: JSON.stringify({ google, ...(typed.name || typed.email ? { typed } : {}), flags: [...eligibility.flags, ...profileFlags], team: eligibility.team, ...clientLinkRef }), expiresAt: new Date(Date.now() + PENDING_MINUTES * 60_000),
@@ -1453,7 +1461,7 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   if (!pending || !deviceHash) return { ok: false as const, kind: "expired" };
   const settings = await getDealSettings();
   const isTest = settings.testNumbers.includes(pending.phoneE164);
-  const identity = JSON.parse(pending.flags || "{}") as { google?: GoogleDealsIdentity; typed?: { name: string | null; email: string | null }; flags?: string[]; team?: boolean; completed?: VerificationReceipt; clientLinkId?: number; agentTeamId?: number };
+  const identity = JSON.parse(pending.flags || "{}") as { google?: GoogleDealsIdentity; typed?: { name: string | null; email: string | null }; flags?: string[]; team?: boolean; completed?: VerificationReceipt; clientLinkId?: number; agentTeamId?: number; agentPageTeamId?: number };
   const storedLink = Number.isSafeInteger(identity.clientLinkId) && Number.isSafeInteger(identity.agentTeamId) ? { linkId: identity.clientLinkId as number, agentTeamId: identity.agentTeamId as number } : null;
   const cookies = parseCookie(input.req.headers.cookie || "");
   // Both cookie values are high-entropy, HTTP-only, device-bound secrets. This
@@ -1500,14 +1508,20 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   }
   // The link belongs to a buyer: a team member stays a team member even when they open one.
   const attachLink = clientLink && !eligibility.team ? clientLink : null;
+  // An agent's page: still on the team now (checked again, like a link), and never over a client link.
+  const pageTeamId = !attachLink && !eligibility.team && Number.isSafeInteger(identity.agentPageTeamId) ? identity.agentPageTeamId as number : null;
+  const pageAgent = pageTeamId ? await (await import("./dealsClientLinks")).agentForTeamId(pageTeamId) : null;
+  const attachPage = pageAgent?.active ? pageAgent : null;
   // Oct 27, 2026 (Peter: agents get in and stay logged in): a team member's session lasts TEAM_ACCESS_HOURS, not a buyer's day.
-  const accessHours = eligibility.team ? TEAM_ACCESS_HOURS : attachLink ? settings.clientLinkExpiryHours : settings.expiryHours;
+  // An agent's lead (client link or page) gets the agent-client window.
+  const accessHours = eligibility.team ? TEAM_ACCESS_HOURS : attachLink || attachPage ? settings.clientLinkExpiryHours : settings.expiryHours;
   let old = (await db.select().from(dealLeads).where(eq(dealLeads.phoneE164, pending.phoneE164)).limit(1))[0];
   let reverifiedActive = Boolean(old && old.expiresAt > new Date());
   // An agent's client keeps the longer access window even when a shorter reel link is still live.
   const freshExpiry = new Date(Date.now() + accessHours * 60 * 60_000);
-  let expiresAt = old && old.expiresAt > new Date() ? ((attachLink || eligibility.team) && old.expiresAt < freshExpiry ? freshExpiry : old.expiresAt) : freshExpiry;
-  const agentFields = attachLink ? { agentTeamId: attachLink.agentTeamId, clientLinkId: attachLink.linkId } : {};
+  let expiresAt = old && old.expiresAt > new Date() ? ((attachLink || attachPage || eligibility.team) && old.expiresAt < freshExpiry ? freshExpiry : old.expiresAt) : freshExpiry;
+  // A buyer who already has an agent keeps them: the page only names an agent for a buyer who has none.
+  const agentFields = attachLink ? { agentTeamId: attachLink.agentTeamId, clientLinkId: attachLink.linkId } : attachPage && !old?.agentTeamId ? { agentTeamId: attachPage.teamId } : {};
   // "fub_check_deferred" is an operational marker for the deferred re-check,
   // never a persisted lead flag; it is carried to the caller separately.
   const fubCheckDeferred = eligibility.flags.includes("fub_check_deferred") || (identity.flags ?? []).includes("fub_check_deferred");
@@ -1535,8 +1549,8 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
       if (!raced) throw error;
       old = raced;
       reverifiedActive = raced.expiresAt > new Date();
-      expiresAt = reverifiedActive ? ((attachLink || eligibility.team) && raced.expiresAt < freshExpiry ? freshExpiry : raced.expiresAt) : expiresAt;
-      await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, flags: JSON.stringify(flags), ...agentFields }).where(eq(dealLeads.id, raced.id));
+      expiresAt = reverifiedActive ? ((attachLink || attachPage || eligibility.team) && raced.expiresAt < freshExpiry ? freshExpiry : raced.expiresAt) : expiresAt;
+      await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, flags: JSON.stringify(flags), ...(attachLink ? agentFields : attachPage && !raced.agentTeamId ? { agentTeamId: attachPage.teamId } : {}) }).where(eq(dealLeads.id, raced.id));
       leadId = raced.id;
     }
   }
@@ -1547,7 +1561,7 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   await db.insert(dealAccessTokens).values({ leadId, tokenHash: hashSecret(token), deviceHash, expiresAt, kind: "exchange" });
   await db.update(dealPendingVerifications).set({ flags: JSON.stringify({ ...identity, completed: { codeHash: hashSecret(input.code), leadId, expiresAt: expiresAt.toISOString(), isTeam: eligibility.team, isTest, fubCheckDeferred } satisfies VerificationReceipt }) }).where(eq(dealPendingVerifications.id, pending.id));
   clearDealCookie(input.res, DEALS_COOKIE.pending);
-  await db.insert(dealEvents).values({ leadId, kind: eligibility.team ? "team" : "verified", sourceCode: pending.sourceCode, deviceHash, ipPrefix: clientIpKey(pending.clientIp), phoneE164: pending.phoneE164, detail: attachLink ? `${input.verifiedBy};client_link:${attachLink.linkId}` : input.verifiedBy });
+  await db.insert(dealEvents).values({ leadId, kind: eligibility.team ? "team" : "verified", sourceCode: pending.sourceCode, deviceHash, ipPrefix: clientIpKey(pending.clientIp), phoneE164: pending.phoneE164, detail: attachLink ? `${input.verifiedBy};client_link:${attachLink.linkId}` : attachPage ? `${input.verifiedBy};agent_page:${attachPage.teamId}` : input.verifiedBy });
   // An existing lead newly attached to this link: the agent is told (a first unlock already alerts them).
   const clientLinkAttached = attachLink && old && old.clientLinkId !== attachLink.linkId ? attachLink.linkId : null;
   return { ok: true as const, token, leadId, expiresAt, firstUnlock: !old, reverifiedActive, isTeam: eligibility.team, isTest, fubCheckDeferred, duplicate: false, clientLinkAttached };

@@ -234,6 +234,8 @@ const acceptHoldInput = z.object({
 const photoRegionInput = z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() });
 
 const clientLinkToken = z.string().trim().max(80).optional();
+/** Oct 28, 2026: an agent's own page link (/deals/u/<name> lands on /deals?a=<name>). */
+const agentPageSlug = z.string().trim().max(80).optional();
 const gateInput = z.object({
   phone: z.string().trim().min(1).max(60),
   choice: z.enum(["buyer", "has_agent", "realtor"]),
@@ -244,6 +246,8 @@ const gateInput = z.object({
   ig: z.string().max(160).optional(),
   /** An LDR agent's client link token (?c=); the agent question is skipped for it. */
   c: clientLinkToken,
+  /** An LDR agent's page (?a=); the sign-up is that agent's lead. */
+  a: agentPageSlug,
 });
 /**
  * A client link as the gate shows it: the agent's name and the client's first
@@ -313,7 +317,7 @@ export const dealsRouter = router({
     const { featuredDeals } = await import("./dealsFeatured");
     return publicPageCache("featured", () => featuredDeals("public"));
   }),
-  state: publicProcedure.input(z.object({ c: clientLinkToken }).optional()).query(async ({ input, ctx }) => {
+  state: publicProcedure.input(z.object({ c: clientLinkToken, a: agentPageSlug }).optional()).query(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);
     const [settings, session, pending] = await Promise.all([getDealSettings(), isLiveDealSession(ctx.req), currentPending(ctx.req)]);
     // An agent's client whose access lapsed keeps their agent's link on the bare
@@ -328,6 +332,10 @@ export const dealsRouter = router({
     const clientLink = await clientLinkPresentation(token, session?.lead.status === "team");
     // A buyer with a live list: their own link goes straight to the list, another number's link is not offered.
     const connectOffer = session && session.lead.status !== "team" && clientLink?.state === "live" && token ? await connectOfferFor(session.lead, token) : null;
+    // Oct 28, 2026: an agent's own page (no client link in play): the landing and the sheet name the agent.
+    const { agentForPageSlug, agentPageSlugFromRequest, presentAgentPage } = await import("./dealsAgentPages");
+    const pageSlug = !token && session?.lead.status !== "team" ? agentPageSlugFromRequest(ctx.req, input?.a) : null;
+    const agentPage = pageSlug ? presentAgentPage(await agentForPageSlug(pageSlug)) : null;
     return {
       session: session ? leadPresentation(session.lead) : null,
       pending: pending ? { displayPhone: maskPhone(pending.phoneE164), expiresAt: pending.expiresAt.toISOString() } : null,
@@ -335,7 +343,7 @@ export const dealsRouter = router({
       consentText: DEALS_CONSENT_TEXT,
       commentKeyword: settings.commentKeyword,
       textLine: settings.textLine,
-      blockedMessage: clientLink ? linkClientBlockedMessage(clientLink.agentName, settings.textLine) : safeBlockedMessage(settings),
+      blockedMessage: clientLink ? linkClientBlockedMessage(clientLink.agentName, settings.textLine) : agentPage ? linkClientBlockedMessage(agentPage.agentName, settings.textLine) : safeBlockedMessage(settings),
       /** This browser belongs to an agent kept off Builder Deals: the page sends it to recruiting (never for a team member or an agent's client). */
       realtorRedirect: !session && !clientLink && !paused && await browserIsRealtorBlocked(ctx.req) ? REALTOR_RECRUIT_PATH : null,
       /** An admin turned this buyer off: the gate shows the neutral paused screen with how to reach us. */
@@ -347,6 +355,8 @@ export const dealsRouter = router({
       /** A reel buyer whose list lapsed (no live agent link behind it): the landing shows the expired screen, not the gate. */
       lapsed: Boolean(lapsed) && !rememberedLive,
       connectOffer,
+      /** The agent whose page brought this visitor; their name heads the page and the sign-up. */
+      agentPage,
     };
   }),
   start: publicProcedure.input(gateInput).mutation(async ({ input, ctx }) => {
@@ -358,7 +368,9 @@ export const dealsRouter = router({
     if (!cookieState.hasProbe || !(await reserveGateSubmit({ ip, deviceHash: cookieState.deviceHash, sourceCode }))) {
       return { ok: false as const, kind: cookieState.hasProbe ? "rate_limited" : "cookie_blocked", message: cookieState.hasProbe ? `We're getting a lot of traffic, so please try again in a bit. Or text ${settings.commentKeyword} to ${settings.textLine}.` : `Your browser is blocking cookies. Open this link in Safari or Chrome. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
     }
-    const result = await createPendingVerification({ req: ctx.req, res: ctx.res, rawPhone: input.phone, choice: input.choice, name: input.name, email: input.email, source: sanitizeSourceCode(input.src), ig: sanitizeInstagramHandle(input.ig), clientLinkToken: input.c });
+    const { agentPageSlugFromRequest } = await import("./dealsAgentPages");
+    const pageSlug = input.c ? null : agentPageSlugFromRequest(ctx.req, input.a);
+    const result = await createPendingVerification({ req: ctx.req, res: ctx.res, rawPhone: input.phone, choice: input.choice, name: input.name, email: input.email, source: sanitizeSourceCode(input.src), ig: sanitizeInstagramHandle(input.ig), clientLinkToken: input.c, agentPageSlug: pageSlug });
     if (!result.ok) {
       const settings = await getDealSettings();
       if (result.kind === "link_other_phone" || result.kind === "link_dead") return { ok: false as const, kind: result.kind, message: clientLinkRefusal(result.kind, "agentName" in result ? result.agentName ?? null : null, settings.textLine) };
@@ -366,6 +378,12 @@ export const dealsRouter = router({
         // An agent's client is never told the page is for buyers without an agent.
         const shown = await presentClientLink(input.c);
         return { ok: false as const, kind: "blocked", message: linkClientBlockedMessage(shown?.agentName, settings.textLine) };
+      }
+      if ((result.kind === "has_agent" || result.kind === "blocked") && pageSlug) {
+        // Nor is a visitor who came through an agent's own page.
+        const { agentForPageSlug } = await import("./dealsAgentPages");
+        const agent = await agentForPageSlug(pageSlug);
+        if (agent) return { ok: false as const, kind: "blocked", message: linkClientBlockedMessage(agent.name, settings.textLine) };
       }
       if (result.kind === "realtor") return { ok: false as const, kind: "realtor", message: REALTOR_GATE_MESSAGE, redirect: REALTOR_RECRUIT_PATH };
       if (result.kind === "paused") return { ok: false as const, kind: "paused", message: pausedAccessMessage(settings.textLine) };
@@ -425,15 +443,16 @@ export const dealsRouter = router({
     if (sent.reason === "rate_limited") return { ok: false as const, kind: "rate_limited" as const, message: `We're getting a lot of traffic, so please try again in a bit. Or text ${settings.commentKeyword} to ${settings.textLine}.` };
     return { ok: false as const, kind: sent.reason, message: "We couldn't send a code right now. Please try again." };
   }),
-  gateFocused: publicProcedure.input(z.object({ src: z.string().max(120).optional(), c: clientLinkToken })).mutation(async ({ input, ctx }) => {
+  gateFocused: publicProcedure.input(z.object({ src: z.string().max(120).optional(), c: clientLinkToken, a: agentPageSlug })).mutation(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);
     const settings = await getDealSettings();
     const { ensureDealsCookies } = await import("./dealsService");
     const { deviceHash, hasProbe } = ensureDealsCookies(ctx.req, ctx.res);
     // A browser that loaded the page carries the probe cookie; a cookie-less caller is not a visitor and writes nothing.
     if (!hasProbe) return { ok: true as const };
+    const { AGENT_PAGE_SOURCE, agentPageSlugFromRequest } = await import("./dealsAgentPages");
     await recordGateFocus({
-      sourceCode: input.c ? AGENT_CLIENT_SOURCE : currentDealSource(input.src, settings), deviceHash,
+      sourceCode: input.c ? AGENT_CLIENT_SOURCE : agentPageSlugFromRequest(ctx.req, input.a) ? AGENT_PAGE_SOURCE : currentDealSource(input.src, settings), deviceHash,
       ip: ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0",
     });
     return { ok: true as const };
@@ -532,7 +551,9 @@ export const dealsRouter = router({
         const shared = (await agentRowsForLead(session.lead)).kind === "shared";
         throw new TRPCError({ code: "FORBIDDEN", message: shared ? SHARED_TEAM_NUMBER_MESSAGE : settings_testTeamNote(session.lead.phoneE164, await getDealSettings()) });
       }
-      return { lead: leadPresentation(session.lead), agent: { name: workspace.agent.name, email: workspace.agent.email, fubLinked: Boolean(workspace.agent.fubUserId) }, clients: workspace.clients, assigned: workspace.assigned };
+      const { agentPageForLead } = await import("./dealsAgentPages");
+      const page = await agentPageForLead(session.lead).catch(() => null);
+      return { lead: leadPresentation(session.lead), agent: { name: workspace.agent.name, email: workspace.agent.email, fubLinked: Boolean(workspace.agent.fubUserId) }, clients: workspace.clients, assigned: workspace.assigned, pagePath: page?.path ?? null };
     }),
     createClientLink: publicProcedure.input(z.object({ clientName: z.string().trim().min(2).max(190), clientPhone: z.string().trim().max(60).optional(), note: z.string().trim().max(500).optional(), picks: z.array(z.string().regex(/^[a-f0-9]{20}$/)).max(30).optional() })).mutation(async ({ input, ctx }) => {
       dealsPublicHeaders(ctx.res);

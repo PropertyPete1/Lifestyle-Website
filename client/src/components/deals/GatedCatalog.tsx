@@ -3,6 +3,7 @@ import { ComingSoonSection, type ComingSoonItem } from "./ComingSoon";
 import { Link } from "wouter";
 import { ArrowDown, ArrowDownUp, Bath, BedDouble, Check, ChevronDown, Clock3, ExternalLink, Flame, Heart, Plus, Ruler, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { useIsMobile } from "@/hooks/useMobile";
 import { Button } from "@/components/ui/button";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, type CarouselApi } from "@/components/ui/carousel";
 import { identityPatternStyle } from "@/lib/dealsIdentityPattern";
@@ -492,6 +493,8 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
   const [listView, setListView] = useState<"homes" | "communities">("homes");
   // New Home Buddy's "Search homes by address": a street, plan, community or builder narrows the homes.
   const [homeQuery, setHomeQuery] = useState("");
+  // A phone's search box is narrow: a short hint that fits instead of one cut off mid-word.
+  const phone = useIsMobile();
   // The communities a map bubble narrowed the list to; the count in the results bar follows it.
   const [areaKeys, setAreaKeys] = useState<ReadonlySet<string> | null>(null);
   const homeEntries = useMemo(() => {
@@ -558,8 +561,8 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
         {/* Phone: count + Homes/Communities, then search + sort. Wider: count, search, sort, toggle in one row. */}
         <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2" data-deals-results-bar="true">
           <p className="order-1 text-sm font-semibold uppercase tracking-widest text-foreground" data-deals-result-count="true">{listView === "homes" ? HOME_LIST_COPY.count(areaKeys ? homeEntries.filter((entry) => areaKeys.has(entry.key)).length : homeQuery.trim() ? homeEntries.length : shownHomes) : `${areaKeys ? areaKeys.size : matching.length} communities`}</p>
-          {listView === "homes" && <label className="order-3 min-w-0 flex-1 sm:order-2 sm:max-w-sm"><span className="sr-only">Search homes by address</span><input type="search" value={homeQuery} onChange={(event) => setHomeQuery(event.target.value)} placeholder="Search address, plan, community, builder" data-deals-home-search="true" className="min-h-9 w-full rounded-full border border-border bg-card px-4 text-sm" /></label>}
-          <label className="order-4 inline-flex min-h-9 min-w-0 max-w-[8rem] shrink-0 items-center gap-1.5 rounded-full border border-border bg-card pl-3 text-xs text-foreground sm:order-3 sm:ml-auto sm:max-w-none" data-deals-sort="true"><ArrowDownUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="sr-only">Sort</span>
+          {listView === "homes" && <label className="order-3 min-w-0 flex-1 sm:order-2 sm:max-w-sm"><span className="sr-only">Search homes by address</span><input type="search" value={homeQuery} onChange={(event) => setHomeQuery(event.target.value)} placeholder={phone ? "Address or plan" : "Search address, plan, community, builder"} data-deals-home-search="true" className="min-h-9 w-full rounded-full border border-border bg-card px-4 text-sm" /></label>}
+          <label className="order-4 inline-flex min-h-9 min-w-0 max-w-[11rem] shrink-0 items-center gap-1.5 rounded-full border border-border bg-card pl-3 text-xs text-foreground sm:order-3 sm:ml-auto sm:max-w-none" data-deals-sort="true"><ArrowDownUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="sr-only">Sort</span>
             <select aria-label="Sort" value={filters.sort} onChange={(event) => { setFilters((current) => ({ ...current, sort: event.target.value as BrowseFilters["sort"] })); setPages(1); }} className="min-h-9 min-w-0 bg-transparent pr-3 text-xs">{BROWSE_SORTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
           </label>
           <div role="group" aria-label="Show homes or communities" className="order-2 inline-flex rounded-full border border-border bg-card p-0.5 text-xs sm:order-4">

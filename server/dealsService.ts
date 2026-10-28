@@ -1066,7 +1066,7 @@ export async function gatedDealsCatalog(leadId: number, view: DealsCatalogView =
 }
 
 /** How long the last build of each view took (reads vs. the whole), for Admin health: the number the opening wait is made of. */
-export type CatalogBuildStat = { at: string; ms: number; readMs: number; communities: number; homes: number };
+export type CatalogBuildStat = { at: string; ms: number; readMs: number; communities: number; homes: number; reads?: { communitiesMs: number; homesMs: number; photosMs: number; homeRows: number; photoRows: number } };
 const catalogBuildStats = new Map<string, CatalogBuildStat>();
 export function catalogBuildsSinceStart(): Record<string, CatalogBuildStat> {
   return Object.fromEntries(catalogBuildStats);
@@ -1076,11 +1076,12 @@ export function catalogBuildsSinceStart(): Record<string, CatalogBuildStat> {
 export async function buildGatedCatalog(view: DealsCatalogView = { view: "gated" }): Promise<GatedCatalogBuilt[]> {
   const startedAt = Date.now();
   const built = await buildGatedCatalogTimed(view, startedAt);
-  catalogBuildStats.set(gatedCatalogViewKey(view), { at: new Date(startedAt).toISOString(), ms: Date.now() - startedAt, readMs: built.readMs, communities: built.entries.length, homes: built.entries.reduce((sum, item) => sum + ((item.entry.homes as unknown[] | undefined)?.length ?? 0), 0) });
+  catalogBuildStats.set(gatedCatalogViewKey(view), { at: new Date(startedAt).toISOString(), ms: Date.now() - startedAt, readMs: built.readMs, communities: built.entries.length, homes: built.entries.reduce((sum, item) => sum + ((item.entry.homes as unknown[] | undefined)?.length ?? 0), 0), reads: built.reads });
   return built.entries;
 }
 
-async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number): Promise<{ entries: GatedCatalogBuilt[]; readMs: number }> {
+type CatalogReads = NonNullable<CatalogBuildStat["reads"]>;
+async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number): Promise<{ entries: GatedCatalogBuilt[]; readMs: number; reads?: CatalogReads }> {
   const db = await getDb();
   if (!db) return { entries: [], readMs: 0 };
   const full = view.view === "full";
@@ -1091,8 +1092,10 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
   const communities = await db.select().from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false))).orderBy(asc(dealCommunities.id));
   const data = [] as GatedCatalogBuilt[];
   if (!communities.length) return { entries: data, readMs: Date.now() - startedAt };
+  const communitiesMs = Date.now() - startedAt;
   // Three reads for the whole list (incentives, homes, photos), however many communities there are.
   const ids = communities.map((community) => community.id);
+  const homesStartedAt = Date.now();
   const [incentives, allHomes, heldLine] = await Promise.all([
     liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
     db.select().from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
@@ -1101,11 +1104,14 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
   const homesBy = groupBy(allHomes, (home) => home.communityId);
   const shownHomes = new Map(communities.map((community) => [community.id, selectDealCatalogHomes(homesBy.get(community.id) ?? [])]));
   const shownHomeIds = Array.from(shownHomes.values()).flatMap((homes) => homes.map((home) => home.id));
+  const homesMs = Date.now() - homesStartedAt;
+  const photosStartedAt = Date.now();
   const photoRows = shownHomeIds.length
     ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, shownHomeIds), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
     : [];
   const photosBy = groupBy(photoRows, (photo) => photo.homeId);
   const readMs = Date.now() - startedAt;
+  const reads: CatalogReads = { communitiesMs, homesMs, photosMs: Date.now() - photosStartedAt, homeRows: allHomes.length, photoRows: photoRows.length };
   for (const community of communities) {
     const scrubNames = communityScrubConfig(community);
     const scrub = (value: string) => full ? value : scrubPrivateNames(value, scrubNames);
@@ -1161,7 +1167,7 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
     if (!full && await dropPrivateResidue(community.id, entry, scrubNames, "gated")) continue;
     data.push({ id: community.id, reelCode: community.reelCode, reelUrl: community.reelUrl, entry });
   }
-  return { entries: data, readMs };
+  return { entries: data, readMs, reads };
 }
 
 /** Opaque card handles of the homes this lead currently has saved. */

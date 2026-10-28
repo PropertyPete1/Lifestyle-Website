@@ -199,11 +199,11 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
   };
   const revoke = (client: AgentClient) => { confirmAndRevoke(client, confirm ?? ((message: string) => window.confirm(message)), onRevoke); };
   const createdMessage = createdUrl && created ? clientMessage({ clientName: created.clientName ?? "", agentName, url: createdUrl, pickCount: created.pickCount }) : null;
-  return <section aria-labelledby="deals-agent-tools" data-deals-agent-tools="true" className="mt-5 min-w-0 space-y-4">
+  return <section aria-labelledby="deals-agent-tools" data-deals-agent-tools="true" className="mt-3 min-w-0 space-y-2 sm:mt-5 sm:space-y-4">
     <div className="min-w-0 border border-gold/30 bg-gold/5 px-4 py-3">
       {workspace && !workspace.agent.fubLinked && <p role="status" className="mb-2 text-xs text-gold">Your number is on the team list without a Follow Up Boss user, so your clients' contacts and tasks go to Peter in FUB until it is linked. Emails still reach you{workspace.agent.email ? ` at ${workspace.agent.email}` : ""}.</p>}
       <form className="flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-        <h2 id="deals-agent-tools" className="w-full shrink-0 font-serif text-base sm:mr-2 sm:w-auto sm:text-lg">{AGENT_COPY.heading}</h2>
+        <h2 id="deals-agent-tools" className="sr-only shrink-0 font-serif sm:not-sr-only sm:mr-2 sm:text-lg">{AGENT_COPY.heading}</h2>
         <Label htmlFor="deals-client-name" className="sr-only">Client name</Label>
         <Input id="deals-client-name" value={clientName} maxLength={190} onChange={(event) => setClientName(event.target.value)} placeholder="Client name" autoComplete="off" className="min-h-10 w-auto min-w-0 flex-1 basis-40 bg-background" />
         <Button type="submit" disabled={creating || clientName.trim().length < 2} className="min-h-10 shrink-0 bg-gold text-primary-foreground"><Link2 className="mr-2 h-4 w-4" />{creating ? "Creating link…" : picked.length ? `Create link with ${picked.length} pick${picked.length === 1 ? "" : "s"}` : <><span className="sm:hidden">Create link</span><span className="hidden sm:inline">Create client link</span></>}</Button>

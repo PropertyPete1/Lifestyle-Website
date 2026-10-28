@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -59,6 +59,12 @@ async function activateAndRetainOnlyImport(importId: number, rowCount: number) {
 
 type TrecImportOptions = { headersTimeoutMs?: number; readInactivityMs?: number };
 
+/** Where the download is spooled: DEALS_TREC_SPOOL_PATH, else <app>/.cache/builder-deals-trec, else the system temp dir. */
+async function trecSpoolRoot(): Promise<string> {
+  const root = process.env.DEALS_TREC_SPOOL_PATH?.trim() || join(process.cwd(), ".cache", "builder-deals-trec");
+  try { await mkdir(root, { recursive: true }); return root; } catch { return tmpdir(); }
+}
+
 /**
  * Streams the official public CSV into a new import record in small database
  * batches. The abort controller covers the headers and then acts as a per-read
@@ -102,7 +108,10 @@ export async function importTrecLicenses(options: TrecImportOptions = {}) {
   // Oct 27, 2026: the body is spooled to a temp file at network speed, then parsed from disk. Parsing while
   // downloading paused the socket for every database batch, and on a busy morning TREC's server closed the idle
   // connection seven minutes in ("terminated"), twice in a row.
-  const dir = await mkdtemp(join(tmpdir(), "trec-"));
+  // Oct 28, 2026: spooled under the app's own .cache (disk), not the system temp dir: on a container /tmp can be
+  // memory-backed, and a 50 MB file there counts against the memory limit the host kills instances at (two
+  // nights' runs ended with their instance "killed" mid-import). The temp dir stays the fallback.
+  const dir = await mkdtemp(join(await trecSpoolRoot(), "trec-"));
   const file = join(dir, "licenses.csv");
   try {
     const out = createWriteStream(file);
@@ -120,7 +129,11 @@ export async function importTrecLicenses(options: TrecImportOptions = {}) {
       const cells = parseCsvLine(line); const row = Object.fromEntries(headers.map((key, index) => [key, cells[index] ?? ""]));
       const values = trecLicenseValues(importId, row); if (!values) continue;
       batch.push(values);
-      if (batch.length >= 500) await flush();
+      if (batch.length >= 500) {
+        await flush();
+        // Progress on the import row every 25,000 rows, so a run cut off mid-way shows how far it got.
+        if (count % 25_000 < 500) await db.update(dealTrecImports).set({ rowCount: count }).where(eq(dealTrecImports.id, importId)).catch(() => undefined);
+      }
     }
     await flush(); await activateAndRetainOnlyImport(importId, count);
     return { ok: true, rows: count, importId, ...(skipped ? { skipped, firstSkip } : {}) };

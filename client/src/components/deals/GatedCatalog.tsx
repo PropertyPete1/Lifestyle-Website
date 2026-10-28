@@ -322,6 +322,28 @@ export function homeStatusLabel(home: Pick<GatedHome, "kind" | "moveInDate">, no
 }
 
 /**
+ * Oct 28, 2026: while the list loads (a few seconds on a freshly started server), the page's own shape shows at once,
+ * New Home Buddy style: the header, the filter row, the map and grey home cards, instead of one line on a blank page.
+ */
+export function ListSkeleton({ label }: { label: string }) {
+  const pulse = "animate-pulse bg-foreground/[0.07]";
+  return <div className="deals-light min-h-screen bg-background" data-deals-list-skeleton="true" aria-busy="true">
+    <header className="deals-chrome flex min-w-0 items-center border-b border-border/60 px-4 py-3 sm:px-6"><span className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></span></header>
+    <div className="mx-auto max-w-[1600px] px-4 sm:px-6">
+      <p role="status" className="pt-3 text-sm text-muted-foreground">{label}</p>
+      <div className="mt-3 flex gap-2 overflow-hidden">{Array.from({ length: 8 }, (_, index) => <span key={index} className={`h-10 w-28 shrink-0 rounded-full ${pulse}`} />)}</div>
+      <div className="mt-4 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(360px,44%)_minmax(0,1fr)]">
+        <div className={`hidden h-[70vh] rounded-xl lg:block ${pulse}`} />
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">{Array.from({ length: 4 }, (_, index) => <div key={index} className="overflow-hidden rounded-lg border border-border bg-card">
+          <div className={`aspect-[16/10] ${pulse}`} />
+          <div className="space-y-2 p-3"><span className={`block h-4 w-2/3 rounded ${pulse}`} /><span className={`block h-6 w-1/3 rounded ${pulse}`} /><span className={`block h-3 w-1/2 rounded ${pulse}`} /></div>
+        </div>)}</div>
+      </div>
+    </div>
+  </div>;
+}
+
+/**
  * A buyer's card has no address or plan to lead with, and its area already sits on the right: the community's own
  * line after "Area | " reads better than the area twice ("Northwest San Antonio | Hal…" beside "Northwest San Antonio").
  */

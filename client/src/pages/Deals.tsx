@@ -10,7 +10,7 @@ import { startLogin } from "@/const";
 import { MINE_COPY, isUnauthorizedDealsError, parseMineCommunities, profileErrorCopy } from "@/lib/dealsMine";
 import { TRANSIENT_GATE_PARAMS, agentRecruitRedirect, clientLinkTokenInUrl, forgetClientLinkToken, keepClientLinkToken, rememberClientLinkToken } from "@/lib/dealsGate";
 import { GateSheet } from "@/components/deals/GateSheet";
-import { GatedCatalog, pickedHomes, picksAsText, type GatedCommunity, type HomeRequest, type PickControl } from "@/components/deals/GatedCatalog";
+import { GatedCatalog, ListSkeleton, pickedHomes, picksAsText, type GatedCommunity, type HomeRequest, type PickControl } from "@/components/deals/GatedCatalog";
 import { FeaturedStrip, type FeaturedDealsData } from "@/components/deals/FeaturedDeals";
 import { AgentTools, type AgentWorkspaceData } from "@/components/deals/AgentTools";
 import { ComingSoonSection } from "@/components/deals/ComingSoon";
@@ -131,7 +131,7 @@ function Mine() {
   const { savingCard, onSave } = useSaveHome(() => { void mine.refetch(); });
   const communities = useMemo(() => parseMineCommunities<GatedCommunity>(mine.data?.communitiesJson), [mine.data?.communitiesJson]);
   useInstagramEmbeds();
-  if (mine.isLoading) return <div className="deals-light min-h-screen bg-background p-8 text-center text-muted-foreground">Preparing your private list…</div>;
+  if (mine.isLoading) return <ListSkeleton label="Preparing your private list…" />;
   // Only "no live session" falls back to the landing page and its gate; any other
   // failure keeps the visitor here with a retry and never navigates.
   if (mine.isError && isUnauthorizedDealsError(mine.error)) return <Landing />;
@@ -197,7 +197,7 @@ function Team() {
   useInstagramEmbeds();
   const forbidden = workspace.isError && workspace.error.data?.code === "FORBIDDEN";
   useEffect(() => { if (forbidden && !mine.data?.lead.teamPreview && mine.data) window.location.assign("/deals/mine"); }, [forbidden, mine.data]);
-  if (mine.isLoading) return <div className="deals-light min-h-screen bg-background p-8 text-center text-muted-foreground">Preparing the team list…</div>;
+  if (mine.isLoading) return <ListSkeleton label="Preparing the team list…" />;
   if (mine.isError && isUnauthorizedDealsError(mine.error)) return <Landing />;
   if (mine.isError || !mine.data) return <MineRetry onRetry={() => { void mine.refetch(); }} retrying={mine.isFetching} />;
   const copy = async (url: string) => {

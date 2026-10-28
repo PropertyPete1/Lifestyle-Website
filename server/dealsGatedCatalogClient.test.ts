@@ -453,6 +453,17 @@ describe("the home cards of the unlocked list (Oct 27: New Home Buddy parity)", 
   });
 });
 
+describe("the loading page (Oct 28: the page's shape shows at once, not one line on a blank page)", async () => {
+  const { ListSkeleton } = await import("../client/src/components/deals/GatedCatalog");
+  it("shows the header, grey cards and the status line", () => {
+    const html = renderToStaticMarkup(createElement(ListSkeleton, { label: "Preparing the team list…" }));
+    expect(html).toContain('data-deals-list-skeleton="true"');
+    expect(html).toContain('role="status"');
+    expect(html).toContain("Preparing the team list…");
+    expect(html).toContain("LIFESTYLE DESIGN");
+  });
+});
+
 describe("the opened home leads its sheet (Oct 27: New Home Buddy's home view)", async () => {
   const { HomeHero } = await import("../client/src/components/deals/GatedCatalog");
   const community = { label: "East | Homes", area: "East San Antonio", reelUrl: null, homes: [], details: { builderName: "Chesmar", communityName: "Sienna Lakes" } } as GatedCommunity;

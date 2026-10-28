@@ -872,6 +872,22 @@ describe("catalog batch and the photo queue", () => {
     expect(urls(homeId(home("8303-a")))).toEqual([]);
   });
 
+  it("keeps a labeled model home (never for sale) for its photos, and lets it go when the builder stops showing it (Oct 28: model-home covers)", async () => {
+    const at = Date.parse("2026-10-21T11:00:00Z");
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [
+      { sourceUrl: home("8301-a") },
+      { sourceUrl: home("9000-model"), status: "Model For Tour", price: null, gallery: [{ sourceUrl: "https://dam.mihomes.com/models/front.jpg" }, { sourceUrl: "https://dam.mihomes.com/models/kitchen.jpg" }] },
+    ] }));
+    expect(await refreshDueCommunitiesBatch({ clock: () => at })).toMatchObject({ checked: 1, ok: 1 });
+    const model = db.rows(dealHomes).find((row) => row.sourceUrl === home("9000-model"))!;
+    expect(model).toMatchObject({ status: "model", price: null });
+    expect(db.rows(dealPhotos).filter((row) => row.homeId === model.id).map((row) => [row.sourceUrl, row.sortOrder])).toEqual([["https://dam.mihomes.com/models/front.jpg", 0], ["https://dam.mihomes.com/models/kitchen.jpg", 1]]);
+    expect(db.rows(dealHomes).filter((row) => row.status === "available")).toHaveLength(1);
+    mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));
+    await refreshDueCommunitiesBatch({ clock: () => at + 4 * 86_400_000 });
+    expect(db.rows(dealHomes).find((row) => row.id === model.id)).toMatchObject({ status: "sold" });
+  });
+
   it("a queued Refresh now is taken by the next batch even when the community was pulled today", async () => {
     const at = Date.parse("2026-10-21T11:00:00Z");
     mocks.loadOfficialDeals.mockResolvedValue(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));

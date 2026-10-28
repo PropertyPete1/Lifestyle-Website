@@ -350,7 +350,8 @@ export const dealHomes = mysqlTable(
     privateAddress: varchar("private_address", { length: 255 }),
     privatePlanName: varchar("private_plan_name", { length: 190 }),
     kind: mysqlEnum("kind", ["quick_move_in", "to_be_built"]).default("quick_move_in").notNull(),
-    status: mysqlEnum("status", ["available", "sold", "hidden"]).default("available").notNull(),
+    // "model" (Oct 28, 2026): a builder's model home, never for sale; kept only so its photos can be the community's cover.
+    status: mysqlEnum("status", ["available", "sold", "hidden", "model"]).default("available").notNull(),
     beds: varchar("beds", { length: 30 }),
     baths: varchar("baths", { length: 30 }),
     sqft: int("sqft"),

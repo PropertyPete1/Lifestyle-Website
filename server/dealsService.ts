@@ -699,6 +699,24 @@ async function heldLineCommunities(db: NonNullable<Awaited<ReturnType<typeof get
   return shown;
 }
 
+/**
+ * Oct 28, 2026 (Peter: "use the model home photo, it's usually the high-upgrades house that sells"): each community's
+ * cover from its model home, when the builder labels one and its first photo is processed and not hidden.
+ */
+async function modelCoverPhotos(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, communityIds: number[]): Promise<Map<number, number>> {
+  const covers = new Map<number, number>();
+  if (!communityIds.length) return covers;
+  // Two plain reads (no join): the model homes, then their shown photos in gallery order.
+  const models = await db.select({ id: dealHomes.id, communityId: dealHomes.communityId }).from(dealHomes).where(and(inArray(dealHomes.communityId, communityIds), eq(dealHomes.status, "model")));
+  if (!models.length) return covers;
+  const communityOf = new Map(models.map((model) => [model.id, model.communityId]));
+  const rows = await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId }).from(dealPhotos)
+    .where(and(inArray(dealPhotos.homeId, models.map((model) => model.id)), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false)))
+    .orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id));
+  for (const row of rows) { const communityId = communityOf.get(row.homeId); if (communityId !== undefined && !covers.has(communityId)) covers.set(communityId, row.id); }
+  return covers;
+}
+
 /** Rows grouped by a numeric key, keeping their order. */
 function groupBy<T>(rows: readonly T[], key: (row: T) => number): Map<number, T[]> {
   const grouped = new Map<number, T[]>();
@@ -827,10 +845,11 @@ export async function publicDealsCatalog(src?: string | null) {
   const reelCode = src?.trim().toLowerCase() || null;
   // Two reads for the whole page, however many communities there are.
   const ids = communities.map((community) => community.id);
-  const [availableHomes, incentives, heldLine] = await Promise.all([
+  const [availableHomes, incentives, heldLine, modelCovers] = await Promise.all([
     db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price, previousPrice: dealHomes.previousPrice, beds: dealHomes.beds, baths: dealHomes.baths, sqft: dealHomes.sqft, garage: dealHomes.garage, stories: dealHomes.stories, moveInDate: dealHomes.moveInDate, createdAt: dealHomes.createdAt }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
     liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
     heldLineCommunities(db, ids, now, settings.incentiveLapseDays),
+    modelCoverPhotos(db, ids),
   ]);
   const availableCount = new Map<number, number>();
   for (const home of availableHomes) if (home.kind === "quick_move_in") availableCount.set(home.communityId, (availableCount.get(home.communityId) ?? 0) + 1);
@@ -856,7 +875,7 @@ export async function publicDealsCatalog(src?: string | null) {
     const incentive = incentives.get(community.id);
     // Opaque per community: the page's key for the card, its map marker and its cover photo. Never the row id.
     const key = dealsHandle(`deals-landing:${community.id}`, 12);
-    const coverPhoto = (coverCandidates.get(community.id) ?? []).map((homeId) => firstPhoto.get(homeId)).find((id): id is number => id !== undefined);
+    const coverPhoto = modelCovers.get(community.id) ?? (coverCandidates.get(community.id) ?? []).map((homeId) => firstPhoto.get(homeId)).find((id): id is number => id !== undefined);
     const geometry = areaMapGeometry(community, "public", publicRadius);
     const shownHomes = selectDealCatalogHomes(homesByCommunity.get(community.id) ?? []).map((home) => ({ ...home, isNew: newThisWeek(home.createdAt, community.createdAt, now) }));
     // The starting price the builder states, else the cheapest home shown (Oct 26, Peter: some markers showed no
@@ -1098,10 +1117,11 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
   // Three reads for the whole list (incentives, homes, photos), however many communities there are.
   const ids = communities.map((community) => community.id);
   const homesStartedAt = Date.now();
-  const [incentives, allHomes, heldLine] = await Promise.all([
+  const [incentives, allHomes, heldLine, modelCovers] = await Promise.all([
     liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
     db.select().from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
     heldLineCommunities(db, ids, now, settings.incentiveLapseDays),
+    modelCoverPhotos(db, ids),
   ]);
   const homesBy = groupBy(allHomes, (home) => home.communityId);
   const shownHomes = new Map(communities.map((community) => [community.id, selectDealCatalogHomes(homesBy.get(community.id) ?? [])]));
@@ -1162,6 +1182,8 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
       pin: (() => { const geometry = areaMapGeometry(community, "gated", gatedRadius); return geometry ? regionPin(geometry.center) : null; })(),
       fromPrice: community.fromPrice,
       reelUrl: community.reelUrl,
+      // The model home's photo (Oct 28), when there is one; the page otherwise covers the community with its cheapest home.
+      cover: modelCovers.has(community.id) ? `/deals/mine/img/${modelCovers.get(community.id)}?s=card` : null,
       updatedAt: (community.catalogUpdatedAt ?? community.lastSuccessfulSyncAt ?? community.createdAt).toISOString(),
       // A held offer shows the neutral line only (the team reads the held text in Admin).
       incentive: incentive ? (() => { const shown = rateDisclosedIncentive(incentive); return shown ? publicIncentive(shown, scrub, full) : null; })() : heldLine.has(community.id) ? heldIncentivePublicEntry(heldLine.get(community.id)) : null,

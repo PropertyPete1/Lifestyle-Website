@@ -582,7 +582,7 @@ export type LandingActions = { openHome: (key: string, focus?: SheetFocus) => bo
 /** What a caller's own list (the unlocked list's flat home list) gets: the communities in view and how to open one. */
 export type BrowseListContext = { keys: ReadonlySet<string>; open: (key: string, focus?: SheetFocus) => void; hover: (key: string | null) => void; activeKey: string | null };
 
-export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6" }: {
+export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6", mapSide = "right" }: {
   communities: readonly LandingCommunity[]; onUnlock?: () => void; useHomes: UseCommunityHomes;
   /** The sheet's pieces for an unlocked list (see SheetOptions). */
   sheet?: SheetOptions;
@@ -594,6 +594,8 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   renderList?: (context: BrowseListContext) => ReactNode;
   /** Where the phone's floating Map button sits (the team page lifts it above its pick tray). */
   floatingMapBottom?: string;
+  /** Oct 28, 2026: the unlocked list puts the map on the left, like New Home Buddy; the landing page keeps it on the right. */
+  mapSide?: "left" | "right";
   /** A shared link's community (?k=key): its sheet opens once the catalog has it. */
   openKey?: string | null;
   /** Shown at the top of the list column (the featured row); a function gets the actions above. */
@@ -663,7 +665,7 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   const mapProps = { items: keyed, activeKey, onHover: setActiveKey, onSelect: selectMarker, selectedId: selected?.id ?? null };
   const map = <RegionMap {...mapProps} className="h-[65vh] w-full" />;
   return <>
-    <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(360px,42%)]">
+    <div className={`mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 ${mapSide === "left" ? "mt-3 gap-4 lg:grid-cols-[minmax(360px,44%)_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,1fr)_minmax(360px,42%)]"}`}>
       <div className="min-w-0">
         {/* On a phone the map button sits right under the search, before the featured row (Peter: map and search first). */}
         <div ref={phoneMapTop} className="mb-4 flex min-w-0 scroll-mt-2 flex-wrap items-center gap-2 lg:hidden">
@@ -688,7 +690,7 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
       </div>
       {mapButtonAway && <button type="button" onClick={openPhoneMap} data-deals-floating-map="true" className={`fixed ${floatingMapBottom} left-1/2 z-30 inline-flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-5 text-sm font-semibold text-background shadow-xl lg:hidden`}><MapPin className="h-4 w-4" />{LANDING_COPY.mapButton}</button>}
       {/* The map fills the side of the screen and stays there while the list scrolls (no empty space under it). */}
-      <aside className="hidden min-w-0 lg:block"><div className="sticky top-0 h-[100dvh] py-4"><RegionMap {...mapProps} className="h-full w-full" /></div></aside>
+      <aside className={`hidden min-w-0 lg:block ${mapSide === "left" ? "lg:order-first" : ""}`} data-deals-map-side={mapSide}><div className={`sticky top-0 h-[100dvh] ${mapSide === "left" ? "py-2" : "py-4"}`}><RegionMap {...mapProps} className="h-full w-full" /></div></aside>
     </div>
     {open && <CommunitySheet community={open} useHomes={useHomes} filters={filters} focus={focus} options={sheet} onClose={() => setOpen(null)} onUnlock={onUnlock ? () => { setOpen(null); onUnlock(); } : undefined} />}
   </>;

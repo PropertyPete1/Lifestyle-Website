@@ -470,3 +470,16 @@ describe("home search (Oct 27: New Home Buddy's search by address)", async () =>
     for (const needle of ["monte carmel", "kemp", "sienna lakes", "chesmar", "converse", "east san antonio"]) expect(text).toContain(needle);
   });
 });
+
+describe("home status like New Home Buddy (Oct 28)", async () => {
+  const { homeStatusLabel } = await import("../client/src/components/deals/GatedCatalog");
+  it("words a plan, a ready home and one under construction", () => {
+    const now = new Date(Date.UTC(2026, 9, 28));
+    expect(homeStatusLabel({ kind: "to_be_built", moveInDate: null }, now)).toBe("Build new");
+    expect(homeStatusLabel({ kind: "quick_move_in", moveInDate: null }, now)).toBe("Move-in ready");
+    expect(homeStatusLabel({ kind: "quick_move_in", moveInDate: "2026-11-15" }, now)).toBe("Ready Nov 2026");
+    expect(homeStatusLabel({ kind: "quick_move_in", moveInDate: "2026-10-01" }, now)).toBe("Move-in ready");
+    expect(homeStatusLabel({ kind: "quick_move_in", moveInDate: "Ready Now" }, now)).toBe("Move-in ready");
+    expect(homeStatusLabel({ kind: "quick_move_in", moveInDate: "December 2026" }, now)).toBe("Ready December 2026");
+  });
+});

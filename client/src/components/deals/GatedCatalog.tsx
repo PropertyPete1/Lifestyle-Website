@@ -303,6 +303,23 @@ export function addressLines(address: string | null | undefined): { street: stri
   return street ? { street, city: rest.length ? rest.join(", ") : null } : null;
 }
 
+/**
+ * A home's status the way New Home Buddy words it: "Build new" for a plan, "Move-in ready" when it is ready now, and
+ * "Ready Nov 2026" for a home under construction (an ISO date from the builder is shown as month and year).
+ */
+export function homeStatusLabel(home: Pick<GatedHome, "kind" | "moveInDate">, now = new Date()): string {
+  if (home.kind === "to_be_built") return HOME_LIST_COPY.build;
+  const raw = home.moveInDate?.trim();
+  if (!raw) return HOME_LIST_COPY.moveIn;
+  const iso = /^(\d{4})-(\d{2})(?:-(\d{2}))?/.exec(raw);
+  if (iso) {
+    const date = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3] ?? 1)));
+    if (date.getTime() <= now.getTime()) return HOME_LIST_COPY.moveIn;
+    return `Ready ${new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone: "UTC" }).format(date)}`;
+  }
+  return /now|ready|complete|available/i.test(raw) ? HOME_LIST_COPY.moveIn : `Ready ${raw}`;
+}
+
 /** One home in the flat list, like a New Home Buddy card: photo, price, where, and the specs at a glance. */
 export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving, onSave }: { home: GatedHome; community: GatedCommunity; onOpen: () => void; onHover?: (on: boolean) => void; pick?: PickControl; saved?: boolean; saving?: boolean; onSave?: (card: string, saved: boolean) => void }) {
   const [failed, setFailed] = useState(false);
@@ -324,6 +341,7 @@ export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving
       <div className="relative aspect-[16/10] w-full overflow-hidden bg-secondary">
         {photo ? <RetryImage src={photo} alt="" loading="lazy" decoding="async" draggable={false} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
           : <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">{HOME_LIST_COPY.noPhoto}</div>}
+        {community.details?.builderName && <span data-deals-tile-builder="true" className="pointer-events-none absolute bottom-2 right-2 max-w-[60%] truncate rounded-sm bg-white/95 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-foreground shadow">{community.details.builderName}</span>}
         <div className="pointer-events-none absolute left-2 top-2 flex flex-wrap gap-1">
           {/* One badge for a cut price: red for a Red Hot Deal, green like New Home Buddy's for any other drop. */}
           {drop > 0 && <span data-deals-tile-drop={redHotDeal(home.price ?? null, home.previousPrice ?? null) ? "red-hot" : "drop"} className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-white shadow ${redHotDeal(home.price ?? null, home.previousPrice ?? null) ? "bg-red-600" : "bg-emerald-700"}`}>{redHotDeal(home.price ?? null, home.previousPrice ?? null) ? <Flame className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}{money.format(drop)}</span>}
@@ -333,7 +351,7 @@ export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving
       <div className="min-w-0 p-3">
         <div className="flex min-w-0 items-start justify-between gap-2"><p className="min-w-0 truncate text-sm font-medium text-foreground">{title}</p><p className="max-w-[48%] shrink-0 truncate text-right text-xs text-muted-foreground" title={place}>{place}</p></div>
         {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
-        <p className="mt-2 flex min-w-0 flex-wrap items-baseline gap-x-2"><span className="text-xl font-semibold leading-none">{home.price ? money.format(home.price) : "Ask for pricing"}</span><span className="text-xs text-muted-foreground">{home.kind === "to_be_built" ? HOME_LIST_COPY.build : home.moveInDate ? `Ready ${home.moveInDate}` : HOME_LIST_COPY.moveIn}</span></p>
+        <p className="mt-2 flex min-w-0 flex-wrap items-baseline gap-x-2">{home.kind === "to_be_built" && home.price ? <span className="text-xs text-muted-foreground">Starting from</span> : null}<span className="text-xl font-semibold leading-none">{home.price ? money.format(home.price) : "Ask for pricing"}</span><span className="text-xs text-muted-foreground">{homeStatusLabel(home)}</span></p>
         {specs.length > 0 && <p className="mt-1.5 flex flex-wrap gap-x-3 text-xs text-muted-foreground">{specs.map(({ icon: Icon, text }) => <span key={text} className="inline-flex items-center gap-1"><Icon className="h-3.5 w-3.5" />{text}</span>)}</p>}
       </div>
     </button>
@@ -388,7 +406,7 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
       <div className="text-left sm:text-right">
         <p className="text-3xl font-semibold leading-none">{home.price ? money.format(home.price) : "Ask for pricing"}</p>
         <RedHotSavings price={home.price} previousPrice={home.previousPrice} />
-        <p className="mt-1 text-sm text-muted-foreground">{toBeBuilt ? HOME_LIST_COPY.build : home.moveInDate ? `Est. move-in ${home.moveInDate}` : HOME_LIST_COPY.moveIn}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{homeStatusLabel(home)}</p>
       </div>
     </div>
     <div className="mt-4 flex flex-wrap items-stretch gap-3">
@@ -502,11 +520,13 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
     return () => window.cancelAnimationFrame(frame);
   }, [pendingCard, opened, pages, filters]);
   return <main data-deals-gated="true" style={identityPatternStyle(lead.display)} className="deals-light min-h-screen max-w-full overflow-x-clip bg-background [overflow-anchor:none]">
-    <header className="deals-chrome flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link><span className="flex items-center gap-4 text-xs text-gold">{lead.teamPreview && <Link href="/deals/team" className="inline-flex min-h-11 items-center underline-offset-4 hover:underline">Agent tools</Link>}<span><Clock3 className="mr-1 inline h-3.5 w-3.5" /> <Countdown expiresAt={lead.expiresAt} now={now} onExpire={onExpire} /></span></span></header>
-    <section className={many ? "px-4 py-6 sm:px-6" : "px-5 py-10 sm:px-8"}><div className={`mx-auto ${many ? "max-w-[1600px]" : "max-w-5xl"}`}>
+    <header className={`deals-chrome flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 ${many ? "px-4 py-3 sm:px-6" : "px-5 py-5"}`}><span className="flex min-w-0 items-center gap-4"><Link href="/" className="shrink-0 font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link>
+      {/* Oct 28, 2026 (New Home Buddy: "Lifestyle Design Realty's New Home Search / Prepared by" sits in the header bar). */}
+      {many && <span className="hidden min-w-0 border-l border-white/20 pl-4 sm:block" data-deals-header-title="true"><span className="block text-[10px] uppercase tracking-[0.2em] text-gold">{eyebrow}</span><h1 className="truncate font-serif text-lg leading-tight">Prepared for {lead.display}</h1></span>}</span><span className="flex items-center gap-4 text-xs text-gold">{lead.teamPreview && <Link href="/deals/team" className="inline-flex min-h-11 items-center underline-offset-4 hover:underline">Agent tools</Link>}<span><Clock3 className="mr-1 inline h-3.5 w-3.5" /> <Countdown expiresAt={lead.expiresAt} now={now} onExpire={onExpire} /></span></span></header>
+    <section className={many ? "px-4 py-3 sm:px-6" : "px-5 py-10 sm:px-8"}><div className={`mx-auto ${many ? "max-w-[1600px]" : "max-w-5xl"}`}>
       {many
         // Oct 27, 2026 (New Home Buddy: a title line, then straight to the homes): one line instead of a hero heading.
-        ? <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1"><p className="eyebrow text-gold">{eyebrow}</p><h1 className="min-w-0 break-words font-serif text-2xl">Prepared for {lead.display}</h1><p className="text-xs text-muted-foreground">Updated {formatChicagoDate(updatedAt)} · access <Countdown expiresAt={lead.expiresAt} now={now} /></p></div>
+        ? <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:hidden"><p className="eyebrow text-gold">{eyebrow}</p><p className="min-w-0 break-words font-serif text-xl">Prepared for {lead.display}</p></div>
         : <div className="border-b border-border pb-7"><p className="eyebrow text-gold">{eyebrow}</p><h1 className="mt-2 break-words text-4xl sm:text-5xl">Prepared for {lead.display}</h1><p className="mt-3 text-sm text-muted-foreground">Updated {formatChicagoDate(updatedAt)}. Your access expires in <Countdown expiresAt={lead.expiresAt} now={now} />.</p></div>}
       <div>{agent && !lead.teamPreview && <p className="mt-3 text-sm text-foreground" data-deals-agent-note="true">Shared with you by {agent.name}. Tap Save on any home and {agent.firstName ?? "your agent"} hears about it right away.{agent.phone ? ` Questions? Text ${agent.firstName ?? agent.name} at ${agent.phone}.` : ""}</p>}</div>
       {tools}
@@ -537,7 +557,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
           </div>
           </div>
         </div>
-        <LandingBrowse communities={landing} lookup={landingAll} floatingMapBottom={pick && pick.picked.size > 0 ? "bottom-24" : "bottom-6"} useHomes={useSheetHomes} filters={{ ...EMPTY_FILTERS, sort: filters.sort }}
+        <LandingBrowse mapSide="left" communities={landing} lookup={landingAll} floatingMapBottom={pick && pick.picked.size > 0 ? "bottom-24" : "bottom-6"} useHomes={useSheetHomes} filters={{ ...EMPTY_FILTERS, sort: filters.sort }}
           renderList={listView === "homes" ? (context) => <HomeList entries={homeEntries} context={context} pick={pick} savedSet={savedSet} savingCard={savingCard} onSave={onSave} /> : undefined}
           onOpenCommunity={(key) => { const community = byKey.get(key); if (community?.key && onViewCommunity && !reported.has(key)) { reported.add(key); onViewCommunity(community.key); } }}
           top={listView === "homes" ? undefined : (actions) => <FeaturedDeals featured={featured} onSelect={(deal) => {

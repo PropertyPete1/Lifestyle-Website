@@ -61,10 +61,11 @@ function NumberSelect({ label, value, options, any, format, onChange }: { label:
   </label>;
 }
 
-const COMPACT_SELECT = "min-h-10 min-w-0 max-w-[13rem] rounded-full border border-input bg-card px-3 text-sm text-foreground";
+/** Fixed widths: a native select is otherwise as wide as its longest option ("All of the San Antonio area (420)"). */
+const COMPACT_SELECT = "min-h-10 min-w-0 w-[7.5rem] rounded-full border border-input bg-card px-3 text-sm text-foreground";
 /** A select whose empty choice is its own name ("Min price"), so the row needs no labels above it. */
-function CompactNumber({ label, value, options, format, onChange }: { label: string; value: number | null; options: readonly number[]; format: (value: number) => string; onChange: (value: number | null) => void }) {
-  return <select aria-label={label} value={value ?? ""} onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)} className={`${COMPACT_SELECT} ${value !== null ? "border-gold text-gold" : ""}`}>
+function CompactNumber({ label, value, options, format, onChange, wide = false }: { label: string; value: number | null; options: readonly number[]; format: (value: number) => string; onChange: (value: number | null) => void; wide?: boolean }) {
+  return <select aria-label={label} value={value ?? ""} onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)} className={`${COMPACT_SELECT} ${wide ? "w-[8.75rem]" : ""} ${value !== null ? "border-gold text-gold" : ""}`}>
     <option value="">{label}</option>
     {options.map((option) => <option key={option} value={option}>{format(option)}</option>)}
   </select>;
@@ -141,7 +142,7 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
     return <section aria-label={BROWSE_COPY.heading} data-deals-browse="true" data-deals-browse-compact="true" className="min-w-0 border-b border-border py-2">
       {/* A phone scrolls the row sideways (one line, like New Home Buddy's chips) instead of stacking five rows. */}
       <div className="-mx-4 flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 [&>*]:shrink-0">
-        <select aria-label={BROWSE_COPY.area} value={filters.area} onChange={(event) => set({ area: event.target.value })} className={COMPACT_SELECT}>
+        <select aria-label={BROWSE_COPY.area} value={filters.area} onChange={(event) => set({ area: event.target.value })} className={`${COMPACT_SELECT} w-[10rem] ${filters.area ? "border-gold text-gold" : ""}`}>
           <option value="">{BROWSE_COPY.anyArea}</option>
           {groups.length === 1
             ? groups[0]!.choices.map((choice) => <option key={choice.area} value={choice.area}>{choice.area} ({choice.count})</option>)
@@ -150,17 +151,17 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
               {group.choices.map((choice) => <option key={choice.area} value={choice.area}>{choice.area} ({choice.count})</option>)}
             </optgroup>)}
         </select>
-        <CompactNumber label={BROWSE_COPY.minPrice} value={filters.minPrice} options={PRICE_FLOORS} format={(value) => `${priceCapLabel(value)}+`} onChange={setMin} />
-        <CompactNumber label={BROWSE_COPY.price} value={filters.maxPrice} options={PRICE_CAPS} format={(value) => `Under ${priceCapLabel(value)}`} onChange={setMax} />
+        <CompactNumber label={BROWSE_COPY.minPrice} value={filters.minPrice} options={PRICE_FLOORS} format={(value) => `${priceCapLabel(value)}+`} onChange={setMin} wide />
+        <CompactNumber label={BROWSE_COPY.price} value={filters.maxPrice} options={PRICE_CAPS} format={(value) => `Under ${priceCapLabel(value)}`} onChange={setMax} wide />
         <CompactNumber label="Beds" value={filters.minBeds} options={BED_MINIMUMS} format={(value) => `${value}+ beds`} onChange={(minBeds) => set({ minBeds })} />
         <CompactNumber label="Baths" value={filters.minBaths} options={BATH_MINIMUMS} format={(value) => `${value}+ baths`} onChange={(minBaths) => set({ minBaths })} />
-        {builders.length > 0 && <select aria-label={BROWSE_COPY.builder} data-deals-builder-filter="true" value={filters.builder} onChange={(event) => set({ builder: event.target.value })} className={COMPACT_SELECT}>
+        {builders.length > 0 && <select aria-label={BROWSE_COPY.builder} data-deals-builder-filter="true" value={filters.builder} onChange={(event) => set({ builder: event.target.value })} className={`${COMPACT_SELECT} w-[9.5rem] ${filters.builder ? "border-gold text-gold" : ""}`}>
           <option value="">{BROWSE_COPY.anyBuilder}</option>
           {builders.map((choice) => <option key={choice.builder} value={choice.builder}>{choice.builder} ({choice.count})</option>)}
         </select>}
         {savedCount > 0 && <button type="button" aria-pressed={filters.savedOnly} data-deals-filter="saved" onClick={() => set({ savedOnly: !filters.savedOnly })} className={pill(filters.savedOnly)}>{BROWSE_COPY.saved} ({savedCount})</button>}
         <button type="button" aria-pressed={filters.redHot} data-deals-filter="red-hot" onClick={() => set({ redHot: !filters.redHot })} className={`inline-flex min-h-10 items-center gap-1 rounded-full border px-3 text-sm font-semibold ${filters.redHot ? "border-red-600 bg-red-600 text-white" : "border-red-600/50 bg-card text-red-600"}`}><Flame className="h-4 w-4" />{BROWSE_COPY.redHot}</button>
-        {showNew && <button type="button" aria-pressed={filters.newOnly} data-deals-filter="new" onClick={() => set({ newOnly: !filters.newOnly })} className={pill(filters.newOnly)}><Sparkles className="h-4 w-4" />{BROWSE_COPY.newThisWeek}</button>}
+        {showNew && <button type="button" aria-pressed={filters.newOnly} data-deals-filter="new" onClick={() => set({ newOnly: !filters.newOnly })} className={pill(filters.newOnly)}><Sparkles className="h-4 w-4" />New</button>}
         <button type="button" aria-pressed={filters.moveInReady} data-deals-filter="move-in-ready" onClick={() => set({ moveInReady: !filters.moveInReady })} className={pill(filters.moveInReady)}>{BROWSE_COPY.moveInReady}</button>
         <button type="button" aria-expanded={moreOpen} data-deals-filter="more" onClick={() => setMoreOpen((value) => !value)} className={pill(more > 0 || moreOpen)}><SlidersHorizontal className="h-4 w-4" />More{more > 0 && <span className="rounded-full bg-gold px-1.5 text-[11px] font-semibold text-primary-foreground">{more}</span>}</button>
         {active > 0 && <button type="button" onClick={() => onChange({ ...EMPTY_FILTERS, sort: filters.sort })} className="inline-flex min-h-10 items-center gap-1 px-2 text-xs uppercase tracking-widest text-muted-foreground hover:text-gold"><X className="h-3.5 w-3.5" />{BROWSE_COPY.clear}</button>}

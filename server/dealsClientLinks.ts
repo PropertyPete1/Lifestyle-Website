@@ -584,11 +584,14 @@ const ASSIGNED_MAX = 60;
 
 type HomeDescriber = (homeId: number | null, card?: string) => { card: string; description: string; price: number | null; communityLabel: string };
 async function homeDescriber(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, homeIds: number[], pickCards: Set<string> = new Set()): Promise<HomeDescriber> {
-  const homes = [
-    ...(homeIds.length ? await db.select().from(dealHomes).where(inArray(dealHomes.id, homeIds)) : []),
-    // Picks are stored as card handles, so the available homes are scanned for the ones that match.
-    ...(pickCards.size ? (await db.select().from(dealHomes).where(eq(dealHomes.status, "available"))).filter((home) => pickCards.has(dealsCardHandle(home.sourceKey)) && !homeIds.includes(home.id)) : []),
-  ];
+  // Picks are stored as card handles, so the available homes' keys are scanned for the ones that match (two narrow
+  // columns, not every column of every home), and only the matches are read in full with the requested homes.
+  const pickIds = pickCards.size
+    ? (await db.select({ id: dealHomes.id, sourceKey: dealHomes.sourceKey }).from(dealHomes).where(eq(dealHomes.status, "available")))
+      .filter((home) => pickCards.has(dealsCardHandle(home.sourceKey)) && !homeIds.includes(home.id)).map((home) => home.id)
+    : [];
+  const wanted = [...homeIds, ...pickIds];
+  const homes = wanted.length ? await db.select().from(dealHomes).where(inArray(dealHomes.id, wanted)) : [];
   const communityIds = Array.from(new Set(homes.map((home) => home.communityId)));
   const communities = communityIds.length ? await db.select({ id: dealCommunities.id, publicLabel: dealCommunities.publicLabel, privateName: dealCommunities.privateName }).from(dealCommunities).where(inArray(dealCommunities.id, communityIds)) : [];
   return (homeId, card) => {

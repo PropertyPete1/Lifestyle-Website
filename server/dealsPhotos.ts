@@ -1992,7 +1992,8 @@ export async function renderDealPhotoForPublic(photoId: number): Promise<Rendere
         .toBuffer({ resolveWithObject: true });
       const rendered = await sharp(resized.data)
         .composite([{ input: tiledWatermarkSvg("Lifestyle Design Realty", resized.info.width, resized.info.height), gravity: "center" }])
-        .webp({ quality: 82, effort: 4, smartSubsample: true })
+        // Oct 28, 2026: effort 2 like the list's card renders (a visitor waits on the first render of each photo).
+        .webp({ quality: 82, effort: 2, smartSubsample: true })
         .toBuffer();
       const value = { data: rendered, contentType: "image/webp" };
       renderMemory.set(cacheVersion, value);

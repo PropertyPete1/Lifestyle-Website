@@ -296,7 +296,7 @@ export const HOME_LIST_COPY = {
   picked: "Picked",
   noPhoto: "Photos on request",
 } as const;
-const HOME_PAGE = 24;
+export const HOME_PAGE = 24;
 
 /** The street line and the city line of a full address ("118 Main St, San Antonio, TX 78263"). */
 export function addressLines(address: string | null | undefined): { street: string; city: string | null } | null {
@@ -370,7 +370,7 @@ export function cardPhoto(src: string): string {
 }
 
 /** One home in the flat list, like a New Home Buddy card: photo, price, where, and the specs at a glance. */
-export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving, onSave }: { home: GatedHome; community: GatedCommunity; onOpen: () => void; onHover?: (on: boolean) => void; pick?: PickControl; saved?: boolean; saving?: boolean; onSave?: (card: string, saved: boolean) => void }) {
+export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving, onSave, photoPending = false }: { home: GatedHome; community: GatedCommunity; onOpen: () => void; onHover?: (on: boolean) => void; pick?: PickControl; saved?: boolean; saving?: boolean; onSave?: (card: string, saved: boolean) => void; /** The photo is still on its way (the public list reads it per community): a grey frame, not "Photos on request". */ photoPending?: boolean }) {
   const [failed, setFailed] = useState(false);
   const photo = !failed && home.photos?.[0] ? cardPhoto(home.photos[0]) : undefined;
   const lines = addressLines(home.details?.address);
@@ -389,6 +389,7 @@ export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving
     <button type="button" onClick={onOpen} className="block w-full min-w-0 text-left" aria-label={`${title}, ${home.price ? money.format(home.price) : "price on request"}. Open details`}>
       <div className="relative aspect-[16/10] w-full overflow-hidden bg-secondary">
         {photo ? <RetryImage src={photo} alt="" loading="lazy" decoding="async" draggable={false} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
+          : photoPending ? <div className="h-full w-full animate-pulse bg-foreground/[0.06]" aria-hidden="true" />
           : <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">{HOME_LIST_COPY.noPhoto}</div>}
         {community.details?.builderName && <span data-deals-tile-builder="true" className="pointer-events-none absolute bottom-2 right-2 max-w-[60%] truncate rounded-sm bg-white/95 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-foreground shadow">{community.details.builderName}</span>}
         <div className="pointer-events-none absolute left-2 top-2 flex flex-wrap gap-1">

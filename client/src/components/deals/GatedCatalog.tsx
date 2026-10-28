@@ -489,6 +489,8 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
   const [listView, setListView] = useState<"homes" | "communities">("homes");
   // New Home Buddy's "Search homes by address": a street, plan, community or builder narrows the homes.
   const [homeQuery, setHomeQuery] = useState("");
+  // The communities a map bubble narrowed the list to; the count in the results bar follows it.
+  const [areaKeys, setAreaKeys] = useState<ReadonlySet<string> | null>(null);
   const homeEntries = useMemo(() => {
     const needle = homeQuery.trim().toLowerCase();
     const entries = matching.flatMap(({ community, key, homes }) => homes.map((home) => ({ home, community, key })))
@@ -551,7 +553,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
       {(filters.savedOnly || savedOnList.size === 0) && savedGone > 0 && <p role="status" className="mt-3 text-xs text-muted-foreground" data-deals-saved-gone="true">{savedGone === 1 ? "1 home you saved is no longer available." : `${savedGone} homes you saved are no longer available.`}</p>}
       {(many || savedOnList.size > 0) && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{filters.savedOnly && savedOnList.size > 0 ? BROWSE_COPY.noneSaved : BROWSE_COPY.none}</p>}
         <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2" data-deals-results-bar="true">
-          <p className="text-sm font-semibold uppercase tracking-widest text-foreground" data-deals-result-count="true">{listView === "homes" ? HOME_LIST_COPY.count(homeQuery.trim() ? homeEntries.length : shownHomes) : `${matching.length} communities`}</p>
+          <p className="text-sm font-semibold uppercase tracking-widest text-foreground" data-deals-result-count="true">{listView === "homes" ? HOME_LIST_COPY.count(areaKeys ? homeEntries.filter((entry) => areaKeys.has(entry.key)).length : homeQuery.trim() ? homeEntries.length : shownHomes) : `${areaKeys ? areaKeys.size : matching.length} communities`}</p>
           {listView === "homes" && <label className="order-last w-full min-w-0 sm:order-none sm:w-auto sm:flex-1 sm:max-w-sm"><span className="sr-only">Search homes by address</span><input type="search" value={homeQuery} onChange={(event) => setHomeQuery(event.target.value)} placeholder="Search by address, plan, community or builder" data-deals-home-search="true" className="min-h-9 w-full rounded-full border border-border bg-card px-4 text-sm" /></label>}
           <div className="flex min-w-0 flex-nowrap items-center gap-2">
           <label className="inline-flex min-h-9 min-w-0 max-w-[9.5rem] items-center gap-1.5 rounded-full border border-border bg-card pl-3 text-xs text-foreground sm:max-w-none" data-deals-sort="true"><ArrowDownUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="sr-only">Sort</span>
@@ -562,7 +564,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
           </div>
           </div>
         </div>
-        <LandingBrowse mapSide="left" communities={landing} lookup={landingAll} floatingMapBottom={pick && pick.picked.size > 0 ? "bottom-24" : "bottom-6"} useHomes={useSheetHomes} filters={{ ...EMPTY_FILTERS, sort: filters.sort }}
+        <LandingBrowse mapSide="left" onAreaChange={(keys) => setAreaKeys(keys ? new Set(keys) : null)} areaStatus={listView === "homes" ? (keys) => { const inArea = new Set(keys); const homes = homeEntries.filter((entry) => inArea.has(entry.key)).length; return `Showing ${HOME_LIST_COPY.count(homes)} in this part of town`; } : undefined} communities={landing} lookup={landingAll} floatingMapBottom={pick && pick.picked.size > 0 ? "bottom-24" : "bottom-6"} useHomes={useSheetHomes} filters={{ ...EMPTY_FILTERS, sort: filters.sort }}
           renderList={listView === "homes" ? (context) => <HomeList entries={homeEntries} context={context} pick={pick} savedSet={savedSet} savingCard={savingCard} onSave={onSave} /> : undefined}
           onOpenCommunity={(key) => { const community = byKey.get(key); if (community?.key && onViewCommunity && !reported.has(key)) { reported.add(key); onViewCommunity(community.key); } }}
           top={listView === "homes" ? undefined : (actions) => <FeaturedDeals featured={featured} onSelect={(deal) => {

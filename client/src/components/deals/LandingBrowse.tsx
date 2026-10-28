@@ -582,7 +582,7 @@ export type LandingActions = { openHome: (key: string, focus?: SheetFocus) => bo
 /** What a caller's own list (the unlocked list's flat home list) gets: the communities in view and how to open one. */
 export type BrowseListContext = { keys: ReadonlySet<string>; open: (key: string, focus?: SheetFocus) => void; hover: (key: string | null) => void; activeKey: string | null };
 
-export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6", mapSide = "right" }: {
+export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6", mapSide = "right", areaStatus, onAreaChange }: {
   communities: readonly LandingCommunity[]; onUnlock?: () => void; useHomes: UseCommunityHomes;
   /** The sheet's pieces for an unlocked list (see SheetOptions). */
   sheet?: SheetOptions;
@@ -596,6 +596,10 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   floatingMapBottom?: string;
   /** Oct 28, 2026: the unlocked list puts the map on the left, like New Home Buddy; the landing page keeps it on the right. */
   mapSide?: "left" | "right";
+  /** The "Showing N in this part of town" line for a caller's own list (the home list counts homes, not communities). */
+  areaStatus?: (keys: readonly string[]) => string;
+  /** Told which communities a map bubble narrowed the list to (null when cleared), so the caller's count follows. */
+  onAreaChange?: (keys: readonly string[] | null) => void;
   /** A shared link's community (?k=key): its sheet opens once the catalog has it. */
   openKey?: string | null;
   /** Shown at the top of the list column (the featured row); a function gets the actions above. */
@@ -639,6 +643,8 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   // A marker group the current filters no longer show is let go.
   useEffect(() => { if (selected && !selected.keys.some((key) => keyed.some((item) => item.key === key))) setSelected(null); }, [keyed, selected]);
   const matching = selected ? keyed.filter((item) => selected.keys.includes(item.key)) : keyed;
+  const selectedSignature = selected ? selected.keys.join(",") : null;
+  useEffect(() => { onAreaChange?.(selectedSignature === null ? null : selectedSignature.split(",")); }, [selectedSignature]);
   const shown = matching.slice(0, pages * BROWSE_PAGE);
   const listTop = useRef<HTMLDivElement>(null);
   // A lone community's marker opens that community (its homes and photos); a group's marker narrows the list to it.
@@ -673,11 +679,11 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
         </div>
         {mapOnPhone && <div className="mb-6 lg:hidden">{map}
           {/* The bubble the visitor tapped narrows the list below; on a phone that is said right under the map. */}
-          {selected && <div role="status" data-deals-phone-area="true" className="mt-2 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-1 text-sm"><span>{LANDING_COPY.areaFilter(matching.length)}</span><button type="button" onClick={() => listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" })} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.seeList}</button><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-muted-foreground underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
+          {selected && <div role="status" data-deals-phone-area="true" className="mt-2 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-1 text-sm"><span>{(areaStatus ? areaStatus(matching.map((item) => item.key)) : LANDING_COPY.areaFilter(matching.length))}</span><button type="button" onClick={() => listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" })} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.seeList}</button><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-muted-foreground underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
         </div>}
         {top && <div className="mb-6 min-w-0">{typeof top === "function" ? top(actions) : top}</div>}
         <div ref={listTop} className="scroll-mt-4" />
-        {selected && <div role="status" className="mb-4 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-2 text-sm"><span>{LANDING_COPY.areaFilter(matching.length)}</span><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
+        {selected && <div role="status" className="mb-4 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-2 text-sm"><span>{(areaStatus ? areaStatus(matching.map((item) => item.key)) : LANDING_COPY.areaFilter(matching.length))}</span><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
         {renderList ? renderList({ keys: new Set(matching.map((item) => item.key)), open: (key, homeFocus) => { const community = keyed.find((item) => item.key === key) ?? lookup?.find((item) => item.key === key); if (community) { setFocus(homeFocus); setOpen(community); } }, hover: setActiveKey, activeKey }) : <>
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
           {shown.map((community) => <CommunityCard key={community.key} community={community} active={activeKey === community.key} onHover={(on) => setActiveKey(on ? community.key : null)} onOpen={() => { setFocus(undefined); setOpen(community); }} />)}

@@ -215,7 +215,12 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
 }
 
 /** "Show 12 more" under a long list. */
-export function ShowMore({ remaining, onClick }: { remaining: number; onClick: () => void }) {
+/** "Show 24 more of 5,662": the step is what one press adds (the home list adds 24, the community cards 12). */
+export function showMoreLabel(remaining: number, step: number = BROWSE_PAGE): string {
+  return remaining <= step ? `Show ${remaining} more` : `Show ${step} more of ${remaining.toLocaleString("en-US")}`;
+}
+
+export function ShowMore({ remaining, onClick, step = BROWSE_PAGE }: { remaining: number; onClick: () => void; step?: number }) {
   if (remaining <= 0) return null;
-  return <button type="button" onClick={onClick} data-deals-show-more="true" className="mx-auto mt-8 flex min-h-11 items-center border border-gold/45 px-6 text-xs uppercase tracking-widest text-gold hover:bg-gold/10">Show {Math.min(remaining, BROWSE_PAGE)} more of {remaining}</button>;
+  return <button type="button" onClick={onClick} data-deals-show-more="true" className="mx-auto mt-8 flex min-h-11 items-center border border-gold/45 px-6 text-xs uppercase tracking-widest text-gold hover:bg-gold/10">{showMoreLabel(remaining, step)}</button>;
 }

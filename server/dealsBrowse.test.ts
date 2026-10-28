@@ -232,6 +232,15 @@ describe("list order", () => {
   });
 });
 
+describe("the Show more button (Oct 28: it said 12 while the home list adds 24, and 5662 without a comma)", async () => {
+  const { showMoreLabel } = await import("../client/src/components/deals/BrowseBar");
+  it("names what one press adds and the rest with commas", () => {
+    expect(showMoreLabel(5662, 24)).toBe("Show 24 more of 5,662");
+    expect(showMoreLabel(16, 24)).toBe("Show 16 more");
+    expect(showMoreLabel(30)).toBe("Show 12 more of 30");
+  });
+});
+
 describe("a long private list", () => {
   const render = (communities: GatedCommunity[]) => renderToStaticMarkup(createElement(Router, { ssrPath: "/deals/mine" }, createElement(GatedCatalog, { lead, communities, now: NOW })));
 
@@ -243,7 +252,9 @@ describe("a long private list", () => {
     expect(html).not.toContain('data-deals-community="open"');
     expect(html).toContain('data-deals-list-view="communities"');
     expect(html).toContain(">40 homes<");
-    expect(html).toContain("Show 12 more of 16");
+    // One press adds the 16 left (the home list steps 24 at a time; it said "Show 12 more of 16" before, Oct 28).
+    expect(html).toContain("Show 16 more");
+    expect(html).not.toContain("Show 12 more");
     // The cheapest homes' community leads nothing on its own: homes are what the list shows. No reel embeds on the list.
     expect(html.match(/instagram-media/g) ?? []).toHaveLength(0);
   });

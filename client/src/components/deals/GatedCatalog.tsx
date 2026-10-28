@@ -494,7 +494,7 @@ function HomeList({ entries, context, pick, savedSet, savingCard, onSave }: { en
       {shown.map(({ home, community, key }) => <HomeTile key={home.card} home={home} community={community} onOpen={() => context.open(key, { card: home.card })} onHover={(on) => context.hover(on ? key : null)} pick={pick} saved={savedSet.has(home.card)} saving={savingCard === home.card} onSave={onSave} />)}
     </div>
     <AutoMore key={shown.length} active={inView.length > shown.length} onNear={() => setPages((value) => value + 1)} />
-    <ShowMore remaining={inView.length - shown.length} onClick={() => setPages((value) => value + 1)} />
+    <ShowMore remaining={inView.length - shown.length} step={HOME_PAGE} onClick={() => setPages((value) => value + 1)} />
   </div>;
 }
 

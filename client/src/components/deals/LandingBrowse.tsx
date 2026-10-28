@@ -466,6 +466,8 @@ export type SheetOptions = {
   share?: boolean;
   /** The public area map under the offer; off when `area` draws the gated one. */
   publicAreaMap?: boolean;
+  /** Oct 27, 2026 (New Home Buddy opens a home on its photos): the opened home shown first, above the community. */
+  focusHero?: (home: PublicHome, community: LandingCommunity) => ReactNode;
 };
 
 export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters, focus, options = {} }: { community: LandingCommunity; onClose: () => void; onUnlock?: () => void; useHomes: UseCommunityHomes; /** The page's filters: the homes that match come first, the rest one tap away. */ filters?: BrowseFilters; focus?: SheetFocus; options?: SheetOptions }) {
@@ -503,11 +505,13 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
   const featuredHome = all.find((home) => isFocusHome(home, focus));
   const list = featuredHome ? [featuredHome, ...base.filter((home) => home !== featuredHome)] : base;
   const homesTop = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (featuredHome) window.setTimeout(() => homesTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 250); }, [featuredHome]);
+  // A featured home is scrolled to in the list, unless the sheet leads with it (the unlocked list's home hero).
+  useEffect(() => { if (featuredHome && !options.focusHero) window.setTimeout(() => homesTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 250); }, [featuredHome]);
   // On document.body, so no section's stacking (or the page's floating button) can sit over the sheet.
   return createPortal(<div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 sm:items-center sm:p-6" onClick={onClose}>
     <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="deals-community-title" data-deals-community-sheet="true" onClick={(event) => event.stopPropagation()} className="deals-light relative max-h-[94vh] w-full max-w-6xl overflow-y-auto rounded-t-2xl bg-background shadow-2xl sm:rounded-2xl">
       <button ref={closeButton} type="button" onClick={onClose} aria-label={LANDING_COPY.close} className="absolute right-2 top-2 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-background/90 text-muted-foreground shadow hover:text-foreground"><X className="h-5 w-5" /></button>
+      {featuredHome && options.focusHero && <div className="border-b border-border" data-deals-focus-hero="true">{options.focusHero(featuredHome, community)}</div>}
       <div className="grid min-w-0 gap-6 p-5 sm:p-6 md:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
         <div className="mx-auto w-full min-w-0 max-w-[340px]"><ReelCard reelUrl={community.reelUrl} label={community.label} autoLoad poster={community.cover ?? null} /></div>
         <div className="min-w-0">

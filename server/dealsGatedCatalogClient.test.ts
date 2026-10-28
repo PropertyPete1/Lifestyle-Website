@@ -438,3 +438,24 @@ describe("the home cards of the unlocked list (Oct 27: New Home Buddy parity)", 
     expect(gatedAsLanding({ ...community, pin: { x: 0.5, y: 0.5 } }, "k1", [home as never])).toMatchObject({ key: "k1", fromPrice: 499_000, homesAvailable: 1, cover: "/deals/mine/img/1", pin: { x: 0.5, y: 0.5 } });
   });
 });
+
+describe("the opened home leads its sheet (Oct 27: New Home Buddy's home view)", async () => {
+  const { HomeHero } = await import("../client/src/components/deals/GatedCatalog");
+  const community = { label: "East | Homes", area: "East San Antonio", reelUrl: null, homes: [], details: { builderName: "Chesmar", communityName: "Sienna Lakes" } } as GatedCommunity;
+  const home = { card: "b".repeat(20), kind: "quick_move_in", beds: "4", baths: "3", sqft: 2776, price: 499_000, moveInDate: "Nov 2026", photos: ["/p/1", "/p/2", "/p/3", "/p/4", "/p/5", "/p/6"], details: { address: "118 Sienna Lakes Blvd, San Antonio, TX 78263" } };
+  it("shows a photo grid with See all, the address, the community by its builder, and Pick on a team list", () => {
+    const html = renderToStaticMarkup(createElement(HomeHero, { home, community, teamPreview: true, pick: { picked: new Set<string>(), onToggle: () => undefined } }));
+    expect(html).toContain('data-deals-hero-photos="6"');
+    expect(html).toContain("See all 6 photos");
+    expect(html).toContain("118 Sienna Lakes Blvd");
+    expect(html).toContain("San Antonio, TX 78263 · Sienna Lakes by Chesmar");
+    expect(html).toContain('data-deals-pick="unpicked"');
+    expect(html).not.toContain("Tour this home with us");
+  });
+  it("gives a client the tour button and no Pick", () => {
+    const html = renderToStaticMarkup(createElement(HomeHero, { home: { ...home, photos: [] }, community, teamPreview: false, onRequest: () => undefined }));
+    expect(html).toContain("Tour this home with us");
+    expect(html).not.toContain("data-deals-pick");
+    expect(html).toContain("Photos on request");
+  });
+});

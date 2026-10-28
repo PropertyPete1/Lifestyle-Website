@@ -343,6 +343,60 @@ export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving
   </article>;
 }
 
+/**
+ * Oct 27, 2026 (New Home Buddy opens a home on its photos): the home a card opened, shown first in its community's
+ * sheet: a photo grid (one big, four small, "See all"), the price and where, the specs, and the card's own buttons.
+ */
+export function HomeHero({ home, community, teamPreview, pick, saved, saving, onSave, onRequest }: { home: GatedHome; community: GatedCommunity; teamPreview: boolean; pick?: PickControl; saved?: boolean; saving?: boolean; onSave?: (card: string, saved: boolean) => void; onRequest?: (request: HomeRequest) => void }) {
+  const [shown, setShown] = useState<number | null>(null);
+  const [broken, setBroken] = useState<ReadonlySet<string>>(() => new Set());
+  const photos = (home.photos ?? []).filter((src) => !broken.has(src));
+  const lines = addressLines(home.details?.address);
+  const plan = home.details?.planName ?? null;
+  const title = lines?.street ?? (plan ? `${plan} plan` : community.label);
+  const place = [community.details?.communityName, community.details?.builderName].filter(Boolean).join(" by ") || community.area;
+  const toBeBuilt = home.kind === "to_be_built";
+  const picked = pick?.picked.has(home.card) ?? false;
+  const grid = photos.length >= 5;
+  const tile = (src: string, index: number, className: string) => <button key={src} type="button" onClick={() => setShown(index)} className={`relative min-h-0 min-w-0 overflow-hidden bg-secondary ${className}`} aria-label={`Photo ${index + 1} of ${photos.length}`}>
+    <RetryImage src={src} alt="" loading={index === 0 ? "eager" : "lazy"} decoding="async" draggable={false} onGiveUp={() => setBroken((current) => new Set(current).add(src))} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
+  </button>;
+  return <section aria-label={`${title}, the home you opened`} className="min-w-0 p-5 pt-14 sm:p-6 sm:pt-6">
+    {photos.length === 0
+      ? <div className="flex aspect-[16/7] w-full items-center justify-center rounded-xl bg-secondary text-sm text-muted-foreground">{PHOTOS_ON_REQUEST}</div>
+      : <div className={`relative grid h-[38vh] min-h-[220px] gap-1.5 overflow-hidden rounded-xl ${grid ? "grid-cols-4 grid-rows-2" : "grid-cols-1"}`} data-deals-hero-photos={photos.length}>
+          {grid ? <>{tile(photos[0]!, 0, "col-span-4 row-span-2 sm:col-span-2")}{photos.slice(1, 5).map((src, index) => tile(src, index + 1, "hidden sm:block"))}</> : tile(photos[0]!, 0, "")}
+          {photos.length > 1 && <button type="button" onClick={() => setShown(0)} className="absolute bottom-3 right-3 rounded-md bg-black/70 px-3 py-1.5 text-xs font-semibold text-white">See all {photos.length} photos</button>}
+        </div>}
+    <div className="mt-4 flex min-w-0 flex-wrap items-start justify-between gap-x-6 gap-y-2">
+      <div className="min-w-0">
+        <h2 className="break-words font-serif text-2xl leading-tight sm:text-3xl">{title}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{[lines?.city, place].filter(Boolean).join(" · ")}</p>
+        <p className="mt-2 text-sm text-foreground">{[home.beds && `${home.beds} beds`, home.baths && `${home.baths} baths`, home.sqft && `${home.sqft.toLocaleString("en-US")} sq ft`, numberFrom(home.garage) && `${numberFrom(home.garage)}-car garage`, home.stories && `${home.stories} ${home.stories === 1 ? "story" : "stories"}`, home.lotSize && `Lot ${home.lotSize}`].filter(Boolean).join(" · ")}</p>
+      </div>
+      <div className="text-left sm:text-right">
+        <p className="text-3xl font-semibold leading-none">{home.price ? money.format(home.price) : "Ask for pricing"}</p>
+        <RedHotSavings price={home.price} previousPrice={home.previousPrice} />
+        <p className="mt-1 text-sm text-muted-foreground">{toBeBuilt ? HOME_LIST_COPY.build : home.moveInDate ? `Est. move-in ${home.moveInDate}` : HOME_LIST_COPY.moveIn}</p>
+      </div>
+    </div>
+    <div className="mt-4 flex flex-wrap items-stretch gap-3">
+      {onSave && <SaveButton saved={Boolean(saved)} saving={saving} onToggle={() => onSave(home.card, !saved)} />}
+      {pick && <PickButton picked={picked} onToggle={() => pick.onToggle(home.card)} />}
+      {!teamPreview && <Button type="button" onClick={() => onRequest?.({ card: home.card, requestType: toBeBuilt ? "ask" : "tour" })} className="h-auto min-h-11 whitespace-normal bg-gold px-6 text-primary-foreground">{toBeBuilt ? "Ask about this one" : "Tour this home with us"}</Button>}
+      {home.details?.builderPage && <a href={home.details.builderPage} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-1 px-2 text-xs uppercase tracking-widest text-gold underline-offset-4 hover:underline">Builder page <ExternalLink className="h-3.5 w-3.5" /></a>}
+    </div>
+    {shown !== null && photos[shown] && <div role="dialog" aria-modal="true" aria-label="Photos" data-deals-photo-viewer="true" className="fixed inset-0 z-[110] flex flex-col bg-black/95" onClick={() => setShown(null)}>
+      <div className="flex items-center justify-between p-3 text-sm text-white"><span>{shown + 1} / {photos.length}</span><button type="button" onClick={() => setShown(null)} aria-label="Close photos" className="flex h-11 w-11 items-center justify-center"><X className="h-6 w-6" /></button></div>
+      <div className="relative flex min-h-0 flex-1 items-center justify-center px-2 pb-6" onClick={(event) => event.stopPropagation()}>
+        <RetryImage key={photos[shown]} src={photos[shown]!} alt={`Photo ${shown + 1} of ${photos.length}`} draggable={false} onContextMenu={(event) => event.preventDefault()} className="max-h-full max-w-full select-none object-contain" />
+        {photos.length > 1 && <><button type="button" aria-label="Previous photo" onClick={() => setShown((shown + photos.length - 1) % photos.length)} className="absolute left-3 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-2xl text-white">‹</button>
+        <button type="button" aria-label="Next photo" onClick={() => setShown((shown + 1) % photos.length)} className="absolute right-3 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/15 text-2xl text-white">›</button></>}
+      </div>
+    </div>}
+  </section>;
+}
+
 /** The flat list: every matching home in the communities in view, sorted, 24 at a time as the reader scrolls. */
 function HomeList({ entries, context, pick, savedSet, savingCard, onSave }: { entries: ReadonlyArray<{ home: GatedHome; community: GatedCommunity; key: string }>; context: BrowseListContext; pick?: PickControl; savedSet: Set<string>; savingCard?: string | null; onSave?: (card: string, saved: boolean) => void }) {
   const inView = entries.filter((entry) => context.keys.has(entry.key));
@@ -473,6 +527,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
           }} />}
           sheet={{
             unlock: false, share: false, publicAreaMap: false,
+            focusHero: (home, item) => { const community = item.key ? byKey.get(item.key) : undefined; return community ? <HomeHero home={home as unknown as GatedHome} community={community} teamPreview={lead.teamPreview} pick={pick} saved={savedSet.has(home.card)} saving={savingCard === home.card} onSave={onSave} onRequest={onRequest} /> : null; },
             details: (item) => { const community = item.key ? byKey.get(item.key) : undefined; return community ? <><CommunityDetails details={community.details} />{community.lotSizes && <p className="mt-2 text-sm text-muted-foreground">{community.lotSizes}</p>}</> : null; },
             area: (item) => { const community = item.key ? byKey.get(item.key) : undefined; return community ? <><AreaMap chips={community.driveTimes} map={community.areaMap} />{community.amenities && community.amenities.length > 0 && <div className="mt-4 flex flex-wrap gap-2">{community.amenities.map((amenity) => <span key={amenity} className="border border-border px-3 py-1.5 text-xs text-muted-foreground">{amenity}</span>)}</div>}</> : null; },
             renderHome: (home, featuredHome) => <div className={featuredHome ? "ring-2 ring-gold/60" : undefined} data-deals-featured-home={featuredHome ? "true" : undefined}><HomeCard home={home as unknown as GatedHome} teamPreview={lead.teamPreview} saved={savedSet.has(home.card)} saving={savingCard === home.card} onRequest={onRequest} onSave={onSave} pick={pick} /></div>,

@@ -86,12 +86,15 @@ const MONTHS: Record<string, string> = { jan: "January", feb: "February", mar: "
 
 /**
  * "Oct 2026" -> "October 2026"; "Available Now" -> ready now; an empty value
- * -> a home for sale with no date. Any other wording ("Under Contract",
+ * or "Contact Us" -> a home for sale with no date. Any other wording ("Under Contract",
  * "Coming Soon", "TBD") is `unknown`: the home gets no status, so the sync
  * holds the run instead of publishing it as available.
  */
 export function pulteMoveIn(dateAvailable: string | null): { readyNow: boolean; moveInDate: string | null; unknown: boolean } {
   if (!dateAvailable) return { readyNow: false, moveInDate: null, unknown: false };
+  // Oct 29, 2026: one priced quick move-in home each at Corley Farms, Veramendi and Legacy at Lake Dunlap read "Contact
+  // Us", and the home's own page shows it in place of the anticipated completion date. A home for sale, no date yet.
+  if (/^contact\s+(?:us|sales)$/i.test(dateAvailable.trim())) return { readyNow: false, moveInDate: null, unknown: false };
   if (/^(?:available\s+now|move[- ]?in\s+ready|ready\s+now|available)$/i.test(dateAvailable.trim())) return { readyNow: true, moveInDate: null, unknown: false };
   const month = /^([A-Za-z]{3,9})\.?\s+(\d{4})$/.exec(dateAvailable.trim());
   if (month) { const name = MONTHS[month[1]!.toLowerCase().slice(0, 4)] ?? MONTHS[month[1]!.toLowerCase().slice(0, 3)]; if (name) return { readyNow: false, moveInDate: `${name} ${month[2]}`, unknown: false }; }

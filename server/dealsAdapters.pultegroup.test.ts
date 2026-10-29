@@ -71,6 +71,9 @@ describe("PulteGroup reader: record shapes", () => {
     expect(pulteMoveIn("Oct 2026")).toEqual({ readyNow: false, moveInDate: "October 2026", unknown: false });
     expect(pulteMoveIn("Sept 2026")).toEqual({ readyNow: false, moveInDate: "September 2026", unknown: false });
     expect(pulteMoveIn(null)).toEqual({ readyNow: false, moveInDate: null, unknown: false });
+    // "Contact Us" stands where the completion date goes (Oct 29): for sale, no date.
+    expect(pulteMoveIn("Contact Us")).toEqual({ readyNow: false, moveInDate: null, unknown: false });
+    expect(parsePulteQmi({ inventoryPageURL: "/homes/texas/x/y-1/plan-2/3", address: { street1: "1 Test Way", city: "Boerne", zipCode: "78006" }, price: 433040, finalPrice: 413040, dateAvailable: "Contact Us", soldDate: null }, "www.centex.com")?.status).toBe("Quick Move-In");
     // Wording the reader does not know is never published as a move-in date.
     for (const odd of ["Under Contract", "Pending", "Coming Soon", "TBD", "Model Home", "Not Available"]) expect(pulteMoveIn(odd)).toEqual({ readyNow: false, moveInDate: null, unknown: true });
     // A sale needs a real past date; .NET's default date and a future date are not sales.

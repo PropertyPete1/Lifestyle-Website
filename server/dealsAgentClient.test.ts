@@ -15,7 +15,7 @@ import type { GatedCatalogProps, GatedCommunity, GatedLead } from "../client/src
 (globalThis as { React?: typeof React }).React = React;
 const { GateSheetView } = await import("../client/src/components/deals/GateSheet");
 const { GatedCatalog } = await import("../client/src/components/deals/GatedCatalog");
-const { AgentTools, clientMessage, clientStatus, confirmAndRevoke, smsHref, absoluteLink, gmailComposeHref } = await import("../client/src/components/deals/AgentTools");
+const { AgentTools, clientMessage, clientStatus, confirmAndRemove, confirmAndRevoke, linkRemovable, smsHref, absoluteLink, gmailComposeHref } = await import("../client/src/components/deals/AgentTools");
 const { clientLinkState } = await import("../client/src/components/builder-deals/ClientLinksSection");
 const { createElement } = React;
 const decode = (value: string) => value.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
@@ -138,6 +138,27 @@ describe("agent tools on /deals/team", () => {
   };
   const noop = () => undefined;
   const renderTools = (overrides: Partial<Parameters<typeof AgentTools>[0]> = {}) => decode(renderToStaticMarkup(createElement(AgentTools, { workspace, onCreate: noop, onRevoke: noop, onCopy: noop, origin: "https://lifestyledesignrealty.com", ...overrides })));
+
+  it("offers Turn back on for a turned-off link and Remove for any dead one, never on a live link (Oct 29, Peter)", () => {
+    const off = { ...workspace.clients[1]!, id: 5, clientName: "James", revoked: true };
+    const html = renderTools({ workspace: { ...workspace, clients: [...workspace.clients, off] }, onRestore: noop, onRemove: noop });
+    // James (turned off): both; Old Link (expired unused): Remove only; Maria and Sam (live): neither.
+    expect(html.match(/data-deals-restore-link="true"/g)?.length).toBe(1);
+    expect(html.match(/data-deals-remove-link="true"/g)?.length).toBe(2);
+    expect(html).toContain("Remove James from your list");
+    expect(html).toContain("Remove Old Link from your list");
+    expect(html).not.toContain("Remove Maria Lopez from your list");
+    // Without the handlers (an older page), nothing new shows.
+    expect(renderTools({ workspace: { ...workspace, clients: [...workspace.clients, off] } })).not.toContain("data-deals-remove-link");
+    expect(linkRemovable(off)).toBe(true);
+    expect(linkRemovable(workspace.clients[0]!)).toBe(false);
+    const asked: string[] = [];
+    const removed: number[] = [];
+    expect(confirmAndRemove(off, (message) => { asked.push(message); return false; }, (id) => removed.push(id))).toBe(false);
+    expect(asked[0]).toContain("James: Remove this client from your list?");
+    expect(confirmAndRemove(off, () => true, (id) => removed.push(id))).toBe(true);
+    expect(removed).toEqual([5]);
+  });
 
   it("gives the agent their bio link to copy, and marks the buyers who signed up through it (Oct 28)", () => {
     const copied: string[] = [];

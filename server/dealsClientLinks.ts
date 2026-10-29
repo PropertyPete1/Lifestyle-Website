@@ -472,6 +472,53 @@ export async function revokeClientLink(agentLead: LeadRow, linkId: number): Prom
   return true;
 }
 
+export type ClientLinkChange = "ok" | "not_found" | "moved_away" | "live";
+
+/** The agent's own link and whether its client has since moved to another link (null when it is not theirs). */
+async function ownLink(agentLead: LeadRow, linkId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const teamIds = await agentLinkTeamIds(agentLead);
+  if (!teamIds.length) return null;
+  const link = (await db.select().from(dealClientLinks).where(and(eq(dealClientLinks.id, linkId), inArray(dealClientLinks.agentTeamId, teamIds))).limit(1))[0];
+  if (!link) return null;
+  const client = link.leadId ? (await db.select({ clientLinkId: dealLeads.clientLinkId }).from(dealLeads).where(eq(dealLeads.id, link.leadId)).limit(1))[0] : undefined;
+  return { db, link, movedAway: Boolean(client && client.clientLinkId !== link.id) };
+}
+
+/**
+ * Oct 29, 2026 (Peter: "how do you turn the link back on?"): an agent turns their own turned-off link back on. The same
+ * link works again with the same picks, and a client who verified through it gets the full list back. An unused link
+ * past its date gets a fresh window. A client who has since moved to another agent's link is not taken back.
+ */
+export async function restoreClientLink(agentLead: LeadRow, linkId: number, now = new Date()): Promise<ClientLinkChange> {
+  const own = await ownLink(agentLead, linkId);
+  if (!own) return "not_found";
+  if (own.movedAway) return "moved_away";
+  if (!own.link.revokedAt) return "ok";
+  const settings = await getDealSettings();
+  const lapsed = !own.link.leadId && own.link.expiresAt.getTime() <= now.getTime();
+  const expiresAt = lapsed ? new Date(now.getTime() + settings.clientLinkDays * 24 * 60 * 60_000) : own.link.expiresAt;
+  await own.db.update(dealClientLinks).set({ revokedAt: null, expiresAt }).where(eq(dealClientLinks.id, own.link.id));
+  return "ok";
+}
+
+/**
+ * Oct 29, 2026 (Peter: "or delete someone's list?"): an agent removes a link from their list once it no longer works
+ * (turned off, expired unused, or its client moved to another link). The link and its picks are deleted; the client's
+ * buyer account stays, with the standard list as when the link was turned off, and Follow Up Boss keeps its notes. A
+ * live link is never removed: it is turned off first, so a client is never cut off by one tap.
+ */
+export async function removeClientLink(agentLead: LeadRow, linkId: number, now = Date.now()): Promise<ClientLinkChange> {
+  const own = await ownLink(agentLead, linkId);
+  if (!own) return "not_found";
+  if (!own.movedAway && linkIsOpen(own.link, now)) return "live";
+  // The client is let go of this link only while it is still theirs (one who moved on keeps their new link and agent).
+  if (own.link.leadId && !own.movedAway) await own.db.update(dealLeads).set({ clientLinkId: null, agentTeamId: null }).where(and(eq(dealLeads.id, own.link.leadId), eq(dealLeads.clientLinkId, own.link.id)));
+  await own.db.delete(dealClientLinks).where(eq(dealClientLinks.id, own.link.id));
+  return "ok";
+}
+
 export const CLIENT_LINK_TEXTED_EVENT = "client_link_texted";
 /** Two taps of "Text it" inside this window count once (a double tap, or the sms: hand-off bouncing back). */
 export const TEXT_DEDUPE_MS = 10 * 60_000;

@@ -43,7 +43,7 @@ import {
   type DealsCatalogView,
 } from "./dealsService";
 import { createPublicPageCache } from "./publicPageCache";
-import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
+import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, removeClientLink, resolveClientLink, restoreClientLink, revokeClientLink } from "./dealsClientLinks";
 import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, adminTurnedOffLeadIds, browserIsAdminPaused, browserIsRealtorBlocked, dealsCardHandle, isTeamPhone, pausedAccessMessage, staleSessionLeadId, turnOffBuyerAccess, turnOnBuyerAccess } from "./dealsService";
 import { catalogWithSnapshot } from "./dealsCatalogSnapshot";
 /** What a realtor sees for the moment before the recruiting page opens. */
@@ -657,6 +657,27 @@ export const dealsRouter = router({
       if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
       if (session.lead.status !== "team") throw new TRPCError({ code: "FORBIDDEN" });
       if (!(await revokeClientLink(session.lead, input.id))) throw new TRPCError({ code: "NOT_FOUND", message: "That link is not one of yours." });
+      return { ok: true as const };
+    }),
+    /** Oct 29, 2026: a turned-off link back on, and a dead link off the agent's list (see dealsClientLinks). */
+    restoreClientLink: publicProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input, ctx }) => {
+      dealsPublicHeaders(ctx.res);
+      const session = await isLiveDealSession(ctx.req);
+      if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
+      if (session.lead.status !== "team") throw new TRPCError({ code: "FORBIDDEN" });
+      const result = await restoreClientLink(session.lead, input.id);
+      if (result === "not_found") throw new TRPCError({ code: "NOT_FOUND", message: "That link is not one of yours." });
+      if (result === "moved_away") throw new TRPCError({ code: "BAD_REQUEST", message: "This client is now on another agent's link, so this one can't be turned back on." });
+      return { ok: true as const };
+    }),
+    removeClientLink: publicProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input, ctx }) => {
+      dealsPublicHeaders(ctx.res);
+      const session = await isLiveDealSession(ctx.req);
+      if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
+      if (session.lead.status !== "team") throw new TRPCError({ code: "FORBIDDEN" });
+      const result = await removeClientLink(session.lead, input.id);
+      if (result === "not_found") throw new TRPCError({ code: "NOT_FOUND", message: "That link is not one of yours." });
+      if (result === "live") throw new TRPCError({ code: "BAD_REQUEST", message: "Turn this link off before removing it." });
       return { ok: true as const };
     }),
   }),

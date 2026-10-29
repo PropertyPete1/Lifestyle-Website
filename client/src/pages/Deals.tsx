@@ -221,6 +221,8 @@ function Team() {
   const create = trpc.deals.team.createClientLink.useMutation({ onSuccess: (result) => { if (result.pickCount) clearPicks(); void workspace.refetch(); } });
   const text = trpc.deals.team.textClientLink.useMutation({ onSuccess: () => { void workspace.refetch(); } });
   const revoke = trpc.deals.team.revokeClientLink.useMutation({ onSuccess: () => { toast.success("Link turned off. That client now sees the standard list."); void workspace.refetch(); }, onError: (error) => toast.error(error.message || "Could not turn that link off.") });
+  const restore = trpc.deals.team.restoreClientLink.useMutation({ onSuccess: () => { toast.success("Link turned back on. Same link, same picks."); void workspace.refetch(); }, onError: (error) => toast.error(error.message || "Could not turn that link back on.") });
+  const remove = trpc.deals.team.removeClientLink.useMutation({ onSuccess: () => { toast.success("Removed from your list."); void workspace.refetch(); }, onError: (error) => toast.error(error.message || "Could not remove that link.") });
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   useInstagramEmbeds();
   const forbidden = workspace.isError && workspace.error.data?.code === "FORBIDDEN";
@@ -240,7 +242,7 @@ function Team() {
   };
   const tools = <AgentTools workspace={workspace.data as AgentWorkspaceData | undefined} loading={workspace.isLoading} error={workspace.isError ? workspace.error.message : null}
     created={create.data ?? null} creating={create.isPending} createError={create.isError ? create.error.message : null}
-    onCreate={(input) => create.mutate(input)} onRevoke={(id) => revoke.mutate({ id })} onCopy={(url) => { void copy(url); }} copiedUrl={copiedUrl}
+    onCreate={(input) => create.mutate(input)} onRevoke={(id) => revoke.mutate({ id })} onRestore={(id) => restore.mutate({ id })} onRemove={(id) => remove.mutate({ id })} onCopy={(url) => { void copy(url); }} copiedUrl={copiedUrl}
     onText={(input) => text.mutateAsync(input)} texting={text.isPending}
     picked={picked} onClearPicks={clearPicks} onSetPicks={(input) => setPicks.mutateAsync(input)} settingPicks={setPicks.isPending} defaultClientsOpen={false} listShare={listShare} />;
   // Agents send the list; their own view has no Save hearts (a heart there would belong to no client). Pick buttons stand in.

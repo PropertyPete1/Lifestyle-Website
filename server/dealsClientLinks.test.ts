@@ -25,7 +25,7 @@ vi.mock("./dealsFubJobs", () => ({
   requestTestMode: (...args: unknown[]) => mocks.requestTestMode(...args),
 }));
 
-import { agentDisplayPhone, agentForLead, agentForTeamId, agentRowsForLead, agentWorkspace, attachLeadToClientLink, attachLiveSessionToClientLink, clientLinkForPhone, clientLinkPicksForLead, clientLinkTextMessage, clientLinkTokenForLead, connectOfferFor, createClientLink, liveAgentForClient, parsePicks, presentClientLink, reassignTeamRowBeforeRemoval, resolveClientLink, resolvePickCards, revokeClientLink, setClientLinkPicks } from "./dealsClientLinks";
+import { agentDisplayPhone, agentForLead, agentForTeamId, agentRowsForLead, agentWorkspace, attachLeadToClientLink, attachLiveSessionToClientLink, clientLinkForPhone, clientLinkPicksForLead, clientLinkTextMessage, clientLinkTokenForLead, connectOfferFor, createClientLink, liveAgentForClient, parsePicks, presentClientLink, reassignTeamRowBeforeRemoval, removeClientLink, resolveClientLink, resolvePickCards, restoreClientLink, revokeClientLink, setClientLinkPicks } from "./dealsClientLinks";
 import { dealEvents } from "../drizzle/schema";
 import { resetFubAssignmentCache } from "./dealsFub";
 import { AGENT_PAGE_SOURCE, agentForPageSlug, agentNameSlug, agentPageEntries, agentPageForLead, resetAgentPageCache } from "./dealsAgentPages";
@@ -201,6 +201,78 @@ describe("verification through a client link", () => {
     expect((await verifyThrough(typed.link.token, "+12105550404")).done?.ok).toBe(true);
     // The agent can still preview their own link: team members pass.
     expect(await clientLinkForPhone(created.link.token, AGENT_PHONE)).toEqual({ ok: false, kind: "other_phone", agentName: "Tiffany Agent" });
+  });
+
+  it("turns a turned-off link back on for its own agent only, giving the client the full list again (Oct 29)", async () => {
+    vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
+    testSettings();
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const other = lead({ phoneE164: "+12105550303", status: "team" });
+    db.seed(dealTeamAllowlist, { name: "Other Agent", phoneE164: "+12105550303", source: "manual", active: true });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    const { done } = await verifyThrough(created.link.token, CLIENT_PHONE);
+    if (!done?.ok) throw new Error("not verified");
+    const buyer = () => db.rows(dealLeads).find((row) => row.id === done.leadId) as typeof dealLeads.$inferSelect;
+    await revokeClientLink(agent, created.link.id);
+    expect((await catalogViewForSession(buyer())).view).toEqual({ view: "gated" });
+    expect(await restoreClientLink(other, created.link.id)).toBe("not_found");
+    expect(await restoreClientLink(agent, created.link.id)).toBe("ok");
+    expect(db.rows(dealClientLinks).find((row) => row.id === created.link.id)!.revokedAt).toBeNull();
+    expect(await resolveClientLink(created.link.token)).not.toBeNull();
+    expect((await catalogViewForSession(buyer())).view).toEqual({ view: "full", builderPages: false });
+    // Already on: nothing changes.
+    expect(await restoreClientLink(agent, created.link.id)).toBe("ok");
+
+    // An unused link turned off after its date gets a fresh window.
+    const old = await createClientLink({ agentLead: agent, clientName: "Old Link" });
+    if (!old.ok) throw new Error("link not created");
+    await revokeClientLink(agent, old.link.id);
+    db.rows(dealClientLinks).find((row) => row.id === old.link.id)!.expiresAt = new Date(Date.now() - HOUR);
+    expect(await restoreClientLink(agent, old.link.id)).toBe("ok");
+    expect(db.rows(dealClientLinks).find((row) => row.id === old.link.id)!.expiresAt.getTime()).toBeGreaterThan(Date.now() + 24 * HOUR);
+    expect(await resolveClientLink(old.link.token)).not.toBeNull();
+  });
+
+  it("removes a dead link from the agent's list, never a live one, and lets go of a client only while it is still theirs (Oct 29)", async () => {
+    vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
+    testSettings();
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const other = lead({ phoneE164: "+12105550303", status: "team" });
+    db.seed(dealTeamAllowlist, { name: "Other Agent", phoneE164: "+12105550303", source: "manual", active: true });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    const { done } = await verifyThrough(created.link.token, CLIENT_PHONE);
+    if (!done?.ok) throw new Error("not verified");
+    const buyer = () => db.rows(dealLeads).find((row) => row.id === done.leadId) as typeof dealLeads.$inferSelect;
+    expect(await removeClientLink(agent, created.link.id)).toBe("live");
+    expect(await removeClientLink(other, created.link.id)).toBe("not_found");
+    await revokeClientLink(agent, created.link.id);
+    expect(await removeClientLink(agent, created.link.id)).toBe("ok");
+    expect(db.rows(dealClientLinks).some((row) => row.id === created.link.id)).toBe(false);
+    expect(buyer()).toMatchObject({ clientLinkId: null, agentTeamId: null, status: "verified" });
+    expect((await catalogViewForSession(buyer())).view).toEqual({ view: "gated" });
+    expect((await agentWorkspace(agent))!.clients.map((client) => client.clientName)).not.toContain("Maria Lopez");
+
+    // An unused link past its date is dead too, and can go without being turned off.
+    const lapsed = await createClientLink({ agentLead: agent, clientName: "Old Link" });
+    if (!lapsed.ok) throw new Error("link not created");
+    db.rows(dealClientLinks).find((row) => row.id === lapsed.link.id)!.expiresAt = new Date(Date.now() - HOUR);
+    expect(await removeClientLink(agent, lapsed.link.id)).toBe("ok");
+
+    // A client who moved to another agent's link keeps that link and agent when the old one is removed.
+    const first = await createClientLink({ agentLead: agent, clientName: "Sam Reyes" });
+    const second = await createClientLink({ agentLead: other, clientName: "Sam Reyes" });
+    if (!first.ok || !second.ok) throw new Error("link not created");
+    const sam = await verifyThrough(first.link.token, OTHER_PHONE);
+    if (!sam.done?.ok) throw new Error("not verified");
+    const samId = sam.done.leadId;
+    const moved = db.rows(dealLeads).find((row) => row.id === samId)!;
+    moved.clientLinkId = second.link.id;
+    moved.agentTeamId = second.link.agentTeamId;
+    expect(await restoreClientLink(agent, first.link.id)).toBe("moved_away");
+    expect(await removeClientLink(agent, first.link.id)).toBe("ok");
+    expect(db.rows(dealLeads).find((row) => row.id === samId)).toMatchObject({ clientLinkId: second.link.id, agentTeamId: second.link.agentTeamId });
   });
 
   it("tells a visitor on a turned-off link to ask the agent, instead of falling to the reel gate", async () => {

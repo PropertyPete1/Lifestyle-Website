@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, Copy, ExternalLink, Heart, Instagram, Link2, ListChecks, Mail, MessageSquareText, Send, X } from "lucide-react";
+import { Check, ChevronDown, Copy, ExternalLink, Heart, Instagram, Link2, ListChecks, Mail, MessageSquareText, RotateCcw, Send, Trash2, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -90,7 +90,11 @@ export const AGENT_COPY = {
   textedAgain: "Already texted in the last few minutes; opening Messages again without a second log.",
   textedFubDown: "Follow Up Boss didn't answer, so this send isn't logged there. Messages still opened.",
   texted: (name: string) => `Logged in Follow Up Boss. Send the text to ${name} in Messages.`,
-  confirmRevoke: "Turn off this link? Your client keeps the standard list but loses the addresses, and the link stops working. This can't be undone; you can send a new link.",
+  confirmRevoke: "Turn off this link? Your client keeps the standard list but loses the addresses, and the link stops working. You can turn it back on later.",
+  /** Oct 29, 2026 (Peter: "how do you turn the link back on? or delete someone's list?"). */
+  restore: "Turn back on",
+  remove: "Remove",
+  confirmRemove: "Remove this client from your list? The link and its picks are deleted. Their account and Follow Up Boss notes stay.",
   /** Picks: tap "Pick for client" on homes in the list, then send them with a new link or put them on an existing client's link. */
   picksOnNew: (count: number) => `${count} picked home${count === 1 ? "" : "s"} will lead this client's list.`,
   picksNone: "Tap \"Pick for client\" on any homes below to send a short list instead of the whole market.",
@@ -160,7 +164,18 @@ export function clientStatus(client: AgentClient, now = Date.now()): { label: st
   return { label: AGENT_COPY.notOpened, tone: "muted" };
 }
 
-/** Turning a link off is permanent, so it always asks first. */
+/** A link that no longer works (turned off, expired unused, or its client moved to another link) can come off the list. */
+export function linkRemovable(client: AgentClient, now = Date.now()) {
+  return client.revoked || client.movedAway || (!client.verifiedAt && new Date(client.expiresAt).getTime() <= now);
+}
+
+/** Removing deletes the link, so it always asks first. */
+export function confirmAndRemove(client: Pick<AgentClient, "id" | "clientName">, ask: (message: string) => boolean, onRemove: (id: number) => void) {
+  if (ask(`${client.clientName}: ${AGENT_COPY.confirmRemove}`)) { onRemove(client.id); return true; }
+  return false;
+}
+
+/** Turning a link off cuts the client's addresses, so it always asks first. */
 export function confirmAndRevoke(client: Pick<AgentClient, "id" | "clientName">, ask: (message: string) => boolean, onRevoke: (id: number) => void) {
   if (ask(`${client.clientName}: ${AGENT_COPY.confirmRevoke}`)) { onRevoke(client.id); return true; }
   return false;
@@ -186,6 +201,10 @@ export type AgentToolsProps = {
   createError?: string | null;
   onCreate: (input: CreateClientInput) => void;
   onRevoke: (id: number) => void;
+  /** A turned-off link back on (same link, same picks). */
+  onRestore?: (id: number) => void;
+  /** A dead link off the list (see linkRemovable). */
+  onRemove?: (id: number) => void;
   onCopy: (url: string) => void;
   copiedUrl?: string | null;
   /** "Text it": logs the send in FUB, then resolves with the message to put in the phone's Messages app. */
@@ -207,7 +226,7 @@ export type AgentToolsProps = {
   listShare?: { filters: BrowseFilters; count: number } | null;
 };
 
-export function AgentTools({ workspace, loading, error, created, creating, createError, onCreate, onRevoke, onCopy, copiedUrl, origin, confirm, onText, texting, picked = [], onClearPicks, onSetPicks, settingPicks, defaultClientsOpen = true, listShare = null }: AgentToolsProps) {
+export function AgentTools({ workspace, loading, error, created, creating, createError, onCreate, onRevoke, onRestore, onRemove, onCopy, copiedUrl, origin, confirm, onText, texting, picked = [], onClearPicks, onSetPicks, settingPicks, defaultClientsOpen = true, listShare = null }: AgentToolsProps) {
   const [clientName, setClientName] = useState("");
   const [putNote, setPutNote] = useState<{ id: number; text: string } | null>(null);
   const putPicks = async (client: AgentClient) => {
@@ -262,6 +281,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
     onCreate({ clientName: name, clientPhone: clientPhone.trim() || undefined, note: note.trim() || undefined, picks: picked.length ? Array.from(picked) : undefined });
   };
   const revoke = (client: AgentClient) => { confirmAndRevoke(client, confirm ?? ((message: string) => window.confirm(message)), onRevoke); };
+  const removeClient = (client: AgentClient) => { if (onRemove) confirmAndRemove(client, confirm ?? ((message: string) => window.confirm(message)), onRemove); };
   const createdMessage = createdUrl && created ? clientMessage({ clientName: created.clientName ?? "", agentName, url: createdUrl, pickCount: created.pickCount, listCount: linkShare?.count, listSummary: linkShare?.summary }) : null;
   return <section aria-labelledby="deals-agent-tools" data-deals-agent-tools="true" className="mt-3 min-w-0 space-y-2 sm:mt-5 sm:space-y-4">
     <div className="min-w-0 border border-gold/30 bg-gold/5 px-4 py-3">
@@ -320,6 +340,10 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
           {client.lastViewedAt && <p className="mt-2 text-xs text-muted-foreground">Last looked at the list {when(client.lastViewedAt)}</p>}
           <SavedHomes saves={client.saves} />
           <TourRequests requests={client.requests} />
+          {!sendable && ((onRestore && client.revoked && !client.movedAway) || (onRemove && linkRemovable(client))) && <div className="mt-5 flex flex-wrap gap-3" data-deals-dead-link-actions="true">
+            {onRestore && client.revoked && !client.movedAway && <button type="button" data-deals-restore-link="true" onClick={() => onRestore(client.id)} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><RotateCcw className="h-4 w-4" /> {AGENT_COPY.restore}</button>}
+            {onRemove && linkRemovable(client) && <button type="button" data-deals-remove-link="true" onClick={() => removeClient(client)} aria-label={`Remove ${client.clientName} from your list`} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm text-muted-foreground hover:border-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /> {AGENT_COPY.remove}</button>}
+          </div>}
           {sendable && <div className="mt-5 flex flex-wrap gap-3">
             {onSetPicks && picked.length > 0 && <button type="button" data-deals-put-picks="true" disabled={settingPicks} onClick={() => { void putPicks(client); }} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground disabled:opacity-60"><ListChecks className="h-4 w-4" /> {AGENT_COPY.picksOnLink(picked.length)}</button>}
             {client.clientPhoneDigits

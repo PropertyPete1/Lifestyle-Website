@@ -40,14 +40,19 @@ const money = (value: string | null): number | null => { const match = value ? /
 
 /**
  * "Available Now" is ready; "Fall 2026" or "November 2026" names when the
- * home is expected (a past one is a stale estimate: no date); only sale words
- * sell; other wording, or none, gives no status (the run is held).
+ * home is expected (a past one is a stale estimate: no date); "Coming Soon" or
+ * "TBD" is no date yet; only sale words sell; other wording, or none, gives no
+ * status (the run is held).
  */
 export function sitterleStatus(note: string | null, now: Date): { status: string | null; readyNow: boolean; moveInDate: string | null } {
   const text = (note ?? "").replace(/\s+/g, " ").replace(/^(?:est(?:imated)?\.?\s*completion:?\s*)/i, "").trim();
   if (!text) return { status: null, readyNow: false, moveInDate: null };
   if (/\bsold\b|under\s+contract/i.test(text)) return { status: "Sold", readyNow: false, moveInDate: null };
   if (/^(?:available\s+now|move[- ]?in\s+ready|ready\s+now|complete[d]?)!?$/i.test(text)) return { status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null };
+  // Oct 29, 2026 (Parmer Ranch Cottages, 200 Timberwilde: a priced home under construction, "Est. Completion: Coming
+  // Soon" on its card and its own page): the completion date is not set yet. A home for sale with no date, like a
+  // stale estimate; this note is only ever the completion field, never a sale word.
+  if (/^(?:coming\s+soon|tbd|to\s+be\s+determined)!?$/i.test(text)) return { status: "Quick Move-In", readyNow: false, moveInDate: null };
   const when = /^(?:early|mid|late)?\s*([A-Za-z]{3,9})\.?\s+(20\d{2})$/i.exec(text);
   if (!when) return { status: null, readyNow: false, moveInDate: null };
   const word = when[1]!.toLowerCase();

@@ -76,7 +76,9 @@ describe("Sitterle reader: cards", () => {
     expect(sitterleStatus("Summer 2026", NOW)).toEqual({ status: "Quick Move-In", readyNow: false, moveInDate: null });
     expect(sitterleStatus("Sep 2026", NOW)).toEqual({ status: "Quick Move-In", readyNow: false, moveInDate: null });
     expect(sitterleStatus("Sold", NOW)).toEqual({ status: "Sold", readyNow: false, moveInDate: null });
-    for (const word of ["Coming Soon", "TBD", "Pending", "", null]) expect(sitterleStatus(word, NOW)).toEqual({ status: null, readyNow: false, moveInDate: null });
+    // A completion date not set yet (Parmer Ranch Cottages, Oct 29): for sale, no date.
+    for (const word of ["Coming Soon", "Est. Completion: Coming Soon", "TBD", "To Be Determined"]) expect(sitterleStatus(word, NOW)).toEqual({ status: "Quick Move-In", readyNow: false, moveInDate: null });
+    for (const word of ["Pending", "Coming Soon to Georgetown", "", null]) expect(sitterleStatus(word, NOW)).toEqual({ status: null, readyNow: false, moveInDate: null });
     // A card without its completion note, or without its link, has no status.
     const odd = parseSitterleCommunity(communityPage({ homes: [{ ...HOMES[0]!, note: null }, { ...HOMES[1]!, link: false }] }), COMMUNITY, NOW)!;
     expect(odd.homes.map((home) => home.status)).toEqual([null, null]);

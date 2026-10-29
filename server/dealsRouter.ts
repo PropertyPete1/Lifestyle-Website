@@ -53,9 +53,29 @@ import { catalogWithSnapshot } from "./dealsCatalogSnapshot";
  * arrives as the minute ends no longer waits 5–10 s for the rebuild (see publicPageCache). Off under tests.
  */
 const publicPages = createPublicPageCache();
-function publicPageCache<T>(key: string, load: () => Promise<T>): Promise<T> {
+function publicPageCache<T>(key: string, load: () => Promise<T>, options: { staleMs?: number } = {}): Promise<T> {
   if (process.env.VITEST) return load();
-  return publicPages.get(key, load);
+  return publicPages.get(key, load, options);
+}
+/**
+ * Oct 28, 2026 (8:30 PM sweep: the team list took 7 s to open after two quiet hours, on a process that had served it
+ * before: its copy was past the 15-minute stale limit, so the visitor waited for the rebuild). The unlocked lists may be
+ * served up to 12 hours stale while they rebuild; what the visitor gets is re-checked against the communities that are
+ * on right now (LIVE_COMMUNITY_TTL_MS), and every photo is checked on its own request, so nothing taken off shows.
+ */
+const MINE_STALE_MS = 12 * 60 * 60_000;
+const LIVE_COMMUNITY_TTL_MS = 30_000;
+let liveCommunityCache: { at: number; ids: Promise<Set<number>> } | null = null;
+function liveCommunityIds(): Promise<Set<number>> {
+  if (liveCommunityCache && Date.now() - liveCommunityCache.at < LIVE_COMMUNITY_TTL_MS) return liveCommunityCache.ids;
+  const ids = (async () => {
+    const db = await getDb();
+    if (!db) return new Set<number>();
+    return new Set((await db.select({ id: dealCommunities.id }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)))).map((row) => row.id));
+  })();
+  liveCommunityCache = { at: Date.now(), ids };
+  ids.catch(() => { if (liveCommunityCache?.ids === ids) liveCommunityCache = null; });
+  return ids;
 }
 /** The landing's catalog as the page serves it (the same cache), for the share-card preview of one community. */
 export function cachedPublicCatalog(): Promise<Awaited<ReturnType<typeof publicDealsCatalog>>> {
@@ -67,11 +87,9 @@ export function warmPublicPages(): void {
   publicPages.pin("catalog:", () => publicDealsCatalog(undefined));
   publicPages.pin("featured", async () => (await import("./dealsFeatured")).featuredDeals("public"));
 }
-/** A stored list (see dealsCatalogSnapshot) keeps only the communities that are still on now (one read of the live ids). */
+/** A list that may be stale (a stored copy, or a cached build past its refresh) keeps only the communities still on. */
 async function liveCommunitiesOnly(built: Awaited<ReturnType<typeof buildGatedCatalog>>) {
-  const db = await getDb();
-  if (!db) return [];
-  const live = new Set((await db.select({ id: dealCommunities.id }).from(dealCommunities).where(and(eq(dealCommunities.active, true), eq(dealCommunities.paused, false)))).map((row) => row.id));
+  const live = await liveCommunityIds();
   return built.filter((entry) => live.has(entry.id));
 }
 export const REALTOR_GATE_MESSAGE = "Builder Deals are for home buyers. Agents: these deals are open to our team for your clients. Taking you to our agent page.";
@@ -479,14 +497,17 @@ export const dealsRouter = router({
     // on every open ("Preparing the team list…"); they are built every three minutes per view and shared (see publicPageCache).
     const viewKey = gatedCatalogViewKey(view);
     // Oct 28, 2026: a fresh server process answers from the last stored build instead of building while the visitor waits.
-    const builtList = () => publicPageCache(`mine:${viewKey}`, () => process.env.VITEST ? buildGatedCatalog(view) : catalogWithSnapshot(viewKey, () => buildGatedCatalog(view), { recheck: liveCommunitiesOnly }));
+    const builtList = async () => {
+      const built = await publicPageCache(`mine:${viewKey}`, () => process.env.VITEST ? buildGatedCatalog(view) : catalogWithSnapshot(viewKey, () => buildGatedCatalog(view)), { staleMs: MINE_STALE_MS });
+      return process.env.VITEST ? built : liveCommunitiesOnly(built);
+    };
     const cardsOf = (built: Awaited<ReturnType<typeof buildGatedCatalog>>) => new Set(built.flatMap(({ entry }) => ((entry.homes as Array<{ card?: string }> | undefined) ?? []).flatMap((home) => home.card ? [home.card] : [])));
     const [communities, saved, picks, featured] = await Promise.all([
       gatedDealsCatalog(session.leadId, view, { built: builtList }),
       savedDealCards(session.leadId),
       agent ? clientLinkPicksForLead(session.lead) : Promise.resolve([] as string[]),
       // Ranked among the homes on this list only, so a community dropped from it never leaves a gap.
-      publicPageCache(`mine-featured:${viewKey}`, async () => featuredDeals(view, { onlyCards: cardsOf(await builtList()) })),
+      publicPageCache(`mine-featured:${viewKey}`, async () => featuredDeals(view, { onlyCards: cardsOf(await builtList()) }), { staleMs: MINE_STALE_MS }),
     ]);
     const listCards = new Set((communities as Array<{ homes?: Array<{ card?: string }> }>).flatMap((community) => (community.homes ?? []).flatMap((home) => home.card ? [home.card] : [])));
     const connection = await getDb();

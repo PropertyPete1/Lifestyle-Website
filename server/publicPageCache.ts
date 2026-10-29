@@ -59,15 +59,17 @@ export function createPublicPageCache(options: PublicPageCacheOptions = {}) {
     entry.timer = setTimer(() => { entry.timer = null; if (warm(entry, key)) void rebuild(key, load).catch(() => undefined); }, Math.max(1, freshMs - (now() - Math.max(entry.at, entry.lastAttempt))));
   }
 
-  function get<T>(key: string, load: () => Promise<T>): Promise<T> {
+  /** `options.staleMs`: this key may be served stale (while it rebuilds) for longer than the cache's default. */
+  function get<T>(key: string, load: () => Promise<T>, options: { staleMs?: number } = {}): Promise<T> {
     loaders.set(key, load);
+    const keyStaleMs = options.staleMs ?? staleMs;
     const t = now();
     const hit = entries.get(key) as Entry<T> | undefined;
     if (hit) {
       hit.lastRead = t;
       const age = t - hit.at;
       if (age < freshMs) { if (!hit.timer && !hit.refreshing) schedule(key); return hit.value; }
-      if (age < staleMs) { void rebuild(key, load).catch(() => undefined); return hit.value; }
+      if (age < keyStaleMs) { void rebuild(key, load).catch(() => undefined); return hit.value; }
       // Too old to show: this request waits for the rebuild (shared by anyone else waiting).
       if (hit.refreshing) return hit.refreshing;
       entries.delete(key);

@@ -50,6 +50,24 @@ describe("public page cache (Oct 26: nobody waits on a rebuild while the page is
     expect(timers).toHaveLength(1);
   });
 
+  it("a key with a longer stale limit is served at once after a quiet evening and rebuilt behind it (Oct 28, 8:30 PM sweep)", async () => {
+    const { cache, advance } = harness();
+    let builds = 0;
+    const load = () => { builds += 1; return Promise.resolve(`v${builds}`); };
+    await cache.get("mine:full:pages", load, { staleMs: 12 * 60 * 60_000 });
+    await advance(2 * 60 * 60_000); // two quiet hours: past keep-warm and the default 15-minute stale limit
+    const before = builds;
+    expect(await cache.get("mine:full:pages", load, { staleMs: 12 * 60 * 60_000 })).toBe(`v${before}`);
+    expect(builds).toBe(before + 1); // rebuilt in the background
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await cache.get("mine:full:pages", load, { staleMs: 12 * 60 * 60_000 })).toBe(`v${before + 1}`);
+    // The default key still waits past its limit.
+    await cache.get("other", load);
+    await advance(2 * 60 * 60_000);
+    const other = cache.get("other", load);
+    expect(await other).toBe(`v${builds}`);
+  });
+
   it("stops rebuilding once nobody has read the page for the keep-warm window, then rebuilds on the next read", async () => {
     const { cache, advance, timers } = harness();
     let builds = 0;

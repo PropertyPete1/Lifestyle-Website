@@ -1,1 +1,0 @@
-ALTER TABLE `deal_homes` MODIFY COLUMN `status` enum('available','sold','hidden','model') NOT NULL DEFAULT 'available';

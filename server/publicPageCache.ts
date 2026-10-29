@@ -97,6 +97,24 @@ export function createPublicPageCache(options: PublicPageCacheOptions = {}) {
     void get(key, load).catch(() => undefined);
   }
 
+  /**
+   * Load this key once, so the first reader finds it, without keeping it rebuilt (Oct 29, 2026: the host restarted
+   * server processes 153 times in a day, and the first team or buyer open on each new one waited 6–10 s while that
+   * process loaded its list). A primed value counts as unread: no rebuild timer runs until someone reads it, and the
+   * first read then takes it and refreshes it as any other read would. A key already present is left alone (and
+   * unread). Resolves to the value (null when the load failed), so a caller can build on it without reading the key.
+   */
+  function prime<T>(key: string, load: () => Promise<T>): Promise<T | null> {
+    const present = entries.get(key) as Entry<T> | undefined;
+    if (present) return present.value.catch(() => null);
+    loaders.set(key, load);
+    const t = now();
+    const value = load();
+    const entry: Entry<T> = { at: t, value, lastRead: Number.NEGATIVE_INFINITY, lastAttempt: t, refreshing: null, timer: null };
+    entries.set(key, entry as Entry<unknown>);
+    return value.catch(() => { if (entries.get(key) === entry) entries.delete(key); return null; });
+  }
+
   function clear() {
     for (const entry of Array.from(entries.values())) if (entry.timer) clearTimer(entry.timer);
     entries.clear();
@@ -104,5 +122,5 @@ export function createPublicPageCache(options: PublicPageCacheOptions = {}) {
     pinned.clear();
   }
 
-  return { get, pin, clear, size: () => entries.size };
+  return { get, pin, prime, clear, size: () => entries.size };
 }

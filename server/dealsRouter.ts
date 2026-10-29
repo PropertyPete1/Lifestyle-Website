@@ -40,6 +40,7 @@ import {
   createPendingVerification,
   buildGatedCatalog,
   gatedCatalogViewKey,
+  type DealsCatalogView,
 } from "./dealsService";
 import { createPublicPageCache } from "./publicPageCache";
 import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, resolveClientLink, revokeClientLink } from "./dealsClientLinks";
@@ -86,6 +87,33 @@ export function warmPublicPages(): void {
   if (process.env.VITEST) return;
   publicPages.pin("catalog:", () => publicDealsCatalog(undefined));
   publicPages.pin("featured", async () => (await import("./dealsFeatured")).featuredDeals("public"));
+  // Oct 29, 2026: the team list and a buyer's list are loaded at start too (from the last stored build), so the first
+  // open on a new process takes ~1 s, not 6–10 s. Loaded once, not kept rebuilt: a process nobody opens them on does no
+  // more work for them. The agent-client view is opened rarely and is left to load on demand.
+  void (async () => {
+    const { featuredDeals } = await import("./dealsFeatured");
+    for (const view of PRIMED_LIST_VIEWS) {
+      const list = await publicPages.prime(`mine:${gatedCatalogViewKey(view)}`, () => mineListLoad(view));
+      // Built from the primed list itself: reading the list's key here would count as a visit and keep it rebuilt.
+      if (list) await publicPages.prime(`mine-featured:${gatedCatalogViewKey(view)}`, async () => featuredDeals(view, { onlyCards: mineCards(await liveCommunitiesOnly(list)) }));
+    }
+  })().catch(() => undefined);
+}
+const PRIMED_LIST_VIEWS: DealsCatalogView[] = [{ view: "full", builderPages: true }, { view: "gated" }];
+/** One view's unlocked list as every lead with that view gets it (before their own order). */
+function mineListLoad(view: DealsCatalogView) {
+  return process.env.VITEST ? buildGatedCatalog(view) : catalogWithSnapshot(gatedCatalogViewKey(view), () => buildGatedCatalog(view));
+}
+/** The unlocked list as served: the shared build, less any community taken off since it was built. */
+async function mineList(view: DealsCatalogView) {
+  const built = await publicPageCache(`mine:${gatedCatalogViewKey(view)}`, () => mineListLoad(view), { staleMs: MINE_STALE_MS });
+  return process.env.VITEST ? built : liveCommunitiesOnly(built);
+}
+const mineCards = (built: Awaited<ReturnType<typeof buildGatedCatalog>>) => new Set(built.flatMap(({ entry }) => ((entry.homes as Array<{ card?: string }> | undefined) ?? []).flatMap((home) => home.card ? [home.card] : [])));
+/** The featured row of one view, ranked among the homes on its list only, so a community dropped from it never leaves a gap. */
+async function mineFeaturedLoad(view: DealsCatalogView) {
+  const { featuredDeals } = await import("./dealsFeatured");
+  return featuredDeals(view, { onlyCards: mineCards(await mineList(view)) });
 }
 /** A list that may be stale (a stored copy, or a cached build past its refresh) keeps only the communities still on. */
 async function liveCommunitiesOnly(built: Awaited<ReturnType<typeof buildGatedCatalog>>) {
@@ -490,24 +518,17 @@ export const dealsRouter = router({
     if (!session) throw new TRPCError({ code: "UNAUTHORIZED", message: "A current Builder Deals session is required." });
     // The team and buyers with a live agent link get the full list; everyone else the scrubbed one.
     const { view, agent } = await catalogViewForSession(session.lead);
-    const { featuredDeals } = await import("./dealsFeatured");
     const { clientLinkPicksForLead } = await import("./dealsClientLinks");
     // Oct 26, 2026: the homes the client's agent picked for them lead their list; nobody else has picks.
     // Oct 27, 2026: the list and its featured row are the same for every lead with this view and took ~4 s to build
     // on every open ("Preparing the team list…"); they are built every three minutes per view and shared (see publicPageCache).
     const viewKey = gatedCatalogViewKey(view);
     // Oct 28, 2026: a fresh server process answers from the last stored build instead of building while the visitor waits.
-    const builtList = async () => {
-      const built = await publicPageCache(`mine:${viewKey}`, () => process.env.VITEST ? buildGatedCatalog(view) : catalogWithSnapshot(viewKey, () => buildGatedCatalog(view)), { staleMs: MINE_STALE_MS });
-      return process.env.VITEST ? built : liveCommunitiesOnly(built);
-    };
-    const cardsOf = (built: Awaited<ReturnType<typeof buildGatedCatalog>>) => new Set(built.flatMap(({ entry }) => ((entry.homes as Array<{ card?: string }> | undefined) ?? []).flatMap((home) => home.card ? [home.card] : [])));
     const [communities, saved, picks, featured] = await Promise.all([
-      gatedDealsCatalog(session.leadId, view, { built: builtList }),
+      gatedDealsCatalog(session.leadId, view, { built: () => mineList(view) }),
       savedDealCards(session.leadId),
       agent ? clientLinkPicksForLead(session.lead) : Promise.resolve([] as string[]),
-      // Ranked among the homes on this list only, so a community dropped from it never leaves a gap.
-      publicPageCache(`mine-featured:${viewKey}`, async () => featuredDeals(view, { onlyCards: cardsOf(await builtList()) }), { staleMs: MINE_STALE_MS }),
+      publicPageCache(`mine-featured:${viewKey}`, () => mineFeaturedLoad(view), { staleMs: MINE_STALE_MS }),
     ]);
     const listCards = new Set((communities as Array<{ homes?: Array<{ card?: string }> }>).flatMap((community) => (community.homes ?? []).flatMap((home) => home.card ? [home.card] : [])));
     const connection = await getDb();

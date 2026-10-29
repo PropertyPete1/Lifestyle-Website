@@ -119,6 +119,40 @@ describe("public page cache (Oct 26: nobody waits on a rebuild while the page is
     expect(await cache.get("catalog", load)).toBe(`v${builds}`);
   });
 
+  it("a primed key is there for the first reader without being kept rebuilt while nobody reads it (Oct 29: 153 restarts a day)", async () => {
+    const { cache, advance, timers } = harness();
+    let builds = 0;
+    const load = () => { builds += 1; return Promise.resolve(`v${builds}`); };
+    expect(await cache.prime("mine:full:pages", load)).toBe("v1");
+    // Nobody reads it for an hour: no timer, no rebuild.
+    expect(timers).toHaveLength(0);
+    await advance(60 * 60_000);
+    expect(builds).toBe(1);
+    // Priming again leaves it alone (and still unread).
+    expect(await cache.prime("mine:full:pages", load)).toBe("v1");
+    expect(builds).toBe(1);
+    expect(timers).toHaveLength(0);
+    // The first reader takes it at once (within the key's stale limit) and a rebuild runs behind them.
+    expect(await cache.get("mine:full:pages", load, { staleMs: 12 * 60 * 60_000 })).toBe("v1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(builds).toBe(2);
+    expect(await cache.get("mine:full:pages", load, { staleMs: 12 * 60 * 60_000 })).toBe("v2");
+    // A primed key read inside the fresh window is served as is, then kept warm like any read key.
+    const fresh = harness();
+    let freshBuilds = 0;
+    const freshLoad = () => { freshBuilds += 1; return Promise.resolve(`f${freshBuilds}`); };
+    await fresh.cache.prime("k", freshLoad);
+    await fresh.advance(10_000);
+    expect(await fresh.cache.get("k", freshLoad)).toBe("f1");
+    expect(freshBuilds).toBe(1);
+    expect(fresh.timers).toHaveLength(1);
+    // A failed prime leaves nothing behind: the reader loads it.
+    const failed = harness();
+    expect(await failed.cache.prime("k", () => Promise.reject(new Error("db down")))).toBeNull();
+    expect(failed.cache.size()).toBe(0);
+    expect(await failed.cache.get("k", () => Promise.resolve("ok"))).toBe("ok");
+  });
+
   it("drops a failed first load so the next read tries again, and keeps the old value when a background rebuild fails", async () => {
     const { cache, advance } = harness();
     let builds = 0;

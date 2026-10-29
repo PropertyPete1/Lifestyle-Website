@@ -125,7 +125,7 @@ export function communitySourceConfig(community: CommunityRow): CommunitySourceC
   };
 }
 
-type HomeUpsertInput = { communityId: number; sourceUrl: string; privatePlanName?: string | null; privateAddress?: string | null; kind: "quick_move_in" | "to_be_built"; beds?: string | null; baths?: string | null; sqft?: number | null; price?: number | null; moveInDate?: string | null; lotSize?: string | null; garage?: string | null; /** Floors when the builder lists them; null (unknown) never erases a known count. */ stories?: number | null; homesite?: string | null; readyNow?: boolean; status?: "available" | "sold"; /** The builder's own published original price (a struck-through "was" price), when it shows one. */ builderWasPrice?: number | null };
+type HomeUpsertInput = { communityId: number; sourceUrl: string; privatePlanName?: string | null; privateAddress?: string | null; kind: "quick_move_in" | "to_be_built"; beds?: string | null; baths?: string | null; sqft?: number | null; price?: number | null; moveInDate?: string | null; lotSize?: string | null; garage?: string | null; /** Floors when the builder lists them; null (unknown) never erases a known count. */ stories?: number | null; homesite?: string | null; readyNow?: boolean; status?: "available" | "sold" | "model"; /** The builder's own published original price (a struck-through "was" price), when it shows one. */ builderWasPrice?: number | null };
 type HomeUpsertResult = { id: number; inserted: boolean; skipped: boolean; priceChange: { from: number; to: number } | null; statusChange: { from: string; to: string } | null };
 
 const PRICE_WINDOW_MS = 30 * 24 * 60 * 60_000;
@@ -781,11 +781,20 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     const borrowed = name ? planGalleries.get(name) : undefined;
     return borrowed?.map((image) => ({ ...image, caption: "Representative image" }));
   };
+  // Oct 28, 2026 (Peter: "use the model home photo, it's usually the high-upgrades house that sells"): a model home the
+  // builder labels is kept as a "model" row, never for sale and never listed, so its photos can be the community's cover.
+  const models = new Set<string>();
+  for (const home of snapshot.private.homes) {
+    if (/sold/i.test(home.status ?? "") || !/\bmodel\b/i.test(home.status ?? "") || !home.gallery?.length) continue;
+    const result = await upsertHome({ communityId: community.id, sourceUrl: home.sourceUrl, builderWasPrice: null, privatePlanName: home.privatePlanName ?? home.privateName, privateAddress: home.privateAddress ?? null, kind: "quick_move_in", beds: home.bedrooms === null ? null : String(home.bedrooms), baths: home.bathrooms === null ? null : String(home.bathrooms), sqft: home.squareFeet, price: null, moveInDate: null, garage: home.garage ? String(home.garage) : null, stories: home.stories ?? null, homesite: null, readyNow: false, status: "model" }, now);
+    models.add(normalizedDealSourceKey(home.sourceUrl));
+    if (!result.skipped) await upsertPhotos(result.id, home.gallery);
+  }
   for (const home of snapshot.private.homes) {
     const sold = /sold/i.test(home.status ?? "");
     // Only publish a QMI when the official page explicitly labels it as such.
     const quickMoveIn = /quick\s+move|available\s+now/i.test(home.status ?? "");
-    if (!sold && !quickMoveIn) continue; // A model or unlabeled card is treated as absent below.
+    if (!sold && !quickMoveIn) continue; // A model (kept above for its photos) or unlabeled card is treated as absent below.
     const result = await upsertHome({ communityId: community.id, sourceUrl: home.sourceUrl, builderWasPrice: homeWas && home.previousPrice ? home.previousPrice : null, privatePlanName: home.privatePlanName ?? home.privateName, privateAddress: home.privateAddress ?? null, kind: "quick_move_in", beds: home.bedrooms === null ? null : String(home.bedrooms), baths: home.bathrooms === null ? null : String(home.bathrooms), sqft: home.squareFeet, price: home.price, moveInDate: home.moveInDate ?? null, garage: home.garage ? String(home.garage) : null, stories: home.stories ?? null, homesite: home.homesite ?? null, readyNow: home.readyNow ?? false, status: sold ? "sold" : "available" }, now);
     if (!sold) publishable.add(normalizedDealSourceKey(home.sourceUrl));
     record(result, label(home));
@@ -799,6 +808,9 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     await db.update(dealHomes).set({ status: "sold" }).where(eq(dealHomes.id, missing.id));
     summary.sold.push(missing.privateAddress ?? missing.privatePlanName ?? `home ${missing.id}`);
   }
+  // A model the builder no longer shows stops being the cover (quietly: a model leaving is not a sale).
+  const existingModels = await db.select({ id: dealHomes.id, sourceUrl: dealHomes.sourceUrl }).from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.origin, "official"), eq(dealHomes.status, "model")));
+  for (const gone of existingModels) if (!models.has(normalizedDealSourceKey(gone.sourceUrl))) await db.update(dealHomes).set({ status: "sold" }).where(eq(dealHomes.id, gone.id));
   // Oct 26, 2026: buyers who saved a home that just got cheaper; their agent is told. Never fails the sync.
   if (priceDrops.length) await import("./dealsAlerts").then(({ queueSavedHomePriceDropAlerts }) => queueSavedHomePriceDropAlerts(priceDrops, now)).catch((error) => console.error("[deals] price-drop alerts failed", error instanceof Error ? error.message : error));
   await writeCommunityFacts(community, snapshot, sourceConfig);

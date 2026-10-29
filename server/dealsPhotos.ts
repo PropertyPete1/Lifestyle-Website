@@ -1413,6 +1413,8 @@ function mergeDrainResults(a: DealPhotoDrainResult, b: DealPhotoDrainResult): De
 
 const dueNow = (now: Date) => and(eq(dealPhotos.processingState, "pending"), isNotNull(dealPhotos.nextProcessingAttemptAt), lte(dealPhotos.nextProcessingAttemptAt, now));
 const homeIsShown = sql`(${dealHomes.status} = 'available' AND ${dealCommunities.active} = 1 AND ${dealCommunities.paused} = 0)`;
+/** Oct 28, 2026 (Peter: the model home's photo is the community's cover): a live community's model-home first photo. */
+const modelCoverPhoto = sql`(${dealHomes.status} = 'model' AND ${dealPhotos.sortOrder} = 0 AND ${dealCommunities.active} = 1 AND ${dealCommunities.paused} = 0)`;
 /** The home already shows at least one photo. Probes idx_deal_photos_home (home_id, processing_state). */
 
 /**
@@ -1487,7 +1489,7 @@ export async function shownHomePhotoCoverage() {
  */
 function dealPhotoPriorityOrder(served: ReturnType<typeof servedHomes>) {
   return [
-    sql`CASE WHEN ${homeIsShown} THEN 0 ELSE 1 END`,
+    sql`CASE WHEN ${homeIsShown} OR ${modelCoverPhoto} THEN 0 ELSE 1 END`,
     sql`CASE WHEN ${served.homeId} IS NULL THEN 0 ELSE 1 END`,
     asc(dealPhotos.sortOrder),
     sql`CASE WHEN ${dealHomes.price} IS NULL THEN 1 ELSE 0 END`,
@@ -1930,7 +1932,7 @@ async function scanCommunityMasters(photoId: number) {
   if (Date.now() - last < MASTER_SCAN_EVERY_MS) return;
   masterScanAt.set(owner.communityId, Date.now());
   const rows = await db.select({ id: dealPhotos.id, key: dealPhotos.processedStorageKey }).from(dealPhotos).innerJoin(dealHomes, eq(dealPhotos.homeId, dealHomes.id))
-    .where(and(eq(dealHomes.communityId, owner.communityId), eq(dealHomes.status, "available"), eq(dealPhotos.processingState, "processed"), isNotNull(dealPhotos.processedStorageKey))).limit(1500);
+    .where(and(eq(dealHomes.communityId, owner.communityId), inArray(dealHomes.status, ["available", "model"]), eq(dealPhotos.processingState, "processed"), isNotNull(dealPhotos.processedStorageKey))).limit(1500);
   let missing = 0;
   for (let index = 0; index < rows.length; index += 3) {
     const checks = await Promise.all(rows.slice(index, index + 3).map(async (row) => ({ row, there: await storageExistsPrivate(row.key as string) })));
@@ -1951,7 +1953,7 @@ export async function renderDealPhotoForPublic(photoId: number): Promise<Rendere
         eq(dealPhotos.processingState, "processed"),
         eq(dealPhotos.automaticHidden, false),
         eq(dealPhotos.adminHidden, false),
-        eq(dealHomes.status, "available"),
+        inArray(dealHomes.status, ["available", "model"]),
         eq(dealCommunities.paused, false),
         eq(dealCommunities.active, true),
       )).limit(1))[0];
@@ -2021,7 +2023,7 @@ export async function renderDealPhotoForLead(photoId: number, leadId: number, si
         eq(dealPhotos.processingState, "processed"),
         eq(dealPhotos.automaticHidden, false),
         eq(dealPhotos.adminHidden, false),
-        eq(dealHomes.status, "available"),
+        inArray(dealHomes.status, ["available", "model"]),
         eq(dealCommunities.paused, false),
         eq(dealCommunities.active, true),
         inArray(dealLeads.status, [...RENDERABLE_LEAD_STATUSES]),

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { PaymentAssumptions } from "@shared/dealsFeatured";
+import { firstLookFirst, type PaymentAssumptions } from "@shared/dealsFeatured";
 import { HOME_PAGE, type GatedHome } from "./GatedCatalog";
 import { BuyerHomeCard } from "./BuyerHomeCard";
 import { AutoMore, type BrowseListContext, type LandingCommunity, type UseCommunityHomes } from "./LandingBrowse";
@@ -22,7 +22,8 @@ export function publicHomeEntries(communities: readonly WithFacts[], filters: Br
     const home = landingHome(facts as LandingHomeFacts);
     return { key: community.key ?? "", index, community, home: { ...home, card: `${community.key ?? "c"}-${index}`, beds: home.beds ?? null, baths: home.baths ?? null, garage: home.garage == null ? null : String(home.garage), photos: [] } as GatedHome };
   })).filter((entry) => entry.key && (!narrow || homePasses(entry.home, { ...filters, bigLots: false })));
-  return filters.sort === "recommended" ? entries : sortHomes(entries.map((entry) => ({ ...entry.home, entry })), filters.sort).map((item) => item.entry);
+  // Oct 30, 2026 (Peter): "Recommended" opens on the $300K-$400K homes (FIRST_LOOK_PRICE), then the rest in the same order.
+  return filters.sort === "recommended" ? firstLookFirst(entries, (entry) => entry.home.price) : sortHomes(entries.map((entry) => ({ ...entry.home, entry })), filters.sort).map((item) => item.entry);
 }
 
 /** A visitor's saved home, by its public figures (the list's card handles are per page load). Nothing private. */

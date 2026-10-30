@@ -14,6 +14,25 @@ const MAX_RATE = 15;
 export const BIG_LOT_ACRES = 0.5;
 export const FEATURED_LIMIT = 3;
 
+/**
+ * Oct 30, 2026 (Peter: "make the homes that people see first like 300k-400k homes"): the price range the Best Deals
+ * row is drawn from, and the homes the lists show first in their "Recommended" order. The row falls back to every
+ * price only when nothing in the range qualifies.
+ */
+export const FIRST_LOOK_PRICE = { min: 300_000, max: 400_000 } as const;
+
+export function inFirstLookRange(price: number | null | undefined): boolean {
+  return typeof price === "number" && price >= FIRST_LOOK_PRICE.min && price <= FIRST_LOOK_PRICE.max;
+}
+
+/** A stable reorder: homes in the first-look range first, each group in the order it came in. */
+export function firstLookFirst<T>(items: readonly T[], priceOf: (item: T) => number | null | undefined): T[] {
+  const inRange: T[] = [];
+  const rest: T[] = [];
+  for (const item of items) (inFirstLookRange(priceOf(item)) ? inRange : rest).push(item);
+  return [...inRange, ...rest];
+}
+
 /** The first percentage in a builder figure: "4.999%" -> 4.999, "3.5% minimum down payment" -> 3.5. */
 export function percentFrom(value: string | null | undefined): number | null {
   if (!value) return null;
@@ -344,9 +363,11 @@ export type FeaturedDeals = {
   bigLots: FeaturedDeal[];
   /** The assumptions printed under the section. */
   assumptions: { marketRatePercent: number; defaultDownPercent: number; termYears: number; costs: PaymentCosts };
+  /** Set when every home in the row is priced in this range (FIRST_LOOK_PRICE); the row's heading names it. */
+  priceRange?: { min: number; max: number };
 };
 
-export type FeaturedSettings = { marketRatePercent: number; defaultDownPercent: number; limit?: number; costs?: PaymentCosts };
+export type FeaturedSettings = { marketRatePercent: number; defaultDownPercent: number; limit?: number; costs?: PaymentCosts; /** Only homes priced in this range compete (see FIRST_LOOK_PRICE). */ priceRange?: { min: number; max: number } };
 
 function priced(candidate: FeaturedCandidate, settings: FeaturedSettings): FeaturedDeal | null {
   if (!candidate.price || candidate.price <= 0) return null;
@@ -398,7 +419,9 @@ export function rankFeatured(candidates: readonly FeaturedCandidate[], settings:
   // October 24, 2026: a featured payment is figured at the builder's own published rate only, never the market rate.
   // A home whose builder publishes no rate is still on the list; it just does not compete here.
   // October 24, 2026 (Peter): a featured home has a garage; one listed with none (or no figure) is never featured.
-  const eligible = candidates.filter((candidate) => !candidate.excluded && typeof candidate.offer?.ratePercent === "number" && (garageSpaces(candidate.garage) ?? 0) >= 1);
+  const range = settings.priceRange;
+  const eligible = candidates.filter((candidate) => !candidate.excluded && typeof candidate.offer?.ratePercent === "number" && (garageSpaces(candidate.garage) ?? 0) >= 1
+    && (!range || (typeof candidate.price === "number" && candidate.price >= range.min && candidate.price <= range.max)));
   const priced_ = eligible.flatMap((candidate) => {
     const deal = priced(candidate, settings);
     return deal ? [{ ...deal, communityKey: candidate.communityKey }] : [];
@@ -413,6 +436,17 @@ export function rankFeatured(candidates: readonly FeaturedCandidate[], settings:
   const bestRate = offers[0] ? { ...strip(offers[0]), reason: "rate" as const } : null;
   const bigLots = bestPerCommunity(comparable.filter((deal) => (deal.acres ?? 0) >= BIG_LOT_ACRES)).slice(0, limit).map((deal) => ({ ...strip(deal), reason: "lot" as const }));
   return { lowestPayment, bestRate, bigLots, assumptions: { marketRatePercent: settings.marketRatePercent, defaultDownPercent: settings.defaultDownPercent, termYears: DEFAULT_TERM_YEARS, costs: settings.costs ?? DEFAULT_PAYMENT_COSTS } };
+}
+
+/**
+ * The Best Deals row drawn from the first-look price range (FIRST_LOOK_PRICE): lowest payments, best builder rate and
+ * big lots all among homes in the range, so every tag is true of what it says ("best builder rate" of $300K-$400K
+ * homes) and the heading names the range. With no home in the range to rank by payment, the row is every price.
+ */
+export function rankFeaturedFirstLook(candidates: readonly FeaturedCandidate[], settings: FeaturedSettings): FeaturedDeals {
+  const inRange = rankFeatured(candidates, { ...settings, priceRange: FIRST_LOOK_PRICE });
+  if (inRange.lowestPayment.length) return { ...inRange, priceRange: { min: FIRST_LOOK_PRICE.min, max: FIRST_LOOK_PRICE.max } };
+  return rankFeatured(candidates, { ...settings, priceRange: undefined });
 }
 
 /** "Lennar" excludes "Lennar", "Lennar Homes", "Lennar Mortgage" and "www.lennar.com"; a blank entry excludes nothing. */

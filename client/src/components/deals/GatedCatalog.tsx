@@ -15,7 +15,7 @@ import { DealsFooter, Incentive, NewBadge, RedHotBadge, RedHotSavings, ReelCard,
 import { FeaturedDeals, type FeaturedDealsData } from "./FeaturedDeals";
 import { BrowseBar, BROWSE_COPY, ShowMore } from "./BrowseBar";
 import { AutoMore, LandingBrowse, sheetHistory, type BrowseListContext, type LandingCommunity, type PublicHome } from "./LandingBrowse";
-import { redHotDeal, type PaymentAssumptions } from "@shared/dealsFeatured";
+import { firstLookFirst, redHotDeal, type PaymentAssumptions } from "@shared/dealsFeatured";
 import { BuyerHomeCard } from "./BuyerHomeCard";
 import { BROWSE_PAGE, BROWSE_SORTS, EMPTY_FILTERS, OPEN_ALL_UP_TO, numberFrom, newThisWeekKnown, sortGatedCommunities, sortHomes, storiesKnown, builderChoices, dealSelection, gatedCommunityVisible, homeFiltersOn, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
 
@@ -544,7 +544,8 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
     const needle = homeQuery.trim().toLowerCase();
     const entries = matching.flatMap(({ community, key, homes }) => homes.map((home) => ({ home, community, key })))
       .filter(({ home, community }) => !needle || homeSearchText(home, community).includes(needle));
-    return filters.sort === "recommended" ? entries : sortHomes(entries.map((entry) => ({ ...entry.home, entry })), filters.sort).map((item) => item.entry);
+    // Oct 30, 2026 (Peter): "Recommended" opens on the $300K-$400K homes (FIRST_LOOK_PRICE), then the rest in the same order.
+    return filters.sort === "recommended" ? firstLookFirst(entries, (entry) => entry.home.price) : sortHomes(entries.map((entry) => ({ ...entry.home, entry })), filters.sort).map((item) => item.entry);
   }, [matching, filters.sort, homeQuery]);
   const keyByCard = useMemo(() => new Map(communities.flatMap((community, index) => community.homes.map((home) => [home.card, communityKey(community, index)] as const))), [communities]);
   const useSheetHomes = (key: string | undefined) => {

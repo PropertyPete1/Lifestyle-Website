@@ -1,7 +1,8 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealIncentives, dealPhotos } from "../drizzle/schema";
 import { scrubPrivateNames, selectDealCatalogHomes } from "../shared/deals";
-import { DEFAULT_PAYMENT_COSTS, builderExcluded, homeLotAcres, lotAcres, mortgageRateFrom, offerFromIncentive, rankFeatured, type FeaturedCandidate, type FeaturedDeal, type FeaturedDeals } from "../shared/dealsFeatured";
+import { DEFAULT_PAYMENT_COSTS, builderExcluded, homeLotAcres, lotAcres, mortgageRateFrom, offerFromIncentive, rankFeatured, rankFeaturedFirstLook, type FeaturedCandidate, type FeaturedDeal, type FeaturedDeals } from "../shared/dealsFeatured";
+import { exteriorCovers } from "./dealsPhotoExterior";
 import { getDb } from "./db";
 import { publicPhotoUrl } from "./dealsPhotoToken";
 import { communityScrubConfig, dealsCardHandle, dealsHandle, getDealSettings, hashSecret, publicNoPrivateNames, type DealsCatalogView } from "./dealsService";
@@ -120,12 +121,59 @@ export async function featuredDeals(view: FeaturedView, options: { onlyCards?: R
     }
   }
   // October 24, 2026: prices are public, so the landing page gets the same figures as the list (never a card handle or name).
-  return withCoverPhotos(rankFeatured(candidates, ranking), homeByKey, view);
+  const { ranked, covers } = await withOutsideCovers(candidates, (list) => rankFeaturedFirstLook(list, ranking), homeByKey);
+  return withCoverPhotos(ranked, homeByKey, view, covers);
 }
 
-/** Each winner's cover (first shown photo): on the landing page a public render of it, on a private list the lead's own render. */
-async function withCoverPhotos(ranked: FeaturedDeals, homeByKey: ReadonlyMap<string, number>, view: FeaturedView): Promise<FeaturedDeals> {
-  const deals = [...ranked.lowestPayment, ...(ranked.bestRate ? [ranked.bestRate] : []), ...ranked.bigLots];
+/** Every featured deal once (a home can win more than one way). */
+function featuredList(ranked: FeaturedDeals): FeaturedDeal[] {
+  return [...ranked.lowestPayment, ...(ranked.bestRate ? [ranked.bestRate] : []), ...ranked.bigLots];
+}
+
+/** Rounds of "rank, drop the winners with no outside shot, rank again": each round looks at a handful of homes. */
+const OUTSIDE_COVER_ROUNDS = 4;
+
+/**
+ * Oct 30, 2026 (Peter: "the featured homes are just the inside of the home"): a featured home shows its outside. Each
+ * winner's gallery is looked at for an outside shot (dealsPhotoExterior); a home whose photos are all inside is left
+ * out and the next home takes its place. A home with nothing to judge keeps its first photo (or none) as before.
+ */
+export async function withOutsideCovers(
+  candidates: readonly FeaturedCandidate[],
+  rank: (list: readonly FeaturedCandidate[]) => FeaturedDeals,
+  homeByKey: ReadonlyMap<string, number>,
+  findCovers: (homeIds: readonly number[]) => Promise<Map<number, number | null | undefined>> = (ids) => exteriorCovers(ids),
+): Promise<{ ranked: FeaturedDeals; covers: Map<string, number> }> {
+  const covers = new Map<string, number>();
+  const judged = new Set<string>();
+  const insideOnly = new Set<string>();
+  let ranked = rank(candidates);
+  for (let round = 0; round < OUTSIDE_COVER_ROUNDS; round++) {
+    const fresh = Array.from(new Set(featuredList(ranked).map((deal) => deal.key).filter((key): key is string => Boolean(key) && !judged.has(key!))));
+    if (!fresh.length) break;
+    const found = await findCovers(fresh.map((key) => homeByKey.get(key)).filter((id): id is number => id !== undefined));
+    let dropped = false;
+    for (const key of fresh) {
+      judged.add(key);
+      const homeId = homeByKey.get(key);
+      const cover = homeId === undefined ? undefined : found.get(homeId);
+      if (typeof cover === "number") covers.set(key, cover);
+      else if (cover === null) { insideOnly.add(key); dropped = true; }
+    }
+    if (!dropped) break;
+    ranked = rank(candidates.map((candidate) => candidate.key && insideOnly.has(candidate.key) ? { ...candidate, excluded: true } : candidate));
+  }
+  // A winner the last round brought in was not looked at: it stays only if it is not known to be inside-only.
+  const keep = (deal: FeaturedDeal) => !deal.key || !insideOnly.has(deal.key);
+  return { ranked: { ...ranked, lowestPayment: ranked.lowestPayment.filter(keep), bestRate: ranked.bestRate && keep(ranked.bestRate) ? ranked.bestRate : null, bigLots: ranked.bigLots.filter(keep) }, covers };
+}
+
+/**
+ * Each winner's cover: its outside shot when one was found (see withOutsideCovers), else its first shown photo; on the
+ * landing page a public render of it, on a private list the lead's own render.
+ */
+async function withCoverPhotos(ranked: FeaturedDeals, homeByKey: ReadonlyMap<string, number>, view: FeaturedView, outside: ReadonlyMap<string, number> = new Map()): Promise<FeaturedDeals> {
+  const deals = featuredList(ranked);
   const homeIds = Array.from(new Set(deals.map((deal) => deal.key ? homeByKey.get(deal.key) : undefined).filter((id): id is number => id !== undefined)));
   const db = await getDb();
   if (!db || !homeIds.length) return ranked;
@@ -135,7 +183,7 @@ async function withCoverPhotos(ranked: FeaturedDeals, homeByKey: ReadonlyMap<str
   const cover = new Map<number, number>();
   for (const row of rows) if (row.homeId !== null && !cover.has(row.homeId)) cover.set(row.homeId, row.id);
   const attach = (deal: FeaturedDeal): FeaturedDeal => {
-    const photoId = deal.key ? cover.get(homeByKey.get(deal.key) ?? -1) : undefined;
+    const photoId = deal.key ? outside.get(deal.key) ?? cover.get(homeByKey.get(deal.key) ?? -1) : undefined;
     if (!photoId) return deal;
     return { ...deal, photo: view === "public" ? publicPhotoUrl(photoId) : `/deals/mine/img/${photoId}` };
   };

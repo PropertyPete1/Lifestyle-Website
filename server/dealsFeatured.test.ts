@@ -237,7 +237,8 @@ describe("Best Deals from the database, by viewer", () => {
   it("gives the landing page labels and payments only, the private list card handles, and the team names", async () => {
     const sienna = community({});
     const sourceKey = "sienna-118";
-    home(sienna, { sourceKey, price: 499_990 });
+    // Both homes in the $300K-$400K first-look range (FIRST_LOOK_PRICE), so the whole row is drawn from it.
+    home(sienna, { sourceKey, price: 389_990 });
     db.seed(dealIncentives, { communityId: sienna, normalizedText: "x", publicText: "x", headlineRate: "4.999%", apr: "5.737%", loanType: "FHA", downPayment: "3.5%", confirmedAt: new Date(), active: true, held: false, manual: false });
     const vista = community({ builder: "M/I Homes", privateName: "Vista Gardens", publicLabel: "Southeast San Antonio | New Phase Now Selling", scrubList: JSON.stringify({ community: ["Vista Gardens"] }) });
     home(vista, { price: 354_990, privateAddress: "9 Vista Way" });
@@ -249,7 +250,8 @@ describe("Best Deals from the database, by viewer", () => {
     home(paused, { price: 150_000 });
 
     const pub = await featuredDeals("public");
-    expect(pub.lowestPayment.map((deal) => deal.label)).toEqual(["Southeast San Antonio | New Phase Now Selling", "Southeast San Antonio | Half-Acre Lots and Lakes"]);
+    expect(pub.lowestPayment.map((deal) => deal.label)).toEqual(["Southeast San Antonio | Half-Acre Lots and Lakes", "Southeast San Antonio | New Phase Now Selling"]);
+    expect(pub.priceRange).toEqual({ min: 300_000, max: 400_000 });
     const json = JSON.stringify(pub);
     for (const secret of ["Sienna Lakes", "Vista Gardens", "118 Sienna", "9 Vista", "Cheap", "Lennar", "Paused", "card", "detail", "chesmar.com"]) expect(json).not.toContain(secret);
     expect(pub.bestRate).toMatchObject({ label: "Southeast San Antonio | Half-Acre Lots and Lakes", rate: { ratePercent: 4.999, loanType: "FHA" }, downPercent: 3.5 });

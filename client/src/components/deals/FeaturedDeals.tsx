@@ -19,6 +19,12 @@ export const FEATURED_COPY = {
   updated: "Updated every time the builders' sites are checked.",
 } as const;
 
+const thousands = (value: number) => `$${Math.round(value / 1000)}K`;
+/** "Best deals · $300K to $400K" when the whole row is drawn from that price range (Peter, Oct 30), else the plain heading. */
+export function featuredEyebrow(featured: Pick<FeaturedDealsData, "priceRange">): string {
+  return featured.priceRange ? `Best deals · ${thousands(featured.priceRange.min)} to ${thousands(featured.priceRange.max)}` : FEATURED_COPY.eyebrow;
+}
+
 /** "at 4.999% (5.737% APR) FHA, 3.5% down" or "at the 7.4% market rate, 5% down" (a buydown names its first-year rate too). */
 export function rateLine(deal: Pick<FeaturedDeal, "rate" | "downPercent">): string {
   const down = `${Number(deal.downPercent.toFixed(2))}% down`;
@@ -93,7 +99,10 @@ export function FeaturedStrip({ featured, onSelect, onHover, opens = false, comp
   onHover?: (deal: FeaturedDeal | null) => void;
   /** Tapping opens the home's details (its community's sheet) rather than the gate. */
   opens?: boolean;
-  /** Oct 30, 2026 (design F, homes near the top): small side-by-side cards, about a third of the height. */
+  /**
+   * Oct 30, 2026 (design F, homes near the top): small side-by-side cards, about a third of the height. The photo is
+   * landscape (3:2), close to the photos' own shape: a square cut the sides off a wide home (Peter, the big-lot card).
+   */
   compact?: boolean;
 }) {
   const row = useRef<HTMLOListElement>(null);
@@ -101,11 +110,11 @@ export function FeaturedStrip({ featured, onSelect, onHover, opens = false, comp
   const items = featuredInOrder(featured);
   if (!items.length) return null;
   if (compact) return <section aria-labelledby="deals-featured-heading" data-deals-featured-section="true" data-deals-featured-strip="compact" className="min-w-0">
-    <h2 id="deals-featured-heading" className="eyebrow text-gold">{FEATURED_COPY.eyebrow}</h2>
+    <h2 id="deals-featured-heading" className="eyebrow text-gold">{featuredEyebrow(featured)}</h2>
     <ol ref={row} className="-mx-4 mt-3 flex min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:mx-0 sm:px-0">
-      {items.map(({ deal, tags }, index) => <li key={`${dealKey(deal)}-${index}`} className="w-[84%] max-w-[320px] shrink-0 snap-start">
+      {items.map(({ deal, tags }, index) => <li key={`${dealKey(deal)}-${index}`} className="w-[88%] max-w-[330px] shrink-0 snap-start">
         <button type="button" onClick={() => onSelect?.(deal)} onMouseEnter={() => onHover?.(deal)} onMouseLeave={() => onHover?.(null)} onFocus={() => onHover?.(deal)} onBlur={() => onHover?.(null)} data-deals-featured={deal.reason} aria-label={`${opens ? FEATURED_COPY.details : FEATURED_COPY.unlock}: ${deal.area}, ${money.format(deal.estMonthly)} a month estimated`} className="flex h-full w-full min-w-0 items-stretch gap-3 rounded-2xl border border-border bg-card p-2 text-left shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:border-gold/60">
-          <span className="relative block aspect-square w-24 shrink-0 overflow-hidden rounded-xl bg-secondary">{deal.photo && <RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />}</span>
+          <span className="relative block aspect-[3/2] w-28 shrink-0 self-center overflow-hidden rounded-xl bg-secondary" data-deals-featured-thumb="true">{deal.photo && <RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />}</span>
           <span className="flex min-w-0 flex-1 flex-col justify-center py-1 pr-1">
             <span className="truncate text-[10px] font-semibold uppercase tracking-widest text-gold">{redHotDeal(deal.price, deal.previousPrice) ? RED_HOT_COPY.badge : tags[0] ?? FEATURED_COPY.lowest}</span>
             <span className="mt-0.5 block font-serif text-2xl font-semibold leading-none text-foreground lining-nums">{money.format(deal.estMonthly)}<span className="ml-1 font-sans text-[11px] font-normal text-muted-foreground">/mo est.</span></span>
@@ -121,7 +130,7 @@ export function FeaturedStrip({ featured, onSelect, onHover, opens = false, comp
   return <section aria-labelledby="deals-featured-heading" data-deals-featured-section="true" data-deals-featured-strip="true" className="min-w-0">
     <div className="flex min-w-0 items-end justify-between gap-3">
       <div className="min-w-0">
-        <p className="eyebrow text-gold">{FEATURED_COPY.eyebrow}</p>
+        <p className="eyebrow text-gold">{featuredEyebrow(featured)}</p>
         <h2 id="deals-featured-heading" className="mt-1 text-xl leading-tight sm:text-2xl">{FEATURED_COPY.heading}</h2>
       </div>
       <div className="hidden shrink-0 gap-2 sm:flex">
@@ -167,7 +176,7 @@ export function FeaturedDeals({ featured, locked = false, onSelect }: { featured
   const bestRate = featured.bestRate && !shown.has(dealKey(featured.bestRate)) ? featured.bestRate : null;
   const bigLots = featured.bigLots.filter((deal) => !shown.has(dealKey(deal)) && !(bestRate && dealKey(bestRate) === dealKey(deal)));
   return <section aria-labelledby="deals-featured-heading" data-deals-featured-section="true" className="mt-10 min-w-0">
-    <p className="eyebrow text-gold">{FEATURED_COPY.eyebrow}</p>
+    <p className="eyebrow text-gold">{featuredEyebrow(featured)}</p>
     <h2 id="deals-featured-heading" className="mt-2 text-3xl leading-tight sm:text-4xl">{FEATURED_COPY.heading}</h2>
     {featured.lowestPayment.length > 0 && <>
       <p className="mt-6 flex items-center gap-2 text-xs uppercase tracking-widest text-muted-foreground"><Trophy className="h-4 w-4 text-gold" />{FEATURED_COPY.lowest}</p>

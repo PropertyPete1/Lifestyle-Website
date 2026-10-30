@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import { afterEach, describe, expect, it } from "vitest";
 import { chicagoDayBounds } from "./siteTelemetry";
-import { collectSiteMetrics, dayQueries } from "./writeSiteStats";
+import { collectSiteMetrics, dayQueries, queryFailureReason } from "./writeSiteStats";
 
 // A drizzle instance with no real client: enough to build and render SQL,
 // never enough to run it.
@@ -81,5 +81,30 @@ describe("collectSiteMetrics without a database", () => {
     // Rejecting is the contract: writeSiteTelemetry turns this into a named
     // `unavailable` entry. Returning zeros here would be the bug.
     await expect(collectSiteMetrics()).rejects.toThrow(/DATABASE_URL is not set/);
+  });
+});
+
+describe("queryFailureReason — says why a read failed", () => {
+  const wrapped = (cause: unknown) =>
+    Object.assign(new Error("Failed query: select SUM(`page_events`.`kind` = 'view') from `page_events`\nparams: 2026-10-30 05:00:00"), { cause });
+
+  it("names the driver's code and message, not just Drizzle's wrapper", () => {
+    const reason = queryFailureReason(wrapped(Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" })));
+    expect(reason).toMatch(/^query failed: ETIMEDOUT: connect ETIMEDOUT \(in Failed query: select/);
+    expect(reason).not.toContain("params:");
+  });
+
+  it("masks the user@host pair an access error carries", () => {
+    const reason = queryFailureReason(
+      wrapped(Object.assign(new Error("Access denied for user 'site_ro'@'10.1.2.3' (using password: YES)"), { code: "ER_ACCESS_DENIED_ERROR" }))
+    );
+    expect(reason).toContain("ER_ACCESS_DENIED_ERROR: Access denied for user '…'@'…'");
+    expect(reason).not.toContain("site_ro");
+    expect(reason).not.toContain("10.1.2.3");
+  });
+
+  it("falls back to the wrapper message when there is no cause", () => {
+    expect(queryFailureReason(new Error("timed out after 45000ms"))).toBe("query failed: timed out after 45000ms");
+    expect(queryFailureReason("boom")).toBe("query failed: boom");
   });
 });

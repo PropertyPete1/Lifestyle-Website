@@ -174,7 +174,7 @@ export async function collectSiteMetrics(now = new Date()): Promise<CollectedMet
       } catch (err) {
         unavailable.push({
           metric: `page_views, unique_visitors, top_pages, lead_submissions (${label} ${dateStr})`,
-          reason: `query failed: ${err instanceof Error ? err.message : String(err)}`,
+          reason: queryFailureReason(err),
         });
         return null;
       }
@@ -191,6 +191,26 @@ export async function collectSiteMetrics(now = new Date()): Promise<CollectedMet
       /* closing a pool that never opened is not a failure worth reporting */
     });
   }
+}
+
+/**
+ * Oct 30, 2026: every run since at least Oct 26 recorded only Drizzle's wrapper ("Failed query: select … params: …"),
+ * which never says WHY (no route to the database, access denied, a missing column). The driver's own error rides on
+ * `cause`; its code and message are what the reason needs. A user@host pair in the message is masked, since this
+ * file is committed to the repo.
+ */
+export function queryFailureReason(err: unknown): string {
+  const top = err instanceof Error ? err.message : String(err);
+  const cause = err instanceof Error ? (err as { cause?: unknown }).cause : undefined;
+  const detail = cause && typeof cause === "object" ? cause as { code?: unknown; message?: unknown } : null;
+  const code = typeof detail?.code === "string" ? detail.code : null;
+  const message = typeof detail?.message === "string"
+    ? detail.message.replace(/'[^']*'@'[^']*'/g, "'…'@'…'").replace(/\s+/g, " ").trim().slice(0, 240)
+    : null;
+  if (!code && !message) return `query failed: ${top}`;
+  // The wrapper's SQL is the same every run; the first line is enough to say which read it was.
+  const which = top.split("\n")[0]!.slice(0, 120);
+  return `query failed: ${[code, message].filter(Boolean).join(": ")} (in ${which})`;
 }
 
 /** Reject rather than hang forever on an unreachable database. */

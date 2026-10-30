@@ -623,7 +623,8 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
   // On document.body, so no section's stacking (or the page's floating button) can sit over the sheet.
   return createPortal(<div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 sm:items-center sm:p-6" onClick={onClose}>
     <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="deals-community-title" data-deals-community-sheet="true" onClick={(event) => event.stopPropagation()} className="deals-light relative max-h-[94vh] w-full max-w-6xl overflow-y-auto rounded-t-2xl bg-background shadow-2xl sm:rounded-2xl">
-      <button ref={closeButton} type="button" onClick={onClose} aria-label={LANDING_COPY.close} className="absolute right-2 top-2 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-background/90 text-muted-foreground shadow hover:text-foreground"><X className="h-5 w-5" /></button>
+      {/* Oct 30, 2026 (ChatGPT's test: the X scrolled away): a zero-height sticky row keeps it in the corner while the sheet scrolls. */}
+      <div className="sticky top-0 z-20 h-0"><button ref={closeButton} type="button" onClick={onClose} aria-label={LANDING_COPY.close} className="absolute right-2 top-2 flex h-11 w-11 items-center justify-center rounded-full bg-background/90 text-muted-foreground shadow hover:text-foreground"><X className="h-5 w-5" /></button></div>
       {featuredHome && options.focusHero && <div className="border-b border-border" data-deals-focus-hero="true">{options.focusHero(featuredHome, community)}</div>}
       <div className="grid min-w-0 gap-6 p-5 sm:p-6 md:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
         <div className="mx-auto w-full min-w-0 max-w-[340px]"><ReelCard reelUrl={community.reelUrl} label={community.label} autoLoad poster={community.cover ?? null} /></div>

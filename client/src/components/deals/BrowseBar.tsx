@@ -109,7 +109,8 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
   const setMin = (minPrice: number | null) => set({ minPrice, ...(minPrice !== null && filters.maxPrice !== null && filters.maxPrice <= minPrice ? { maxPrice: null } : {}) });
   const setMax = (maxPrice: number | null) => set({ maxPrice, ...(maxPrice !== null && filters.minPrice !== null && filters.minPrice >= maxPrice ? { minPrice: null } : {}) });
   const morePanel = <div data-deals-more-filters="true" className="mt-4 min-w-0 border-t border-border pt-4">
-      <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      {/* In the Filters sheet (28rem wide on a desktop) the grid stays two across (ChatGPT's test: six columns squeezed the labels). */}
+      <div className={`grid min-w-0 grid-cols-2 gap-3 ${sheet ? "" : "sm:grid-cols-3 lg:grid-cols-6"}`}>
         <NumberSelect label={BROWSE_COPY.baths} value={filters.minBaths} options={BATH_MINIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `${value}+ baths`} onChange={(minBaths) => set({ minBaths })} />
         <NumberSelect label={BROWSE_COPY.sqft} value={filters.minSqft} options={SQFT_MINIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `${value.toLocaleString("en-US")}+ sq ft`} onChange={(minSqft) => set({ minSqft, ...(minSqft !== null && filters.maxSqft !== null && filters.maxSqft <= minSqft ? { maxSqft: null } : {}) })} />
         <NumberSelect label={BROWSE_COPY.maxSqft} value={filters.maxSqft} options={SQFT_MAXIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `Up to ${value.toLocaleString("en-US")}`} onChange={(maxSqft) => set({ maxSqft, ...(maxSqft !== null && filters.minSqft !== null && filters.minSqft >= maxSqft ? { minSqft: null } : {}) })} />
@@ -121,7 +122,7 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
           </div>
         </div>}
       </div>
-      {districts.length > 1 && <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+      {districts.length > 1 && <div className={`mt-3 grid min-w-0 grid-cols-1 gap-3 ${sheet ? "" : "sm:grid-cols-2"}`}>
         <label className={LABEL} data-deals-district-filter="true">{BROWSE_COPY.schoolDistrict}
           <select aria-label={BROWSE_COPY.schoolDistrict} value={filters.schoolDistrict} onChange={(event) => set({ schoolDistrict: event.target.value })} className={`mt-1 ${SELECT}`}>
             <option value="">{BROWSE_COPY.anyDistrict}</option>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "wouter";
 import { Heart, Menu, SlidersHorizontal, X } from "lucide-react";
 import type { PaymentAssumptions } from "@shared/dealsFeatured";
+import { SITE } from "@shared/site";
 import { BROWSE_SORTS, EMPTY_FILTERS, activeFilterCount, landingMatches, newThisWeekKnown, sortLandingCommunities, storiesKnown, type BrowseFilters, type LandingHomeFacts } from "@/lib/dealsBrowse";
 import { BrowseBar, BROWSE_COPY } from "./BrowseBar";
 import { BuyerHomeCard, LockedDetails } from "./BuyerHomeCard";
@@ -52,11 +53,15 @@ export function DealsHeader({ agentSignIn = true }: { agentSignIn?: boolean }) {
     {open && <nav id="deals-menu" aria-label={PUBLIC_PAGE_COPY.menu} className="absolute right-4 top-full z-50 mt-1 w-64 overflow-hidden rounded-xl border border-border bg-card py-1 shadow-lg sm:right-6">
       <Link href="/" className="flex min-h-11 items-center px-4 text-sm text-foreground hover:bg-secondary">{PUBLIC_PAGE_COPY.mainSite}</Link>
       {agentSignIn && <Link href="/deals/team" data-deals-agent-signin="true" className="flex min-h-11 items-center px-4 text-sm text-foreground hover:bg-secondary">{PUBLIC_PAGE_COPY.agentSignIn}</Link>}
+      {/* Oct 30, 2026: TREC's notices one tap from the top too (the long list pushes the footer far down). */}
+      <a href={SITE.iabsUrl} target="_blank" rel="noreferrer" className="flex min-h-11 items-center border-t border-border px-4 text-xs text-muted-foreground hover:bg-secondary">Information About Brokerage Services</a>
+      <a href={SITE.cpnUrl} target="_blank" rel="noreferrer" className="flex min-h-11 items-center px-4 text-xs text-muted-foreground hover:bg-secondary">Consumer Protection Notice</a>
     </nav>}
   </header>;
 }
 
 const SAVES_KEY = "deals-saved-homes";
+const FILTERS_KEY = "deals-public-filters";
 const SAVES_MAX = 200;
 /**
  * Oct 30, 2026 (Peter: like New Home Buddy, a visitor saves homes without signing up): the hearts, in this browser
@@ -121,7 +126,13 @@ export type PublicDealsPageProps = {
 };
 
 export function PublicDealsPage({ communities: all, useHomes, featured, comingSoon, eyebrow, intro = PUBLIC_PAGE_COPY.intro, openKey, onTour }: PublicDealsPageProps) {
-  const [filters, setFilters] = useState<BrowseFilters>(EMPTY_FILTERS);
+  // Oct 30, 2026 (ChatGPT's test: back from the Privacy Policy, the saved-only view was gone): the filters last for the visit.
+  const [filters, setFiltersState] = useState<BrowseFilters>(() => { try { const kept = JSON.parse(window.sessionStorage.getItem(FILTERS_KEY) ?? "null") as Partial<BrowseFilters> | null; return kept && typeof kept === "object" ? { ...EMPTY_FILTERS, ...kept } : EMPTY_FILTERS; } catch { return EMPTY_FILTERS; } });
+  const setFilters = (next: BrowseFilters | ((current: BrowseFilters) => BrowseFilters)) => setFiltersState((current) => {
+    const value = typeof next === "function" ? next(current) : next;
+    try { window.sessionStorage.setItem(FILTERS_KEY, JSON.stringify(value)); } catch { /* kept for this page only */ }
+    return value;
+  });
   const [listView, setListView] = useState<"homes" | "communities">("homes");
   const [mapOpen, setMapOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -165,9 +176,12 @@ export function PublicDealsPage({ communities: all, useHomes, featured, comingSo
           areaStatus={listView === "homes" ? (keys) => { const inArea = new Set(keys); return `Showing ${HOME_LIST_COPY.count(homeEntries.filter((entry) => inArea.has(entry.key)).length)} in this part of town`; } : undefined}
           renderList={listView === "homes" ? (context) => <PublicHomeList entries={homeEntries} context={context} useHomes={useHomes} assumptions={assumptions} onTour={(entry) => onTour(entry)} saved={saved} onToggleSave={toggleSave} /> : undefined}
           communities={matching} filters={filters} useHomes={useHomes} onUnlock={() => onTour()} lookup={all} openKey={openKey}
-          sheet={{ locked: <LockedDetails />, renderHome: (home, isFeatured, community) => <BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} featured={isFeatured} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour()} /> }}
-          top={(actions) => <FeaturedStrip compact featured={featured} opens onHover={(deal) => actions.hover(deal?.landingKey ?? null)} onSelect={(deal) => { if (!deal.landingKey || !actions.openHome(deal.landingKey, { price: deal.price, sqft: deal.sqft, kind: deal.kind })) onTour(); }} />}
-          below={<ComingSoonSection items={comingSoon} action={{ kind: "unlock", onClick: () => onTour() }} />} />
+          sheet={{ locked: <LockedDetails />,
+            // Oct 30, 2026 (ChatGPT's test: a home opened onto its community, not its photos): the opened home leads the sheet.
+            focusHero: (home, community) => <div className="mx-auto max-w-3xl p-4 pt-14 sm:p-6 sm:pt-14"><BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour()} /></div>,
+            renderHome: (home, isFeatured, community) => <BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} featured={isFeatured} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour()} /> }}
+          top={filters.savedOnly ? undefined : (actions) => <FeaturedStrip compact featured={featured} opens onHover={(deal) => actions.hover(deal?.landingKey ?? null)} onSelect={(deal) => { if (!deal.landingKey || !actions.openHome(deal.landingKey, { price: deal.price, sqft: deal.sqft, kind: deal.kind })) onTour(); }} />}
+          below={filters.savedOnly ? undefined : <ComingSoonSection items={comingSoon} action={{ kind: "text", phone: null, name: null }} />} />
       </div>
     </section>
     <DealsFooter />

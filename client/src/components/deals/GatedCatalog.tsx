@@ -15,7 +15,8 @@ import { DealsFooter, Incentive, NewBadge, RedHotBadge, RedHotSavings, ReelCard,
 import { FeaturedDeals, type FeaturedDealsData } from "./FeaturedDeals";
 import { BrowseBar, BROWSE_COPY, ShowMore } from "./BrowseBar";
 import { AutoMore, LandingBrowse, sheetHistory, type BrowseListContext, type LandingCommunity, type PublicHome } from "./LandingBrowse";
-import { redHotDeal } from "@shared/dealsFeatured";
+import { redHotDeal, type PaymentAssumptions } from "@shared/dealsFeatured";
+import { BuyerHomeCard } from "./BuyerHomeCard";
 import { BROWSE_PAGE, BROWSE_SORTS, EMPTY_FILTERS, OPEN_ALL_UP_TO, numberFrom, newThisWeekKnown, sortGatedCommunities, sortHomes, storiesKnown, builderChoices, dealSelection, gatedCommunityVisible, homeFiltersOn, homesMatching, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export { countdownLabel } from "@/lib/dealsMine";
@@ -375,45 +376,24 @@ export function cardPhoto(src: string): string {
 }
 
 /** One home in the flat list, like a New Home Buddy card: photo, price, where, and the specs at a glance. */
-export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving, onSave, photoPending = false }: { home: GatedHome; community: GatedCommunity; onOpen: () => void; onHover?: (on: boolean) => void; pick?: PickControl; saved?: boolean; saving?: boolean; onSave?: (card: string, saved: boolean) => void; /** The photo is still on its way (the public list reads it per community): a grey frame, not "Photos on request". */ photoPending?: boolean }) {
-  const [failed, setFailed] = useState(false);
-  const photo = !failed && home.photos?.[0] ? cardPhoto(home.photos[0]) : undefined;
+export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving, onSave, photoPending = false, assumptions, onTour }: { home: GatedHome; community: GatedCommunity; onOpen: () => void; onHover?: (on: boolean) => void; pick?: PickControl; saved?: boolean; saving?: boolean; onSave?: (card: string, saved: boolean) => void; /** The photo is still on its way (the public list reads it per community): a grey frame, not "Photos on request". */ photoPending?: boolean; /** Oct 30, 2026 (design F everywhere): the monthly total at the builder's rate, as on the public page. */ assumptions?: PaymentAssumptions | null; /** A buyer's "Schedule a tour" (none on the team's list). */ onTour?: () => void }) {
   const lines = addressLines(home.details?.address);
   const plan = home.details?.planName ?? null;
   const title = lines?.street ?? (plan ? `${plan} plan` : labelHook(community.label, homeNoun(home)));
   const subtitle = lines?.city ?? (plan ? community.area : null);
   const place = [community.details?.communityName, community.details?.builderName].filter(Boolean).join(" · ") || community.area;
-  const drop = home.previousPrice && home.price && home.previousPrice > home.price ? home.previousPrice - home.price : 0;
   const picked = pick?.picked.has(home.card) ?? false;
-  const specs = [
-    home.beds ? { icon: BedDouble, text: `${home.beds} bd` } : null,
-    home.baths ? { icon: Bath, text: `${home.baths} ba` } : null,
-    home.sqft ? { icon: Ruler, text: `${home.sqft.toLocaleString("en-US")} sqft` } : null,
-  ].filter((item): item is { icon: typeof Bath; text: string } => Boolean(item));
-  return <article id={`tile-${home.card}`} data-deals-home-tile="true" data-deals-picked={picked ? "true" : undefined} onMouseEnter={() => onHover?.(true)} onMouseLeave={() => onHover?.(false)} className={`relative min-w-0 overflow-hidden rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md ${picked ? "border-gold ring-2 ring-gold/60" : "border-border"}`}>
-    <button type="button" onClick={onOpen} className="block w-full min-w-0 text-left" aria-label={`${title}, ${home.price ? money.format(home.price) : "price on request"}. Open details`}>
-      <div className="relative aspect-[16/10] w-full overflow-hidden bg-secondary">
-        {photo ? <RetryImage src={photo} alt="" loading="lazy" decoding="async" draggable={false} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
-          : photoPending ? <div className="h-full w-full animate-pulse bg-foreground/[0.06]" aria-hidden="true" />
-          : <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">{HOME_LIST_COPY.noPhoto}</div>}
-        {community.details?.builderName && <span data-deals-tile-builder="true" className="pointer-events-none absolute bottom-2 right-2 max-w-[60%] truncate rounded-sm bg-white/95 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-foreground shadow">{community.details.builderName}</span>}
-        <div className="pointer-events-none absolute left-2 top-2 flex flex-wrap gap-1">
-          {/* One badge for a cut price: red for a Red Hot Deal, green like New Home Buddy's for any other drop. */}
-          {drop > 0 && <span data-deals-tile-drop={redHotDeal(home.price ?? null, home.previousPrice ?? null) ? "red-hot" : "drop"} className={`inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-white shadow ${redHotDeal(home.price ?? null, home.previousPrice ?? null) ? "bg-red-600" : "bg-emerald-700"}`}>{redHotDeal(home.price ?? null, home.previousPrice ?? null) ? <Flame className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}{money.format(drop)}</span>}
-          <NewBadge isNew={home.isNew} />
-        </div>
-      </div>
-      <div className="min-w-0 p-3">
-        <div className="flex min-w-0 items-start justify-between gap-2"><p className="min-w-0 truncate text-sm font-medium text-foreground">{title}</p><p className="max-w-[48%] shrink-0 truncate text-right text-xs text-muted-foreground" title={place}>{place}</p></div>
-        {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
-        <p className="mt-2 flex min-w-0 flex-wrap items-baseline gap-x-2">{home.kind === "to_be_built" && home.price ? <span className="text-xs text-muted-foreground">Starting from</span> : null}<span className="text-xl font-semibold leading-none">{home.price ? money.format(home.price) : "Ask for pricing"}</span><span className="text-xs text-muted-foreground">{homeStatusLabel(home)}</span></p>
-        {specs.length > 0 && <p className="mt-1.5 flex flex-wrap gap-x-3 text-xs text-muted-foreground">{specs.map(({ icon: Icon, text }) => <span key={text} className="inline-flex items-center gap-1"><Icon className="h-3.5 w-3.5" />{text}</span>)}</p>}
-      </div>
-    </button>
-    {pick
-      ? <button type="button" aria-pressed={picked} aria-label={picked ? "Picked for your client. Tap to remove" : "Pick this home for a client"} onClick={() => pick.onToggle(home.card)} data-deals-pick={picked ? "picked" : "unpicked"} className={`absolute right-2 top-2 inline-flex min-h-9 items-center gap-1 rounded-full px-3 text-[11px] font-semibold uppercase tracking-wider shadow ${picked ? "bg-gold text-primary-foreground" : "bg-white/95 text-foreground hover:text-gold"}`}>{picked ? <Check className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}{picked ? HOME_LIST_COPY.picked : HOME_LIST_COPY.pick}</button>
-      : onSave ? <button type="button" aria-pressed={saved} aria-label={saved ? "Saved. Tap to unsave" : "Save this home"} disabled={saving} onClick={() => onSave(home.card, !saved)} data-deals-save={saved ? "saved" : "unsaved"} className="absolute right-2 top-2 flex h-9 w-9 items-center justify-center rounded-full bg-white/95 shadow"><Heart className={`h-4 w-4 ${saved ? "fill-red-600 text-red-600" : "text-foreground"}`} /></button> : null}
-  </article>;
+  const photo = home.photos?.[0] ? cardPhoto(home.photos[0]) : undefined;
+  // Oct 30, 2026 (Peter: the team view and the buyer's list get design F): the public card, with the full list's
+  // address, community and builder, the builder badge on the photo, and Pick (team) or the heart (buyer).
+  return <div id={`tile-${home.card}`} data-deals-home-tile="true" data-deals-picked={picked ? "true" : undefined} onMouseEnter={() => onHover?.(true)} onMouseLeave={() => onHover?.(false)} className={`min-w-0 rounded-2xl ${picked ? "ring-2 ring-gold/70" : ""}`}>
+    <BuyerHomeCard home={{ ...home, photos: photo ? [photo] : [] }} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} photoPending={photoPending}
+      title={title} subtitle={[place !== title ? place : null, subtitle].filter(Boolean).join(" · ") || null} status={homeStatusLabel(home)}
+      openLabel={`${title}, ${home.price ? money.format(home.price) : "price on request"}. Open details`} onOpen={onOpen} onTour={onTour}
+      photoBadge={community.details?.builderName ? <span data-deals-tile-builder="true" className="pointer-events-none absolute bottom-3 right-3 max-w-[60%] truncate rounded-md bg-white/95 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-foreground shadow">{community.details.builderName}</span> : undefined}
+      corner={pick ? <button type="button" aria-pressed={picked} aria-label={picked ? "Picked for your client. Tap to remove" : "Pick this home for a client"} onClick={() => pick.onToggle(home.card)} data-deals-pick={picked ? "picked" : "unpicked"} className={`inline-flex min-h-11 items-center gap-1 rounded-full px-4 text-xs font-semibold uppercase tracking-wider shadow ${picked ? "bg-gold text-primary-foreground" : "bg-white/95 text-foreground hover:text-gold"}`}>{picked ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}{picked ? HOME_LIST_COPY.picked : HOME_LIST_COPY.pick}</button> : undefined}
+      saved={saved} onSave={!pick && onSave && !saving ? () => onSave(home.card, !saved) : undefined} />
+  </div>;
 }
 
 /**
@@ -499,7 +479,7 @@ export function homeSearchText(home: GatedHome, community: GatedCommunity): stri
 }
 
 /** The flat list: every matching home in the communities in view, sorted, 24 at a time as the reader scrolls. */
-function HomeList({ entries, context, pick, savedSet, savingCard, onSave }: { entries: ReadonlyArray<{ home: GatedHome; community: GatedCommunity; key: string }>; context: BrowseListContext; pick?: PickControl; savedSet: Set<string>; savingCard?: string | null; onSave?: (card: string, saved: boolean) => void }) {
+function HomeList({ entries, context, pick, savedSet, savingCard, onSave, assumptions, onRequest }: { entries: ReadonlyArray<{ home: GatedHome; community: GatedCommunity; key: string }>; context: BrowseListContext; pick?: PickControl; assumptions?: PaymentAssumptions | null; onRequest?: (request: HomeRequest) => void; savedSet: Set<string>; savingCard?: string | null; onSave?: (card: string, saved: boolean) => void }) {
   const inView = entries.filter((entry) => context.keys.has(entry.key));
   const [pages, setPages] = useState(1);
   const keysSignature = Array.from(context.keys).join(",");
@@ -507,7 +487,7 @@ function HomeList({ entries, context, pick, savedSet, savingCard, onSave }: { en
   const shown = inView.slice(0, pages * HOME_PAGE);
   return <div data-deals-home-list="true">
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2">
-      {shown.map(({ home, community, key }) => <HomeTile key={home.card} home={home} community={community} onOpen={() => context.open(key, { card: home.card })} onHover={(on) => context.hover(on ? key : null)} pick={pick} saved={savedSet.has(home.card)} saving={savingCard === home.card} onSave={onSave} />)}
+      {shown.map(({ home, community, key }) => <HomeTile key={home.card} home={home} community={community} onOpen={() => context.open(key, { card: home.card })} onHover={(on) => context.hover(on ? key : null)} pick={pick} saved={savedSet.has(home.card)} saving={savingCard === home.card} onSave={onSave} assumptions={assumptions} onTour={!pick && onRequest ? () => onRequest({ card: home.card, requestType: home.kind === "to_be_built" ? "ask" : "tour" }) : undefined} />)}
     </div>
     <AutoMore key={shown.length} active={inView.length > shown.length} onNear={() => setPages((value) => value + 1)} />
     <ShowMore remaining={inView.length - shown.length} step={HOME_PAGE} onClick={() => setPages((value) => value + 1)} />
@@ -596,7 +576,8 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
     return () => window.cancelAnimationFrame(frame);
   }, [pendingCard, opened, pages, filters]);
   return <main data-deals-gated="true" style={identityPatternStyle(lead.display)} className="deals-light min-h-screen max-w-full overflow-x-clip bg-background [overflow-anchor:none]">
-    <header className={`deals-chrome flex min-w-0 items-center justify-between gap-x-3 gap-y-2 border-b border-border/60 ${many ? "flex-nowrap px-4 py-3 sm:px-6" : "flex-wrap px-5 py-5"}`}><span className="flex min-w-0 items-center gap-4"><Link href="/" className="shrink-0 font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link>
+    {/* Oct 30, 2026 (design F everywhere): the light header of the public page, not the dark bar. */}
+    <header data-deals-header="true" className={`flex min-w-0 items-center justify-between gap-x-3 gap-y-2 border-b border-border/70 bg-background ${many ? "flex-nowrap px-4 py-3 sm:px-6" : "flex-wrap px-5 py-5"}`}><span className="flex min-w-0 items-center gap-4"><Link href="/" className="inline-flex shrink-0 flex-col font-serif text-[1.3rem] font-semibold leading-none text-foreground sm:text-2xl">Lifestyle Design Realty<span aria-hidden="true" className="mt-1.5 h-px w-2/3 bg-gold/70" /></Link>
       {/* Oct 28, 2026 (New Home Buddy: "Lifestyle Design Realty's New Home Search / Prepared by" sits in the header bar). */}
       {many && <span className="hidden min-w-0 border-l border-white/20 pl-4 sm:block" data-deals-header-title="true"><span className="block text-[10px] uppercase tracking-[0.2em] text-gold">{eyebrow}</span><h1 className="truncate font-serif text-lg leading-tight">Prepared for {lead.display}</h1></span>}</span><span className="flex items-center gap-4 text-xs text-gold">{lead.teamPreview && !onTeamPage && <Link href="/deals/team" className={`${many ? "hidden sm:inline-flex" : "inline-flex"} min-h-11 items-center underline-offset-4 hover:underline`}>Agent tools</Link>}{/* Oct 28, 2026: an agent's 90-day sign-in needs no clock in the header (New Home Buddy has none); a buyer's list does. */}<span className={lead.teamPreview ? "sr-only" : undefined}><Clock3 className="mr-1 inline h-3.5 w-3.5" /> <Countdown expiresAt={lead.expiresAt} now={now} onExpire={onExpire} /></span></span></header>
     <section className={many ? "px-4 py-3 sm:px-6" : "px-5 py-10 sm:px-8"}><div className={`mx-auto ${many ? "max-w-[1600px]" : "max-w-5xl"}`}>
@@ -635,7 +616,7 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
           {listView === "homes" && <span className="order-2 basis-full sm:hidden" aria-hidden="true" />}
         </div>
         <LandingBrowse mapSide="left" phoneMap="floating" searchArea onAreaChange={(keys) => setAreaKeys(keys ? new Set(keys) : null)} areaStatus={listView === "homes" ? (keys) => { const inArea = new Set(keys); const homes = homeEntries.filter((entry) => inArea.has(entry.key)).length; return `Showing ${HOME_LIST_COPY.count(homes)} in this part of town`; } : undefined} communities={landing} lookup={landingAll} floatingMapBottom={pick && pick.picked.size > 0 ? "bottom-24" : "bottom-6"} useHomes={useSheetHomes} filters={{ ...EMPTY_FILTERS, sort: filters.sort }}
-          renderList={listView === "homes" ? (context) => <HomeList entries={homeEntries} context={context} pick={pick} savedSet={savedSet} savingCard={savingCard} onSave={onSave} /> : undefined}
+          renderList={listView === "homes" ? (context) => <HomeList entries={homeEntries} context={context} pick={pick} savedSet={savedSet} savingCard={savingCard} onSave={onSave} onRequest={lead.teamPreview ? undefined : onRequest} assumptions={featured?.assumptions ? { defaultDownPercent: featured.assumptions.defaultDownPercent, termYears: featured.assumptions.termYears, costs: featured.assumptions.costs } : null} /> : undefined}
           onOpenCommunity={(key) => { const community = byKey.get(key); if (community?.key && onViewCommunity && !reported.has(key)) { reported.add(key); onViewCommunity(community.key); } }}
           top={listView === "homes" ? undefined : (actions) => <FeaturedDeals featured={featured} onSelect={(deal) => {
             const key = deal.card ? keyByCard.get(deal.card) : undefined;

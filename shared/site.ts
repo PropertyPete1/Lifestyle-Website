@@ -55,7 +55,9 @@ export const SITE = {
   address: "1212 Chicon St Unit 101, Austin TX 78702",
   /** New Construction Search — external builder-network tool (vendor name never shown in UI) */
   newConstructionUrl: "https://a.nhb.app/u/peter-allen",
-  iabsUrl: "https://drive.google.com/file/d/1DTDRFjzJJS_iD8aaNu8l4Wr3YmmR9zHe/view",
+  // Oct 30, 2026: the old file was gone ("file does not exist" for every visitor, found by ChatGPT's test). This is
+  // the brokerage's IABS shared publicly from Steven's Drive; it is the 2015 form (IABS 1-0), TREC's current is IABS 1-2.
+  iabsUrl: "https://drive.google.com/file/d/1rZZD89IeAN3LBlzH5l3w6RwEV77t0wZx/view",
   cpnUrl: "https://www.trec.texas.gov/forms/consumer-protection-notice",
   disclaimer:
     "All information is deemed reliable but not guaranteed and should be independently reviewed and verified.",

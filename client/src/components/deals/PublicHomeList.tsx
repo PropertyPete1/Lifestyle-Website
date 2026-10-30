@@ -43,6 +43,9 @@ function PublicTile({ entry, context, useHomes, assumptions, onTour, saved, onSa
   </div>;
 }
 
+/** Pages that load on their own as the visitor scrolls; after them a button, so the footer can be reached. */
+export const AUTO_PAGES = 3;
+
 export function PublicHomeList({ entries, context, useHomes, assumptions, onTour = () => undefined, saved, onToggleSave }: { entries: readonly PublicHomeEntry[]; context: BrowseListContext; useHomes: UseCommunityHomes; assumptions?: PaymentAssumptions | null; onTour?: (entry: PublicHomeEntry) => void; /** Oct 30, 2026: the visitor's saved homes (publicSaveId), kept in their browser. */ saved?: ReadonlySet<string>; onToggleSave?: (id: string) => void }) {
   const inView = entries.filter((entry) => context.keys.has(entry.key));
   const [pages, setPages] = useState(1);
@@ -53,7 +56,8 @@ export function PublicHomeList({ entries, context, useHomes, assumptions, onTour
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
       {shown.map((entry) => <PublicTile key={entry.home.card} entry={entry} context={context} useHomes={useHomes} assumptions={assumptions} onTour={onTour} saved={saved?.has(publicSaveId(entry))} onSave={onToggleSave ? () => onToggleSave(publicSaveId(entry)) : undefined} />)}
     </div>
-    <AutoMore key={shown.length} active={inView.length > shown.length} onNear={() => setPages((value) => value + 1)} />
+    {/* Oct 30, 2026 (ChatGPT's test: the footer's links ran away as homes kept loading): three pages load on their own, then "Show more". */}
+    <AutoMore key={shown.length} active={pages < AUTO_PAGES && inView.length > shown.length} onNear={() => setPages((value) => value + 1)} />
     <ShowMore remaining={inView.length - shown.length} step={HOME_PAGE} onClick={() => setPages((value) => value + 1)} />
   </div>;
 }

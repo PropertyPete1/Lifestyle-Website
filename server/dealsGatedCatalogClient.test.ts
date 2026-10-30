@@ -430,7 +430,7 @@ describe("the home cards of the unlocked list (Oct 27: New Home Buddy parity)", 
     expect(labelHook("Boerne | Acre Lots and Over $1M")).toBe("Acre Lots");
     const community = { label: "Northwest San Antonio | Half-Acre Lots and Lakes", area: "Northwest San Antonio", reelUrl: null, homes: [] } as GatedCommunity;
     const html = renderToStaticMarkup(createElement(HomeTile, { home: { card: "d".repeat(20), kind: "quick_move_in", beds: "4", price: 387_990 }, community, onOpen: () => undefined }));
-    expect(html).toContain(">Half-Acre Lots and Lakes</p>");
+    expect(html).toContain(">Half-Acre Lots and Lakes</h3>");
     expect(html).toContain(">Northwest San Antonio</p>");
   });
   it("splits an address into its street and city lines", () => {

@@ -77,7 +77,7 @@ export type BuyerCardHome = {
 
 export type BuyerCardIncentive = Parameters<typeof homePaymentEstimate>[1];
 
-export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending = false, onOpen, onTour, gallery, featured = false, saved, onSave }: {
+export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending = false, onOpen, onTour, gallery, featured = false, saved, onSave, title, subtitle, photoBadge, corner, status: statusOverride, openLabel }: {
   home: BuyerCardHome;
   /** The public area label ("East San Antonio"); never a community or builder name. */
   area: string;
@@ -85,7 +85,8 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
   assumptions: PaymentAssumptions | null | undefined;
   photoPending?: boolean;
   onOpen?: () => void;
-  onTour: () => void;
+  /** "Schedule a tour" under the card; none on the team's own list. */
+  onTour?: () => void;
   /** In a community's sheet: the home's photo gallery in place of the one tappable photo. */
   gallery?: ReactNode;
   /** The home a featured card opened (gold ring). */
@@ -93,6 +94,20 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
   /** Oct 30, 2026 (Peter: like New Home Buddy, a visitor saves homes without signing up): the heart. */
   saved?: boolean;
   onSave?: () => void;
+  /**
+   * Oct 30, 2026 (Peter: the team view and the buyer's private list get the same design): the card's own heading (a
+   * street address or plan on the full list; the area by default), the line under it (community and builder, or the
+   * city), a badge on the photo (the builder's name, team only), and a button in the photo's corner (Pick) instead of
+   * the heart.
+   */
+  title?: string;
+  subtitle?: string | null;
+  photoBadge?: ReactNode;
+  corner?: ReactNode;
+  /** The status after the price ("Move-in ready", "Ready Dec 2026", "Build new"); worked out from the home by default. */
+  status?: string | null;
+  /** The photo button's label for screen readers. */
+  openLabel?: string;
 }) {
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
@@ -107,9 +122,11 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
     home.baths ? { icon: Bath, text: baths(home.baths) } : null,
     home.sqft ? { icon: Home, text: `${home.sqft.toLocaleString("en-US")} sq ft` } : null,
   ].filter((item): item is { icon: typeof Bath; text: string } => Boolean(item));
-  const status = home.kind === "to_be_built" ? BUYER_CARD_COPY.toBeBuilt : home.moveInDate ? BUYER_CARD_COPY.moveIn(home.moveInDate) : null;
-  return <article data-deals-buyer-card="true" data-deals-featured-home={featured ? "true" : undefined} className={`relative min-w-0 rounded-2xl border bg-card p-3 shadow-[0_1px_2px_rgb(0_0_0/0.04)] sm:p-4 ${featured ? "border-gold ring-2 ring-gold/50" : "border-border"}`}>
-    {gallery ? <div className="overflow-hidden rounded-xl [&>*]:mt-0">{gallery}</div> : <button type="button" onClick={onOpen} className="block w-full min-w-0 overflow-hidden rounded-xl text-left" aria-label={`Home in ${area}, ${price}. See photos and details`}>
+  const status = statusOverride !== undefined ? statusOverride : home.kind === "to_be_built" ? BUYER_CARD_COPY.toBeBuilt : home.moveInDate ? BUYER_CARD_COPY.moveIn(home.moveInDate) : null;
+  const heading = title ?? area;
+  const startingFrom = home.kind === "to_be_built" && home.price ? "Starting from " : "";
+  return <article data-deals-buyer-card="true" data-deals-featured-home={featured ? "true" : undefined} className={`@container relative min-w-0 rounded-2xl border bg-card p-3 shadow-[0_1px_2px_rgb(0_0_0/0.04)] sm:p-4 ${featured ? "border-gold ring-2 ring-gold/50" : "border-border"}`}>
+    {gallery ? <div className="overflow-hidden rounded-xl [&>*]:mt-0">{gallery}</div> : <button type="button" onClick={onOpen} className="block w-full min-w-0 overflow-hidden rounded-xl text-left" aria-label={openLabel ?? `Home in ${area}, ${price}. See photos and details`}>
       <div className="relative aspect-[16/10] w-full overflow-hidden bg-secondary">
         {photo ? <RetryImage src={photo} alt="" loading="lazy" decoding="async" draggable={false} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
           : photoPending ? <div className="h-full w-full animate-pulse bg-foreground/[0.06]" aria-hidden="true" />
@@ -118,27 +135,29 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
           {drop > 0 && <span data-deals-tile-drop={hot ? "red-hot" : "drop"} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-white shadow ${hot ? "bg-red-600" : "bg-emerald-700"}`}>{hot ? <Flame className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}{money.format(drop)} off</span>}
           <NewBadge isNew={home.isNew} className="bg-white/95" />
         </div>
+        {photoBadge}
       </div>
     </button>}
-    {onSave && <button type="button" aria-pressed={Boolean(saved)} aria-label={saved ? "Saved. Tap to unsave" : "Save this home"} onClick={onSave} data-deals-save={saved ? "saved" : "unsaved"} className="absolute right-5 top-5 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white/95 shadow sm:right-6 sm:top-6"><Heart className={`h-5 w-5 ${saved ? "fill-red-600 text-red-600" : "text-foreground"}`} /></button>}
+    {corner ? <div className="absolute right-5 top-5 z-10 sm:right-6 sm:top-6">{corner}</div> : onSave && <button type="button" aria-pressed={Boolean(saved)} aria-label={saved ? "Saved. Tap to unsave" : "Save this home"} onClick={onSave} data-deals-save={saved ? "saved" : "unsaved"} className="absolute right-5 top-5 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white/95 shadow sm:right-6 sm:top-6"><Heart className={`h-5 w-5 ${saved ? "fill-red-600 text-red-600" : "text-foreground"}`} /></button>}
     <div className="px-1 pt-4 sm:px-2">
-      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-2 @[21rem]:grid-cols-[minmax(0,1fr)_auto] @[21rem]:gap-3">
         <div className="min-w-0">
-          <h3 className="line-clamp-2 break-words font-serif text-[1.5rem] font-semibold leading-[1.1] text-foreground sm:text-[1.65rem]">{area}</h3>
-          <p className="mt-0.5 text-sm text-muted-foreground"><span className={estimate ? "" : "sr-only"}>{price}</span>{status && <span>{estimate ? " · " : ""}{status}</span>}</p>
+          <h3 className="line-clamp-2 break-words font-serif text-[1.5rem] font-semibold leading-[1.1] text-foreground sm:text-[1.65rem]">{heading}</h3>
+          {subtitle && <p className="mt-0.5 truncate text-sm text-foreground/80" title={subtitle}>{subtitle}</p>}
+          <p className="mt-0.5 text-sm text-muted-foreground"><span className={estimate ? "" : "sr-only"}>{startingFrom}{price}</span>{status && <span>{estimate ? " · " : ""}{status}</span>}</p>
         </div>
         {estimate
-          ? <div className="border-l border-gold/40 pl-3 text-right sm:pl-4">
+          ? <div className="@[21rem]:border-l @[21rem]:border-gold/40 @[21rem]:pl-3 @[21rem]:text-right sm:@[21rem]:pl-4">
               <p className="whitespace-nowrap font-serif text-[2rem] font-semibold leading-none text-foreground lining-nums">{money.format(estimate.parts.total)}<span className="ml-1 font-sans text-xs font-normal text-muted-foreground">{BUYER_CARD_COPY.perMonth}</span></p>
               <button type="button" aria-expanded={open} aria-controls={breakdownId} onClick={() => setOpen((value) => !value)} data-deals-breakdown-toggle="true" className="mt-1 inline-flex min-h-11 items-center gap-1 text-xs font-medium text-gold underline-offset-4 hover:underline">{open ? BUYER_CARD_COPY.hideBreakdown : BUYER_CARD_COPY.breakdown}<ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} /></button>
             </div>
-          : <p className="whitespace-nowrap text-right font-serif text-[1.75rem] font-semibold leading-none text-foreground lining-nums">{price}</p>}
+          : <div className="@[21rem]:text-right">{startingFrom && <p className="text-xs text-muted-foreground">Starting from</p>}<p className="whitespace-nowrap font-serif text-[1.75rem] font-semibold leading-none text-foreground lining-nums">{price}</p></div>}
       </div>
       {specs.length > 0 && <ul className="mt-2 flex min-w-0 flex-wrap items-center gap-y-1 text-sm text-foreground/80" aria-label="Home size">
         {specs.map(({ icon: Icon, text }, index) => <li key={text} className={`inline-flex items-center gap-1.5 ${index ? "ml-3 border-l border-border pl-3" : ""}`}><Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />{text}</li>)}
       </ul>}
       {estimate && open && home.price ? <PaymentBreakdown estimate={estimate} price={home.price} id={breakdownId} /> : null}
-      <button type="button" onClick={onTour} data-deals-card-tour="true" className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-gold bg-card px-4 font-serif text-xl font-semibold text-foreground transition-colors hover:bg-gold hover:text-primary-foreground">{BUYER_CARD_COPY.tour}</button>
+      {onTour && <button type="button" onClick={onTour} data-deals-card-tour="true" className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-gold bg-card px-4 font-serif text-xl font-semibold text-foreground transition-colors hover:bg-gold hover:text-primary-foreground">{BUYER_CARD_COPY.tour}</button>}
     </div>
   </article>;
 }

@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { dealCommunities, dealHomes, dealIncentives, dealPhotos } from "../drizzle/schema";
 import { scrubPrivateNames, selectDealCatalogHomes } from "../shared/deals";
-import { DEFAULT_PAYMENT_COSTS, builderExcluded, downPaymentPercentFrom, homeLotAcres, loanTypeLabel, lotAcres, mortgageRateFrom, rankFeatured, type FeaturedCandidate, type FeaturedDeal, type FeaturedDeals } from "../shared/dealsFeatured";
+import { DEFAULT_PAYMENT_COSTS, builderExcluded, homeLotAcres, lotAcres, mortgageRateFrom, offerFromIncentive, rankFeatured, type FeaturedCandidate, type FeaturedDeal, type FeaturedDeals } from "../shared/dealsFeatured";
 import { getDb } from "./db";
 import { publicPhotoUrl } from "./dealsPhotoToken";
 import { communityScrubConfig, dealsCardHandle, dealsHandle, getDealSettings, hashSecret, publicNoPrivateNames, type DealsCatalogView } from "./dealsService";
@@ -23,24 +23,8 @@ function incentiveIsLive(row: Incentive, now: Date, lapseDays: number) {
   return row.confirmedAt > new Date(now.getTime() - lapseDays * 24 * 60 * 60_000);
 }
 
-/**
- * The builder's financing as a payment input. A buydown's headline is a
- * temporary first-year rate: the payment is figured at the long-term rate that
- * follows it, and the first-year rate is shown alongside.
- */
-export function offerFromIncentive(row: Pick<Incentive, "headlineRate" | "followOnRate" | "loanType" | "downPayment"> | undefined): FeaturedCandidate["offer"] {
-  if (!row) return null;
-  const headline = mortgageRateFrom(row.headlineRate);
-  const followOn = mortgageRateFrom(row.followOnRate);
-  if (headline === null && followOn === null) return null;
-  return {
-    ratePercent: followOn ?? headline,
-    firstYearRatePercent: followOn !== null && headline !== null && headline !== followOn ? headline : null,
-    // Only the program name ("FHA"), never free text that could carry a lender's name.
-    loanType: loanTypeLabel(row.loanType),
-    downPercent: downPaymentPercentFrom(row.downPayment),
-  };
-}
+/** The builder's financing as a payment input; it lives in shared/ so the page's cards figure homes the same way. */
+export { offerFromIncentive };
 
 function hostOf(url: string): string | null {
   try { return new URL(url).hostname; } catch { return null; }

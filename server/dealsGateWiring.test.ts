@@ -114,7 +114,9 @@ describe("/deals/mine: only a dead session falls back to the landing page", () =
     mocks.state.mockReturnValue({ data: { session: null, pending: null, consentText: "consent", googleEnabled: false, commentKeyword: "HOME", textLine: "(512) 542-1477", blockedMessage: null }, isLoading: false });
     mocks.publicCatalog.mockReturnValue({ data: [], isLoading: false });
     const html = decode(renderMine());
-    expect(html).toContain("Schedule a tour <");
+    // Oct 30, 2026 (design F): the public page, with the gate open over it (each home card carries its own tour button).
+    expect(html).toContain('data-deals-public-page="true"');
+    expect(html).toContain("New construction deals");
     expect(html).toContain("Schedule a tour.");
     expect(html).not.toContain(MINE_COPY.loadFailed);
     expect(mocks.state).toHaveBeenCalled();

@@ -76,7 +76,7 @@ function CompactNumber({ label, value, options, format, onChange, wide = false }
  * baths, size, garage, stories and home type under "More filters". The landing page filters on each community's
  * public home figures; the private list filters the homes themselves.
  */
-export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedCount = 0, showStories = true, builders = [], showNew = false, compact = false }: {
+export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedCount = 0, showStories = true, builders = [], showNew = false, compact = false, sheet = false }: {
   filters: BrowseFilters;
   onChange: (filters: BrowseFilters) => void;
   areas: ReadonlyArray<{ area: string; schoolDistrict?: string | null }>;
@@ -96,6 +96,8 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
   builders?: ReadonlyArray<{ builder: string; count: number }>;
   /** One thin row (the unlocked list's map layout); the count and the sort live in the results bar. */
   compact?: boolean;
+  /** Oct 30, 2026 (design F): every filter at once, for the Filters sheet (the caller adds the sort and the "Show" button). */
+  sheet?: boolean;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const groups = areaGroups(areas);
@@ -133,9 +135,41 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
         <Toggle name="to-be-built" on={filters.toBeBuilt} label={BROWSE_COPY.toBeBuilt} onChange={(value) => set({ toBeBuilt: value })} />
         <Toggle name="builder-rate" on={filters.builderRate} label={BROWSE_COPY.builderRate} onChange={(value) => set({ builderRate: value })} />
         <Toggle name="big-lots" on={filters.bigLots} label={BROWSE_COPY.bigLots} onChange={(value) => set({ bigLots: value })} />
-        <button type="button" onClick={() => setMoreOpen(false)} className="ml-auto inline-flex min-h-11 items-center rounded-full bg-gold px-5 text-sm font-semibold text-primary-foreground">{BROWSE_COPY.done}</button>
+        {!sheet && <button type="button" onClick={() => setMoreOpen(false)} className="ml-auto inline-flex min-h-11 items-center rounded-full bg-gold px-5 text-sm font-semibold text-primary-foreground">{BROWSE_COPY.done}</button>}
       </div>
     </div>;
+  if (sheet) {
+    return <div data-deals-browse="true" data-deals-browse-sheet="true" className="min-w-0">
+      <div className="grid min-w-0 grid-cols-2 gap-3">
+        <label className={`${LABEL} col-span-2`}>{BROWSE_COPY.area}
+          <select aria-label={BROWSE_COPY.area} value={filters.area} onChange={(event) => set({ area: event.target.value })} className={`mt-1 ${SELECT}`}>
+            <option value="">{BROWSE_COPY.anyArea}</option>
+            {groups.length === 1
+              ? groups[0]!.choices.map((choice) => <option key={choice.area} value={choice.area}>{choice.area} ({choice.count})</option>)
+              : groups.map((group) => <optgroup key={group.market} label={BROWSE_COPY.marketGroup(group.market)}>
+                <option value={`${MARKET_AREA_PREFIX}${group.market}`}>{BROWSE_COPY.wholeMarket(group.market)} ({group.total})</option>
+                {group.choices.map((choice) => <option key={choice.area} value={choice.area}>{choice.area} ({choice.count})</option>)}
+              </optgroup>)}
+          </select>
+        </label>
+        <NumberSelect label={BROWSE_COPY.minPrice} value={filters.minPrice} options={PRICE_FLOORS} any={BROWSE_COPY.noMin} format={(value) => `${priceCapLabel(value)}+`} onChange={setMin} />
+        <NumberSelect label={BROWSE_COPY.price} value={filters.maxPrice} options={PRICE_CAPS} any={BROWSE_COPY.anyPrice} format={(value) => `Under ${priceCapLabel(value)}`} onChange={setMax} />
+        <NumberSelect label={BROWSE_COPY.beds} value={filters.minBeds} options={BED_MINIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `${value}+ beds`} onChange={(minBeds) => set({ minBeds })} />
+        {builders.length > 0 && <label className={LABEL} data-deals-builder-filter="true">{BROWSE_COPY.builder}
+          <select aria-label={BROWSE_COPY.builder} value={filters.builder} onChange={(event) => set({ builder: event.target.value })} className={`mt-1 ${SELECT}`}>
+            <option value="">{BROWSE_COPY.anyBuilder}</option>
+            {builders.map((choice) => <option key={choice.builder} value={choice.builder}>{choice.builder} ({choice.count})</option>)}
+          </select>
+        </label>}
+      </div>
+      <div className="mt-4 flex min-w-0 flex-wrap gap-2">
+        {savedCount > 0 && <Toggle name="saved" on={filters.savedOnly} label={`${BROWSE_COPY.saved} (${savedCount})`} onChange={(value) => set({ savedOnly: value })} />}
+        <button type="button" aria-pressed={filters.redHot} data-deals-filter="red-hot" onClick={() => set({ redHot: !filters.redHot })} className={`inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-sm font-semibold transition-colors ${filters.redHot ? "border-red-600 bg-red-600 text-white" : "border-red-600/60 text-red-600 hover:bg-red-50"}`}><Flame className="h-4 w-4" />{BROWSE_COPY.redHot}</button>
+        {showNew && <Toggle name="new" on={filters.newOnly} label={BROWSE_COPY.newThisWeek} onChange={(value) => set({ newOnly: value })} />}
+      </div>
+      {morePanel}
+    </div>;
+  }
   // Oct 27, 2026 (New Home Buddy: one thin row of filters over the map and the homes): the unlocked list's bar.
   if (compact) {
     const pill = (on: boolean) => `inline-flex min-h-10 items-center gap-1.5 rounded-full border px-3 text-sm transition-colors ${on ? "border-gold bg-gold/10 text-gold" : "border-border bg-card text-foreground hover:text-gold"}`;

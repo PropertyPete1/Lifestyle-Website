@@ -11,7 +11,7 @@ import { MINE_COPY, isUnauthorizedDealsError, parseMineCommunities, profileError
 import { TRANSIENT_GATE_PARAMS, agentRecruitRedirect, clientLinkTokenInUrl, forgetClientLinkToken, keepClientLinkToken, readGateParams, rememberClientLinkToken } from "@/lib/dealsGate";
 import { GateSheet } from "@/components/deals/GateSheet";
 import { GatedCatalog, HOME_LIST_COPY, ListSkeleton, pickedHomes, picksAsText, type GatedCommunity, type HomeRequest, type PickControl } from "@/components/deals/GatedCatalog";
-import { PublicHomeList, publicHomeEntries } from "@/components/deals/PublicHomeList";
+import { PublicDealsPage } from "@/components/deals/PublicDealsPage";
 import { keepSharedFilters, takeSharedFilters } from "@/lib/dealsListShare";
 import { FeaturedStrip, type FeaturedDealsData } from "@/components/deals/FeaturedDeals";
 import { AgentTools, type AgentWorkspaceData } from "@/components/deals/AgentTools";
@@ -70,18 +70,9 @@ function Landing() {
   // A shared community link (?k=<key>, Oct 26, 2026; ?c= is an agent's client link): that community's sheet opens on arrival.
   const [sharedKey] = useState(() => { const key = new URLSearchParams(window.location.search).get("k")?.trim().toLowerCase() ?? ""; return /^[a-f0-9]{12}$/.test(key) ? key : null; });
   const catalog = trpc.deals.publicCatalog.useQuery(src ? { src } : undefined);
-  const [filters, setFilters] = useState<BrowseFilters>(EMPTY_FILTERS);
-  const all = catalog.data ?? [];
-  const matching = useMemo(() => sortLandingCommunities(all.filter((community) => landingMatches(community, filters)), filters.sort), [all, filters]);
-  const changeFilters = (next: BrowseFilters) => setFilters(next);
-  // Oct 28, 2026 (Peter: the public page gets the team view's home list): homes first, communities one tap away.
-  const [listView, setListView] = useState<"homes" | "communities">("homes");
-  const [areaKeys, setAreaKeys] = useState<ReadonlySet<string> | null>(null);
-  const homeEntries = useMemo(() => publicHomeEntries(matching, filters), [matching, filters]);
-  const shownHomeCount = areaKeys ? homeEntries.filter((entry) => areaKeys.has(entry.key)).length : homeEntries.length;
   const featured = trpc.deals.featured.useQuery();
   const comingSoon = trpc.deals.comingSoon.useQuery();
-  // October 24, 2026: visitors browse every home first; the sign-up opens when they ask for addresses, or when a
+  // October 24, 2026: visitors browse every home first; the sign-up opens when they ask for a tour, or when a
   // link brings them to it (an agent's client link, a code in progress, an expired or blocked session, a lapsed list).
   const [gateOpen, setGateOpen] = useState(() => Boolean(clientToken) || TRANSIENT_GATE_PARAMS.some((name) => new URLSearchParams(window.location.search).has(name)) || /^\/deals\/(mine|team)/.test(window.location.pathname));
   useInstagramEmbeds();
@@ -110,20 +101,13 @@ function Landing() {
   // A buyer an admin turned off is shown "your access is paused" right away.
   const paused = Boolean(state.data && "paused" in state.data && state.data.paused);
   useEffect(() => { if (paused) setGateOpen(true); }, [paused]);
-  const updatedAt = catalog.data?.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
-  return <main className="deals-light min-h-screen max-w-full overflow-x-clip bg-background [overflow-anchor:none]"><header className="deals-chrome relative flex min-w-0 items-center justify-center border-b border-border/60 px-5 py-5"><Link href="/" className="font-serif text-sm tracking-[0.14em]">LIFESTYLE DESIGN <span className="text-gold">REALTY</span></Link><Link href="/deals/team" data-deals-agent-signin="true" className="absolute right-5 top-1/2 hidden -translate-y-1/2 text-[11px] uppercase tracking-[0.16em] text-muted-foreground underline-offset-4 hover:text-gold hover:underline sm:inline">Agent sign-in</Link></header><section className="ambient-section px-4 pb-28 pt-6 sm:px-6"><div className="mx-auto max-w-[1600px]"><p className="eyebrow text-gold" data-deals-landing-agent={agentPage ? "true" : undefined}>{shared ? `Shared by ${shared.agentName}` : agentPage ? `${agentPage.agentName}'s new home search` : "New construction deals"}</p><h1 className="mt-2 max-w-3xl text-3xl leading-tight sm:text-4xl">{sourceLabel}</h1><p className="mt-2 text-sm text-muted-foreground">{shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : agentPage ? `Hand-picked by ${agentPage.agentName} at Lifestyle Design Realty.` : "Hand-picked by Property Pete."}{updatedAt ? ` Updated ${formatChicagoDate(updatedAt)}.` : ""}</p>{all.length > BROWSE_PAGE / 2 && <BrowseBar compact filters={filters} onChange={changeFilters} areas={all} shown={homeEntries.length} total={all.reduce((sum, community) => sum + (community.homeFacts?.length ?? 0), 0)} unit="homes" showBeds showStories={storiesKnown(all)} showNew={newThisWeekKnown(all)} />}{all.length > 0 && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{BROWSE_COPY.none}</p>}
-      {all.length > 0 && <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-2" data-deals-results-bar="true">
-        <p className="text-sm font-semibold uppercase tracking-widest text-foreground" data-deals-result-count="true">{listView === "homes" ? HOME_LIST_COPY.count(shownHomeCount) : `${areaKeys ? areaKeys.size : matching.length} communities`}</p>
-        <div className="flex min-w-0 items-center gap-2">
-          <label className="inline-flex min-h-9 min-w-0 max-w-[11rem] items-center gap-1.5 rounded-full border border-border bg-card pl-3 text-xs text-foreground sm:max-w-none" data-deals-sort="true"><ArrowDownUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="sr-only">Sort</span>
-            <select aria-label="Sort" value={filters.sort} onChange={(event) => setFilters((current) => ({ ...current, sort: event.target.value as BrowseFilters["sort"] }))} className="min-h-9 min-w-0 bg-transparent pr-3 text-xs">{BROWSE_SORTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
-          </label>
-          <div role="group" aria-label="Show homes or communities" className="inline-flex rounded-full border border-border bg-card p-0.5 text-xs">
-            {(["homes", "communities"] as const).map((value) => <button key={value} type="button" aria-pressed={listView === value} data-deals-list-view={value} onClick={() => setListView(value)} className={`min-h-9 rounded-full px-3 font-medium sm:px-4 ${listView === value ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}>{value === "homes" ? HOME_LIST_COPY.homes : HOME_LIST_COPY.communities}</button>)}
-          </div>
-        </div>
-      </div>}
-      <LandingBrowse mapSide="left" phoneMap="floating" searchArea onAreaChange={(keys) => setAreaKeys(keys ? new Set(keys) : null)} areaStatus={listView === "homes" ? (keys) => { const inArea = new Set(keys); return `Showing ${HOME_LIST_COPY.count(homeEntries.filter((entry) => inArea.has(entry.key)).length)} in this part of town`; } : undefined} floatingMapBottom="bottom-24" renderList={listView === "homes" ? (context) => <PublicHomeList entries={homeEntries} context={context} useHomes={useLandingHomes} /> : undefined} communities={matching} filters={filters} useHomes={useLandingHomes} onUnlock={() => setGateOpen(true)} lookup={all} openKey={sharedKey} top={(actions) => <FeaturedStrip featured={featured.data as FeaturedDealsData | undefined} opens onHover={(deal) => actions.hover(deal?.landingKey ?? null)} onSelect={(deal) => { if (!deal.landingKey || !actions.openHome(deal.landingKey, { price: deal.price, sqft: deal.sqft, kind: deal.kind })) setGateOpen(true); }} />} /><ComingSoonSection items={comingSoon.data} action={{ kind: "unlock", onClick: () => setGateOpen(true) }} /></div></section><button type="button" onClick={() => setGateOpen(true)} className="fixed bottom-5 left-5 right-5 z-30 min-h-14 bg-gold px-5 text-sm font-medium uppercase tracking-[0.14em] text-primary-foreground shadow-xl sm:left-auto sm:right-8 sm:w-72">Schedule a tour <LockKeyhole className="ml-2 inline h-4 w-4" /></button><DealsFooter />{askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} teamSignIn={teamSignIn} onSiteLogin={() => startLogin({ returnTo: "/deals/team" })} onClose={() => setGateOpen(false)} />}</main>;
+  const eyebrow = shared ? `Shared by ${shared.agentName}` : agentPage ? `${agentPage.agentName}'s new home search` : null;
+  const intro = shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : agentPage ? `Hand-picked by ${agentPage.agentName} at Lifestyle Design Realty.` : undefined;
+  // Oct 30, 2026 (design F): the page itself is presentational (PublicDealsPage); this keeps the session, links and gate.
+  return <>
+    <PublicDealsPage communities={catalog.data ?? []} useHomes={useLandingHomes} featured={featured.data as FeaturedDealsData | undefined} comingSoon={comingSoon.data} eyebrow={eyebrow} intro={intro} openKey={sharedKey} onTour={() => setGateOpen(true)} />
+    {askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} teamSignIn={teamSignIn} onSiteLogin={() => startLogin({ returnTo: "/deals/team" })} onClose={() => setGateOpen(false)} />}
+  </>;
 }
 
 /**

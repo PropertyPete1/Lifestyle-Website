@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dealCommunities, dealHomes, dealIncentives, dealPhotos, dealSettings } from "../drizzle/schema";
-import { DEFAULT_PAYMENT_COSTS, acresFromText, builderExcluded, downPaymentPercentFrom, estimatedMonthlyPayment, garageSpaces, homeLotAcres, loanTypeLabel, lotAcres, monthlyPrincipalAndInterest, mortgageRateFrom, percentFrom, priceBandLabel, rankFeatured, type FeaturedCandidate } from "../shared/dealsFeatured";
+import { DEFAULT_PAYMENT_COSTS, acresFromText, builderExcluded, downPaymentPercentFrom, estimatedMonthlyPayment, homePaymentEstimate, monthlyPaymentParts, garageSpaces, homeLotAcres, loanTypeLabel, lotAcres, monthlyPrincipalAndInterest, mortgageRateFrom, percentFrom, priceBandLabel, rankFeatured, type FeaturedCandidate } from "../shared/dealsFeatured";
 import { FakeDealsDb } from "./dealsSync.fakeDb";
 
 /**
@@ -35,20 +35,41 @@ describe("the payment math", () => {
     expect(monthlyPrincipalAndInterest({ price: 100_000, ratePercent: 6, downPercent: 100 })).toBe(0);
   });
 
-  it("figures the mortgage payment: principal and interest plus mortgage insurance, never tax, insurance or HOA", () => {
-    // A $170K home at a 4.99% FHA builder rate with 3.5% down: $880 P&I and $75 mortgage insurance (Oct 24: taxes, insurance and HOA left out).
-    expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 3.5, costs: DEFAULT_PAYMENT_COSTS })).toBe(955);
-    // Peter's $225,105 home at 4.99% FHA, 3.5% down: $1,164 P&I + $100 MIP.
-    expect(estimatedMonthlyPayment({ price: 225_105, ratePercent: 4.99, downPercent: 3.5, loanType: "FHA", costs: DEFAULT_PAYMENT_COSTS })).toBe(1264);
-    expect(estimatedMonthlyPayment({ price: 225_105, ratePercent: 4.99, downPercent: 3.5, loanType: "FHA", costs: { ...DEFAULT_PAYMENT_COSTS, taxRatePercent: 6, insuranceRatePercent: 5, hoaMonthly: 2000 } })).toBe(1264);
-    // 20% down carries no mortgage insurance.
+  it("figures the monthly total: principal and interest, mortgage insurance, and estimated tax, insurance and HOA", () => {
+    // Oct 30, 2026 (Peter: the payments were too low): a $170K home at a 4.99% FHA builder rate with 3.5% down is $880
+    // P&I + $75 mortgage insurance + $425 tax (3%) + $170 insurance (1.2%) + $60 HOA.
+    expect(monthlyPaymentParts({ price: 170_000, ratePercent: 4.99, downPercent: 3.5, costs: DEFAULT_PAYMENT_COSTS })).toEqual({ downAmount: 5950, loanAmount: 164_050, principalAndInterest: 880, mortgageInsurance: 75, propertyTax: 425, homeInsurance: 170, hoa: 60, total: 1610 });
+    expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 3.5, costs: DEFAULT_PAYMENT_COSTS })).toBe(1610);
+    // Peter's $225,105 home at 4.99% FHA, 3.5% down: P&I and MIP as before, plus $563 tax, $225 insurance and $60 HOA.
+    expect(estimatedMonthlyPayment({ price: 225_105, ratePercent: 4.99, downPercent: 3.5, loanType: "FHA", costs: DEFAULT_PAYMENT_COSTS })).toBe(2113);
+    // With no tax, insurance or HOA set, the total is the mortgage payment alone.
     expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 20, costs: NO_COSTS })).toBe(monthlyPrincipalAndInterest({ price: 170_000, ratePercent: 4.99, downPercent: 20 }));
+    // 20% down carries no mortgage insurance.
     expect(estimatedMonthlyPayment({ price: 170_000, ratePercent: 4.99, downPercent: 20, costs: { ...NO_COSTS, mortgageInsuranceRatePercent: 0.55 } })).toBe(monthlyPrincipalAndInterest({ price: 170_000, ratePercent: 4.99, downPercent: 20 }));
     // VA has no monthly mortgage insurance at 0% down; FHA keeps its MIP even at 20% down.
     const mi = { ...NO_COSTS, mortgageInsuranceRatePercent: 0.55 };
     expect(estimatedMonthlyPayment({ price: 400_000, ratePercent: 5.5, downPercent: 0, loanType: "VA", costs: mi })).toBe(monthlyPrincipalAndInterest({ price: 400_000, ratePercent: 5.5, downPercent: 0 }));
     expect(estimatedMonthlyPayment({ price: 400_000, ratePercent: 5.5, downPercent: 0, loanType: "Conventional", costs: mi })).toBe(monthlyPrincipalAndInterest({ price: 400_000, ratePercent: 5.5, downPercent: 0 }) + 183);
     expect(estimatedMonthlyPayment({ price: 400_000, ratePercent: 5.5, downPercent: 20, loanType: "FHA", costs: mi })).toBe(monthlyPrincipalAndInterest({ price: 400_000, ratePercent: 5.5, downPercent: 20 }) + 147);
+    // The parts always add up to the total shown.
+    const parts = monthlyPaymentParts({ price: 333_333, ratePercent: 6.125, downPercent: 5, loanType: "Conventional", costs: DEFAULT_PAYMENT_COSTS });
+    expect(parts.principalAndInterest + parts.mortgageInsurance + parts.propertyTax + parts.homeInsurance + parts.hoa).toBe(parts.total);
+  });
+
+  it("figures a home's estimate only at a live builder rate with its APR (Peter: builder rate only)", () => {
+    const assumptions = { defaultDownPercent: 5, termYears: 30, costs: DEFAULT_PAYMENT_COSTS };
+    const buydown = homePaymentEstimate(300_000, { headlineRate: "3.99%", followOnRate: "5.99%", apr: "6.21%", loanType: "Conventional with Lender Co", downPayment: "5% down" }, assumptions);
+    expect(buydown).toMatchObject({ ratePercent: 5.99, firstYearRatePercent: 3.99, aprPercent: 6.21, loanType: "Conventional", downPercent: 5, termYears: 30 });
+    expect(buydown!.parts.total).toBe(estimatedMonthlyPayment({ price: 300_000, ratePercent: 5.99, downPercent: 5, loanType: "Conventional", costs: DEFAULT_PAYMENT_COSTS }));
+    // No APR, a held offer, no rate, no price or no assumptions: no figure at all (never a market-rate one).
+    expect(homePaymentEstimate(300_000, { headlineRate: "4.99%", apr: null }, assumptions)).toBeNull();
+    expect(homePaymentEstimate(300_000, { headlineRate: "4.99%", apr: "5.5%", pending: true }, assumptions)).toBeNull();
+    expect(homePaymentEstimate(300_000, { headlineRate: "Closing costs paid", apr: "5.5%" }, assumptions)).toBeNull();
+    expect(homePaymentEstimate(null, { headlineRate: "4.99%", apr: "5.5%" }, assumptions)).toBeNull();
+    expect(homePaymentEstimate(300_000, null, assumptions)).toBeNull();
+    expect(homePaymentEstimate(300_000, { headlineRate: "4.99%", apr: "5.5%" }, null)).toBeNull();
+    // An offer with no down payment uses the default.
+    expect(homePaymentEstimate(300_000, { headlineRate: "4.99%", apr: "5.5%", loanType: "FHA" }, assumptions)!.downPercent).toBe(5);
   });
 
   it("reads rates, down payments and lot sizes out of builder wording", () => {
@@ -394,8 +415,8 @@ describe("the Best Deals strip", () => {
     expect(html).toContain('data-deals-featured-tag="Best builder rate"');
     expect(html).toContain('data-deals-featured-tag="Big lot"');
     expect(html).not.toContain(">Best builder rate</p>");
-    expect(html).toContain("Estimated monthly mortgage payment on a 30-year loan: principal and interest, plus mortgage insurance when the loan carries it. Property taxes, home insurance and HOA dues are not included");
-    expect(html).not.toMatch(/property tax at/i);
+    expect(html).toContain("Estimated monthly total on a 30-year loan at the builder's rate: principal and interest, mortgage insurance when the loan carries it, and estimated property tax (");
+    expect(html).toContain("Tax, insurance and HOA are estimates, not quotes; they vary by home and by your homestead exemption.");
     expect(html).toContain("Builder rates apply to select homes with the builder's lender and qualifying credit. Not a commitment to lend.");
     expect(html).not.toContain("—");
     // A deal with a cover photo shows it on its card; one without shows none.

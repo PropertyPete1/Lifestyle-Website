@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { ArrowRight, ChevronLeft, ChevronRight, LockKeyhole, Percent, Trees, Trophy } from "lucide-react";
-import { formatRate, type FeaturedDeal, type FeaturedDeals as FeaturedDealsData } from "@shared/dealsFeatured";
+import { formatRate, type FeaturedDeal, type FeaturedDeals as FeaturedDealsData, type PaymentCosts } from "@shared/dealsFeatured";
 import { RED_HOT_COPY, RedHotSavings, RetryImage, money } from "./shared";
 import { redHotDeal } from "@shared/dealsFeatured";
 
@@ -60,7 +60,13 @@ function DealRow({ deal, rank, locked, onSelect, tags = [] }: { deal: FeaturedDe
   </li>;
 }
 
-export const FEATURED_ASSUMPTIONS = (termYears: number) => `Estimated monthly mortgage payment on a ${termYears}-year loan: principal and interest, plus mortgage insurance when the loan carries it. Property taxes, home insurance and HOA dues are not included; they vary by home and by your homestead exemption. Builder rates apply to select homes with the builder's lender and qualifying credit. Not a commitment to lend. ${FEATURED_COPY.updated}`;
+/** "3%" / "1.25%": a settings percent without trailing zeros. */
+const pct = (value: number) => `${Number(value.toFixed(3))}%`;
+/**
+ * Oct 30, 2026 (Peter: the payments were too low): what every monthly figure on the page includes, in plain words.
+ * Tax, insurance and HOA are the admin's estimates (printed here), never a quote.
+ */
+export const FEATURED_ASSUMPTIONS = (termYears: number, costs?: PaymentCosts) => `Estimated monthly total on a ${termYears}-year loan at the builder's rate: principal and interest, mortgage insurance when the loan carries it, and estimated property tax${costs ? ` (${pct(costs.taxRatePercent)} of the price a year)` : ""}, home insurance${costs ? ` (${pct(costs.insuranceRatePercent)} a year)` : ""} and HOA dues${costs ? ` (${money.format(costs.hoaMonthly)} a month)` : ""}. Tax, insurance and HOA are estimates, not quotes; they vary by home and by your homestead exemption. Builder rates apply to select homes with the builder's lender and qualifying credit. Not a commitment to lend. ${FEATURED_COPY.updated}`;
 
 /** Every featured home once, in order (lowest payments, the best rate, big lots), with the reasons it is featured. */
 export function featuredInOrder(featured: FeaturedDealsData): Array<{ deal: FeaturedDeal; tags: string[] }> {
@@ -79,18 +85,37 @@ export function featuredInOrder(featured: FeaturedDealsData): Array<{ deal: Feat
  * The landing page's featured row (October 24, 2026, Peter): one compact, swipeable row across the top of the list, so
  * the search bar and the map are on screen before anyone scrolls. Tapping a home opens the gate.
  */
-export function FeaturedStrip({ featured, onSelect, onHover, opens = false }: {
+export function FeaturedStrip({ featured, onSelect, onHover, opens = false, compact = false }: {
   featured: FeaturedDealsData | null | undefined;
   onSelect?: (deal: FeaturedDeal) => void;
   /** Lights the home's area on the map while the pointer is on it (null when it leaves). */
   onHover?: (deal: FeaturedDeal | null) => void;
   /** Tapping opens the home's details (its community's sheet) rather than the gate. */
   opens?: boolean;
+  /** Oct 30, 2026 (design F, homes near the top): small side-by-side cards, about a third of the height. */
+  compact?: boolean;
 }) {
   const row = useRef<HTMLOListElement>(null);
   if (!featured) return null;
   const items = featuredInOrder(featured);
   if (!items.length) return null;
+  if (compact) return <section aria-labelledby="deals-featured-heading" data-deals-featured-section="true" data-deals-featured-strip="compact" className="min-w-0">
+    <h2 id="deals-featured-heading" className="eyebrow text-gold">{FEATURED_COPY.eyebrow}</h2>
+    <ol ref={row} className="-mx-4 mt-3 flex min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:mx-0 sm:px-0">
+      {items.map(({ deal, tags }, index) => <li key={`${dealKey(deal)}-${index}`} className="w-[84%] max-w-[320px] shrink-0 snap-start">
+        <button type="button" onClick={() => onSelect?.(deal)} onMouseEnter={() => onHover?.(deal)} onMouseLeave={() => onHover?.(null)} onFocus={() => onHover?.(deal)} onBlur={() => onHover?.(null)} data-deals-featured={deal.reason} aria-label={`${opens ? FEATURED_COPY.details : FEATURED_COPY.unlock}: ${deal.area}, ${money.format(deal.estMonthly)} a month estimated`} className="flex h-full w-full min-w-0 items-stretch gap-3 rounded-2xl border border-border bg-card p-2 text-left shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:border-gold/60">
+          <span className="relative block aspect-square w-24 shrink-0 overflow-hidden rounded-xl bg-secondary">{deal.photo && <RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />}</span>
+          <span className="flex min-w-0 flex-1 flex-col justify-center py-1 pr-1">
+            <span className="truncate text-[10px] font-semibold uppercase tracking-widest text-gold">{redHotDeal(deal.price, deal.previousPrice) ? RED_HOT_COPY.badge : tags[0] ?? FEATURED_COPY.lowest}</span>
+            <span className="mt-0.5 block font-serif text-2xl font-semibold leading-none text-foreground lining-nums">{money.format(deal.estMonthly)}<span className="ml-1 font-sans text-[11px] font-normal text-muted-foreground">/mo est.</span></span>
+            <span className="mt-1 block truncate text-sm text-foreground">{deal.area}</span>
+            <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{rateLine(deal)}</span>
+          </span>
+        </button>
+      </li>)}
+    </ol>
+    <details className="mt-1 text-[11px] leading-relaxed text-muted-foreground" data-deals-featured-assumptions="true"><summary className="inline-flex min-h-11 cursor-pointer items-center underline-offset-4 hover:underline">How monthly totals are estimated</summary><p className="pb-2">{FEATURED_ASSUMPTIONS(featured.assumptions.termYears, featured.assumptions.costs)}</p></details>
+  </section>;
   const scroll = (direction: 1 | -1) => row.current?.scrollBy({ left: direction * Math.max(240, (row.current?.clientWidth ?? 600) * 0.8), behavior: "smooth" });
   return <section aria-labelledby="deals-featured-heading" data-deals-featured-section="true" data-deals-featured-strip="true" className="min-w-0">
     <div className="flex min-w-0 items-end justify-between gap-3">
@@ -121,7 +146,7 @@ export function FeaturedStrip({ featured, onSelect, onHover, opens = false }: {
         </button>
       </li>)}
     </ol>
-    <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground" data-deals-featured-assumptions="true">{FEATURED_ASSUMPTIONS(featured.assumptions.termYears)}</p>
+    <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground" data-deals-featured-assumptions="true">{FEATURED_ASSUMPTIONS(featured.assumptions.termYears, featured.assumptions.costs)}</p>
   </section>;
 }
 
@@ -157,6 +182,6 @@ export function FeaturedDeals({ featured, locked = false, onSelect }: { featured
         <ul className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3">{bigLots.map((deal, index) => <DealRow key={`${deal.card ?? deal.label}-lot-${index}`} deal={deal} locked={locked} onSelect={onSelect} />)}</ul>
       </div>}
     </div>
-    <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground" data-deals-featured-assumptions="true">{FEATURED_ASSUMPTIONS(assumptions.termYears)}</p>
+    <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground" data-deals-featured-assumptions="true">{FEATURED_ASSUMPTIONS(assumptions.termYears, assumptions.costs)}</p>
   </section>;
 }

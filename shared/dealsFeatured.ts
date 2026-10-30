@@ -49,19 +49,52 @@ export function carriesMortgageInsurance(loanType: string | null | undefined, do
   return downPercent < 20;
 }
 
+/** One home's estimated monthly total, part by part, in whole dollars; `total` is the sum of the parts shown. */
+export type MonthlyPaymentParts = {
+  downAmount: number;
+  loanAmount: number;
+  principalAndInterest: number;
+  mortgageInsurance: number;
+  propertyTax: number;
+  homeInsurance: number;
+  hoa: number;
+  total: number;
+};
+
+export type PaymentInput = { price: number; ratePercent: number; downPercent: number; costs: PaymentCosts; loanType?: string | null; years?: number };
+
 /**
- * The estimated monthly mortgage payment: principal and interest plus mortgage insurance when the loan carries it (see
- * carriesMortgageInsurance). October 24, 2026 (Peter): property tax, home insurance and HOA are left out; they vary by
- * home and by the buyer's homestead exemption, and a figure built on guesses for them made every payment look wrong.
+ * The estimated monthly total, part by part. October 30, 2026 (Peter: "we are making false expectations on the
+ * monthly, payments being too low"): property tax, home insurance and HOA are back in, so the number a buyer sees is
+ * closer to what they will pay. They are estimates from the admin settings (a yearly percent of the price for tax and
+ * insurance, a typical HOA), never a quote, and the breakdown says so. Mortgage insurance follows
+ * carriesMortgageInsurance; the loan is amortized at the note rate passed in.
  */
-export function estimatedMonthlyPayment(input: { price: number; ratePercent: number; downPercent: number; costs: PaymentCosts; loanType?: string | null; years?: number }): number {
+export function monthlyPaymentParts(input: PaymentInput): MonthlyPaymentParts {
   const down = Math.min(Math.max(input.downPercent, 0), 100);
   const loan = input.price * (1 - down / 100);
   const months = (input.years ?? DEFAULT_TERM_YEARS) * 12;
   const monthlyRate = input.ratePercent / 100 / 12;
   const principalAndInterest = loan <= 0 ? 0 : monthlyRate === 0 ? loan / months : (loan * monthlyRate) / (1 - (1 + monthlyRate) ** -months);
   const mortgageInsurance = carriesMortgageInsurance(input.loanType, down) ? (loan * input.costs.mortgageInsuranceRatePercent) / 100 / 12 : 0;
-  return Math.round(principalAndInterest + mortgageInsurance);
+  const parts = {
+    principalAndInterest: Math.round(principalAndInterest),
+    mortgageInsurance: Math.round(mortgageInsurance),
+    propertyTax: Math.round((input.price * input.costs.taxRatePercent) / 100 / 12),
+    homeInsurance: Math.round((input.price * input.costs.insuranceRatePercent) / 100 / 12),
+    hoa: Math.round(input.costs.hoaMonthly),
+  };
+  return {
+    downAmount: Math.round(input.price - loan),
+    loanAmount: Math.round(loan),
+    ...parts,
+    total: parts.principalAndInterest + parts.mortgageInsurance + parts.propertyTax + parts.homeInsurance + parts.hoa,
+  };
+}
+
+/** The estimated monthly total (see monthlyPaymentParts): the one number every card, the ranking and the strip use. */
+export function estimatedMonthlyPayment(input: PaymentInput): number {
+  return monthlyPaymentParts(input).total;
 }
 
 /** Monthly principal and interest, in whole dollars. Taxes, insurance and HOA are not included. */
@@ -165,6 +198,67 @@ export function loanTypeLabel(value: string | null | undefined): string | null {
   if (!value) return null;
   const found = LOAN_TYPES.filter(([pattern]) => pattern.test(value)).map(([, label]) => label);
   return found.length ? found.join("/") : null;
+}
+
+/** The builder's offer as a payment input (see offerFromIncentive). */
+export type BuilderOffer = { ratePercent: number; firstYearRatePercent: number | null; loanType: string | null; downPercent: number | null; aprPercent?: number | null };
+
+/**
+ * The builder's financing as a payment input. A buydown's headline is a temporary first-year rate: the payment is
+ * figured at the long-term rate that follows it, and the first-year rate is shown alongside. Shared by the server's
+ * ranking and the page's cards, so a home's payment is the same number everywhere.
+ */
+export function offerFromIncentive(row: { headlineRate?: string | null; followOnRate?: string | null; loanType?: string | null; downPayment?: string | null } | null | undefined): BuilderOffer | null {
+  if (!row) return null;
+  const headline = mortgageRateFrom(row.headlineRate);
+  const followOn = mortgageRateFrom(row.followOnRate);
+  if (headline === null && followOn === null) return null;
+  return {
+    ratePercent: (followOn ?? headline)!,
+    firstYearRatePercent: followOn !== null && headline !== null && headline !== followOn ? headline : null,
+    // Only the program name ("FHA"), never free text that could carry a lender's name.
+    loanType: loanTypeLabel(row.loanType),
+    downPercent: downPaymentPercentFrom(row.downPayment),
+  };
+}
+
+/** What every home's estimate is figured with besides the builder's offer (from the admin settings, sent with Best Deals). */
+export type PaymentAssumptions = { defaultDownPercent: number; termYears: number; costs: PaymentCosts };
+
+/** A home's estimate with the terms it was figured on (all printed in the breakdown). */
+export type HomePaymentEstimate = {
+  parts: MonthlyPaymentParts;
+  ratePercent: number;
+  firstYearRatePercent: number | null;
+  aprPercent: number;
+  loanType: string | null;
+  downPercent: number;
+  termYears: number;
+  costs: PaymentCosts;
+};
+
+/**
+ * One home's estimated monthly total, or null. October 24 and 30, 2026 (Peter: "make sure the monthly payment is based
+ * off the interest rate of builder only"): only a live builder offer with a usable rate AND its APR (Reg Z: a rate and a
+ * payment are printed with the APR) gives a figure; a held offer, a home with no price, or a community with no builder
+ * rate shows no monthly figure at all, never one at a market rate.
+ */
+export function homePaymentEstimate(price: number | null | undefined, incentive: { headlineRate?: string | null; followOnRate?: string | null; loanType?: string | null; downPayment?: string | null; apr?: string | null; pending?: boolean | null } | null | undefined, assumptions: PaymentAssumptions | null | undefined): HomePaymentEstimate | null {
+  if (!price || price <= 0 || !incentive || incentive.pending || !assumptions) return null;
+  const offer = offerFromIncentive(incentive);
+  const aprPercent = mortgageRateFrom(incentive.apr);
+  if (!offer || aprPercent === null) return null;
+  const downPercent = offer.downPercent ?? assumptions.defaultDownPercent;
+  return {
+    parts: monthlyPaymentParts({ price, ratePercent: offer.ratePercent, downPercent, loanType: offer.loanType, costs: assumptions.costs, years: assumptions.termYears }),
+    ratePercent: offer.ratePercent,
+    firstYearRatePercent: offer.firstYearRatePercent,
+    aprPercent,
+    loanType: offer.loanType,
+    downPercent,
+    termYears: assumptions.termYears,
+    costs: assumptions.costs,
+  };
 }
 
 /** The builder's financing on a home, as the ranking uses it. */

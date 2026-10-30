@@ -47,6 +47,7 @@ export const LANDING_COPY = {
   areaFilter: (count: number) => `Showing ${count} in this part of town`,
   clearArea: "Show all",
   seeList: "See the list",
+  seeHomes: "Back to the homes",
   searchArea: "Search this area",
   zoomHint: "Pinch, or hold ⌘/Ctrl and scroll, to zoom the map",
   searchAreaEmpty: "Nothing in this part of the map. Zoom out",
@@ -535,6 +536,8 @@ export type SheetOptions = {
   renderHome?: (home: PublicHome, featured: boolean, community: LandingCommunity) => ReactNode;
   /** The unlock ("Schedule a tour") button and its privacy line; off on a list that is already unlocked. */
   unlock?: boolean;
+  /** Oct 30, 2026: what stays locked (address, builder, community), shown above the unlock button in place of its privacy line. */
+  locked?: ReactNode;
   /** The public share button (a link to the landing page's sheet); off on a private list. */
   share?: boolean;
   /** The public area map under the offer; off when `area` draws the gated one. */
@@ -633,8 +636,8 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
           {community.incentive && <div className="mt-5"><Incentive incentive={community.incentive} compact /></div>}
           {options.publicAreaMap !== false && community.areaMap ? <AreaMap map={community.areaMap} variant="public" /> : null}
           {options.area?.(community)}
-          {options.unlock !== false && onUnlock && <><button type="button" onClick={onUnlock} className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-gold px-5 text-sm font-semibold text-primary-foreground shadow hover:opacity-95">{LANDING_COPY.unlock}<LockKeyhole className="h-4 w-4" /></button>
-          <p className="mt-2 text-xs text-muted-foreground">{LANDING_COPY.privacy}</p></>}
+          {options.unlock !== false && onUnlock && <>{options.locked ?? null}<button type="button" onClick={onUnlock} className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-gold px-5 text-sm font-semibold text-primary-foreground shadow hover:opacity-95">{LANDING_COPY.unlock}<LockKeyhole className="h-4 w-4" /></button>
+          {!options.locked && <p className="mt-2 text-xs text-muted-foreground">{LANDING_COPY.privacy}</p>}</>}
           {options.share !== false && <ShareButton community={community} />}
         </div>
       </div>
@@ -692,7 +695,7 @@ export type LandingActions = { openHome: (key: string, focus?: SheetFocus) => bo
 /** What a caller's own list (the unlocked list's flat home list) gets: the communities in view and how to open one. */
 export type BrowseListContext = { keys: ReadonlySet<string>; open: (key: string, focus?: SheetFocus) => void; hover: (key: string | null) => void; activeKey: string | null };
 
-export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6", mapSide = "right", areaStatus, onAreaChange, phoneMap = "top", searchArea = false }: {
+export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6", mapSide = "right", areaStatus, onAreaChange, phoneMap = "top", searchArea = false, phoneMapOpen, onPhoneMapOpenChange }: {
   communities: readonly LandingCommunity[]; onUnlock?: () => void; useHomes: UseCommunityHomes;
   /** The sheet's pieces for an unlocked list (see SheetOptions). */
   sheet?: SheetOptions;
@@ -708,8 +711,14 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   mapSide?: "left" | "right";
   /** The "Showing N in this part of town" line for a caller's own list (the home list counts homes, not communities). */
   areaStatus?: (keys: readonly string[]) => string;
-  /** Oct 28, 2026: "floating" puts the phone's only Map button at the bottom from the start (New Home Buddy), no top button. */
-  phoneMap?: "top" | "floating";
+  /**
+   * Oct 28, 2026: "floating" puts the phone's only Map button at the bottom from the start (New Home Buddy), no top button.
+   * Oct 30, 2026 (design F): "external" leaves the phone's map to the caller's Homes / Map switch (phoneMapOpen); while
+   * the map is open on a phone it takes the list's place instead of pushing the homes down.
+   */
+  phoneMap?: "top" | "floating" | "external";
+  phoneMapOpen?: boolean;
+  onPhoneMapOpenChange?: (open: boolean) => void;
   /** Oct 28, 2026 (New Home Buddy): the map offers "Search this area" after the visitor moves it. */
   searchArea?: boolean;
   /** Told which communities a map bubble narrowed the list to (null when cleared), so the caller's count follows. */
@@ -728,7 +737,13 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   const [focus, setFocus] = useState<SheetFocus | undefined>(undefined);
   const openKeyRef = useRef<string | null>(null);
   useEffect(() => { const key = open?.key ?? null; if (key && key !== openKeyRef.current) onOpenCommunity?.(key); openKeyRef.current = key; }, [open, onOpenCommunity]);
-  const [mapOnPhone, setMapOnPhone] = useState(false);
+  const [ownMapOnPhone, setOwnMapOnPhone] = useState(false);
+  const external = phoneMap === "external";
+  const mapOnPhone = external ? Boolean(phoneMapOpen) : ownMapOnPhone;
+  const setMapOnPhone = (next: boolean | ((value: boolean) => boolean)) => {
+    const value = typeof next === "function" ? next(mapOnPhone) : next;
+    if (external) onPhoneMapOpenChange?.(value); else setOwnMapOnPhone(value);
+  };
   // Oct 27, 2026 (New Home Buddy's floating MAP button): once the top Map button scrolls away, a pill stays at the bottom.
   const phoneMapTop = useRef<HTMLDivElement>(null);
   const [mapButtonAway, setMapButtonAway] = useState(false);
@@ -795,10 +810,13 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
         <div ref={phoneMapTop} className={`flex min-w-0 scroll-mt-2 flex-wrap items-center gap-2 lg:hidden ${phoneMap === "floating" ? "" : "mb-4"}`}>
           {phoneMap === "top" && <button type="button" onClick={() => setMapOnPhone((value) => !value)} aria-expanded={mapOnPhone} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border bg-card px-4 text-sm shadow-sm"><MapPin className="h-4 w-4 text-gold" />{mapOnPhone ? LANDING_COPY.hideMap : LANDING_COPY.showMap}</button>}
         </div>
-        {mapOnPhone && <div className="mb-6 lg:hidden">{map}
+        {mapOnPhone && <div className="mb-6 lg:hidden" data-deals-phone-map="true">{map}
+          {external && !selected && <button type="button" onClick={() => setMapOnPhone(false)} className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-gold px-4 text-sm font-semibold text-foreground">{LANDING_COPY.seeHomes}</button>}
           {/* The bubble the visitor tapped narrows the list below; on a phone that is said right under the map. */}
-          {selected && <div role="status" data-deals-phone-area="true" className="mt-2 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-1 text-sm"><span>{(areaStatus ? areaStatus(matching.map((item) => item.key)) : LANDING_COPY.areaFilter(matching.length))}</span><button type="button" onClick={() => listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" })} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.seeList}</button><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-muted-foreground underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
+          {selected && <div role="status" data-deals-phone-area="true" className="mt-2 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-1 text-sm"><span>{(areaStatus ? areaStatus(matching.map((item) => item.key)) : LANDING_COPY.areaFilter(matching.length))}</span><button type="button" onClick={() => { if (external) setMapOnPhone(false); else listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.seeList}</button><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-muted-foreground underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
         </div>}
+        {/* With the caller's Homes / Map switch on Map, a phone shows the map alone (the homes are one tap away). */}
+        <div className={external && mapOnPhone ? "max-lg:hidden" : undefined}>
         {top && <div className="mb-6 min-w-0">{typeof top === "function" ? top(actions) : top}</div>}
         <div ref={listTop} className="scroll-mt-4" />
         {selected && <div role="status" className="mb-4 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-2 text-sm"><span>{(areaStatus ? areaStatus(matching.map((item) => item.key)) : LANDING_COPY.areaFilter(matching.length))}</span><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
@@ -811,8 +829,9 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
         <ShowMore remaining={matching.length - shown.length} onClick={() => setPages((value) => value + 1)} />
         </>}
         {below}
+        </div>
       </div>
-      {(mapButtonAway || phoneMap === "floating") && <button type="button" onClick={phoneMap === "floating" && mapOnPhone ? () => setMapOnPhone(false) : openPhoneMap} aria-expanded={mapOnPhone} data-deals-floating-map="true" className={`fixed ${floatingMapBottom} left-1/2 z-30 inline-flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-5 text-sm font-semibold text-background shadow-xl lg:hidden`}><MapPin className="h-4 w-4" />{phoneMap === "floating" && mapOnPhone ? LANDING_COPY.hideMap : LANDING_COPY.mapButton}</button>}
+      {(mapButtonAway || phoneMap === "floating") && !external && <button type="button" onClick={phoneMap === "floating" && mapOnPhone ? () => setMapOnPhone(false) : openPhoneMap} aria-expanded={mapOnPhone} data-deals-floating-map="true" className={`fixed ${floatingMapBottom} left-1/2 z-30 inline-flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full bg-foreground px-5 text-sm font-semibold text-background shadow-xl lg:hidden`}><MapPin className="h-4 w-4" />{phoneMap === "floating" && mapOnPhone ? LANDING_COPY.hideMap : LANDING_COPY.mapButton}</button>}
       {/* The map fills the side of the screen and stays there while the list scrolls (no empty space under it). */}
       <aside className={`hidden min-w-0 lg:block ${mapSide === "left" ? "lg:order-first" : ""}`} data-deals-map-side={mapSide}><div className={`sticky top-0 h-[100dvh] ${mapSide === "left" ? "py-2" : "py-4"}`}><RegionMap {...mapProps} className="h-full w-full" /></div></aside>
     </div>

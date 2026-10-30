@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { PaymentAssumptions } from "@shared/dealsFeatured";
 import { HOME_PAGE, type GatedHome } from "./GatedCatalog";
 import { BuyerHomeCard } from "./BuyerHomeCard";
@@ -43,22 +43,15 @@ function PublicTile({ entry, context, useHomes, assumptions, onTour, saved, onSa
   </div>;
 }
 
-/** After the first three homes (design E's card): one sign-up offer in the list, not a pop-up. */
-export const FIRST_DIBS_AFTER = 3;
-
-export function PublicHomeList({ entries, context, useHomes, assumptions, onTour = () => undefined, firstDibs, saved, onToggleSave }: { entries: readonly PublicHomeEntry[]; context: BrowseListContext; useHomes: UseCommunityHomes; assumptions?: PaymentAssumptions | null; onTour?: (entry: PublicHomeEntry) => void; /** Shown after the first FIRST_DIBS_AFTER homes (or after the last, on a shorter list). */ firstDibs?: ReactNode; /** Oct 30, 2026: the visitor's saved homes (publicSaveId), kept in their browser. */ saved?: ReadonlySet<string>; onToggleSave?: (id: string) => void }) {
+export function PublicHomeList({ entries, context, useHomes, assumptions, onTour = () => undefined, saved, onToggleSave }: { entries: readonly PublicHomeEntry[]; context: BrowseListContext; useHomes: UseCommunityHomes; assumptions?: PaymentAssumptions | null; onTour?: (entry: PublicHomeEntry) => void; /** Oct 30, 2026: the visitor's saved homes (publicSaveId), kept in their browser. */ saved?: ReadonlySet<string>; onToggleSave?: (id: string) => void }) {
   const inView = entries.filter((entry) => context.keys.has(entry.key));
   const [pages, setPages] = useState(1);
   const keysSignature = Array.from(context.keys).join(",");
   useEffect(() => setPages(1), [keysSignature, entries]);
   const shown = inView.slice(0, pages * HOME_PAGE);
-  const dibsAt = Math.min(FIRST_DIBS_AFTER, shown.length) - 1;
   return <div data-deals-home-list="public">
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
-      {shown.map((entry, index) => <Fragment key={entry.home.card}>
-        <PublicTile entry={entry} context={context} useHomes={useHomes} assumptions={assumptions} onTour={onTour} saved={saved?.has(publicSaveId(entry))} onSave={onToggleSave ? () => onToggleSave(publicSaveId(entry)) : undefined} />
-        {firstDibs && index === dibsAt ? firstDibs : null}
-      </Fragment>)}
+      {shown.map((entry) => <PublicTile key={entry.home.card} entry={entry} context={context} useHomes={useHomes} assumptions={assumptions} onTour={onTour} saved={saved?.has(publicSaveId(entry))} onSave={onToggleSave ? () => onToggleSave(publicSaveId(entry)) : undefined} />)}
     </div>
     <AutoMore key={shown.length} active={inView.length > shown.length} onNear={() => setPages((value) => value + 1)} />
     <ShowMore remaining={inView.length - shown.length} step={HOME_PAGE} onClick={() => setPages((value) => value + 1)} />

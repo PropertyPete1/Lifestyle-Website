@@ -1,12 +1,11 @@
-import { useId, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowDown, Bath, BedDouble, ChevronDown, Flame, Heart, Home, LockKeyhole, Mail } from "lucide-react";
+import { useId, useState, type ReactNode } from "react";
+import { ArrowDown, Bath, BedDouble, ChevronDown, Flame, Heart, Home, LockKeyhole } from "lucide-react";
 import { formatRate, homePaymentEstimate, type HomePaymentEstimate, type PaymentAssumptions } from "@shared/dealsFeatured";
 import { redHotDeal } from "@shared/dealsFeatured";
-import { FIRST_DIBS_CONSENT, normalizeFirstDibsEmail } from "@shared/dealsFirstDibs";
 import { NewBadge, RetryImage, money } from "./shared";
 
 /**
- * Oct 30, 2026 (Peter picked design "F / Warm Ivory" with "E"'s sign-up card): the public homes list. One card per
+ * Oct 30, 2026 (Peter picked design "F / Warm Ivory"): the public homes list. One card per
  * home: its photo, the area (never a builder, community or street), the price, the specs, the estimated monthly total
  * at the builder's rate with its breakdown, and "Schedule a tour".
  */
@@ -142,56 +141,6 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
       <button type="button" onClick={onTour} data-deals-card-tour="true" className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-gold bg-card px-4 font-serif text-xl font-semibold text-foreground transition-colors hover:bg-gold hover:text-primary-foreground">{BUYER_CARD_COPY.tour}</button>
     </div>
   </article>;
-}
-
-export const FIRST_DIBS_COPY = {
-  heading: "Get first dibs on new deals",
-  body: FIRST_DIBS_CONSENT,
-  area: "Area",
-  anyArea: "All areas",
-  email: "Email address",
-  submit: "Sign up",
-  sending: "Signing up…",
-  done: "You're on the list. Check your inbox for your first homes.",
-  invalid: "Enter a valid email address.",
-} as const;
-
-/** Oct 30, 2026 (Peter): email and area only, no phone; the emails carry the way to add a number when they're ready. */
-export function FirstDibsCard({ areas, onSubmit }: { areas: readonly string[]; onSubmit: (input: { email: string; area: string }) => Promise<void> }) {
-  const [email, setEmail] = useState("");
-  const [area, setArea] = useState("");
-  const [state, setState] = useState<"idle" | "sending" | "done">("idle");
-  const [error, setError] = useState<string | null>(null);
-  const emailId = useId();
-  const areaId = useId();
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    const value = normalizeFirstDibsEmail(email);
-    if (!value) { setError(FIRST_DIBS_COPY.invalid); return; }
-    setError(null);
-    setState("sending");
-    try { await onSubmit({ email: value, area }); setState("done"); }
-    catch (failure) { setState("idle"); setError(failure instanceof Error && failure.message ? failure.message : "Could not sign you up. Try again."); }
-  };
-  return <section data-deals-first-dibs="true" aria-labelledby={`${emailId}-heading`} className="min-w-0 rounded-2xl border border-gold/30 bg-[oklch(0.955_0.022_85)] p-5 sm:col-span-2 sm:p-6">
-    <div className="flex items-center gap-3"><Mail className="h-7 w-7 shrink-0 text-gold" aria-hidden="true" /><h3 id={`${emailId}-heading`} className="font-serif text-[1.5rem] font-semibold leading-tight sm:text-[1.65rem]">{FIRST_DIBS_COPY.heading}</h3></div>
-    {state === "done"
-      ? <p role="status" className="mt-3 text-sm text-foreground">{FIRST_DIBS_COPY.done}</p>
-      : <form onSubmit={submit} noValidate className="mt-3">
-          <p className="text-sm text-muted-foreground">{FIRST_DIBS_COPY.body}</p>
-          <label htmlFor={areaId} className="sr-only">{FIRST_DIBS_COPY.area}</label>
-          <select id={areaId} value={area} onChange={(event) => setArea(event.target.value)} className="mt-4 min-h-12 w-full min-w-0 rounded-xl border border-input bg-card px-4 text-base text-foreground">
-            <option value="">{FIRST_DIBS_COPY.anyArea}</option>
-            {areas.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
-          </select>
-          <div className="mt-3 flex min-w-0 gap-2">
-            <label htmlFor={emailId} className="sr-only">{FIRST_DIBS_COPY.email}</label>
-            <input id={emailId} type="email" inputMode="email" autoComplete="email" placeholder={FIRST_DIBS_COPY.email} value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(error)} className="min-h-12 min-w-0 flex-1 rounded-xl border border-input bg-card px-4 text-base text-foreground placeholder:text-muted-foreground" />
-            <button type="submit" disabled={state === "sending"} className="min-h-12 shrink-0 rounded-xl bg-gold px-5 text-base font-semibold text-primary-foreground disabled:opacity-70">{state === "sending" ? FIRST_DIBS_COPY.sending : FIRST_DIBS_COPY.submit}</button>
-          </div>
-          {error && <p role="alert" className="mt-2 text-sm text-destructive">{error}</p>}
-        </form>}
-  </section>;
 }
 
 export const LOCKED_COPY = {

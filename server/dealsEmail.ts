@@ -196,39 +196,3 @@ export function builderDealsEmailStatus(recipients: readonly string[]) {
     recipients: normalizedRecipients(recipients),
   };
 }
-
-/**
- * Oct 30, 2026 (first dibs): an email to a buyer who signed up, never to the team. Resend only: a buyer email never
- * falls back to the owner notification (that would send the buyer's homes to the owner instead). The recipient is
- * logged as a count, never the address, so the email log holds no buyer contact.
- */
-export async function sendBuyerEmail(input: { category: string; to: string; subject: string; html: string; text: string; headers?: Record<string, string> }): Promise<BuilderDealsEmailResult> {
-  const resend = resendConfiguration();
-  const logged = { category: input.category, recipients: ["buyer"], subject: capSubject(input.subject), content: "" };
-  if (!resend.ready) {
-    const result: AttemptedEmailResult = { ok: false, status: "failed", deliveryLog: "resend not configured", error: resend.fromMissing ? RESEND_FROM_MISSING_ERROR : "RESEND_API_KEY is not set" };
-    await persistEmailLog(logged, result, "resend");
-    return result;
-  }
-  try {
-    const response = await fetch(RESEND_ENDPOINT, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${resend.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: resend.from, to: [input.to], subject: logged.subject, html: input.html, text: input.text, ...(input.headers ? { headers: input.headers } : {}) }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!response.ok) {
-      const detail = (await response.text().catch(() => "")).slice(0, 500);
-      const result: AttemptedEmailResult = { ok: false, status: "failed", deliveryLog: "resend failed", error: `Resend ${response.status}${detail ? `: ${detail}` : ""}` };
-      await persistEmailLog(logged, result, "resend");
-      return result;
-    }
-    const result: AttemptedEmailResult = { ok: true, status: "sent", deliveryLog: "resend sent" };
-    await persistEmailLog(logged, result, "resend");
-    return result;
-  } catch (error) {
-    const result: AttemptedEmailResult = { ok: false, status: "failed", deliveryLog: "resend failed", error: safeError(error) };
-    await persistEmailLog(logged, result, "resend");
-    return result;
-  }
-}

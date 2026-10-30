@@ -183,13 +183,6 @@
       "when": 1793037309885,
       "tag": "0025_client_link_picks",
       "breakpoints": true
-    },
-    {
-      "idx": 26,
-      "version": "5",
-      "when": 1793381680698,
-      "tag": "0026_deal_first_dibs",
-      "breakpoints": true
     }
   ]
 }

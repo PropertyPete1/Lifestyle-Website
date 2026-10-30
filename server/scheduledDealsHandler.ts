@@ -239,8 +239,6 @@ async function handleScheduledDealsCall(req: Request, res: Response, job: string
     // 7:05 AM Monday: the System OK report is sent unconditionally (its absence is the alarm).
     if (job === "health") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(7, 0), "builder-deals-health", runBuilderDealsHealthJob)) });
     if (job === "weekly") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(7, 5, "Mon"), "builder-deals-weekly-report", sendBuilderDealsMondayReport)) });
-    // Oct 30, 2026: first dibs. Once a day at 9:00 AM Central; each subscriber hears from us at most once a week.
-    if (job === "first-dibs") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(9, 0), "builder-deals-first-dibs", async () => (await import("./dealsFirstDibs")).sendFirstDibsDigests())) });
     if (job === "maintenance") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(7, 30, "Mon"), "builder-deals-maintenance", async () => ({ testRecords: await cleanupDealsTestRecords(), fubRetries: await runPendingDealsFubJobs(), cachedRenderCleanup: await pruneDealPhotoRenders() }))) });
     return res.status(400).json({ error: "unknown_job" });
   } catch (error) {

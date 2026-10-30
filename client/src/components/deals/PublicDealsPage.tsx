@@ -4,7 +4,7 @@ import { Heart, Menu, SlidersHorizontal, X } from "lucide-react";
 import type { PaymentAssumptions } from "@shared/dealsFeatured";
 import { BROWSE_SORTS, EMPTY_FILTERS, activeFilterCount, landingMatches, newThisWeekKnown, sortLandingCommunities, storiesKnown, type BrowseFilters, type LandingHomeFacts } from "@/lib/dealsBrowse";
 import { BrowseBar, BROWSE_COPY } from "./BrowseBar";
-import { BuyerHomeCard, FirstDibsCard, LockedDetails } from "./BuyerHomeCard";
+import { BuyerHomeCard, LockedDetails } from "./BuyerHomeCard";
 import { ComingSoonSection, type ComingSoonItem } from "./ComingSoon";
 import { FeaturedStrip, type FeaturedDealsData } from "./FeaturedDeals";
 import { HOME_LIST_COPY, ProtectedGallery } from "./GatedCatalog";
@@ -15,8 +15,8 @@ import { DealsFooter, formatChicagoDate } from "./shared";
 /**
  * Oct 30, 2026 (Peter picked design "F / Warm Ivory"): the public /deals page. A compact light header, "New
  * construction deals", Homes / Map and Filters, then one big card per home with its monthly total at the builder's
- * rate and its own "Schedule a tour"; "Get first dibs on new deals" sits after the third home. Presentational: the
- * page (Deals.tsx) passes the data and what a tour or a sign-up does, so the QA harness renders the same component.
+ * rate and its own "Schedule a tour". Presentational: the page (Deals.tsx) passes the data and what a tour does, so
+ * the QA harness renders the same component.
  */
 export const PUBLIC_PAGE_COPY = {
   heading: "New construction deals",
@@ -118,11 +118,9 @@ export type PublicDealsPageProps = {
   openKey?: string | null;
   /** "Schedule a tour" (a card's, the featured row's or Coming Soon's): the sign-up for a tour. */
   onTour: (entry?: PublicHomeEntry) => void;
-  /** The first-dibs sign-up; without it the card is not shown. */
-  onFirstDibs?: (input: { email: string; area: string }) => Promise<void>;
 };
 
-export function PublicDealsPage({ communities: all, useHomes, featured, comingSoon, eyebrow, intro = PUBLIC_PAGE_COPY.intro, openKey, onTour, onFirstDibs }: PublicDealsPageProps) {
+export function PublicDealsPage({ communities: all, useHomes, featured, comingSoon, eyebrow, intro = PUBLIC_PAGE_COPY.intro, openKey, onTour }: PublicDealsPageProps) {
   const [filters, setFilters] = useState<BrowseFilters>(EMPTY_FILTERS);
   const [listView, setListView] = useState<"homes" | "communities">("homes");
   const [mapOpen, setMapOpen] = useState(false);
@@ -136,7 +134,6 @@ export function PublicDealsPage({ communities: all, useHomes, featured, comingSo
   const shownCommunities = areaKeys ? areaKeys.size : matching.length;
   const totalHomes = all.reduce((sum, community) => sum + (community.homeFacts?.length ?? 0), 0);
   const active = activeFilterCount(filters);
-  const areas = useMemo(() => Array.from(new Set(all.map((community) => community.area).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [all]);
   const updatedAt = all.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
   const assumptions: PaymentAssumptions | null = featured?.assumptions ? { defaultDownPercent: featured.assumptions.defaultDownPercent, termYears: featured.assumptions.termYears, costs: featured.assumptions.costs } : null;
   const unit = listView === "homes" ? "homes" : "communities";
@@ -166,8 +163,7 @@ export function PublicDealsPage({ communities: all, useHomes, featured, comingSo
         <LandingBrowse mapSide="left" phoneMap="external" phoneMapOpen={mapOpen} onPhoneMapOpenChange={setMapOpen} searchArea
           onAreaChange={(keys) => setAreaKeys(keys ? new Set(keys) : null)}
           areaStatus={listView === "homes" ? (keys) => { const inArea = new Set(keys); return `Showing ${HOME_LIST_COPY.count(homeEntries.filter((entry) => inArea.has(entry.key)).length)} in this part of town`; } : undefined}
-          renderList={listView === "homes" ? (context) => <PublicHomeList entries={homeEntries} context={context} useHomes={useHomes} assumptions={assumptions} onTour={(entry) => onTour(entry)} saved={saved} onToggleSave={toggleSave}
-            firstDibs={onFirstDibs ? <FirstDibsCard areas={areas} onSubmit={onFirstDibs} /> : undefined} /> : undefined}
+          renderList={listView === "homes" ? (context) => <PublicHomeList entries={homeEntries} context={context} useHomes={useHomes} assumptions={assumptions} onTour={(entry) => onTour(entry)} saved={saved} onToggleSave={toggleSave} /> : undefined}
           communities={matching} filters={filters} useHomes={useHomes} onUnlock={() => onTour()} lookup={all} openKey={openKey}
           sheet={{ locked: <LockedDetails />, renderHome: (home, isFeatured, community) => <BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} featured={isFeatured} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour()} /> }}
           top={(actions) => <FeaturedStrip compact featured={featured} opens onHover={(deal) => actions.hover(deal?.landingKey ?? null)} onSelect={(deal) => { if (!deal.landingKey || !actions.openHome(deal.landingKey, { price: deal.price, sqft: deal.sqft, kind: deal.kind })) onTour(); }} />}

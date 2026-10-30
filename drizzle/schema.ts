@@ -673,33 +673,6 @@ export const dealEmailLogs = mysqlTable("deal_email_logs", {
 }, (t) => [index("idx_deal_email_logs_alert").on(t.alertId, t.createdAt), index("idx_deal_email_logs_created").on(t.createdAt)]);
 
 /**
- * Oct 30, 2026 (Peter): "Get first dibs on new deals" on the public page. Email and area only (no phone): the visitor
- * goes into Follow Up Boss with their email, gets homes in that area right away and then once a week only when there
- * are new homes or price drops there. `token` is the unsubscribe handle in every email; `sentHomes` (JSON) keeps the
- * public home ids already emailed so a home is never sent twice. Never stores a builder, community or address.
- */
-export const dealFirstDibs = mysqlTable(
-  "deal_first_dibs",
-  {
-    id: int("id").autoincrement().primaryKey(),
-    email: varchar("email", { length: 254 }).notNull().unique(),
-    /** The public area label picked ("" = every area). */
-    area: varchar("area", { length: 120 }).notNull().default(""),
-    status: mysqlEnum("status", ["active", "unsubscribed"]).default("active").notNull(),
-    token: varchar("token", { length: 64 }).notNull().unique(),
-    consentText: text("consent_text").notNull(),
-    consentIp: varchar("consent_ip", { length: 64 }).notNull(),
-    fubPersonId: varchar("fub_person_id", { length: 80 }),
-    sentHomes: text("sent_homes"),
-    lastEmailedAt: timestamp("last_emailed_at"),
-    unsubscribedAt: timestamp("unsubscribed_at"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-  },
-  (t) => [index("idx_deal_first_dibs_due").on(t.status, t.lastEmailedAt)]
-);
-
-/**
  * Supplied source import (docs/builder-deals-supplied-import.md). A builder with
  * a key here is "supplied": its communities are read from the latest import the
  * owner's own browser agent posted to /api/deals/import instead of being fetched.

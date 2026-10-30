@@ -426,6 +426,8 @@ export const dealsRouter = router({
       connectOffer,
       /** The agent whose page brought this visitor; their name heads the page and the sign-up. */
       agentPage,
+      /** Oct 30, 2026: the first-dibs card shows only while buyer emails can actually be sent (Resend key and sender set). */
+      firstDibs: (await import("./dealsEmail")).resendConfiguration().ready,
     };
   }),
   start: publicProcedure.input(gateInput).mutation(async ({ input, ctx }) => {

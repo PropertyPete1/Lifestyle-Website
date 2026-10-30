@@ -244,6 +244,7 @@ async function notifyTeam(row: Pick<typeof dealFirstDibs.$inferSelect, "email" |
 export async function subscribeFirstDibs(input: { email: string; area: string; ip: string }, now = new Date(), deps: FirstDibsDeps = {}): Promise<{ ok: true }> {
   const email = normalizeFirstDibsEmail(input.email);
   if (!email) throw new TRPCError({ code: "BAD_REQUEST", message: "Enter a valid email address." });
+  if (!(await import("./dealsEmail")).resendConfiguration().ready) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Sign-ups are paused right now. Text us instead." });
   const { rateLimitCount, logDealEvent } = await import("./dealsService");
   if (await rateLimitCount("first_dibs", new Date(now.getTime() - 60 * 60_000), { ip: input.ip }) >= SIGNUPS_PER_IP_HOUR) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many sign-ups from this connection. Try again in an hour." });
   await logDealEvent({ kind: "first_dibs", ip: input.ip, detail: input.area.slice(0, 120) || null });
@@ -290,7 +291,8 @@ export async function sendFirstDibsDigests(now = new Date()): Promise<{ due: num
   const { sendFirstDibsToFub } = await import("./dealsFub");
   for (const row of due) {
     if (!row.fubPersonId) { const fub = await sendFirstDibsToFub({ email: row.email, area: row.area }); if (fub.ok) { fubRetried++; await db.update(dealFirstDibs).set({ fubPersonId: fub.personId }).where(eq(dealFirstDibs.id, row.id)); } }
-    if (await emailSubscriber(row, true, homesFor, now).catch(() => false)) emailed++;
+    // A subscriber who never got the welcome (email was not set up yet, or it failed) gets the welcome, not a weekly.
+    if (await emailSubscriber(row, row.lastEmailedAt !== null, homesFor, now).catch(() => false)) emailed++;
   }
   return { due: due.length, emailed, fubRetried };
 }

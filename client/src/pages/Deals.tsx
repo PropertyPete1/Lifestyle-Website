@@ -106,7 +106,7 @@ function Landing() {
   const firstDibs = trpc.deals.firstDibs.useMutation();
   // Oct 30, 2026 (design F): the page itself is presentational (PublicDealsPage); this keeps the session, links and gate.
   return <>
-    <PublicDealsPage communities={catalog.data ?? []} useHomes={useLandingHomes} featured={featured.data as FeaturedDealsData | undefined} comingSoon={comingSoon.data} eyebrow={eyebrow} intro={intro} openKey={sharedKey} onTour={() => setGateOpen(true)} onFirstDibs={async ({ email, area }) => { await firstDibs.mutateAsync({ email, area }); }} />
+    <PublicDealsPage communities={catalog.data ?? []} useHomes={useLandingHomes} featured={featured.data as FeaturedDealsData | undefined} comingSoon={comingSoon.data} eyebrow={eyebrow} intro={intro} openKey={sharedKey} onTour={() => setGateOpen(true)} onFirstDibs={state.data && "firstDibs" in state.data && state.data.firstDibs ? async ({ email, area }) => { await firstDibs.mutateAsync({ email, area }); } : undefined} />
     {askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} teamSignIn={teamSignIn} onSiteLogin={() => startLogin({ returnTo: "/deals/team" })} onClose={() => setGateOpen(false)} />}
   </>;
 }

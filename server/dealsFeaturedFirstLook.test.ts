@@ -66,9 +66,10 @@ describe("telling the outside of a house from the inside", () => {
     expect(await firstExteriorPhoto([row(1, "kitchen"), row(2, "front"), row(3, "bath")], read)).toBe(2);
     // Peter's Marion home: every photo is inside.
     expect(await firstExteriorPhoto([row(4, "kitchen"), row(5, "bath")], read)).toBeNull();
-    // Storage down, or no photos: unknown, so the row is never emptied by a hiccup.
+    // No photo at all: no front photo, so not featured (Peter's rule).
+    expect(await firstExteriorPhoto([], read)).toBeNull();
+    // Storage down: unknown, so the row is never emptied by a hiccup.
     expect(await firstExteriorPhoto([row(6, "gone")], read)).toBeUndefined();
-    expect(await firstExteriorPhoto([], read)).toBeUndefined();
   });
 });
 
@@ -111,7 +112,7 @@ describe("the Best Deals row: $300K-$400K and outside covers", () => {
     expect(ranked.lowestPayment.map((deal) => deal.key)).toEqual(["seguin", "converse", "wildwood"]);
     expect(covers.get("seguin")).toBe(12);
     expect(covers.get("wildwood")).toBe(41);
-    // Nothing to judge (no photos, or storage down): the home stays, with its first photo as before.
+    // Photos unreadable just now (storage down): the home stays, with its first photo as before.
     expect(covers.has("converse")).toBe(false);
     // Only the new winner is looked at the second time round.
     expect(looked).toEqual([[1, 2, 3], [4]]);

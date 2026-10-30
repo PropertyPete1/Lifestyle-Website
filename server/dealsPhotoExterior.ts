@@ -91,11 +91,12 @@ async function scoreOf(row: PhotoRow, read: Reader): Promise<number | null> {
 }
 
 /**
- * The first outside shot in a home's gallery order (its photo id); null when its photos were read and none looks like
- * the outside; undefined when there was nothing to judge (no photos, or none could be read just now), so a storage
- * hiccup never empties the row.
+ * The first outside shot in a home's gallery order (its photo id); null when the home has no outside shot (its photos
+ * are all inside, or it has no shown photo at all: Peter, Oct 30, "need a front home photo or don't feature them");
+ * undefined only when its photos could not be read just now, so a storage hiccup never empties the row.
  */
 export async function firstExteriorPhoto(rows: readonly PhotoRow[], read: Reader): Promise<number | null | undefined> {
+  if (!rows.length) return null;
   let judged = 0;
   for (const row of rows.slice(0, EXTERIOR_PHOTOS_PER_HOME)) {
     const score = await scoreOf(row, read);

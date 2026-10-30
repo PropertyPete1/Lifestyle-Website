@@ -134,9 +134,10 @@ function featuredList(ranked: FeaturedDeals): FeaturedDeal[] {
 const OUTSIDE_COVER_ROUNDS = 4;
 
 /**
- * Oct 30, 2026 (Peter: "the featured homes are just the inside of the home"): a featured home shows its outside. Each
- * winner's gallery is looked at for an outside shot (dealsPhotoExterior); a home whose photos are all inside is left
- * out and the next home takes its place. A home with nothing to judge keeps its first photo (or none) as before.
+ * Oct 30, 2026 (Peter: "the featured homes are just the inside of the home", then the rule: "featured homes need a
+ * front home photo or don't feature them"): each winner's gallery is looked at for an outside shot (dealsPhotoExterior);
+ * a home with none (all inside, or no photo at all) is left out and the next home takes its place. Only a home whose
+ * photos could not be read just now (storage down) keeps its first photo, so an outage never empties the row.
  */
 export async function withOutsideCovers(
   candidates: readonly FeaturedCandidate[],

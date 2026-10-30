@@ -22,10 +22,9 @@ export const BUYER_CARD_COPY = {
   total: "Est. monthly total",
   principalAndInterest: "Principal & interest",
   mortgageInsurance: "Mortgage insurance",
-  propertyTax: "Property tax (est.)",
   homeInsurance: "Home insurance (est.)",
   hoa: "HOA dues (est.)",
-  veteran: (amount: string) => `100% disabled veteran? Texas exempts your homestead from property tax, so this home would be about ${amount}/mo.`,
+  noTax: "Property tax is not included. It varies by home, tax district and your homestead exemption.",
 } as const;
 
 const beds = (value: string | number) => `${value} bed${String(value) === "1" ? "" : "s"}`;
@@ -44,7 +43,6 @@ export function PaymentBreakdown({ estimate, price, id }: { estimate: HomePaymen
   const rows: Array<[string, number, string | null]> = [
     [BUYER_CARD_COPY.principalAndInterest, parts.principalAndInterest, `${money.format(parts.loanAmount)} loan at ${formatRate(estimate.ratePercent)}`],
     ...(parts.mortgageInsurance > 0 ? [[BUYER_CARD_COPY.mortgageInsurance, parts.mortgageInsurance, `${pct(costs.mortgageInsuranceRatePercent)} of the loan a year`] as [string, number, string]] : []),
-    [BUYER_CARD_COPY.propertyTax, parts.propertyTax, `${pct(costs.taxRatePercent)} of the price a year`],
     [BUYER_CARD_COPY.homeInsurance, parts.homeInsurance, `${pct(costs.insuranceRatePercent)} of the price a year`],
     [BUYER_CARD_COPY.hoa, parts.hoa, "typical for the area"],
   ];
@@ -56,9 +54,9 @@ export function PaymentBreakdown({ estimate, price, id }: { estimate: HomePaymen
       </div>)}
       <div className="flex items-baseline justify-between gap-3 pt-3 font-semibold"><dt>{BUYER_CARD_COPY.total}</dt><dd className="tabular-nums">{money.format(parts.total)}</dd></div>
     </dl>
-    {/* Oct 30, 2026 (Peter): Texas exempts a 100% disabled veteran's homestead from property tax (Tax Code 11.131). */}
-    {parts.propertyTax > 0 && <p data-deals-veteran-line="true" className="mt-3 rounded-lg bg-gold/10 px-3 py-2 text-sm text-foreground">{BUYER_CARD_COPY.veteran(money.format(parts.total - parts.propertyTax))}</p>}
-    <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Figured on the {money.format(price)} price at the builder&apos;s rate: {estimateTerms(estimate)} ({money.format(parts.downAmount)} down).{estimate.firstYearRatePercent !== null ? " The first-year rate is temporary; the payment shown uses the rate after it." : ""} Tax, insurance and HOA are estimates, not quotes, and vary by home and by your homestead exemption. Builder rates apply to select homes with the builder&apos;s lender and qualifying credit. Not a commitment to lend.</p>
+    {/* Oct 30, 2026 (Peter: "just remove the property taxes entirely"): no tax row, and no veteran line, which only subtracted tax. */}
+    <p data-deals-no-tax="true" className="mt-3 text-sm text-foreground">{BUYER_CARD_COPY.noTax}</p>
+    <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Figured on the {money.format(price)} price at the builder&apos;s rate: {estimateTerms(estimate)} ({money.format(parts.downAmount)} down).{estimate.firstYearRatePercent !== null ? " The first-year rate is temporary; the payment shown uses the rate after it." : ""} Insurance and HOA are estimates, not quotes, and vary by home. Builder rates apply to select homes with the builder&apos;s lender and qualifying credit. Not a commitment to lend.</p>
   </div>;
 }
 

@@ -55,7 +55,6 @@ export type MonthlyPaymentParts = {
   loanAmount: number;
   principalAndInterest: number;
   mortgageInsurance: number;
-  propertyTax: number;
   homeInsurance: number;
   hoa: number;
   total: number;
@@ -65,9 +64,11 @@ export type PaymentInput = { price: number; ratePercent: number; downPercent: nu
 
 /**
  * The estimated monthly total, part by part. October 30, 2026 (Peter: "we are making false expectations on the
- * monthly, payments being too low"): property tax, home insurance and HOA are back in, so the number a buyer sees is
- * closer to what they will pay. They are estimates from the admin settings (a yearly percent of the price for tax and
- * insurance, a typical HOA), never a quote, and the breakdown says so. Mortgage insurance follows
+ * monthly, payments being too low"): home insurance and HOA are in, so the number a buyer sees is closer to what they
+ * will pay. They are estimates from the admin settings (a yearly percent of the price for insurance, a typical HOA),
+ * never a quote, and the breakdown says so. Later Oct 30 (Peter: "just remove the property taxes entirely"): property
+ * tax is NOT part of the total; it varies too much by district and exemption, and the breakdown says it is not
+ * included. `costs.taxRatePercent` stays in the settings shape but nothing here reads it. Mortgage insurance follows
  * carriesMortgageInsurance; the loan is amortized at the note rate passed in.
  */
 export function monthlyPaymentParts(input: PaymentInput): MonthlyPaymentParts {
@@ -80,7 +81,6 @@ export function monthlyPaymentParts(input: PaymentInput): MonthlyPaymentParts {
   const parts = {
     principalAndInterest: Math.round(principalAndInterest),
     mortgageInsurance: Math.round(mortgageInsurance),
-    propertyTax: Math.round((input.price * input.costs.taxRatePercent) / 100 / 12),
     homeInsurance: Math.round((input.price * input.costs.insuranceRatePercent) / 100 / 12),
     hoa: Math.round(input.costs.hoaMonthly),
   };
@@ -88,7 +88,7 @@ export function monthlyPaymentParts(input: PaymentInput): MonthlyPaymentParts {
     downAmount: Math.round(input.price - loan),
     loanAmount: Math.round(loan),
     ...parts,
-    total: parts.principalAndInterest + parts.mortgageInsurance + parts.propertyTax + parts.homeInsurance + parts.hoa,
+    total: parts.principalAndInterest + parts.mortgageInsurance + parts.homeInsurance + parts.hoa,
   };
 }
 

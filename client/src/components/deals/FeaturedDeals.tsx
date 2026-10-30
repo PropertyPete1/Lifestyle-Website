@@ -64,9 +64,10 @@ function DealRow({ deal, rank, locked, onSelect, tags = [] }: { deal: FeaturedDe
 const pct = (value: number) => `${Number(value.toFixed(3))}%`;
 /**
  * Oct 30, 2026 (Peter: the payments were too low): what every monthly figure on the page includes, in plain words.
- * Tax, insurance and HOA are the admin's estimates (printed here), never a quote.
+ * Insurance and HOA are the admin's estimates (printed here), never a quote. Property tax is left out (Peter, later
+ * Oct 30: "just remove the property taxes entirely") and the text says so.
  */
-export const FEATURED_ASSUMPTIONS = (termYears: number, costs?: PaymentCosts) => `Estimated monthly total on a ${termYears}-year loan at the builder's rate: principal and interest, mortgage insurance when the loan carries it, and estimated property tax${costs ? ` (${pct(costs.taxRatePercent)} of the price a year)` : ""}, home insurance${costs ? ` (${pct(costs.insuranceRatePercent)} a year)` : ""} and HOA dues${costs ? ` (${money.format(costs.hoaMonthly)} a month)` : ""}. Tax, insurance and HOA are estimates, not quotes; they vary by home and by your homestead exemption. Builder rates apply to select homes with the builder's lender and qualifying credit. Not a commitment to lend. ${FEATURED_COPY.updated}`;
+export const FEATURED_ASSUMPTIONS = (termYears: number, costs?: PaymentCosts) => `Estimated monthly total on a ${termYears}-year loan at the builder's rate: principal and interest, mortgage insurance when the loan carries it, and estimated home insurance${costs ? ` (${pct(costs.insuranceRatePercent)} of the price a year)` : ""} and HOA dues${costs ? ` (${money.format(costs.hoaMonthly)} a month)` : ""}. Property tax is not included; it varies by home, tax district and your homestead exemption. Insurance and HOA are estimates, not quotes. Builder rates apply to select homes with the builder's lender and qualifying credit. Not a commitment to lend. ${FEATURED_COPY.updated}`;
 
 /** Every featured home once, in order (lowest payments, the best rate, big lots), with the reasons it is featured. */
 export function featuredInOrder(featured: FeaturedDealsData): Array<{ deal: FeaturedDeal; tags: string[] }> {

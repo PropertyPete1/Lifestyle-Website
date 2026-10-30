@@ -7,6 +7,7 @@ import { CommunitiesSection } from "@/components/builder-deals/CommunitiesSectio
 import { PhotosSection } from "@/components/builder-deals/PhotosSection";
 import { ManualHomesSection } from "@/components/builder-deals/ManualHomesSection";
 import { LeadsSection } from "@/components/builder-deals/LeadsSection";
+import { FirstDibsSection } from "@/components/builder-deals/FirstDibsSection";
 import { FunnelSection } from "@/components/builder-deals/FunnelSection";
 import { TeamSection } from "@/components/builder-deals/TeamSection";
 import { ClientLinksSection } from "@/components/builder-deals/ClientLinksSection";
@@ -131,6 +132,7 @@ function BuilderDealsAdminContent() {
       <PhotosSection overview={overview} />
       <ManualHomesSection overview={overview} />
       <LeadsSection overview={overview} />
+      <FirstDibsSection />
       <FunnelSection activeReelCodes={settings?.activeReelCodes ?? []} />
       <TeamSection settings={settings} />
       <ClientLinksSection overview={overview} />

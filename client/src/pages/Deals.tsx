@@ -103,9 +103,10 @@ function Landing() {
   useEffect(() => { if (paused) setGateOpen(true); }, [paused]);
   const eyebrow = shared ? `Shared by ${shared.agentName}` : agentPage ? `${agentPage.agentName}'s new home search` : null;
   const intro = shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : agentPage ? `Hand-picked by ${agentPage.agentName} at Lifestyle Design Realty.` : undefined;
+  const firstDibs = trpc.deals.firstDibs.useMutation();
   // Oct 30, 2026 (design F): the page itself is presentational (PublicDealsPage); this keeps the session, links and gate.
   return <>
-    <PublicDealsPage communities={catalog.data ?? []} useHomes={useLandingHomes} featured={featured.data as FeaturedDealsData | undefined} comingSoon={comingSoon.data} eyebrow={eyebrow} intro={intro} openKey={sharedKey} onTour={() => setGateOpen(true)} />
+    <PublicDealsPage communities={catalog.data ?? []} useHomes={useLandingHomes} featured={featured.data as FeaturedDealsData | undefined} comingSoon={comingSoon.data} eyebrow={eyebrow} intro={intro} openKey={sharedKey} onTour={() => setGateOpen(true)} onFirstDibs={async ({ email, area }) => { await firstDibs.mutateAsync({ email, area }); }} />
     {askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} teamSignIn={teamSignIn} onSiteLogin={() => startLogin({ returnTo: "/deals/team" })} onClose={() => setGateOpen(false)} />}
   </>;
 }

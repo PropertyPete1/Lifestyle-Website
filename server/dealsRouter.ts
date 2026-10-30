@@ -360,6 +360,21 @@ export const dealsRouter = router({
     dealsPublicHeaders(ctx.res);
     return publicPageCache(`catalog:${(input?.src ?? "").toLowerCase()}`, () => publicDealsCatalog(input?.src));
   }),
+  /**
+   * Oct 30, 2026 (Peter): "Get first dibs on new deals": email and area only. The answer comes before FUB and the
+   * emails (they run after it), and says the same thing for a new or a known address.
+   */
+  firstDibs: publicProcedure.input(z.object({ email: z.string().trim().min(3).max(254), area: z.string().trim().max(120).default(""), website: z.string().max(200).optional() })).mutation(async ({ input, ctx }) => {
+    dealsPublicHeaders(ctx.res);
+    // A filled hidden field is a bot: answered like a success, nothing stored or sent.
+    if (input.website) return { ok: true as const };
+    const { subscribeFirstDibs } = await import("./dealsFirstDibs");
+    const { featuredDeals } = await import("./dealsFeatured");
+    return subscribeFirstDibs({ email: input.email, area: input.area, ip: ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0" }, new Date(), {
+      catalog: () => publicPageCache("catalog:", () => publicDealsCatalog()),
+      assumptions: async () => { const featured = await publicPageCache("featured", () => featuredDeals("public")); return { defaultDownPercent: featured.assumptions.defaultDownPercent, termYears: featured.assumptions.termYears, costs: featured.assumptions.costs }; },
+    });
+  }),
   /** The Coming Soon section: area and price band only, for the landing page and the unlocked list alike. */
   comingSoon: publicProcedure.query(async ({ ctx }) => {
     dealsPublicHeaders(ctx.res);
@@ -822,6 +837,8 @@ export const dealsRouter = router({
         .map((home) => ({ description: [home.privateAddress, home.privatePlanName ? `(${home.privatePlanName})` : null].filter(Boolean).join(" ") || "Home", price: home.price })) : [];
       return { lead, views, tours, jobs, picks };
     }),
+    /** Oct 30, 2026: who signed up for first dibs (email and area; no phone until they add one through the gate). */
+    firstDibs: adminProcedure.input(z.object({ search: z.string().trim().max(190).default(""), page: z.number().int().min(1).default(1), pageSize: z.number().int().min(1).max(100).default(25) })).query(async ({ input }) => (await import("./dealsFirstDibs")).listFirstDibs(input)),
     funnel: adminProcedure.input(z.object({ days: z.number().int().min(1).max(365).default(30) })).query(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const rows = await db.select({ sourceCode: dealEvents.sourceCode, kind: dealEvents.kind, count: sql<number>`count(*)` }).from(dealEvents).where(gte(dealEvents.createdAt, new Date(Date.now() - input.days * 86400_000))).groupBy(dealEvents.sourceCode, dealEvents.kind);

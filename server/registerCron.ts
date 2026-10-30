@@ -51,6 +51,7 @@ export const DEALS_JOB_DEFINITIONS = [
   { name: "builder-deals-fub-retry", cron: "17 0 * * * *", path: DEALS_CRON_PATH, payload: { job: "fub" }, description: "Hourly Builder Deals CRM retry" },
   { name: "builder-deals-alert-digest", cron: "41 5 * * * *", path: DEALS_CRON_PATH, payload: { job: "alerts" }, description: "Hourly Builder Deals durable alert delivery and digest" },
   { name: "builder-deals-weekly-system-ok", cron: "29 5 12-15 * * 1", path: DEALS_CRON_PATH, payload: { job: "weekly" }, description: "Monday 7:05 AM Central System OK report, with hourly retry fires until it has run" },
+  { name: "builder-deals-first-dibs", cron: "11 0 14-17 * * *", path: DEALS_CRON_PATH, payload: { job: "first-dibs" }, description: "9:00 AM Central first-dibs emails (each subscriber at most weekly, only when their area has new homes or price drops), with hourly retry fires until it has run" },
   { name: "builder-deals-maintenance", cron: "53 30 12-15 * * 1", path: DEALS_CRON_PATH, payload: { job: "maintenance" }, description: "Monday 7:30 AM Central test record and cached render maintenance, with hourly retry fires" },
 ] as const;
 

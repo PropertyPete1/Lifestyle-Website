@@ -2,6 +2,7 @@ import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowDown, Bath, BedDouble, ChevronDown, Flame, Heart, Home, LockKeyhole, Mail } from "lucide-react";
 import { formatRate, homePaymentEstimate, type HomePaymentEstimate, type PaymentAssumptions } from "@shared/dealsFeatured";
 import { redHotDeal } from "@shared/dealsFeatured";
+import { FIRST_DIBS_CONSENT, normalizeFirstDibsEmail } from "@shared/dealsFirstDibs";
 import { NewBadge, RetryImage, money } from "./shared";
 
 /**
@@ -25,6 +26,7 @@ export const BUYER_CARD_COPY = {
   propertyTax: "Property tax (est.)",
   homeInsurance: "Home insurance (est.)",
   hoa: "HOA dues (est.)",
+  veteran: (amount: string) => `100% disabled veteran? Texas exempts your homestead from property tax, so this home would be about ${amount}/mo.`,
 } as const;
 
 const beds = (value: string | number) => `${value} bed${String(value) === "1" ? "" : "s"}`;
@@ -55,6 +57,8 @@ export function PaymentBreakdown({ estimate, price, id }: { estimate: HomePaymen
       </div>)}
       <div className="flex items-baseline justify-between gap-3 pt-3 font-semibold"><dt>{BUYER_CARD_COPY.total}</dt><dd className="tabular-nums">{money.format(parts.total)}</dd></div>
     </dl>
+    {/* Oct 30, 2026 (Peter): Texas exempts a 100% disabled veteran's homestead from property tax (Tax Code 11.131). */}
+    {parts.propertyTax > 0 && <p data-deals-veteran-line="true" className="mt-3 rounded-lg bg-gold/10 px-3 py-2 text-sm text-foreground">{BUYER_CARD_COPY.veteran(money.format(parts.total - parts.propertyTax))}</p>}
     <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Figured on the {money.format(price)} price at the builder&apos;s rate: {estimateTerms(estimate)} ({money.format(parts.downAmount)} down).{estimate.firstYearRatePercent !== null ? " The first-year rate is temporary; the payment shown uses the rate after it." : ""} Tax, insurance and HOA are estimates, not quotes, and vary by home and by your homestead exemption. Builder rates apply to select homes with the builder&apos;s lender and qualifying credit. Not a commitment to lend.</p>
   </div>;
 }
@@ -142,7 +146,7 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
 
 export const FIRST_DIBS_COPY = {
   heading: "Get first dibs on new deals",
-  body: "Pick an area and we'll email you new homes and price drops there as they come up. Unsubscribe anytime.",
+  body: FIRST_DIBS_CONSENT,
   area: "Area",
   anyArea: "All areas",
   email: "Email address",
@@ -162,8 +166,8 @@ export function FirstDibsCard({ areas, onSubmit }: { areas: readonly string[]; o
   const areaId = useId();
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const value = email.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value)) { setError(FIRST_DIBS_COPY.invalid); return; }
+    const value = normalizeFirstDibsEmail(email);
+    if (!value) { setError(FIRST_DIBS_COPY.invalid); return; }
     setError(null);
     setState("sending");
     try { await onSubmit({ email: value, area }); setState("done"); }

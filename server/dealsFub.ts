@@ -542,6 +542,42 @@ export async function sendBuilderDealsLeadToFub(lead: BuilderLead): Promise<FubD
   } catch { return { ok: false, error: "FUB delivery failed" }; }
 }
 
+export const FIRST_DIBS_SOURCE = "Builder Deals First Dibs";
+export const FIRST_DIBS_TAG = "First Dibs";
+
+/** The wording of a first-dibs event (kept here so a test can read it). */
+export function firstDibsMessage(area: string, again = false): string {
+  const where = area.trim() || "any area";
+  return `${again ? "Signed up again" : "Signed up"} on the Builder Deals page for first dibs on new deals in ${where}. Email only, no phone yet. They get homes in that area by email right away, then once a week when new homes or price drops come up; every email has a link to add their number so we can reach out.`;
+}
+
+/**
+ * Oct 30, 2026 (Peter: first dibs, "they go in FUB with their email"): one event per sign-up, assigned to Peter. FUB
+ * matches an existing contact by email, so a second sign-up from the same address lands on the same person. Only the
+ * email, the area and the tags are sent; no builder, community or address exists here to send.
+ */
+export async function sendFirstDibsToFub(input: { email: string; area: string; again?: boolean }): Promise<{ ok: true; personId: string } | { ok: false; error: string }> {
+  try {
+    const assigneeId = await peterUserId().catch(() => null);
+    const body = {
+      source: FIRST_DIBS_SOURCE, system: "Lifestyle Design Realty Website", type: "General Inquiry",
+      message: firstDibsMessage(input.area, input.again),
+      person: { emails: [{ value: input.email }], tags: [BASE_TAG, FIRST_DIBS_TAG], ...(assigneeId ? { assignedUserId: /^\d+$/.test(assigneeId) ? Number(assigneeId) : assigneeId } : {}) },
+    };
+    const res = await fub("/events", { method: "POST", body: JSON.stringify(body) });
+    if (res.status === 204) return { ok: false, error: "FUB did not accept the first-dibs event (HTTP 204): its lead flow ignores or archives these" };
+    const data = await res.json().catch(() => ({})) as FubPerson & { personId?: string | number; person?: FubPerson };
+    const personId = data.person?.id ?? data.personId ?? data.id;
+    if (personId === undefined || personId === null || String(personId).trim() === "") return { ok: false, error: "FUB event did not return a contact" };
+    return { ok: true, personId: String(personId) };
+  } catch { return { ok: false, error: "FUB delivery failed" }; }
+}
+
+/** A note on a first-dibs contact (an unsubscribe, for one). */
+export async function noteFirstDibsInFub(personId: string, subject: string, body: string) {
+  return postFubNote(personId, subject, body);
+}
+
 /** Why a lead's FUB contact is being noted again; the wording lands in the note as written. */
 export type ReverifyReason = "re-verified on a second device" | "returned for a new link" | "attached to an agent's client link";
 

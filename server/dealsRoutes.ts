@@ -164,6 +164,18 @@ export function registerDealsRoutes(app: Express) {
     const { dealsMapImageHandler } = await import("./dealsMap");
     await dealsMapImageHandler(req, res);
   }));
+  // Oct 30, 2026: the first-dibs emails' unsubscribe link (GET, a person) and its one-click header (POST, the mail app).
+  const firstDibsUnsubscribe = safe(async (req, res) => {
+    const token = String(req.query.t ?? "");
+    const { unsubscribeFirstDibs } = await import("./dealsFirstDibs");
+    const done = await unsubscribeFirstDibs(token);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Robots-Tag", "noindex");
+    if (req.method === "POST") return res.status(done ? 200 : 404).json({ ok: done });
+    res.status(done ? 200 : 404).type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Lifestyle Design Realty</title></head><body style="margin:0;background:#f8f5ef;font-family:Helvetica,Arial,sans-serif;color:#26231f"><main style="max-width:32rem;margin:0 auto;padding:4rem 1.25rem"><p style="font-family:Georgia,serif;font-size:1.4rem">Lifestyle Design Realty</p><h1 style="font-family:Georgia,serif;font-size:2rem">${done ? "You're unsubscribed." : "That link has expired."}</h1><p>${done ? "You won't get any more first-dibs emails from us." : "If you're still getting our emails, reply to one and we'll take you off the list."}</p><p><a href="/deals" style="color:#8a6220">Back to the deals</a></p></main></body></html>`);
+  });
+  app.get("/deals/first-dibs/unsubscribe", firstDibsUnsubscribe);
+  app.post("/deals/first-dibs/unsubscribe", firstDibsUnsubscribe);
   // A public home photo (the landing page shows every home's photos before sign-up): by sealed token, rate-limited per visitor.
   app.get("/deals/pub/img/:token", safe(async (req, res) => {
     const { photoIdFromToken, publicPhotoAllowed } = await import("./dealsPhotoToken");

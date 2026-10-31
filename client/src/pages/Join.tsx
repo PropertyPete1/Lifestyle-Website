@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import RecruitForm, { BUILDER_DEALS_RECRUIT_SOURCE } from "@/components/RecruitForm";
 import LeadFlowDiagram from "@/components/LeadFlowDiagram";
 import { SITE } from "@shared/site";
-import { IMG } from "@/lib/assets";
-import { Flame, HandCoins, Landmark, Mail } from "lucide-react";
+import { BRAND_IMG } from "@/lib/assets";
+import { ArrowRight, Flame, HandCoins, Landmark, Mail } from "lucide-react";
 
 /**
  * Instant payoff for the homepage Now Hiring banner: the three strongest
@@ -43,29 +43,30 @@ export default function Join() {
   useEffect(() => { if (arrival.fromDeals) window.setTimeout(() => document.querySelector("[data-join-from-deals]")?.scrollIntoView({ block: "start" }), 300); }, [arrival.fromDeals]);
   return (
     <PageShell>
-      <section className="dark relative min-h-[60svh] flex items-end text-foreground">
-        <div className="absolute inset-0">
-          <img src={IMG.heroDarkInterior} alt="" aria-hidden className="h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-black/70" />
-          <div className="absolute inset-0 bg-gradient-to-t from-background to-transparent" />
-        </div>
-        <div className="relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pb-16 pt-40">
-          <p className="eyebrow text-gold">Now Hiring</p>
-          <h1 className="display-serif text-4xl md:text-6xl mt-3 max-w-4xl leading-tight">
-            Ready to join a team that helps you boost your sales with warm &amp; hot transfer leads?
-          </h1>
-          {/* Why Agents Join Us — 3-hook strip, visible on first screen */}
-          <div className="mt-8 grid gap-2.5 sm:grid-cols-3 max-w-4xl">
-            {TOP_HOOKS.map(({ icon: Icon, text }) => (
-              <div
-                key={text}
-                className="flex items-center gap-3 border border-gold/35 bg-black/35 backdrop-blur-sm px-4 py-3">
-                <Icon className="h-4 w-4 shrink-0 text-gold" aria-hidden />
-                <span className="text-[11px] uppercase tracking-[0.12em] text-foreground/90 leading-snug">
-                  {text}
-                </span>
-              </div>
-            ))}
+      {/* Oct 30, 2026 (Peter: "fix the black part on the recruiting page"): the white-skin hero, text beside a bright
+          photo, with the three hooks and a straight line to the application. */}
+      <section className="pt-[calc(68px+2.25rem)] lg:pt-[calc(80px+3rem)]">
+        <div className="mx-auto grid max-w-[1400px] items-center gap-8 px-5 pb-12 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-14 lg:px-8 lg:pb-16">
+          <div>
+            <p className="eyebrow text-gold">Now Hiring</p>
+            <h1 className="mt-3 font-serif text-[2.35rem] font-medium leading-[1.08] text-foreground sm:text-5xl lg:text-[3.6rem]">
+              Ready to join a team that helps you boost your sales with warm &amp; hot transfer leads?
+            </h1>
+            {/* Why Agents Join Us — 3-hook strip, visible on first screen */}
+            <div className="mt-7 grid gap-2.5">
+              {TOP_HOOKS.map(({ icon: Icon, text }) => (
+                <div key={text} className="flex items-center gap-3 border border-border bg-card px-4 py-3.5">
+                  <Icon className="h-5 w-5 shrink-0 text-gold" aria-hidden />
+                  <span className="text-[12px] font-medium uppercase leading-snug tracking-[0.1em] text-foreground">{text}</span>
+                </div>
+              ))}
+            </div>
+            <a href="#apply" className="mt-7 inline-flex min-h-12 items-center justify-center gap-2.5 bg-gold px-8 font-serif text-[19px] text-white transition-colors hover:bg-gold/90">
+              Apply to Join the Team <ArrowRight className="h-4 w-4" />
+            </a>
+          </div>
+          <div className="relative aspect-[4/3] overflow-hidden lg:aspect-[5/4]">
+            <img src={BRAND_IMG.heroDesktop} alt="Bright Hill Country living room" fetchPriority="high" decoding="async" className="absolute inset-0 h-full w-full object-cover" />
           </div>
         </div>
       </section>
@@ -103,7 +104,7 @@ export default function Join() {
           <p className="eyebrow text-gold">From Builder Deals</p>
           <p className="mt-2 leading-relaxed text-foreground/90">Builder Deals are for home buyers. Agents on our team get every one of these deals, with the addresses, rates and photos, for their own clients. Tell us about yourself and our broker will reach out.</p>
         </div>}
-        <div id="apply" className="bg-card border border-border p-6 lg:p-10">
+        <div id="apply" className="scroll-mt-28 bg-card border border-border p-6 lg:p-10">
           <RecruitForm sourceTag={arrival.fromDeals ? BUILDER_DEALS_RECRUIT_SOURCE : undefined} initialPhone={arrival.phone} initialName={arrival.name} initialEmail={arrival.email} />
         </div>
 

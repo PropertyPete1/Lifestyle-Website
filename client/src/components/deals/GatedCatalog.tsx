@@ -38,6 +38,8 @@ export type GatedHome = {
   sqft?: number | null;
   garage?: string | null;
   stories?: number | null;
+  /** Oct 31, 2026: the primary bedroom downstairs (true), upstairs (false), or not said. */
+  primaryDown?: boolean | null;
   price?: number | null;
   previousPrice?: number | null;
   moveInDate?: string | null;

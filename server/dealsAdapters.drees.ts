@@ -1,7 +1,7 @@
 import {
   DREES_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, looksLikeStreetAddress, makePublicSnapshot, parsePromotionalRate, postJsonDocument, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
-  storiesFrom,
+  storiesFrom, primaryDownFrom,
 } from "./dealsAdapters";
 
 /**
@@ -290,6 +290,7 @@ export function parseDreesHomes(body: string, communityPage: string, now: Date):
       squareFeet: positive(home.sqFtLow),
       garage: num(home.garagesLow),
       stories: storiesFrom(home.storiesLow),
+      primaryDown: primaryDownFrom(home.features),
       readyNow: false,
       moveInDate: model ? null : status.moveInDate,
       gallery: dreesGallery(home.images),
@@ -328,6 +329,7 @@ export function parseDreesPlans(body: string, communityPage: string): { plans: P
       squareFeet: positive(plan.sqFtLow),
       garage: num(plan.garagesLow),
       stories: storiesFrom(plan.storiesLow),
+      primaryDown: primaryDownFrom(plan.features),
       readyNow: false,
       gallery: dreesGallery(plan.images),
     });

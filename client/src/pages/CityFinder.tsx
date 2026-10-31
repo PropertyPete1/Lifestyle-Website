@@ -332,7 +332,7 @@ function CityMatchResults({
                   href={SITE.newConstructionUrl}
                   onClick={logNcClick}
                   className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.15em] text-muted-foreground hover:text-gold transition-colors">
-                  See New Construction in {c.name} <ArrowRight className="h-3 w-3" />
+                  Browse New Construction Deals <ArrowRight className="h-3 w-3" />
                 </a>
               </div>
             </div>

@@ -216,7 +216,7 @@ export default function SiteNav({
               Home Valuation
             </Link>
             <Link href="/contact" className="py-1.5 font-serif text-[19px] text-foreground hover:text-gold">
-              Schedule a Consultation
+              Request a Consultation
             </Link>
             <Link href="/join" className="py-1.5 font-serif text-[19px] text-gold">
               Now Hiring — Join Our Team

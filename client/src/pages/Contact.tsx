@@ -9,7 +9,7 @@ export default function Contact() {
       <div className="mx-auto max-w-[1400px] px-5 lg:px-8 pt-28 lg:pt-36 pb-20 grid lg:grid-cols-2 gap-14">
         <div>
           <p className="eyebrow text-gold">Get In Touch</p>
-          <h1 className="display-serif text-4xl md:text-6xl mt-3">Schedule a Consultation</h1>
+          <h1 className="display-serif text-4xl md:text-6xl mt-3">Request a Consultation</h1>
           <p className="mt-5 text-muted-foreground max-w-lg leading-relaxed">
             Whether you're buying, selling, or exploring new construction, start with a
             no-pressure conversation with our team.
@@ -29,8 +29,8 @@ export default function Contact() {
         <div className="bg-card border border-border p-6 lg:p-10">
           <LeadForm
             sourceTag="Website - Contact"
-            heading="Submit a Message"
-            submitLabel="Submit"
+            heading="Tell us your goals. We'll follow up to set up your consultation."
+            submitLabel="Request My Consultation"
             showMessage
             qualifying={[
               { key: "interest", label: "I'm interested in", options: ["Buying", "Selling", "Both", "Other"] },

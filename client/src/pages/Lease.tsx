@@ -13,7 +13,7 @@ const PROCESS = [
   {
     n: "01",
     title: "Strategic Pricing",
-    body: "Rental pricing built from live lease comps and tenant demand across your submarket — positioned for maximum monthly rent with minimum vacancy, so the property never sits empty losing money.",
+    body: "Rental pricing built from live lease comps and tenant demand across your submarket — priced to lease quickly at a strong monthly rent, so your property spends less time sitting empty.",
   },
   {
     n: "02",
@@ -23,7 +23,7 @@ const PROCESS = [
   {
     n: "03",
     title: "Expert Tenant Screening",
-    body: "Every applicant is verified before a lease is offered: income verification, rental history, and background checks. You get tenants who pay on time and treat the property like their own.",
+    body: "Every applicant is verified before a lease is offered: income verification, rental history, and background checks. So you can choose a tenant with a solid record of paying on time and caring for a home.",
   },
 ];
 

@@ -593,6 +593,9 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeButton.current?.focus();
     const onKey = (event: KeyboardEvent) => {
+      // Oct 30, 2026 (ChatGPT's review: "Schedule a tour" opened the sign-up under the home details): the sign-up now
+      // sits above this sheet (z-[100]); while it is open, its keys are its own.
+      if (document.getElementById("unlock")) return;
       if (event.key === "Escape") { close.current(); return; }
       if (event.key !== "Tab" || !dialog.current) return;
       const focusable = Array.from(dialog.current.querySelectorAll<HTMLElement>('button, a[href], iframe, [tabindex]:not([tabindex="-1"])')).filter((element) => !element.hasAttribute("disabled"));

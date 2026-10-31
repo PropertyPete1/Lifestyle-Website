@@ -66,6 +66,16 @@ export default function SiteNav({
   const [propsOpen, setPropsOpen] = useState(false);
   const [location, navigate] = useLocation();
 
+  /**
+   * Oct 30, 2026 (ChatGPT recruiting review): on /join the header CTA goes to the agent application, not the
+   * buyer/seller Get Started page.
+   */
+  const onJoin = location.replace(/\/+$/, "") === "/join";
+  const goApply = () => {
+    setOpen(false);
+    document.getElementById("apply")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   /** Jump to the Get Started form: scroll if on homepage, otherwise navigate. */
   const goGetStarted = () => {
     setOpen(false);
@@ -176,9 +186,10 @@ export default function SiteNav({
             </a>
             {/* Persistent high-intent CTA — visible on every page */}
             <button
-              onClick={goGetStarted}
+              onClick={onJoin ? goApply : goGetStarted}
+              data-nav-cta={onJoin ? "apply" : "get-started"}
               className="whitespace-nowrap bg-gold px-7 py-3 font-serif text-[18px] text-primary-foreground transition-colors hover:bg-gold/90">
-              Get Started
+              {onJoin ? "Apply Now" : "Get Started"}
             </button>
           </nav>
 
@@ -197,9 +208,10 @@ export default function SiteNav({
         <div className="lg:hidden bg-background border-b border-border max-h-[calc(100dvh-4rem)] overflow-y-auto">
           <nav className="px-6 py-6 flex flex-col gap-3">
             <button
-              onClick={goGetStarted}
+              onClick={onJoin ? goApply : goGetStarted}
+              data-nav-cta={onJoin ? "apply" : "get-started"}
               className="bg-gold px-5 py-3 text-center font-serif text-[18px] text-primary-foreground transition-colors hover:bg-gold/90">
-              Ready to Buy or Sell? Get Started
+              {onJoin ? "Apply to Join the Team" : "Ready to Buy or Sell? Get Started"}
             </button>
             {PROPERTIES_MENU.map((item, i) => (
               item.external ? (

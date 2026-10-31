@@ -123,8 +123,9 @@ export default function RecruitForm({ sourceTag = "Recruit - Website", initialPh
           )}
         </div>
         <div className="space-y-1.5 sm:col-span-2">
-          <Label htmlFor="rc-email" className="text-xs uppercase tracking-widest text-muted-foreground">Email *</Label>
-          <Input id="rc-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="bg-secondary/60 border-border" />
+          {/* Oct 30, 2026 (Peter's rule for every form: phone required, email optional). */}
+          <Label htmlFor="rc-email" className="text-xs uppercase tracking-widest text-muted-foreground">Email <span className="normal-case tracking-normal">(optional)</span></Label>
+          <Input id="rc-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="bg-secondary/60 border-border" />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="rc-license" className="text-xs uppercase tracking-widest text-muted-foreground">1. License Number *</Label>

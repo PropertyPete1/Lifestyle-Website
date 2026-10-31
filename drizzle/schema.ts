@@ -361,6 +361,12 @@ export const dealHomes = mysqlTable(
     garage: varchar("garage", { length: 30 }),
     /** Floors (1 or 2) when the builder lists them; null when it does not. */
     stories: int("stories"),
+    /**
+     * Oct 31, 2026 (Peter: the "master bed downstairs" filter New Home Buddy has): true when the builder says the
+     * primary bedroom is on the main floor, false when it says upstairs, null when it does not say. A single-story
+     * home counts as downstairs whatever this says (see homePrimaryDown).
+     */
+    primaryDown: boolean("primary_down"),
     homesite: varchar("homesite", { length: 100 }),
     readyNow: boolean("ready_now").default(false).notNull(),
     origin: mysqlEnum("origin", ["official", "manual"]).default("official").notNull(),

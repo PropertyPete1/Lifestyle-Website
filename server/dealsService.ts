@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { homePrimaryDown } from "../shared/dealsHomeLayout";
 import { and, asc, desc, eq, gt, inArray, isNull, lte, notInArray, notLike, or, sql } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { parse as parseCookie } from "cookie";
@@ -806,11 +807,13 @@ function factNumber(value: string | number | null | undefined): number | null {
   return numbers.length ? Math.max(...numbers) : null;
 }
 
-/** [price, beds, baths, sqft, garage, kind (0 move-in ready, 1 to be built), stories, previous price]: see LandingHomeFacts. */
-export function landingHomeFacts(home: { kind: string; price: number | null; previousPrice: number | null; beds: string | null; baths: string | null; sqft: number | null; garage: string | null; stories?: number | null; moveInDate?: string | null; isNew?: boolean }): [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null, string | null, 0 | 1] {
+/** [price, beds, baths, sqft, garage, kind (0 move-in ready, 1 to be built), stories, previous price, move-in, new, primary down]: see LandingHomeFacts. */
+export function landingHomeFacts(home: { kind: string; price: number | null; previousPrice: number | null; beds: string | null; baths: string | null; sqft: number | null; garage: string | null; stories?: number | null; primaryDown?: boolean | null; moveInDate?: string | null; isNew?: boolean }): [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null, string | null, 0 | 1, 0 | 1 | null] {
   // The move-in text is a month at most ("Nov 2026"), never a date that could be matched to a listing.
   // The last fact (Oct 26, 2026): 1 when the home arrived this week (the "New this week" badge and filter).
-  return [home.price, factNumber(home.beds), factNumber(home.baths), home.sqft, factNumber(home.garage), home.kind === "to_be_built" ? 1 : 0, home.stories ?? null, home.previousPrice, home.moveInDate ?? null, home.isNew ? 1 : 0];
+  // Oct 31, 2026: the primary bedroom downstairs (1), upstairs (0) or not said (null); see homePrimaryDown.
+  const primaryDown = homePrimaryDown(home);
+  return [home.price, factNumber(home.beds), factNumber(home.baths), home.sqft, factNumber(home.garage), home.kind === "to_be_built" ? 1 : 0, home.stories ?? null, home.previousPrice, home.moveInDate ?? null, home.isNew ? 1 : 0, primaryDown === null ? null : primaryDown ? 1 : 0];
 }
 
 export async function publicDealsCatalog(src?: string | null) {
@@ -829,7 +832,7 @@ export async function publicDealsCatalog(src?: string | null) {
   // Two reads for the whole page, however many communities there are.
   const ids = communities.map((community) => community.id);
   const [availableHomes, incentives, heldLine] = await Promise.all([
-    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price, previousPrice: dealHomes.previousPrice, beds: dealHomes.beds, baths: dealHomes.baths, sqft: dealHomes.sqft, garage: dealHomes.garage, stories: dealHomes.stories, moveInDate: dealHomes.moveInDate, createdAt: dealHomes.createdAt }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
+    db.select({ id: dealHomes.id, communityId: dealHomes.communityId, kind: dealHomes.kind, price: dealHomes.price, previousPrice: dealHomes.previousPrice, beds: dealHomes.beds, baths: dealHomes.baths, sqft: dealHomes.sqft, garage: dealHomes.garage, stories: dealHomes.stories, primaryDown: dealHomes.primaryDown, moveInDate: dealHomes.moveInDate, createdAt: dealHomes.createdAt }).from(dealHomes).where(and(inArray(dealHomes.communityId, ids), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)),
     liveIncentivesByCommunity(db, ids, now, settings.incentiveLapseDays),
     heldLineCommunities(db, ids, now, settings.incentiveLapseDays),
   ]);
@@ -961,6 +964,7 @@ async function readPublicCommunityHomes(communityId: number, key: string): Promi
       sqft: home.sqft,
       garage: home.garage,
       stories: home.stories,
+      primaryDown: homePrimaryDown(home),
       price: home.price,
       previousPrice: home.previousPrice,
       moveInDate: home.moveInDate,
@@ -1139,6 +1143,7 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
         sqft: home.sqft,
         garage: home.garage,
         stories: home.stories,
+        primaryDown: homePrimaryDown(home),
         price: home.price,
         previousPrice: home.previousPrice,
         moveInDate: home.moveInDate,

@@ -1,7 +1,7 @@
 import {
   ASHTON_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
-  storiesFrom,
+  storiesFrom, primaryDownFrom,
 } from "./dealsAdapters";
 import { jsonLdRecords } from "./dealsAdapters.homefiniti";
 
@@ -169,7 +169,7 @@ export function parseAshtonCommunity(html: string, pageUrl: string, now: Date = 
       plans.push({
         sourceUrl: link.toString(), privateName: planName, privatePlanName: planName, status: null,
         price: current && current > 0 ? current : null,
-        bedrooms: beds ? Number(beds[1]) : null, bathrooms: baths ? Number(baths[1]) : null, squareFeet: sqft ? Number(sqft[1]!.replace(/,/g, "")) : null, garage: garage ? Number(garage[1]) : null, stories: stories ? storiesFrom(stories[1]) : null,
+        bedrooms: beds ? Number(beds[1]) : null, bathrooms: baths ? Number(baths[1]) : null, squareFeet: sqft ? Number(sqft[1]!.replace(/,/g, "")) : null, garage: garage ? Number(garage[1]) : null, stories: stories ? storiesFrom(stories[1]) : null, primaryDown: primaryDownFrom(features),
         readyNow: false, gallery: images.map((image) => ({ ...image, caption: "Representative image" })),
       });
       continue;
@@ -190,7 +190,7 @@ export function parseAshtonCommunity(html: string, pageUrl: string, now: Date = 
       price: current && current > 0 ? current : null,
       previousPrice: previous && current && previous > current ? previous : null,
       priceDrop: previous && current && previous > current ? previous - current : null,
-      bedrooms: beds ? Number(beds[1]) : null, bathrooms: baths ? Number(baths[1]) : null, squareFeet: sqft ? Number(sqft[1]!.replace(/,/g, "")) : null, garage: garage ? Number(garage[1]) : null, stories: stories ? storiesFrom(stories[1]) : null,
+      bedrooms: beds ? Number(beds[1]) : null, bathrooms: baths ? Number(baths[1]) : null, squareFeet: sqft ? Number(sqft[1]!.replace(/,/g, "")) : null, garage: garage ? Number(garage[1]) : null, stories: stories ? storiesFrom(stories[1]) : null, primaryDown: primaryDownFrom(features),
       readyNow: status.readyNow, moveInDate: status.moveInDate, gallery: images,
     });
   }

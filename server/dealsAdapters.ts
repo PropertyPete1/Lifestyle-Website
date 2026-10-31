@@ -176,6 +176,69 @@ export function storiesFrom(value: unknown): number | null {
   return Math.ceil(number);
 }
 
+const OWNER = String.raw`(?:primary|owner'?s|owners|master)`;
+const ROOM = String.raw`(?:\s+(?:bedroom|bed|suite|retreat)s?)?`;
+const LOWER = String.raw`(?:main|first|1st|ground)[\s-]+(?:floor|level)`;
+const UPPER = String.raw`(?:second|2nd|upper)[\s-]+(?:floor|level)`;
+const AT = String.raw`\s+(?:is\s+|can\s+be\s+found\s+|sits\s+)?(?:(?:conveniently\s+)?located\s+)?(?:on\s+(?:the\s+)?)?`;
+/** Phrases that place one plan's primary bedroom: [pattern, true for the main floor]. */
+const PRIMARY_PLACES: ReadonlyArray<readonly [RegExp, boolean]> = [
+  [new RegExp(String.raw`\b${LOWER}\s+${OWNER}${ROOM}`, "gi"), true], // "1st-Floor Primary", "main-level owner's suite"
+  [new RegExp(String.raw`\bdownstairs\s+${OWNER}${ROOM}`, "gi"), true], // "Downstairs primary suite"
+  [new RegExp(String.raw`\b${OWNER}${ROOM}${AT}(?:${LOWER}|downstairs|main)\b`, "gi"), true], // "primary suite on the first floor", "master on main"
+  [new RegExp(String.raw`\b${OWNER}\s+down\b(?!\s+payment)`, "gi"), true], // "Primary down"
+  [new RegExp(String.raw`\b${UPPER}\s+${OWNER}${ROOM}`, "gi"), false], // "second-floor primary suite"
+  [new RegExp(String.raw`\bupstairs\s+${OWNER}${ROOM}`, "gi"), false], // "Upstairs primary suite offers a private bath"
+  [new RegExp(String.raw`\b(?:upstairs|(?:on\s+the\s+)?${UPPER}),?\s+(?:you'll\s+find\s+)?(?:the|a|an|your)\s+(?:[a-z-]+\s+){0,2}?${OWNER}${ROOM}`, "gi"), false], // "Upstairs, the primary suite", "On the second floor, the owner's suite"
+  [new RegExp(String.raw`\b${OWNER}${ROOM}${AT}(?:${UPPER}|upstairs)\b`, "gi"), false], // "primary suite upstairs"
+];
+
+/**
+ * Oct 31, 2026 (Peter: a "master bed downstairs" filter like New Home Buddy's): where a plan's or home's primary bedroom
+ * is, from the builder's own field or its own description. True: main floor; false: upstairs; null: it does not say or
+ * says both. Only text about one plan or one home goes in (a community page's marketing never decides a home), and a
+ * phrase about several ("first-floor primary suites") or an option ("optional first-floor primary") does not count.
+ */
+export function primaryDownFrom(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (Array.isArray(value)) return primaryDownFrom(value.filter((item): item is string => typeof item === "string").join(". "));
+  if (typeof value !== "string") return null;
+  const text = decodeHtmlEntities(value).replace(/<[^>]*>/g, " ").replace(/[\u00a0\s]+/g, " ").replace(/[\u2018\u2019]/g, "'").trim();
+  if (!text) return null;
+  // A builder's location field: "1st Floor", "Main", "Down", "Upstairs", "2nd Floor".
+  if (text.length <= 24) {
+    if (/^(?:1st|first|main|ground)(?:[\s-]*(?:floor|level))?$|^down(?:stairs)?$/i.test(text)) return true;
+    if (/^(?:2nd|second|upper)(?:[\s-]*(?:floor|level))?$|^up(?:stairs)?$/i.test(text)) return false;
+  }
+  let down = false, up = false;
+  for (const [pattern, isDown] of PRIMARY_PLACES) {
+    for (const match of Array.from(text.matchAll(pattern))) {
+      if (/(?:bedroom|bed|suite|retreat)s$/i.test(match[0])) continue; // several plans' rooms
+      if (/option(?:al)?\s+(?:an?\s+)?$/i.test(text.slice(Math.max(0, match.index! - 14), match.index))) continue;
+      if (isDown) down = true; else up = true;
+    }
+  }
+  return down === up ? null : down;
+}
+
+/**
+ * Oct 31, 2026: floors from one plan's or one home's own description: "single-story home" -> 1, "two-story design" -> 2.
+ * A two-story room ("two-story family room", "two-story ceilings") says nothing about the house; both kinds: null.
+ */
+export function storiesFromText(value: string | null | undefined): number | null {
+  const text = String(value ?? "").replace(/\s+/g, " ");
+  const one = /\b(?:single|one|1)[\s-]+stor(?:y|ies)\b(?!\s+(?:family|living|great|foyer|entry|ceiling|room)\b)/i.test(text);
+  const two = /\b(?:two|2)[\s-]+stor(?:y|ies)\s+(?:home|house|plan|floor\s*plan|design|layout|residence)\b/i.test(text);
+  return one === two ? null : one ? 1 : 2;
+}
+
+/** Oct 31, 2026: a Chesmar plan or home page's own write-up: the "About the <plan>" entry content in the overview section. */
+export function chesmarAboutText(html: string): string | null {
+  const match = /<section\b[^>]*\bid=["']overview["'][\s\S]*?<div\b[^>]*class=["'][^"']*\bentry-content\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i.exec(html);
+  const text = match ? htmlToText(match[1]!) : "";
+  return text.trim() ? text : null;
+}
+
 export interface PrivatePlanOrHome {
   sourceUrl: string;
   privateName: string | null;
@@ -194,6 +257,8 @@ export interface PrivatePlanOrHome {
   garage?: number | null;
   /** Floors as the builder lists them (1 or 2); null when the source does not say. See storiesFrom. */
   stories?: number | null;
+  /** Oct 31, 2026: the primary bedroom on the main floor (true) or upstairs (false) as the builder says; null when it does not. See primaryDownFrom. */
+  primaryDown?: boolean | null;
   homesite?: string | null;
   geo?: { latitude: number; longitude: number } | null;
   gallery?: PrivateGalleryImage[];
@@ -1692,6 +1757,7 @@ function parsePrivateProperty(sourceUrl: string, html: string): PrivatePlanOrHom
   if (!stats && facts.bedrooms === null && facts.bathrooms === null && facts.squareFeet === null) return null;
   const gallery = chesmarGallery(sourceUrl, html);
   if (gallery === null) return null;
+  const about = chesmarAboutText(html);
   return {
     sourceUrl,
     privateName: extractFirstHeading(html),
@@ -1702,6 +1768,9 @@ function parsePrivateProperty(sourceUrl: string, html: string): PrivatePlanOrHom
     bedrooms: facts.bedrooms ?? (stats ? extractBedrooms(stats.block) : null),
     bathrooms: facts.bathrooms ?? (stats ? extractBathrooms(stats.block) : null),
     squareFeet: facts.squareFeet ?? (stats ? extractSquareFeet(stats.block) : null),
+    // Oct 31, 2026: floors and the primary bedroom's floor from the page's own write-up, when it says.
+    stories: storiesFromText(about),
+    primaryDown: primaryDownFrom(about),
     gallery,
   };
 }

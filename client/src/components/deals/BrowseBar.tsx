@@ -27,6 +27,8 @@ export const BROWSE_COPY = {
   anyStories: "Any",
   oneStory: "1 story",
   twoStory: "2 story+",
+  /** Oct 31, 2026 (Peter: New Home Buddy's "master bed downstairs"). */
+  primaryDown: "Primary bedroom downstairs",
   homeType: "Home type",
   schoolDistrict: "School district",
   anyDistrict: "Any district",
@@ -126,6 +128,9 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
           </div>
         </div>}
       </div>
+      {(showStories || filters.primaryDown) && <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2" data-deals-primary-down-filter="true">
+        <Toggle name="primary-down" on={filters.primaryDown} label={BROWSE_COPY.primaryDown} onChange={(value) => set({ primaryDown: value })} />
+      </div>}
       {districts.length > 1 && <div className={`mt-3 grid min-w-0 grid-cols-1 gap-3 ${sheet ? "" : "sm:grid-cols-2"}`}>
         <label className={LABEL} data-deals-district-filter="true">{BROWSE_COPY.schoolDistrict}
           <select aria-label={BROWSE_COPY.schoolDistrict} value={filters.schoolDistrict} onChange={(event) => set({ schoolDistrict: event.target.value })} className={`mt-1 ${SELECT}`}>

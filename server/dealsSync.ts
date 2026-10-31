@@ -125,7 +125,7 @@ export function communitySourceConfig(community: CommunityRow): CommunitySourceC
   };
 }
 
-type HomeUpsertInput = { communityId: number; sourceUrl: string; privatePlanName?: string | null; privateAddress?: string | null; kind: "quick_move_in" | "to_be_built"; beds?: string | null; baths?: string | null; sqft?: number | null; price?: number | null; moveInDate?: string | null; lotSize?: string | null; garage?: string | null; /** Floors when the builder lists them; null (unknown) never erases a known count. */ stories?: number | null; homesite?: string | null; readyNow?: boolean; status?: "available" | "sold"; /** The builder's own published original price (a struck-through "was" price), when it shows one. */ builderWasPrice?: number | null };
+type HomeUpsertInput = { communityId: number; sourceUrl: string; privatePlanName?: string | null; privateAddress?: string | null; kind: "quick_move_in" | "to_be_built"; beds?: string | null; baths?: string | null; sqft?: number | null; price?: number | null; moveInDate?: string | null; lotSize?: string | null; garage?: string | null; /** Floors when the builder lists them; null (unknown) never erases a known count. */ stories?: number | null; /** Oct 31, 2026: the primary bedroom on the main floor (true) or upstairs (false) as the builder says; null never erases a known answer. */ primaryDown?: boolean | null; homesite?: string | null; readyNow?: boolean; status?: "available" | "sold"; /** The builder's own published original price (a struck-through "was" price), when it shows one. */ builderWasPrice?: number | null };
 type HomeUpsertResult = { id: number; inserted: boolean; skipped: boolean; priceChange: { from: number; to: number } | null; statusChange: { from: string; to: string } | null };
 
 const PRICE_WINDOW_MS = 30 * 24 * 60 * 60_000;
@@ -185,7 +185,7 @@ async function upsertHome(input: HomeUpsertInput, now = new Date()): Promise<Hom
   // Admin-hidden rows stay hidden; sold rows that reappear become available in place.
   const nextStatus = existing.status === "hidden" ? "hidden" : status;
   const statusChange = nextStatus !== existing.status ? { from: existing.status, to: nextStatus } : null;
-  await db.update(dealHomes).set({ ...fields, stories: fields.stories ?? existing.stories ?? null, sourceUrl, sourceKey, price, previousPrice, status: nextStatus, origin: "official" }).where(eq(dealHomes.id, existing.id));
+  await db.update(dealHomes).set({ ...fields, stories: fields.stories ?? existing.stories ?? null, primaryDown: fields.primaryDown ?? existing.primaryDown ?? null, sourceUrl, sourceKey, price, previousPrice, status: nextStatus, origin: "official" }).where(eq(dealHomes.id, existing.id));
   return { id: existing.id, inserted: false, skipped: false, priceChange, statusChange };
 }
 
@@ -764,7 +764,7 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     if (result.statusChange?.to === "sold") summary.sold.push(name);
   };
   for (const plan of snapshot.private.plans) {
-    const result = await upsertHome({ communityId: community.id, sourceUrl: plan.sourceUrl, builderWasPrice: planWas && plan.previousPrice ? plan.previousPrice : null, privatePlanName: plan.privatePlanName ?? plan.privateName, privateAddress: plan.privateAddress ?? null, kind: "to_be_built", beds: plan.bedrooms === null ? null : String(plan.bedrooms), baths: plan.bathrooms === null ? null : String(plan.bathrooms), sqft: plan.squareFeet, price: plan.price, moveInDate: plan.moveInDate ?? null, garage: plan.garage ? String(plan.garage) : null, stories: plan.stories ?? null, homesite: plan.homesite ?? null, readyNow: plan.readyNow ?? false, status: "available" }, now);
+    const result = await upsertHome({ communityId: community.id, sourceUrl: plan.sourceUrl, builderWasPrice: planWas && plan.previousPrice ? plan.previousPrice : null, privatePlanName: plan.privatePlanName ?? plan.privateName, privateAddress: plan.privateAddress ?? null, kind: "to_be_built", beds: plan.bedrooms === null ? null : String(plan.bedrooms), baths: plan.bathrooms === null ? null : String(plan.bathrooms), sqft: plan.squareFeet, price: plan.price, moveInDate: plan.moveInDate ?? null, garage: plan.garage ? String(plan.garage) : null, stories: plan.stories ?? null, primaryDown: plan.primaryDown ?? null, homesite: plan.homesite ?? null, readyNow: plan.readyNow ?? false, status: "available" }, now);
     publishable.add(normalizedDealSourceKey(plan.sourceUrl));
     record(result, label(plan));
     await upsertPhotos(result.id, plan.gallery);
@@ -781,12 +781,25 @@ async function refreshCommunity(community: CommunityRow, now: Date, summaries: C
     const borrowed = name ? planGalleries.get(name) : undefined;
     return borrowed?.map((image) => ({ ...image, caption: "Representative image" }));
   };
+  // Oct 31, 2026: a move-in-ready home built from a plan has that plan's floors and primary bedroom; when the builder
+  // lists them only on the plan, the home takes them from its plan (same community, same plan name).
+  const planLayouts = new Map<string, { stories: number | null; primaryDown: boolean | null }>();
+  for (const plan of snapshot.private.plans) {
+    const name = (plan.privatePlanName ?? plan.privateName ?? "").trim().toLowerCase();
+    if (!name) continue;
+    const known = planLayouts.get(name);
+    planLayouts.set(name, { stories: known?.stories ?? plan.stories ?? null, primaryDown: known?.primaryDown ?? plan.primaryDown ?? null });
+  }
+  const homeLayout = (home: PrivatePlanOrHome) => {
+    const plan = planLayouts.get((home.privatePlanName ?? "").trim().toLowerCase());
+    return { stories: home.stories ?? plan?.stories ?? null, primaryDown: home.primaryDown ?? plan?.primaryDown ?? null };
+  };
   for (const home of snapshot.private.homes) {
     const sold = /sold/i.test(home.status ?? "");
     // Only publish a QMI when the official page explicitly labels it as such.
     const quickMoveIn = /quick\s+move|available\s+now/i.test(home.status ?? "");
     if (!sold && !quickMoveIn) continue; // A model or unlabeled card is treated as absent below.
-    const result = await upsertHome({ communityId: community.id, sourceUrl: home.sourceUrl, builderWasPrice: homeWas && home.previousPrice ? home.previousPrice : null, privatePlanName: home.privatePlanName ?? home.privateName, privateAddress: home.privateAddress ?? null, kind: "quick_move_in", beds: home.bedrooms === null ? null : String(home.bedrooms), baths: home.bathrooms === null ? null : String(home.bathrooms), sqft: home.squareFeet, price: home.price, moveInDate: home.moveInDate ?? null, garage: home.garage ? String(home.garage) : null, stories: home.stories ?? null, homesite: home.homesite ?? null, readyNow: home.readyNow ?? false, status: sold ? "sold" : "available" }, now);
+    const result = await upsertHome({ communityId: community.id, sourceUrl: home.sourceUrl, builderWasPrice: homeWas && home.previousPrice ? home.previousPrice : null, privatePlanName: home.privatePlanName ?? home.privateName, privateAddress: home.privateAddress ?? null, kind: "quick_move_in", beds: home.bedrooms === null ? null : String(home.bedrooms), baths: home.bathrooms === null ? null : String(home.bathrooms), sqft: home.squareFeet, price: home.price, moveInDate: home.moveInDate ?? null, garage: home.garage ? String(home.garage) : null, ...homeLayout(home), homesite: home.homesite ?? null, readyNow: home.readyNow ?? false, status: sold ? "sold" : "available" }, now);
     if (!sold) publishable.add(normalizedDealSourceKey(home.sourceUrl));
     record(result, label(home));
     if (!sold) await upsertPhotos(result.id, homeGallery(home));

@@ -1,5 +1,6 @@
 import { BIG_LOT_ACRES, homeLotAcres, lotAcres, redHotDeal } from "@shared/dealsFeatured";
 import { areaMarketName } from "@shared/dealsArea";
+import { homePrimaryDown } from "@shared/dealsHomeLayout";
 
 /**
  * Browsing every community in the area: filters shared by the landing page and
@@ -22,6 +23,11 @@ export type BrowseFilters = {
   minGarage: number | null;
   /** 1: single-story homes only; 2: two stories or more. */
   stories: 1 | 2 | null;
+  /**
+   * Oct 31, 2026 (Peter: the "master bed downstairs" filter New Home Buddy has): homes whose primary bedroom is on the
+   * main floor: every single-story home, and two-story homes the builder says have it downstairs.
+   */
+  primaryDown: boolean;
   moveInReady: boolean;
   /** Homes still to be built (pick your plan). */
   toBeBuilt: boolean;
@@ -59,7 +65,7 @@ export const BROWSE_SORTS: ReadonlyArray<{ value: BrowseSort; label: string }> =
 export const PAYMENT_SORT: { value: BrowseSort; label: string } = { value: "payment_asc", label: "Lowest payment" };
 export const PAYMENT_CAPS = [1_500, 2_000, 2_500, 3_000, 3_500] as const;
 
-export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, maxSqft: null, availableBy: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, newOnly: false, savedOnly: false, builder: "", schoolDistrict: "", sort: "recommended", maxPayment: null };
+export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, maxSqft: null, availableBy: null, minGarage: null, stories: null, primaryDown: false, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, newOnly: false, savedOnly: false, builder: "", schoolDistrict: "", sort: "recommended", maxPayment: null };
 export const PRICE_CAPS = [200_000, 300_000, 400_000, 500_000, 600_000, 750_000, 1_000_000] as const;
 export const PRICE_FLOORS = [200_000, 250_000, 300_000, 350_000, 400_000, 500_000, 600_000, 750_000] as const;
 export const BED_MINIMUMS = [2, 3, 4, 5] as const;
@@ -79,11 +85,11 @@ const filterOn = (value: unknown) => value !== null && value !== false && value 
 
 /** The filters tucked behind "More filters" (counted on that button). */
 export function moreFilterCount(filters: BrowseFilters): number {
-  return [filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.toBeBuilt, filters.bigLots, filters.builderRate, filters.schoolDistrict].filter(filterOn).length;
+  return [filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.primaryDown, filters.toBeBuilt, filters.bigLots, filters.builderRate, filters.schoolDistrict].filter(filterOn).length;
 }
 
 export function activeFilterCount(filters: BrowseFilters): number {
-  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.newOnly, filters.savedOnly, filters.builder, filters.schoolDistrict, filters.maxPayment ?? null].filter(filterOn).length;
+  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.primaryDown, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.newOnly, filters.savedOnly, filters.builder, filters.schoolDistrict, filters.maxPayment ?? null].filter(filterOn).length;
 }
 
 /** Areas present in the list, most communities first, for the area picker. */
@@ -145,6 +151,8 @@ export type FilterableHome = {
   sqft?: number | null;
   garage?: string | number | null;
   stories?: number | null;
+  /** The primary bedroom on the main floor (true), upstairs (false), or not said (see homePrimaryDown). */
+  primaryDown?: boolean | null;
   lotSize?: string | null;
   moveInDate?: string | null;
   /** Arrived this week (the server decides; see newThisWeek). */
@@ -189,6 +197,8 @@ export function homePasses(home: FilterableHome, filters: BrowseFilters, communi
   if (filters.minGarage !== null && (numberFrom(home.garage) ?? 0) < filters.minGarage) return false;
   if (filters.stories === 1 && home.stories !== 1) return false;
   if (filters.stories === 2 && !(home.stories && home.stories >= 2)) return false;
+  // A home whose builder does not say where the primary bedroom is stays out (single-story homes always have it down).
+  if (filters.primaryDown && homePrimaryDown(home) !== true) return false;
   // Move-in ready and to be built together mean either kind.
   if (filters.moveInReady !== filters.toBeBuilt && home.kind !== (filters.moveInReady ? "quick_move_in" : "to_be_built")) return false;
   if (filters.bigLots && (homeLotAcres(home.lotSize, communityLot) ?? 0) < BIG_LOT_ACRES) return false;
@@ -197,12 +207,15 @@ export function homePasses(home: FilterableHome, filters: BrowseFilters, communi
   return true;
 }
 
-/** The landing card's homes, compact: [price, beds, baths, sqft, garage, kind (0 move-in ready, 1 to be built), stories, previous price, move-in text]. */
-export type LandingHomeFacts = [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null, (string | null)?, (0 | 1)?];
+/**
+ * The landing card's homes, compact: [price, beds, baths, sqft, garage, kind (0 move-in ready, 1 to be built), stories,
+ * previous price, move-in text, new this week, primary bedroom downstairs (1 down, 0 up, null not said)].
+ */
+export type LandingHomeFacts = [number | null, number | null, number | null, number | null, number | null, 0 | 1, number | null, number | null, (string | null)?, (0 | 1)?, (0 | 1 | null)?];
 
 export function landingHome(facts: LandingHomeFacts): FilterableHome {
-  const [price, beds, baths, sqft, garage, kind, stories, previousPrice, moveInDate, isNew] = facts;
-  return { price, beds, baths, sqft, garage, kind: kind === 1 ? "to_be_built" : "quick_move_in", stories, previousPrice, moveInDate: moveInDate ?? null, isNew: isNew === 1 };
+  const [price, beds, baths, sqft, garage, kind, stories, previousPrice, moveInDate, isNew, primaryDown] = facts;
+  return { price, beds, baths, sqft, garage, kind: kind === 1 ? "to_be_built" : "quick_move_in", stories, previousPrice, moveInDate: moveInDate ?? null, isNew: isNew === 1, primaryDown: primaryDown === 1 ? true : primaryDown === 0 ? false : null };
 }
 
 export type LandingBrowseCommunity = {
@@ -239,7 +252,7 @@ export function storiesKnown(items: ReadonlyArray<{ homeFacts?: LandingHomeFacts
   return items.some((item) => item.homeFacts?.some((facts) => facts[6] !== null) || item.homes?.some((home) => typeof home.stories === "number"));
 }
 
-const LANDING_HOME_FILTERS = (filters: BrowseFilters) => filters.minPrice !== null || filters.maxPrice !== null || filters.minBeds !== null || filters.minBaths !== null || filters.minSqft !== null || filters.maxSqft !== null || filters.availableBy !== null || filters.minGarage !== null || filters.stories !== null || filters.moveInReady || filters.toBeBuilt || filters.redHot || filters.newOnly;
+const LANDING_HOME_FILTERS = (filters: BrowseFilters) => filters.minPrice !== null || filters.maxPrice !== null || filters.minBeds !== null || filters.minBaths !== null || filters.minSqft !== null || filters.maxSqft !== null || filters.availableBy !== null || filters.minGarage !== null || filters.stories !== null || filters.primaryDown || filters.moveInReady || filters.toBeBuilt || filters.redHot || filters.newOnly;
 
 /** A landing card matches when it is in the area, has the offer and lot asked for, and has a home that passes the home filters. */
 export function landingMatches(community: LandingBrowseCommunity, filters: BrowseFilters): boolean {

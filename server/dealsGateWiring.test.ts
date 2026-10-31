@@ -92,8 +92,8 @@ describe("/deals/mine: only a dead session falls back to the landing page", () =
     expect(html).toContain(MINE_COPY.loadFailedHint);
     expect(html).toMatch(new RegExp(`<button[^>]*>(?:(?!</button>).)*${MINE_COPY.retry}</button>`));
     expect(html).toContain('data-deals-retry="true"');
-    expect(html).not.toContain("Schedule a tour <");
-    expect(html).not.toContain("Schedule a tour.");
+    expect(html).not.toContain("Get this home's details <");
+    expect(html).not.toContain("Get this home's details.");
     expect(mocks.state).not.toHaveBeenCalled();
     expect(mocks.publicCatalog).not.toHaveBeenCalled();
     // The failure message itself is not shown to the visitor.
@@ -117,7 +117,8 @@ describe("/deals/mine: only a dead session falls back to the landing page", () =
     // Oct 30, 2026 (design F): the public page, with the gate open over it (each home card carries its own tour button).
     expect(html).toContain('data-deals-public-page="true"');
     expect(html).toContain("New construction deals");
-    expect(html).toContain("Schedule a tour.");
+    // Oct 30, 2026 (ChatGPT's review, Peter: yes): the gate asks for the home's details, not a tour first.
+    expect(html).toContain("Get this home's details.");
     expect(html).not.toContain(MINE_COPY.loadFailed);
     expect(mocks.state).toHaveBeenCalled();
   });
@@ -128,7 +129,7 @@ describe("/deals/mine: only a dead session falls back to the landing page", () =
     expect(html).toContain("Prepared for @demo_buyer");
     expect(html).toContain('data-deals-gated="true"');
     expect(html).not.toContain(MINE_COPY.loadFailed);
-    expect(html).not.toContain("Schedule a tour <");
+    expect(html).not.toContain("Get this home's details <");
   });
 
   it("shows the readable profile error under the name prompt and hides the prompt once a save succeeded", () => {

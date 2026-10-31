@@ -135,8 +135,8 @@ export default function LeadForm({
           <Input id={`${sourceTag}-name`} value={name} onChange={(e) => setName(e.target.value)} required className="bg-secondary/60 border-border" />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor={`${sourceTag}-email`} className="text-xs uppercase tracking-widest text-muted-foreground">Email *</Label>
-          <Input id={`${sourceTag}-email`} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="bg-secondary/60 border-border" />
+          <Label htmlFor={`${sourceTag}-email`} className="text-xs uppercase tracking-widest text-muted-foreground">Email <span className="normal-case tracking-normal">(optional)</span></Label>
+          <Input id={`${sourceTag}-email`} type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className="bg-secondary/60 border-border" />
         </div>
         <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor={`${sourceTag}-phone`} className="text-xs uppercase tracking-widest text-muted-foreground">Phone *</Label>

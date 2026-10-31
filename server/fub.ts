@@ -32,7 +32,8 @@ export function fubHeaders(apiKey: string): Record<string, string> {
 
 export interface FubLeadInput {
   name: string;
-  email: string;
+  /** Optional since Oct 30, 2026 (buyer forms ask for the phone; email is a bonus). */
+  email?: string;
   phone?: string;
   message?: string;
   sourceTag: string;
@@ -141,7 +142,7 @@ export async function sendToFub(input: FubLeadInput): Promise<FubResult> {
     person: {
       firstName,
       lastName: lastName || undefined,
-      emails: [{ value: input.email }],
+      emails: input.email ? [{ value: input.email }] : undefined,
       phones: input.phone ? [{ value: input.phone }] : undefined,
       tags: buildTag(input.sourceTag, input.intent, input.answers),
     },

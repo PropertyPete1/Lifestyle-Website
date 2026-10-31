@@ -5,7 +5,7 @@ import type { PaymentAssumptions } from "@shared/dealsFeatured";
 import { SITE } from "@shared/site";
 import { BROWSE_SORTS, EMPTY_FILTERS, activeFilterCount, landingMatches, newThisWeekKnown, sortLandingCommunities, storiesKnown, type BrowseFilters, type LandingHomeFacts } from "@/lib/dealsBrowse";
 import { BrowseBar, BROWSE_COPY } from "./BrowseBar";
-import { BuyerHomeCard, LockedDetails } from "./BuyerHomeCard";
+import { BUYER_CARD_COPY, BuyerHomeCard, LockedDetails } from "./BuyerHomeCard";
 import { ComingSoonSection, type ComingSoonItem } from "./ComingSoon";
 import { FeaturedStrip, type FeaturedDealsData } from "./FeaturedDeals";
 import { HOME_LIST_COPY, ProtectedGallery } from "./GatedCatalog";
@@ -178,8 +178,8 @@ export function PublicDealsPage({ communities: all, useHomes, featured, comingSo
           communities={matching} filters={filters} useHomes={useHomes} onUnlock={() => onTour()} lookup={all} openKey={openKey}
           sheet={{ locked: <LockedDetails />,
             // Oct 30, 2026 (ChatGPT's test: a home opened onto its community, not its photos): the opened home leads the sheet.
-            focusHero: (home, community) => <div className="mx-auto max-w-3xl p-4 pt-14 sm:p-6 sm:pt-14"><BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour()} /></div>,
-            renderHome: (home, isFeatured, community) => <BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} featured={isFeatured} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour()} /> }}
+            focusHero: (home, community) => <div className="mx-auto max-w-3xl p-4 pt-14 sm:p-6 sm:pt-14"><BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} tourLabel={BUYER_CARD_COPY.details} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour()} /></div>,
+            renderHome: (home, isFeatured, community) => <BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} tourLabel={BUYER_CARD_COPY.details} featured={isFeatured} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour()} /> }}
           top={filters.savedOnly ? undefined : (actions) => <FeaturedStrip compact featured={featured} opens onHover={(deal) => actions.hover(deal?.landingKey ?? null)} onSelect={(deal) => { if (!deal.landingKey || !actions.openHome(deal.landingKey, { price: deal.price, sqft: deal.sqft, kind: deal.kind })) onTour(); }} />}
           below={filters.savedOnly ? undefined : <ComingSoonSection items={comingSoon} action={{ kind: "text", phone: null, name: null }} />} />
       </div>

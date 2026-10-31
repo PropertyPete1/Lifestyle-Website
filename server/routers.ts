@@ -61,7 +61,9 @@ const listingInput = z.object({
 
 const leadInput = z.object({
   name: z.string().min(1).max(190),
-  email: z.string().email().max(320),
+  // Oct 30, 2026 (Peter: "phone required, email optional" on the buyer forms): an empty email is allowed; the
+  // Newsletter (email-only by design) still requires one, below.
+  email: z.union([z.literal(""), z.string().trim().email().max(320)]).optional(),
   // Phone is REQUIRED on every lead form site-wide (we work leads by phone).
   // Enforced in superRefine below; the ONE exception is the Newsletter
   // content subscription (email-only by design).
@@ -73,7 +75,11 @@ const leadInput = z.object({
   /** Anonymous first-party visitor id — links pre-inquiry site activity. */
   visitorId: z.string().max(40).optional(),
 }).superRefine((val, ctx) => {
-  if (val.sourceTag === "Website - Newsletter") return; // content subscription, not a lead inquiry
+  if (val.sourceTag === "Website - Newsletter") {
+    // content subscription, not a lead inquiry: the email is the whole point
+    if (!val.email) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["email"], message: "An email address is required." });
+    return;
+  }
   const digits = (val.phone ?? "").replace(/\D/g, "");
   if (digits.length < 7) {
     ctx.addIssue({
@@ -333,7 +339,7 @@ export const appRouter = router({
       const intent = computeIntent(input.answers);
       const leadId = await db.createLead({
         name: input.name,
-        email: input.email,
+        email: input.email ?? "",
         phone: input.phone,
         message: input.message,
         sourceTag: input.sourceTag,
@@ -346,7 +352,7 @@ export const appRouter = router({
 
       const fub = await sendToFub({
         name: input.name,
-        email: input.email,
+        email: input.email || undefined,
         phone: input.phone,
         message: input.message,
         sourceTag: input.sourceTag,
@@ -386,7 +392,7 @@ export const appRouter = router({
         // Graceful fallback: notify owner so no lead slips through
         notifyOwner({
           title: `New lead (FUB sync failed): ${input.name}`,
-          content: `Source: ${input.sourceTag}\nEmail: ${input.email}\nPhone: ${input.phone ?? "—"}\nIntent: ${intent}\nError: ${fub.error ?? "unknown"}\nThe lead is saved in the admin Lead Log.`,
+          content: `Source: ${input.sourceTag}\nEmail: ${input.email || "—"}\nPhone: ${input.phone ?? "—"}\nIntent: ${intent}\nError: ${fub.error ?? "unknown"}\nThe lead is saved in the admin Lead Log.`,
         }).catch(() => undefined);
       }
 

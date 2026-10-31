@@ -13,7 +13,7 @@ export const FEATURED_COPY = {
   bestRate: "Best builder rate",
   bigLots: "Big lots",
   see: "See this home",
-  unlock: "Schedule a tour",
+  unlock: "Get the details",
   details: "See details",
   perMonth: "/mo est.",
   updated: "Updated every time the builders' sites are checked.",

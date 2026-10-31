@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { firstLookFirst, type PaymentAssumptions } from "@shared/dealsFeatured";
 import { HOME_PAGE, type GatedHome } from "./GatedCatalog";
-import { BuyerHomeCard } from "./BuyerHomeCard";
+import { BUYER_CARD_COPY, BuyerHomeCard } from "./BuyerHomeCard";
 import { AutoMore, type BrowseListContext, type LandingCommunity, type UseCommunityHomes } from "./LandingBrowse";
 import { ShowMore } from "./BrowseBar";
 import { homeFiltersOn, homePasses, landingHome, sortHomes, type BrowseFilters, type LandingHomeFacts } from "@/lib/dealsBrowse";
@@ -38,7 +38,7 @@ function PublicTile({ entry, context, useHomes, assumptions, onTour, saved, onSa
   const home = { ...entry.home, photos: match?.photos?.slice(0, 1) ?? [] };
   // Oct 30, 2026 (design F): the buyer card, with the monthly total at the builder's rate (none without one).
   return <div className="min-w-0" onMouseEnter={() => context.hover(entry.key)} onMouseLeave={() => context.hover(null)}>
-    <BuyerHomeCard home={home} area={entry.community.area} incentive={entry.community.incentive ?? null} assumptions={assumptions} photoPending={homes.isLoading}
+    <BuyerHomeCard home={home} area={entry.community.area} incentive={entry.community.incentive ?? null} assumptions={assumptions} photoPending={homes.isLoading} tourLabel={BUYER_CARD_COPY.details}
       onOpen={() => context.open(entry.key, { price: entry.home.price, sqft: entry.home.sqft, kind: entry.home.kind })}
       onTour={() => onTour(entry)} saved={saved} onSave={onSave} />
   </div>;

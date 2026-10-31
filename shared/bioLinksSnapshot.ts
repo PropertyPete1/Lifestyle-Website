@@ -18,14 +18,14 @@ import type { BioLink } from "../drizzle/schema";
 export const BIO_LINKS_SNAPSHOT: BioLink[] = [
   {
     id: 30005,
-    label: "New Construction Search",
+    label: "Browse New Homes & Builder Deals",
     url: "/deals",
     sortOrder: 1,
     active: true,
   },
   {
     id: 30003,
-    label: "Find Your Texas City",
+    label: "Find My Texas City",
     url: "/city-finder",
     sortOrder: 2,
     active: true,

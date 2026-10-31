@@ -410,7 +410,7 @@ describe("the Best Deals strip", () => {
     const html = decode(renderToStaticMarkup(React.createElement(FeaturedDeals, { featured: deals, locked: true })));
     expect(html).toContain("Best deals right now");
     expect(html).toContain("Ranked by estimated monthly payment");
-    expect(html).toContain("Schedule a tour");
+    expect(html).toContain("Get the details");
     expect(html).not.toContain("See this home");
     expect(html).toContain("$2,335");
     expect(html).toContain("$354,990 · 4 beds · 2,011 sq ft");

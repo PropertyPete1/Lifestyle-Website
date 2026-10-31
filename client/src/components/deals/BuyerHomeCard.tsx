@@ -14,6 +14,8 @@ export const BUYER_CARD_COPY = {
   breakdown: "Payment breakdown",
   hideBreakdown: "Hide breakdown",
   tour: "Schedule a tour",
+  /** Oct 30, 2026 (ChatGPT's review, Peter: yes): the public card asks for the details, an easier yes than a tour. */
+  details: "Get this home's details",
   toBeBuilt: "To be built",
   moveIn: (date: string) => `Move-in ${date}`,
   noPhoto: "Photo coming soon",
@@ -75,7 +77,7 @@ export type BuyerCardHome = {
 
 export type BuyerCardIncentive = Parameters<typeof homePaymentEstimate>[1];
 
-export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending = false, onOpen, onTour, gallery, featured = false, saved, onSave, title, subtitle, photoBadge, corner, status: statusOverride, openLabel }: {
+export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending = false, onOpen, onTour, gallery, featured = false, saved, onSave, title, subtitle, photoBadge, corner, status: statusOverride, openLabel, tourLabel }: {
   home: BuyerCardHome;
   /** The public area label ("East San Antonio"); never a community or builder name. */
   area: string;
@@ -83,6 +85,8 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
   assumptions: PaymentAssumptions | null | undefined;
   photoPending?: boolean;
   onOpen?: () => void;
+  /** Public cards: the primary action's words ("Get this home's details"); it is then a filled gold button. */
+  tourLabel?: string;
   /** "Schedule a tour" under the card; none on the team's own list. */
   onTour?: () => void;
   /** In a community's sheet: the home's photo gallery in place of the one tappable photo. */
@@ -155,7 +159,7 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
         {specs.map(({ icon: Icon, text }, index) => <li key={text} className={`inline-flex items-center gap-1.5 ${index ? "ml-3 border-l border-border pl-3" : ""}`}><Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />{text}</li>)}
       </ul>}
       {estimate && open && home.price ? <PaymentBreakdown estimate={estimate} price={home.price} id={breakdownId} /> : null}
-      {onTour && <button type="button" onClick={onTour} data-deals-card-tour="true" className="mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-gold bg-card px-4 font-serif text-xl font-semibold text-foreground transition-colors hover:bg-gold hover:text-primary-foreground">{BUYER_CARD_COPY.tour}</button>}
+      {onTour && <button type="button" onClick={onTour} data-deals-card-tour="true" className={tourLabel ? "mt-4 flex min-h-12 w-full items-center justify-center rounded-xl bg-gold px-4 font-serif text-xl font-semibold text-primary-foreground transition-colors hover:bg-gold/90" : "mt-4 flex min-h-12 w-full items-center justify-center rounded-xl border border-gold bg-card px-4 font-serif text-xl font-semibold text-foreground transition-colors hover:bg-gold hover:text-primary-foreground"}>{tourLabel ?? BUYER_CARD_COPY.tour}</button>}
     </div>
   </article>;
 }

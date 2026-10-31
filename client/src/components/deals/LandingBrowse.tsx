@@ -59,12 +59,13 @@ export const LANDING_COPY = {
   showMap: "Show map",
   mapButton: "Map",
   hideMap: "Hide map",
-  unlock: "Schedule a tour",
-  homeAddress: "Schedule a tour",
+  // Oct 30, 2026 (ChatGPT's review, Peter: yes): ask for the details first; a tour is the agent's next step.
+  unlock: "Get this home's details",
+  homeAddress: "Get this home's details",
   homesHeading: (count: number) => `${count} home${count === 1 ? "" : "s"} available`,
   homesLoading: "Loading homes…",
   homesNone: "Homes are being added. Ask us for the current list.",
-  privacy: "One of our agents will reach out to set it up and answer your questions.",
+  privacy: "An agent will send you the address, builder and community privately, and help confirm it's still available.",
   /** Oct 26, 2026: a buyer sends a community to a spouse; the link opens this sheet and carries a preview card. */
   markerView: "View",
   /** A community with plans but no priced home yet (build-only) says so on its marker instead of "View". */

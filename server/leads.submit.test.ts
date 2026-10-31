@@ -108,6 +108,24 @@ describe("leads.submit", () => {
     expect(createLead).not.toHaveBeenCalled();
   });
 
+  it("takes a buyer lead with a phone and no email (Oct 30: phone required, email optional)", async () => {
+    sendToFub.mockResolvedValue({ ok: true, fubId: "124" });
+    const caller = appRouter.createCaller(publicCtx());
+    const result = await caller.leads.submit({ ...baseInput, email: "" });
+    expect(result.success).toBe(true);
+    expect(createLead).toHaveBeenCalledWith(expect.objectContaining({ email: "", phone: "(555) 111-2222" }));
+    expect(sendToFub).toHaveBeenCalledWith(expect.objectContaining({ email: undefined }));
+    const { email: _omit, ...withoutEmail } = baseInput;
+    await expect(caller.leads.submit(withoutEmail)).resolves.toMatchObject({ success: true });
+    // A typed email still has to be a real one.
+    await expect(caller.leads.submit({ ...baseInput, email: "not-an-email" })).rejects.toThrow();
+  });
+
+  it("still requires an email on the Newsletter subscription", async () => {
+    const caller = appRouter.createCaller(publicCtx());
+    await expect(caller.leads.submit({ ...baseInput, sourceTag: "Website - Newsletter", phone: undefined, email: "" })).rejects.toThrow(/email/i);
+  });
+
   it("allows the Newsletter subscription without a phone (the one exception)", async () => {
     sendToFub.mockResolvedValue({ ok: true, fubId: "77" });
     const caller = appRouter.createCaller(publicCtx());

@@ -548,20 +548,42 @@ export default function CityFinder() {
           </div>
         )}
 
-        {/* Gate: lead capture before full results */}
+        {/* Oct 30, 2026 (ChatGPT's review, Peter: yes): the #1 match shows right away; the full top-3 report sits
+            behind the form, so the visitor gets something before being asked for anything. */}
+        {atGate && !unlocked && matches[0] && (() => {
+          const top = matches[0];
+          const image = selectCityImage(top.name, answers);
+          return (
+            <div className="mt-12 overflow-hidden border border-border bg-card" data-city-finder-teaser>
+              <div className="dark relative aspect-[16/9] text-foreground md:aspect-[16/6]">
+                <img src={image.src} alt={image.alt} className="h-full w-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/30" />
+                <span className="absolute left-4 top-4 bg-gold px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-primary-foreground">Your #1 match</span>
+                <h2 className="absolute bottom-4 left-5 font-serif text-4xl text-white md:text-5xl">{top.name}</h2>
+              </div>
+              <div className="p-6 lg:p-8">
+                <p className="font-serif text-xl leading-snug">{top.vibe}</p>
+                <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{top.why(answers)}</p>
+                <p className="mt-3 text-[11px] uppercase tracking-[0.18em] text-gold">Typical home price around {top.medianPrice}</p>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Gate: lead capture before the full report */}
         {atGate && !unlocked && (
-          <div className="mt-12">
+          <div className="mt-10">
             <div className="text-center mb-8">
-              <h2 className="font-serif text-2xl md:text-3xl">Your matches are ready</h2>
+              <h2 className="font-serif text-2xl md:text-3xl">Your first city match is ready. Want the full comparison?</h2>
               <p className="mt-3 text-sm text-muted-foreground max-w-md mx-auto">
-                Tell us where to send your personalized city report and we'll unlock your top
-                matches instantly.
+                Unlock your top 3 Texas cities side by side, with your personalized report, and a
+                local agent can answer your questions.
               </p>
             </div>
             <div className="bg-card border border-border p-6 lg:p-8">
               <LeadForm
                 sourceTag="Website - City Finder"
-                submitLabel="Unlock My Matches"
+                submitLabel="Unlock My Full Report"
                 compact
                 extraAnswers={answers}
                 onSuccess={handleUnlock}

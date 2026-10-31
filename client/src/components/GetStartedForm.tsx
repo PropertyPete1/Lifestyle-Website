@@ -113,8 +113,8 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
           )}
         </div>
         <div className={cn("space-y-1.5", !compact && "sm:col-span-2")}>
-          <Label htmlFor="gs-email" className="text-xs uppercase tracking-widest text-muted-foreground">Email *</Label>
-          <Input id="gs-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="bg-secondary/60 border-border" />
+          <Label htmlFor="gs-email" className="text-xs uppercase tracking-widest text-muted-foreground">Email <span className="normal-case tracking-normal">(optional)</span></Label>
+          <Input id="gs-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className="bg-secondary/60 border-border" />
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs uppercase tracking-widest text-muted-foreground">I'm Looking To *</Label>

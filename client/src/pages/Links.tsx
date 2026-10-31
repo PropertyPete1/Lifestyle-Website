@@ -13,10 +13,9 @@ import {
   useLinksPromiseTracking,
 } from "@/hooks/usePageTracking";
 import NowHiringBanner from "@/components/NowHiringBanner";
-import WebsiteInquiryModal from "@/components/WebsiteInquiryModal";
 import LeadForm from "@/components/LeadForm";
 import GuideTrail from "@/components/GuideTrail";
-import { ResponseBadge, TrustLine } from "@/components/TrustSignals";
+import { ResponseBadge } from "@/components/TrustSignals";
 import { BRAND_IMG } from "@/lib/assets";
 
 /** Matches the .form-flash keyframe duration in index.css, plus a little slack. */
@@ -67,7 +66,6 @@ export default function Links() {
   const logNcClick = useNcClickTracking();
   const logLeaseClick = useLeaseClickTracking();
   const logFormSubmit = useLinksFormTracking();
-  const [inquiryOpen, setInquiryOpen] = useState(false);
   const logPromiseClick = useLinksPromiseTracking();
   const promiseRef = useRef<HTMLButtonElement>(null);
   const captureRef = useRef<HTMLDivElement>(null);
@@ -132,9 +130,7 @@ export default function Links() {
         <p className="mt-3 rounded-[6px] border border-gold/70 px-4 py-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-gold sm:text-[11px]">
           Veteran-Owned &amp; Operated
         </p>
-        <p className="mt-2.5 inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-          <span className="text-gold">4.6★</span> 22 Google Reviews
-        </p>
+        {/* Oct 30, 2026, 9:18 PM (Peter): no Google star rating on the link page. */}
 
         {/* 30-minute promise — the highest-intent path on the page, kept where it
             is seen without scrolling. A soft-filled pill (the links below are
@@ -215,6 +211,19 @@ export default function Links() {
           })()}
         </div>
 
+        {/* Oct 30, 2026 (ChatGPT's review, Peter: yes): sellers and landlords get their own two doors. */}
+        <div data-links-owner-shortcuts className="mt-4 w-full rounded-[10px] border border-border bg-secondary/50 px-4 py-3.5">
+          <p className="font-serif text-[1.15rem] text-foreground">Selling or renting out a property?</p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <Link href="/valuation" className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[8px] border border-gold/60 bg-card px-2 text-center font-serif text-[1rem] leading-tight text-foreground hover:border-gold hover:text-gold">
+              Review My Home&rsquo;s Value
+            </Link>
+            <Link href="/lease" onClick={logLeaseClick} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[8px] border border-gold/60 bg-card px-2 text-center font-serif text-[1rem] leading-tight text-foreground hover:border-gold hover:text-gold">
+              Plan My Rental Listing
+            </Link>
+          </div>
+        </div>
+
         {/* Direct lead capture — an additive shortcut BELOW the buttons.
             Nothing above is gated on it. */}
         <div
@@ -228,7 +237,6 @@ export default function Links() {
           </p>
           <div className="mt-3 flex flex-col items-center gap-2.5">
             <ResponseBadge />
-            <TrustLine className="justify-center" />
           </div>
           <div className="mt-5">
             <LeadForm
@@ -296,21 +304,8 @@ export default function Links() {
           <p>{SITE.address} · {SITE.phone}</p>
         </div>
 
-        {/* Lifestyle Design Technologies credit — same quiet flex as the
-            site footer, opening the same website-inquiry modal. */}
-        <div className="mt-8 text-[11px] leading-relaxed text-muted-foreground">
-          <p>
-            Website crafted by <span className="text-gold">Lifestyle Design Technologies</span> —{" "}
-            <button
-              type="button"
-              onClick={() => setInquiryOpen(true)}
-              className="cursor-pointer text-gold underline decoration-gold/50 underline-offset-2 transition-colors hover:decoration-gold">
-              Click here
-            </button>{" "}
-            to inquire about your own custom website.
-          </p>
-        </div>
-        <WebsiteInquiryModal open={inquiryOpen} onOpenChange={setInquiryOpen} />
+        {/* Oct 30, 2026 (ChatGPT's review, Peter: yes): the custom-website credit stays in the site footer, not in
+            this buyer funnel. */}
       </div>
     </div>
   );

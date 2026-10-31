@@ -71,9 +71,10 @@ const pct = (value: number) => `${Number(value.toFixed(3))}%`;
 /**
  * Oct 30, 2026 (Peter: the payments were too low): what every monthly figure on the page includes, in plain words.
  * Insurance and HOA are the admin's estimates (printed here), never a quote. Property tax is left out (Peter, later
- * Oct 30: "just remove the property taxes entirely") and the text says so.
+ * Oct 30: "just remove the property taxes entirely") and never mentioned (Peter, 10:40 PM: "No mention at all"); the
+ * text still says the actual payment will be higher, so the estimate is never presented as the whole payment.
  */
-export const FEATURED_ASSUMPTIONS = (termYears: number, costs?: PaymentCosts) => `Estimated monthly total on a ${termYears}-year loan at the builder's rate: principal and interest, mortgage insurance when the loan carries it, and estimated home insurance${costs ? ` (${pct(costs.insuranceRatePercent)} of the price a year)` : ""} and HOA dues${costs ? ` (${money.format(costs.hoaMonthly)} a month)` : ""}. Property tax is not included; it varies by home, tax district and your homestead exemption. Insurance and HOA are estimates, not quotes. Builder rates apply to select homes with the builder's lender and qualifying credit. Not a commitment to lend. ${FEATURED_COPY.updated}`;
+export const FEATURED_ASSUMPTIONS = (termYears: number, costs?: PaymentCosts) => `Estimated monthly payment on a ${termYears}-year loan at the builder's rate: principal and interest, mortgage insurance when the loan carries it, and estimated home insurance${costs ? ` (${pct(costs.insuranceRatePercent)} of the price a year)` : ""} and HOA dues${costs ? ` (${money.format(costs.hoaMonthly)} a month)` : ""}. Your actual payment will be higher. Insurance and HOA are estimates, not quotes. Builder rates apply to select homes with the builder's lender and qualifying credit. Not a commitment to lend. ${FEATURED_COPY.updated}`;
 
 /** Every featured home once, in order (lowest payments, the best rate, big lots), with the reasons it is featured. */
 export function featuredInOrder(featured: FeaturedDealsData): Array<{ deal: FeaturedDeal; tags: string[] }> {
@@ -124,7 +125,7 @@ export function FeaturedStrip({ featured, onSelect, onHover, opens = false, comp
         </button>
       </li>)}
     </ol>
-    <details className="mt-1 text-[11px] leading-relaxed text-muted-foreground" data-deals-featured-assumptions="true"><summary className="inline-flex min-h-11 cursor-pointer items-center underline-offset-4 hover:underline">How monthly totals are estimated</summary><p className="pb-2">{FEATURED_ASSUMPTIONS(featured.assumptions.termYears, featured.assumptions.costs)}</p></details>
+    <details className="mt-1 text-[11px] leading-relaxed text-muted-foreground" data-deals-featured-assumptions="true"><summary className="inline-flex min-h-11 cursor-pointer items-center underline-offset-4 hover:underline">How monthly payments are estimated</summary><p className="pb-2">{FEATURED_ASSUMPTIONS(featured.assumptions.termYears, featured.assumptions.costs)}</p></details>
   </section>;
   const scroll = (direction: 1 | -1) => row.current?.scrollBy({ left: direction * Math.max(240, (row.current?.clientWidth ?? 600) * 0.8), behavior: "smooth" });
   return <section aria-labelledby="deals-featured-heading" data-deals-featured-section="true" data-deals-featured-strip="true" className="min-w-0">

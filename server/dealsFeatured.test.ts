@@ -422,8 +422,10 @@ describe("the Best Deals strip", () => {
     expect(html).toContain('data-deals-featured-tag="Best builder rate"');
     expect(html).toContain('data-deals-featured-tag="Big lot"');
     expect(html).not.toContain(">Best builder rate</p>");
-    expect(html).toContain("Estimated monthly total on a 30-year loan at the builder's rate: principal and interest, mortgage insurance when the loan carries it, and estimated home insurance (");
-    expect(html).toContain("Property tax is not included; it varies by home, tax district and your homestead exemption. Insurance and HOA are estimates, not quotes.");
+    expect(html).toContain("Estimated monthly payment on a 30-year loan at the builder's rate: principal and interest, mortgage insurance when the loan carries it, and estimated home insurance (");
+    // Oct 30, 2026 (Peter: "No mention at all" of property tax), but never presented as the whole payment.
+    expect(html).toContain("Your actual payment will be higher. Insurance and HOA are estimates, not quotes.");
+    expect(html).not.toMatch(/property tax/i);
     expect(html).toContain("Builder rates apply to select homes with the builder's lender and qualifying credit. Not a commitment to lend.");
     expect(html).not.toContain("—");
     // A deal with a cover photo shows it on its card; one without shows none.

@@ -21,12 +21,14 @@ export const BUYER_CARD_COPY = {
   noPhoto: "Photo coming soon",
   priceOnRequest: "Price on request",
   noRate: "No builder rate posted",
-  total: "Est. monthly total",
+  total: "Est. monthly payment",
   principalAndInterest: "Principal & interest",
   mortgageInsurance: "Mortgage insurance",
   homeInsurance: "Home insurance (est.)",
   hoa: "HOA dues (est.)",
-  noTax: "Property tax is not included. It varies by home, tax district and your homestead exemption.",
+  /** Oct 30, 2026 (Peter: "Don't tell them we are excluding property taxes... No mention at all"): no tax wording; the
+   * number is still never presented as the whole payment. */
+  estimateNote: "Estimate only. Your actual payment will be higher.",
 } as const;
 
 const beds = (value: string | number) => `${value} bed${String(value) === "1" ? "" : "s"}`;
@@ -56,8 +58,8 @@ export function PaymentBreakdown({ estimate, price, id }: { estimate: HomePaymen
       </div>)}
       <div className="flex items-baseline justify-between gap-3 pt-3 font-semibold"><dt>{BUYER_CARD_COPY.total}</dt><dd className="tabular-nums">{money.format(parts.total)}</dd></div>
     </dl>
-    {/* Oct 30, 2026 (Peter: "just remove the property taxes entirely"): no tax row, and no veteran line, which only subtracted tax. */}
-    <p data-deals-no-tax="true" className="mt-3 text-sm text-foreground">{BUYER_CARD_COPY.noTax}</p>
+    {/* Oct 30, 2026 (Peter: "just remove the property taxes entirely", then "no mention at all"): no tax row or tax wording. */}
+    <p data-deals-estimate-note="true" className="mt-3 text-sm text-foreground">{BUYER_CARD_COPY.estimateNote}</p>
     <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Figured on the {money.format(price)} price at the builder&apos;s rate: {estimateTerms(estimate)} ({money.format(parts.downAmount)} down).{estimate.firstYearRatePercent !== null ? " The first-year rate is temporary; the payment shown uses the rate after it." : ""} Insurance and HOA are estimates, not quotes, and vary by home. Builder rates apply to select homes with the builder&apos;s lender and qualifying credit. Not a commitment to lend.</p>
   </div>;
 }

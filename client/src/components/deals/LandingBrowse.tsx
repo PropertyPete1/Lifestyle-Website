@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Flame, Home, LockKeyhole, MapPin, Play, Search, Share2, Sparkles, X } from "lucide-react";
+import { Flame, Home, LockKeyhole, MapPin, PenLine, Play, Search, Share2, Sparkles, X } from "lucide-react";
 import { AreaMap } from "./AreaMap";
 import { Incentive, NEW_COPY, NewBadge, RedHotBadge, RedHotSavings, ReelCard, RetryImage, money, type DealsIncentive } from "./shared";
 import { ProtectedGallery } from "./GatedCatalog";
 import { ShowMore } from "./BrowseBar";
 import { BROWSE_PAGE, homeFiltersOn, homePasses, numberFrom, sortHomes, type BrowseFilters } from "@/lib/dealsBrowse";
+import { DRAW_COPY, keysInShape, shapePoints, simplifyTrace, traceToPicture, usableTrace, type Pt } from "@/lib/dealsDrawArea";
 
 /**
  * The landing page's list, laid out like a home search: photo cards beside one
@@ -222,7 +223,7 @@ export function keysInView(items: ReadonlyArray<{ key: string; pin?: { x: number
   }).map((item) => item.key);
 }
 
-export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, className = "", onSearchArea }: {
+export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, className = "", onSearchArea, shape = null, onShape }: {
   items: ReadonlyArray<{ key: string; pin?: { x: number; y: number } | null; fromPriceLabel?: string | null; homesAvailable?: number }>;
   activeKey: string | null;
   onHover: (key: string | null) => void;
@@ -232,8 +233,19 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
   className?: string;
   /** Oct 28, 2026 (New Home Buddy): after the visitor drags or zooms, a "Search this area" button narrows the list to what is in view. */
   onSearchArea?: (keys: string[]) => void;
+  /** Oct 30, 2026 (Peter: draw around the area): the buyer's drawn area in picture points, and where a new one goes. */
+  shape?: readonly Pt[] | null;
+  onShape?: (shape: Pt[] | null) => void;
 }) {
   const [failed, setFailed] = useState(false);
+  /** Drawing: "drawing" while the buyer traces, "preview" once a shape is closed and waits for "Use this area". */
+  const [drawMode, setDrawMode] = useState<"off" | "drawing" | "preview">("off");
+  const trace = useRef<Pt[]>([]);
+  const tracer = useRef<number | null>(null);
+  const [, setTraceTick] = useState(0);
+  const [preview, setPreview] = useState<Pt[] | null>(null);
+  const [previewHits, setPreviewHits] = useState(0);
+  const [drawNote, setDrawNote] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [view, setView] = useState<View | null>(null);
@@ -399,6 +411,63 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
     pointers.current.delete(event.pointerId);
     if (pointers.current.size < 2) gesture.current.pinch = null;
   };
+  // Drawing an area (New Home Buddy's Draw, ChatGPT's spec): one finger or the mouse traces; release closes the shape.
+  const startDrawing = () => { trace.current = []; tracer.current = null; setPreview(null); setDrawNote(null); setFanned(null); setDrawMode("drawing"); };
+  const stopDrawing = () => { trace.current = []; tracer.current = null; setPreview(null); setDrawNote(null); setDrawMode("off"); };
+  const tracePoint = (event: React.PointerEvent): Pt | null => {
+    const rect = box.current?.getBoundingClientRect();
+    return rect ? { x: event.clientX - rect.left, y: event.clientY - rect.top } : null;
+  };
+  const onDrawDown = (event: React.PointerEvent) => {
+    if (tracer.current !== null) return;
+    const point = tracePoint(event);
+    if (!point) return;
+    measure();
+    tracer.current = event.pointerId;
+    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+    trace.current = [point];
+    setDrawNote(null);
+    setTraceTick((tick) => tick + 1);
+  };
+  const onDrawMove = (event: React.PointerEvent) => {
+    if (tracer.current !== event.pointerId) return;
+    const point = tracePoint(event);
+    const last = trace.current[trace.current.length - 1];
+    if (!point || (last && Math.hypot(point.x - last.x, point.y - last.y) < 3)) return;
+    trace.current.push(point);
+    setTraceTick((tick) => tick + 1);
+  };
+  const onDrawUp = (event: React.PointerEvent) => {
+    if (tracer.current !== event.pointerId) return;
+    tracer.current = null;
+    const points = simplifyTrace(trace.current);
+    const current = viewRef.current;
+    trace.current = [];
+    setTraceTick((tick) => tick + 1);
+    if (!current || !usableTrace(points)) { setDrawNote(DRAW_COPY.tooSmall); return; }
+    const picture = traceToPicture(points, current, REGION_VIEW.aspect);
+    setPreview(picture);
+    setPreviewHits(keysInShape(items, picture).length);
+    setDrawMode("preview");
+  };
+  const applyDrawnArea = () => {
+    if (!preview || !onShape) return;
+    onShape(preview);
+    const now = measure();
+    if (now) { touched.current = true; setView(clamp(clusterView(preview, now.w, now.h, minWidth(now.w, now.h) * MAX_ZOOM), now.w, now.h)); }
+    setAreaMoved(false);
+    setAreaEmpty(false);
+    stopDrawing();
+  };
+  useEffect(() => {
+    if (drawMode === "off") return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") stopDrawing(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawMode]);
+  const outline = drawMode === "preview" ? preview : shape;
+  // With an area drawn, the communities outside it step back on the map, so the map and the list tell the same story.
+  const insideShape = useMemo(() => shape ? new Set(keysInShape(items, shape)) : null, [items, shape]);
   const cell = view ? Math.max(0.004, GROUP_PIXELS / view.z) : GROUP_CELL;
   const bucket = Math.round(Math.log2(cell) * 4);
   const markers = useMemo(() => groupMarkers(items, 2 ** (bucket / 4)), [items, bucket]);
@@ -433,6 +502,9 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
       onClick={(event) => { if (!(event.target as HTMLElement).closest("button")) setFanned(null); }}>
       {view && <div data-deals-map-content="true" className="absolute left-0 top-0" style={{ width: view.z, height: view.z / REGION_VIEW.aspect, transform: `translate(${view.tx}px, ${view.ty}px)`, transition: gliding ? "transform 400ms ease-out" : undefined }}>
         <img src="/deals/maps/region.webp" alt="" decoding="async" draggable={false} onError={() => setFailed(true)} className="pointer-events-none block h-full w-full select-none" />
+        {outline && outline.length > 2 && <svg aria-hidden="true" data-deals-draw-shape={drawMode === "preview" ? "preview" : "applied"} viewBox="0 0 1 1" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 z-[4] h-full w-full">
+          <polygon points={shapePoints(outline)} fill="rgba(184,146,74,0.16)" stroke="#836324" strokeWidth="2.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        </svg>}
         {activePin && <span aria-hidden="true" data-deals-map-area="true" style={{ left: `${activePin.x * 100}%`, top: `${activePin.y * 100}%`, width: `${AREA_DIAMETER * 100}%` }}
           className="pointer-events-none absolute z-[5] aspect-square min-w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-gold/80 bg-gold/25 shadow-[0_0_0_6px_rgba(184,146,74,0.12)] transition-all duration-200" />}
         {markers.map((marker) => {
@@ -457,7 +529,7 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
           }
           const lit = (activeKey !== null && marker.keys.includes(activeKey)) || selectedId === marker.id;
           // While a ring is open, the other markers step back so its pills read clearly.
-          const dim = Boolean(fanned) && !lit;
+          const dim = (Boolean(fanned) && !lit) || (insideShape !== null && !lit && !marker.keys.some((key) => insideShape.has(key)));
           // A group is a numbered bubble; a lone community is a dot that shows its price band when lit.
           const shape = group ? "min-h-7 min-w-7 px-1.5 text-[11px]" : lit ? "min-h-7 px-2 text-[11px]" : "h-4 w-4";
           return <button key={marker.id} type="button" data-deals-marker={group ? "group" : "single"} data-active={lit ? "true" : undefined}
@@ -480,13 +552,28 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
     </div>
     <div className="pointer-events-none absolute left-2 right-2 top-2 flex flex-wrap items-start justify-between gap-2">
       <div className="pointer-events-auto flex flex-wrap gap-1.5">{REGION_VIEW.jumps.map((spot) => <button key={spot.label} type="button" onClick={() => jumpTo(spot)} className="min-h-9 rounded-full border border-border bg-white/95 px-3 text-xs font-medium text-foreground shadow-sm hover:border-gold">{spot.label}</button>)}</div>
-      <div className="pointer-events-auto flex flex-col overflow-hidden rounded-lg border border-border bg-white/95 shadow-sm">
+      <div className="pointer-events-auto flex items-start gap-1.5">
+      {onShape && drawMode === "off" && <button type="button" onClick={startDrawing} data-deals-draw-start="true" className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-full border border-border bg-white/95 px-3 text-xs font-semibold text-foreground shadow-sm hover:border-gold"><PenLine className="h-3.5 w-3.5 text-gold" aria-hidden="true" />{shape ? DRAW_COPY.redraw : DRAW_COPY.start}</button>}
+      <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-white/95 shadow-sm">
         <button type="button" onClick={zoomButton(1.5)} aria-label="Zoom in" className="flex h-9 w-9 items-center justify-center text-lg font-semibold hover:bg-secondary">+</button>
         <button type="button" onClick={zoomButton(1 / 1.5)} aria-label="Zoom out" className="flex h-9 w-9 items-center justify-center border-t border-border text-lg font-semibold hover:bg-secondary">−</button>
       </div>
+      </div>
     </div>
+    {/* Drawing: a surface over the map takes the trace (one finger never scrolls the page), with its own bar on top. */}
+    {drawMode === "drawing" && <div data-deals-draw-surface="true" className="absolute inset-0 z-40 cursor-crosshair touch-none select-none" onPointerDown={onDrawDown} onPointerMove={onDrawMove} onPointerUp={onDrawUp} onPointerCancel={onDrawUp}>
+      {trace.current.length > 1 && <svg aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full"><polyline points={trace.current.map((point) => `${point.x},${point.y}`).join(" ")} fill="rgba(184,146,74,0.14)" stroke="#836324" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" /></svg>}
+    </div>}
+    {drawMode !== "off" && <div role="status" data-deals-draw-bar={drawMode} className="absolute left-2 right-2 top-2 z-50 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-white/95 px-3 py-2 shadow-md">
+      <p className={`w-full min-w-0 text-sm font-medium sm:w-auto sm:flex-1 ${drawNote || (drawMode === "preview" && previewHits === 0) ? "text-destructive" : "text-foreground"}`}>{drawMode === "drawing" ? drawNote ?? DRAW_COPY.instruction : previewHits === 0 ? DRAW_COPY.none : DRAW_COPY.ready}</p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {drawMode === "preview" && <button type="button" onClick={applyDrawnArea} disabled={previewHits === 0} data-deals-draw-use="true" className="min-h-10 rounded-full bg-gold px-4 text-sm font-semibold text-primary-foreground shadow-sm hover:brightness-105 disabled:opacity-40">{DRAW_COPY.use}</button>}
+        {drawMode === "preview" && <button type="button" onClick={startDrawing} className="min-h-10 rounded-full border border-border bg-card px-3 text-sm font-medium hover:border-gold">{DRAW_COPY.redraw}</button>}
+        <button type="button" onClick={stopDrawing} data-deals-draw-cancel="true" className="min-h-10 rounded-full px-3 text-sm font-medium text-muted-foreground underline underline-offset-4">{DRAW_COPY.cancel}</button>
+      </div>
+    </div>}
     {zoomHint && <div aria-hidden="true" data-deals-zoom-hint="true" className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-black/35"><span className="rounded-full bg-black/75 px-4 py-2 text-sm font-medium text-white">{LANDING_COPY.zoomHint}</span></div>}
-    {onSearchArea && areaMoved && <button type="button" onClick={searchArea} data-deals-search-area="true" className="absolute bottom-12 left-1/2 z-30 inline-flex min-h-10 -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full bg-gold px-4 text-sm font-semibold text-primary-foreground shadow-lg hover:brightness-105"><Search className="h-4 w-4" />{areaEmpty ? LANDING_COPY.searchAreaEmpty : LANDING_COPY.searchArea}</button>}
+    {onSearchArea && areaMoved && drawMode === "off" && <button type="button" onClick={searchArea} data-deals-search-area="true" className="absolute bottom-12 left-1/2 z-30 inline-flex min-h-10 -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full bg-gold px-4 text-sm font-semibold text-primary-foreground shadow-lg hover:brightness-105"><Search className="h-4 w-4" />{areaEmpty ? LANDING_COPY.searchAreaEmpty : shape ? DRAW_COPY.searchView : LANDING_COPY.searchArea}</button>}
     <figcaption className="pointer-events-none absolute bottom-2 left-2 right-2 rounded bg-white/85 px-2 py-1 text-[10px] leading-snug text-muted-foreground">{LANDING_COPY.mapAttribution}</figcaption>
   </figure>;
 }
@@ -776,9 +863,14 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   }, [openKey, keyed, lookup]);
   // A marker group the current filters no longer show is let go.
   useEffect(() => { if (selected && !selected.keys.some((key) => keyed.some((item) => item.key === key))) setSelected(null); }, [keyed, selected]);
-  const matching = selected ? keyed.filter((item) => selected.keys.includes(item.key)) : keyed;
-  const selectedSignature = selected ? selected.keys.join(",") : null;
-  useEffect(() => { onAreaChange?.(selectedSignature === null ? null : selectedSignature.split(",")); }, [selectedSignature]);
+  // Oct 30, 2026 (Peter: draw around the area): a drawn shape narrows the list like a marker group, but it is kept as
+  // the shape itself, so new filters are tested against it again (the shape AND the filters, never a stale list).
+  const [shape, setShape] = useState<Pt[] | null>(null);
+  const drawnKeys = useMemo(() => shape ? keysInShape(keyed, shape) : null, [shape, keyed]);
+  const area = shape && drawnKeys ? { id: "draw", keys: drawnKeys } : selected;
+  const matching = area ? keyed.filter((item) => area.keys.includes(item.key)) : keyed;
+  const selectedSignature = area ? area.keys.join(",") : null;
+  useEffect(() => { onAreaChange?.(selectedSignature === null ? null : selectedSignature ? selectedSignature.split(",") : []); }, [selectedSignature]);
   const shown = matching.slice(0, pages * BROWSE_PAGE);
   const listTop = useRef<HTMLDivElement>(null);
   // A lone community's marker opens that community (its homes and photos); a group's marker narrows the list to it.
@@ -787,6 +879,7 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
       const community = keyed.find((item) => item.key === marker.keys[0]);
       if (community) { setFocus(undefined); setOpen(community); return; }
     }
+    setShape(null);
     setSelected(marker);
     // On a wide screen the map stays put beside the list, so the list scrolls to its top. On a phone the map sits
     // above the list: scrolling away would hide the zoom and the fanned-out communities the visitor just asked for.
@@ -803,10 +896,18 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
     hover: setActiveKey,
   };
   const searchThisArea = (keys: string[]) => {
+    setShape(null);
     setSelected({ id: "area", keys });
     if (window.matchMedia?.("(min-width: 1024px)").matches) window.setTimeout(() => listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
-  const mapProps = { items: keyed, activeKey, onHover: setActiveKey, onSelect: selectMarker, selectedId: selected?.id ?? null, onSearchArea: searchArea ? searchThisArea : undefined };
+  const applyShape = (next: Pt[] | null) => {
+    setSelected(null);
+    setShape(next);
+    if (next && window.matchMedia?.("(min-width: 1024px)").matches) window.setTimeout(() => listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+  const clearArea = () => { setSelected(null); setShape(null); };
+  const areaText = shape && drawnKeys && drawnKeys.length === 0 ? DRAW_COPY.none : areaStatus ? areaStatus(matching.map((item) => item.key)) : LANDING_COPY.areaFilter(matching.length);
+  const mapProps = { items: keyed, activeKey, onHover: setActiveKey, onSelect: selectMarker, selectedId: area?.id ?? null, onSearchArea: searchArea ? searchThisArea : undefined, shape, onShape: searchArea ? applyShape : undefined };
   const map = <RegionMap {...mapProps} className="h-[65vh] w-full" />;
   return <>
     <div className={`mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 ${mapSide === "left" ? "mt-3 gap-4 lg:grid-cols-[minmax(360px,44%)_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,1fr)_minmax(360px,42%)]"}`}>
@@ -816,15 +917,15 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
           {phoneMap === "top" && <button type="button" onClick={() => setMapOnPhone((value) => !value)} aria-expanded={mapOnPhone} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border bg-card px-4 text-sm shadow-sm"><MapPin className="h-4 w-4 text-gold" />{mapOnPhone ? LANDING_COPY.hideMap : LANDING_COPY.showMap}</button>}
         </div>
         {mapOnPhone && <div className="mb-6 lg:hidden" data-deals-phone-map="true">{map}
-          {external && !selected && <button type="button" onClick={() => setMapOnPhone(false)} className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-gold px-4 text-sm font-semibold text-foreground">{LANDING_COPY.seeHomes}</button>}
+          {external && !area && <button type="button" onClick={() => setMapOnPhone(false)} className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-gold px-4 text-sm font-semibold text-foreground">{LANDING_COPY.seeHomes}</button>}
           {/* The bubble the visitor tapped narrows the list below; on a phone that is said right under the map. */}
-          {selected && <div role="status" data-deals-phone-area="true" className="mt-2 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-1 text-sm"><span>{(areaStatus ? areaStatus(matching.map((item) => item.key)) : LANDING_COPY.areaFilter(matching.length))}</span><button type="button" onClick={() => { if (external) setMapOnPhone(false); else listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.seeList}</button><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-muted-foreground underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
+          {area && <div role="status" data-deals-phone-area="true" className="mt-2 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-1 text-sm"><span>{areaText}</span><button type="button" onClick={() => { if (external) setMapOnPhone(false); else listTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.seeList}</button><button type="button" onClick={clearArea} className="min-h-11 font-medium text-muted-foreground underline underline-offset-4">{shape ? DRAW_COPY.clear : LANDING_COPY.clearArea}</button></div>}
         </div>}
         {/* With the caller's Homes / Map switch on Map, a phone shows the map alone (the homes are one tap away). */}
         <div className={external && mapOnPhone ? "max-lg:hidden" : undefined}>
         {top && <div className="mb-6 min-w-0">{typeof top === "function" ? top(actions) : top}</div>}
         <div ref={listTop} className="scroll-mt-4" />
-        {selected && <div role="status" className="mb-4 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-2 text-sm"><span>{(areaStatus ? areaStatus(matching.map((item) => item.key)) : LANDING_COPY.areaFilter(matching.length))}</span><button type="button" onClick={() => setSelected(null)} className="min-h-11 font-medium text-gold underline underline-offset-4">{LANDING_COPY.clearArea}</button></div>}
+        {area && <div role="status" data-deals-list-area={shape ? "draw" : "area"} className="mb-4 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-2 text-sm"><span>{areaText}</span><button type="button" onClick={clearArea} className="min-h-11 font-medium text-gold underline underline-offset-4">{shape ? DRAW_COPY.clear : LANDING_COPY.clearArea}</button></div>}
         {renderList ? renderList({ keys: new Set(matching.map((item) => item.key)), open: (key, homeFocus) => { const community = keyed.find((item) => item.key === key) ?? lookup?.find((item) => item.key === key); if (community) { setFocus(homeFocus); setOpen(community); } }, hover: setActiveKey, activeKey }) : <>
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
           {shown.map((community) => <CommunityCard key={community.key} community={community} active={activeKey === community.key} onHover={(on) => setActiveKey(on ? community.key : null)} onOpen={() => { setFocus(undefined); setOpen(community); }} />)}

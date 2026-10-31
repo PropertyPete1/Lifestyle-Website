@@ -57,7 +57,7 @@ const TIMELINE = [
 export default function Lease() {
   return (
     <PageShell>
-      <section className="relative min-h-[60svh] flex items-end">
+      <section className="dark relative min-h-[60svh] flex items-end text-foreground">
         <div className="absolute inset-0">
           <img src={IMG.listingAustinModern} alt="Modern Texas rental property" className="h-full w-full object-cover" />
           <div className="absolute inset-0 bg-black/65" />
@@ -84,7 +84,7 @@ export default function Lease() {
       </section>
 
       {/* Speed to Market — automation timeline */}
-      <section className="bg-[oklch(0.165_0.005_285)] border-y border-border/60">
+      <section className="bg-secondary/60 border-y border-border/60">
         <div className="mx-auto max-w-[1400px] px-5 lg:px-8 py-20">
           <p className="eyebrow text-gold">Speed to Market</p>
           <h2 className="display-serif text-3xl md:text-4xl mt-3">Listed in Days. Leased in Record Time.</h2>

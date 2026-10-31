@@ -4,8 +4,10 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * LIFESTYLE DESIGN REALTY — Dark Luxury Design System
- * Palette: deep charcoal/black, warm white, gold accent.
+ * LIFESTYLE DESIGN REALTY — Warm Ivory Design System (Oct 30, 2026, Peter's white-skin mockups)
+ * Palette: white and warm ivory, charcoal text, deep antique gold (#836324, readable on white).
+ * The former dark palette lives on in `.dark`, which scopes it to a section (photo bands) or the
+ * whole page when the html element carries it.
  * Display: Cormorant Garamond (editorial serif). Body: Montserrat (refined sans).
  *
  * TREC COMPLIANCE NOTE (design system rule):
@@ -15,49 +17,53 @@
  */
 
 :root {
-  /* Dark luxury is the base theme (site is dark by default) */
-  --background: oklch(0.145 0.005 285); /* deep charcoal near-black */
-  --foreground: oklch(0.97 0.005 90); /* warm white */
-  --card: oklch(0.185 0.006 285);
-  --card-foreground: oklch(0.97 0.005 90);
-  --popover: oklch(0.185 0.006 285);
-  --popover-foreground: oklch(0.97 0.005 90);
-  --primary: oklch(0.75 0.09 85); /* gold accent */
-  --primary-foreground: oklch(0.145 0.005 285);
-  --secondary: oklch(0.24 0.006 285);
-  --secondary-foreground: oklch(0.97 0.005 90);
-  --muted: oklch(0.24 0.006 285);
-  --muted-foreground: oklch(0.72 0.01 90);
-  --accent: oklch(0.75 0.09 85);
-  --accent-foreground: oklch(0.145 0.005 285);
+  color-scheme: light;
+  --background: #fdfcfa; /* warm white */
+  --foreground: #23201c; /* charcoal */
+  --card: #ffffff;
+  --card-foreground: #23201c;
+  --popover: #ffffff;
+  --popover-foreground: #23201c;
+  --primary: #836324; /* deep antique gold */
+  --primary-foreground: #ffffff;
+  --secondary: #f5f0e6; /* warm ivory */
+  --secondary-foreground: #23201c;
+  --muted: #f5f0e6;
+  --muted-foreground: #5f584e;
+  --accent: #836324;
+  --accent-foreground: #ffffff;
   --destructive: oklch(0.55 0.2 25);
-  --destructive-foreground: oklch(0.97 0.005 90);
-  --border: oklch(0.32 0.008 285);
-  --input: oklch(0.32 0.008 285);
-  --ring: oklch(0.75 0.09 85);
-  --chart-1: oklch(0.75 0.09 85);
+  --destructive-foreground: #ffffff;
+  --border: #e6ddcd;
+  --input: #d9cfbe;
+  --ring: #836324;
+  --chart-1: #836324;
   --chart-2: oklch(0.6 0.1 250);
   --chart-3: oklch(0.55 0.12 150);
   --chart-4: oklch(0.7 0.15 50);
   --chart-5: oklch(0.65 0.2 300);
-  --sidebar: oklch(0.125 0.005 285);
-  --sidebar-foreground: oklch(0.97 0.005 90);
-  --sidebar-primary: oklch(0.75 0.09 85);
-  --sidebar-primary-foreground: oklch(0.145 0.005 285);
-  --sidebar-accent: oklch(0.24 0.006 285);
-  --sidebar-accent-foreground: oklch(0.97 0.005 90);
-  --sidebar-border: oklch(0.32 0.008 285);
-  --sidebar-ring: oklch(0.75 0.09 85);
+  --sidebar: #f9f6f0;
+  --sidebar-foreground: #23201c;
+  --sidebar-primary: #836324;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f5f0e6;
+  --sidebar-accent-foreground: #23201c;
+  --sidebar-border: #e6ddcd;
+  --sidebar-ring: #836324;
   --font-serif: "Cormorant Garamond", Georgia, serif;
   --font-sans: "Montserrat", "Helvetica Neue", Arial, sans-serif;
   --radius: 0.125rem; /* sharp, editorial corners */
-  --gold: oklch(0.75 0.09 85);
-  --gold-dim: oklch(0.62 0.08 85);
+  --gold: #836324;
+  --gold-dim: #a3864c;
+  --ivory: #f5f0e6;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
 }
 
 .dark {
+  color-scheme: dark;
+  --gold: oklch(0.75 0.09 85);
+  --gold-dim: oklch(0.62 0.08 85);
   --background: oklch(0.145 0.005 285);
   --foreground: oklch(0.97 0.005 90);
   --card: oklch(0.185 0.006 285);
@@ -307,7 +313,7 @@ button:active, [role="button"]:active {
     transform: translateY(-3px);
     box-shadow:
       0 14px 40px -18px color-mix(in oklch, var(--gold) 35%, transparent),
-      0 8px 24px -16px rgb(0 0 0 / 0.6);
+      0 8px 24px -16px rgb(0 0 0 / 0.18);
   }
 }
 
@@ -485,7 +491,7 @@ button:active, [role="button"]:active {
   border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent);
   box-shadow:
     inset 0 1px 0 color-mix(in oklch, var(--foreground) 6%, transparent),
-    0 10px 30px -18px rgb(0 0 0 / 0.55);
+    0 10px 30px -18px rgb(0 0 0 / 0.18);
 }
 
 /* Slightly darker glass for strips/bands over imagery */

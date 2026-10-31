@@ -29,7 +29,7 @@ const PROPERTIES_MENU_FULL = [
 
 /** Pre-IDX: placeholder-powered links are unreachable; NC Search + Sell only. */
 const PROPERTIES_MENU_PRE_IDX = [
-  { label: "New Construction Search", href: SITE.newConstructionUrl, external: true },
+  { label: "New Construction Search", href: SITE.newConstructionUrl },
   { label: "Sell With Us", href: "/sell" },
   { label: "List for Lease", href: "/lease" },
 ];
@@ -88,30 +88,38 @@ export default function SiteNav({
     setPropsOpen(false);
   }, [location]);
 
+  // Oct 30, 2026 (white skin): the header is always the page's warm white; a hairline appears once the page scrolls.
   const isSolid = solid || scrolled || open;
+  const linkCls = (active: boolean) => cn("whitespace-nowrap font-serif text-[17px] transition-colors", active ? "text-gold underline decoration-gold/60 underline-offset-8" : "text-foreground hover:text-gold");
 
   return (
     <header
       className={cn(
-        "fixed left-0 right-0 z-50 transition-colors duration-300",
+        "fixed left-0 right-0 z-50 bg-background/95 backdrop-blur-sm transition-[border-color,box-shadow] duration-300",
         offsetForBanner ? "top-[var(--hiring-banner-h,0px)]" : "top-0",
-        isSolid ? "bg-background/95 backdrop-blur-sm border-b border-border/60" : "bg-transparent"
+        isSolid ? "border-b border-border shadow-[0_1px_12px_-8px_rgb(0_0_0/0.18)]" : "border-b border-transparent"
       )}>
       <div className="mx-auto max-w-[1400px] px-5 lg:px-8">
-        <div className="flex h-16 lg:h-20 items-center justify-between gap-4">
-          {/* Brokerage wordmark — TREC: brokerage name always prominent */}
-          <Link href="/" className="shrink-0 flex flex-col items-start gap-0.5">
-            <VeteranBadge compact className="hidden sm:inline-flex" />
-            {/* TREC: full brokerage name must always be visible — stack on two
-                lines below `sm` instead of truncating or overlapping. */}
-            <span className="font-serif text-[13px] leading-[1.15] sm:text-lg xl:text-xl tracking-[0.06em] sm:tracking-[0.12em] text-foreground">
-              <span className="block sm:inline whitespace-nowrap">LIFESTYLE DESIGN</span>{" "}
-              <span className="text-gold whitespace-nowrap">REALTY</span>
+        <div className="relative flex h-[68px] lg:h-20 items-center justify-between gap-4">
+          {/* Phones: call on the left, the wordmark centred, the menu on the right (mockup). */}
+          <a href={SITE.phoneHref} aria-label={`Call ${SITE.phone}`} className="flex h-11 w-11 items-center justify-center text-gold lg:hidden">
+            <Phone className="h-5 w-5" />
+          </a>
+
+          {/* Brokerage wordmark — TREC: the full brokerage name is always visible and prominent. */}
+          <Link href="/" className="absolute left-1/2 -translate-x-1/2 shrink-0 flex flex-col items-center gap-1 lg:static lg:translate-x-0 lg:items-start">
+            <span className="whitespace-nowrap font-serif text-[23px] leading-none tracking-[0.01em] text-foreground sm:text-[26px] lg:text-[30px] lg:text-gold">
+              Lifestyle Design Realty
+            </span>
+            <span className="flex items-center gap-2 whitespace-nowrap text-[8.5px] font-medium uppercase leading-none tracking-[0.3em] text-muted-foreground sm:text-[9.5px]">
+              <span className="h-px w-5 bg-border lg:hidden" aria-hidden />
+              Veteran-Owned &amp; Operated
+              <span className="h-px w-5 bg-border lg:hidden" aria-hidden />
             </span>
           </Link>
 
-          {/* Desktop nav — 5 top-level items max so it can never overflow */}
-          <nav className="hidden lg:flex items-center gap-4 xl:gap-6 min-w-0">
+          {/* Desktop nav — 4 top-level items max so it can never overflow */}
+          <nav className="hidden lg:flex items-center gap-5 xl:gap-8 min-w-0">
             {/* Properties dropdown (consolidates 4 former top-level links) */}
             <div
               className="relative"
@@ -121,20 +129,15 @@ export default function SiteNav({
                 onClick={() => setPropsOpen((v) => !v)}
                 aria-expanded={propsOpen}
                 aria-haspopup="menu"
-                className={cn(
-                  "nav-link inline-flex items-center gap-1.5 whitespace-nowrap py-2",
-                  PROPERTIES_MENU.some((m) => m.href === location)
-                    ? "text-gold"
-                    : "text-foreground/90 hover:text-gold"
-                )}>
+                className={cn("inline-flex items-center gap-1.5 py-2", linkCls(PROPERTIES_MENU.some((m) => m.href === location)))}>
                 Properties
-                <ChevronDown className={cn("h-3 w-3 transition-transform duration-200", propsOpen && "rotate-180")} />
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform duration-200", propsOpen && "rotate-180")} />
               </button>
               {propsOpen && (
                 <div
                   role="menu"
-                  className="absolute left-1/2 -translate-x-1/2 top-full pt-2 min-w-56">
-                  <div className="bg-background/98 backdrop-blur-sm border border-border/80 py-2 shadow-xl">
+                  className="absolute left-1/2 -translate-x-1/2 top-full pt-2 min-w-60">
+                  <div className="border border-border bg-card py-2 shadow-[0_18px_40px_-20px_rgb(0_0_0/0.25)]">
                     {PROPERTIES_MENU.map((m, i) => (
                       m.external ? (
                         <a
@@ -143,7 +146,7 @@ export default function SiteNav({
                           target="_blank"
                           rel="noreferrer"
                           role="menuitem"
-                          className="nav-link block px-5 py-2.5 text-foreground/90 hover:text-gold hover:bg-gold/[0.06] whitespace-nowrap">
+                          className="block whitespace-nowrap px-5 py-2.5 font-serif text-[17px] text-foreground hover:bg-secondary hover:text-gold">
                           {m.label}
                         </a>
                       ) : (
@@ -151,7 +154,7 @@ export default function SiteNav({
                           key={`${m.label}-${i}`}
                           href={m.href}
                           role="menuitem"
-                          className="nav-link block px-5 py-2.5 text-foreground/90 hover:text-gold hover:bg-gold/[0.06] whitespace-nowrap">
+                          className="block whitespace-nowrap px-5 py-2.5 font-serif text-[17px] text-foreground hover:bg-secondary hover:text-gold">
                           {m.label}
                         </Link>
                       )
@@ -161,32 +164,11 @@ export default function SiteNav({
               )}
             </div>
 
-            <Link
-              href="/valuation"
-              className={cn(
-                "nav-link whitespace-nowrap",
-                location === "/valuation" ? "text-gold border-b border-gold pb-1" : "text-foreground/90 hover:text-gold"
-              )}>
-              Home Valuation
-            </Link>
-            <Link
-              href="/contact"
-              className={cn(
-                "nav-link whitespace-nowrap",
-                location === "/contact" ? "text-gold border-b border-gold pb-1" : "text-foreground/90 hover:text-gold"
-              )}>
-              Consultation
-            </Link>
+            <Link href="/valuation" className={linkCls(location === "/valuation")}>Home Valuation</Link>
+            <Link href="/contact" className={linkCls(location === "/contact")}>Consultation</Link>
             {/* Priority item — must always be fully visible, never clipped */}
-            <Link
-              href="/join"
-              className={cn(
-                "nav-link whitespace-nowrap",
-                location === "/join" ? "text-gold border-b border-gold pb-1" : "text-foreground/90 hover:text-gold"
-              )}>
-              Now Hiring
-            </Link>
-            <a href={SITE.phoneHref} className="nav-link text-gold whitespace-nowrap hidden xl:inline">
+            <Link href="/join" className={linkCls(location === "/join")}>Now Hiring</Link>
+            <a href={SITE.phoneHref} className="hidden whitespace-nowrap font-serif text-[17px] text-gold xl:inline">
               {SITE.phone}
             </a>
             <a href={SITE.phoneHref} aria-label={`Call ${SITE.phone}`} className="text-gold xl:hidden">
@@ -195,70 +177,60 @@ export default function SiteNav({
             {/* Persistent high-intent CTA — visible on every page */}
             <button
               onClick={goGetStarted}
-              className="nav-link bg-gold text-primary-foreground px-4 xl:px-5 py-2.5 hover:bg-gold/90 transition-colors whitespace-nowrap">
+              className="whitespace-nowrap bg-gold px-7 py-3 font-serif text-[18px] text-primary-foreground transition-colors hover:bg-gold/90">
               Get Started
             </button>
           </nav>
 
-          {/* Mobile: phone + hamburger */}
-          <div className="flex lg:hidden items-center gap-2.5 shrink-0">
-            <button
-              onClick={goGetStarted}
-              className="nav-link bg-gold text-primary-foreground px-2.5 py-2 hover:bg-gold/90 transition-colors whitespace-nowrap text-[10px] tracking-[0.1em]">
-              Get Started
-            </button>
-            <a href={SITE.phoneHref} aria-label={`Call ${SITE.phone}`} className="text-gold">
-              <Phone className="h-4 w-4" />
-            </a>
-            <button
-              aria-label={open ? "Close menu" : "Open menu"}
-              onClick={() => setOpen(!open)}
-              className="text-foreground p-1">
-              {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-            </button>
-          </div>
+          {/* Phones: the menu */}
+          <button
+            aria-label={open ? "Close menu" : "Open menu"}
+            onClick={() => setOpen(!open)}
+            className="flex h-11 w-11 items-center justify-center text-foreground lg:hidden">
+            {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" strokeWidth={1.5} />}
+          </button>
         </div>
       </div>
 
       {/* Mobile menu */}
       {open && (
         <div className="lg:hidden bg-background border-b border-border max-h-[calc(100dvh-4rem)] overflow-y-auto">
-          <nav className="px-6 py-6 flex flex-col gap-4">
+          <nav className="px-6 py-6 flex flex-col gap-3">
             <button
               onClick={goGetStarted}
-              className="nav-link bg-gold text-primary-foreground px-5 py-3 hover:bg-gold/90 transition-colors text-center">
+              className="bg-gold px-5 py-3 text-center font-serif text-[18px] text-primary-foreground transition-colors hover:bg-gold/90">
               Ready to Buy or Sell? Get Started
             </button>
             {PROPERTIES_MENU.map((item, i) => (
               item.external ? (
-                <a key={`m-${item.label}-${i}`} href={item.href} target="_blank" rel="noreferrer" className="nav-link text-foreground/90 hover:text-gold py-1">
+                <a key={`m-${item.label}-${i}`} href={item.href} target="_blank" rel="noreferrer" className="py-1.5 font-serif text-[19px] text-foreground hover:text-gold">
                   {item.label}
                 </a>
               ) : (
-                <Link key={`m-${item.label}-${i}`} href={item.href} className="nav-link text-foreground/90 hover:text-gold py-1">
+                <Link key={`m-${item.label}-${i}`} href={item.href} className="py-1.5 font-serif text-[19px] text-foreground hover:text-gold">
                   {item.label}
                 </Link>
               )
             ))}
-            <Link href="/valuation" className="nav-link text-foreground/90 hover:text-gold py-1">
+            <Link href="/valuation" className="py-1.5 font-serif text-[19px] text-foreground hover:text-gold">
               Home Valuation
             </Link>
-            <Link href="/contact" className="nav-link text-foreground/90 hover:text-gold py-1">
+            <Link href="/contact" className="py-1.5 font-serif text-[19px] text-foreground hover:text-gold">
               Schedule a Consultation
             </Link>
-            <Link href="/join" className="nav-link text-gold hover:text-gold py-1">
+            <Link href="/join" className="py-1.5 font-serif text-[19px] text-gold">
               Now Hiring — Join Our Team
             </Link>
-            <div className="hairline my-2" />
+            <div className="my-2 h-px bg-border" />
             {SECONDARY_ITEMS.map((item) => (
-              <Link key={item.href} href={item.href} className="nav-link text-muted-foreground hover:text-gold py-1">
+              <Link key={item.href} href={item.href} className="py-1 font-serif text-[17px] text-muted-foreground hover:text-gold">
                 {item.label}
               </Link>
             ))}
             <div className="py-1">
               <VeteranBadge />
             </div>
-            <a href={SITE.phoneHref} className="nav-link text-gold py-1">
+            <a href={SITE.phoneHref} className="py-1 font-serif text-[17px] text-gold">
               {SITE.phone}
             </a>
           </nav>

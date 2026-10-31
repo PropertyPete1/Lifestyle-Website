@@ -18,7 +18,7 @@ export default function Sell() {
 
   return (
     <PageShell>
-      <section className="relative min-h-[60svh] flex items-end">
+      <section className="dark relative min-h-[60svh] flex items-end text-foreground">
         <div className="absolute inset-0">
           <img src={IMG.listingCordillera} alt="Luxury Texas home" className="h-full w-full object-cover" />
           <div className="absolute inset-0 bg-black/65" />
@@ -45,7 +45,7 @@ export default function Sell() {
 
       {/* Recent Results grid uses placeholder listing data — paused until IDX */}
       {FEATURES.SHOW_PROPERTY_SEARCH && sold.length > 0 && (
-        <section className="bg-[oklch(0.165_0.005_285)] border-y border-border/60">
+        <section className="bg-secondary/60 border-y border-border/60">
           <div className="mx-auto max-w-[1400px] px-5 lg:px-8 py-20">
             <div className="flex items-end justify-between mb-10">
               <h2 className="display-serif text-3xl md:text-4xl">Recent Results</h2>

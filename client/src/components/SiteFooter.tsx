@@ -13,14 +13,13 @@ import WebsiteInquiryModal from "./WebsiteInquiryModal";
 export default function SiteFooter() {
   const [inquiryOpen, setInquiryOpen] = useState(false);
   return (
-    <footer className="bg-[oklch(0.11_0.005_285)] border-t border-border/60 text-foreground">
+    <footer className="border-t border-border bg-[#f8f4ec] text-foreground">
       <div className="mx-auto max-w-[1400px] px-5 lg:px-8 py-14 lg:py-20">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10">
           {/* Brand */}
           <div className="lg:col-span-1">
-            <div className="font-serif text-xl tracking-[0.14em]">
-              LIFESTYLE DESIGN <span className="text-gold">REALTY</span>
-            </div>
+            <div className="font-serif text-[28px] leading-none text-gold">Lifestyle Design Realty</div>
+            <p className="mt-2 text-[9.5px] font-medium uppercase tracking-[0.3em] text-muted-foreground">Veteran-Owned &amp; Operated</p>
             <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
               Central Texas real estate professionals serving San Antonio, New Braunfels, Austin,
               DFW, Houston, and surrounding areas.
@@ -33,7 +32,7 @@ export default function SiteFooter() {
 
           {/* Explore */}
           <div>
-            <h3 className="eyebrow text-gold mb-4">Explore</h3>
+            <h3 className="eyebrow mb-4 text-gold">Explore</h3>
             <ul className="space-y-2.5 text-sm">
               {/* Pre-IDX: placeholder-powered links hidden until live MLS data */}
               {FEATURES.SHOW_PROPERTY_SEARCH && (
@@ -44,7 +43,7 @@ export default function SiteFooter() {
                 </>
               )}
               <li>
-                <a href={SITE.newConstructionUrl} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-gold">
+                <a href={SITE.newConstructionUrl} className="text-muted-foreground hover:text-gold">
                   New Construction Search
                 </a>
               </li>
@@ -57,7 +56,7 @@ export default function SiteFooter() {
 
           {/* Company */}
           <div>
-            <h3 className="eyebrow text-gold mb-4">Company</h3>
+            <h3 className="eyebrow mb-4 text-gold">Company</h3>
             <ul className="space-y-2.5 text-sm">
               <li><Link href="/team" className="text-muted-foreground hover:text-gold">Meet the Team</Link></li>
               <li><Link href="/testimonials" className="text-muted-foreground hover:text-gold">Testimonials</Link></li>
@@ -69,7 +68,7 @@ export default function SiteFooter() {
 
           {/* Contact */}
           <div>
-            <h3 className="eyebrow text-gold mb-4">Contact</h3>
+            <h3 className="eyebrow mb-4 text-gold">Contact</h3>
             <ul className="space-y-2.5 text-sm text-muted-foreground">
               <li><a href={SITE.phoneHref} className="hover:text-gold">{SITE.phone}</a></li>
               <li><a href={`mailto:${SITE.email}`} className="hover:text-gold break-all">{SITE.email}</a></li>
@@ -78,7 +77,7 @@ export default function SiteFooter() {
           </div>
         </div>
 
-        <div className="hairline my-10" />
+        <div className="my-10 h-px bg-border" />
 
         {/* TREC compliance block */}
         <div className="space-y-4 text-xs text-muted-foreground leading-relaxed">

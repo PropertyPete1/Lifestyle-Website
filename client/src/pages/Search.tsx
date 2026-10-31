@@ -266,7 +266,7 @@ function SearchInner({ portfolio }: { portfolio: boolean }) {
                 Our inventory changes weekly. Try a different filter, or explore new construction
                 across Texas through our builder network.
               </p>
-              <a href={SITE.newConstructionUrl} target="_blank" rel="noreferrer" onClick={logNcClick} className="text-cta mt-6 inline-block">
+              <a href={SITE.newConstructionUrl} onClick={logNcClick} className="text-cta mt-6 inline-block">
                 Find New Builds Across Texas
               </a>
             </div>

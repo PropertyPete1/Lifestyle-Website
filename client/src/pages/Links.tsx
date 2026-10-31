@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { SITE, isLinkVisible } from "@shared/site";
 import { BIO_LINKS_SNAPSHOT } from "@shared/bioLinksSnapshot";
 import { GUIDE_DRAW_MS } from "@shared/guideTrail";
-import { Instagram, Facebook, Youtube, Linkedin, ArrowUpRight } from "lucide-react";
+import { ArrowRight, BarChart3, Briefcase, CalendarDays, Facebook, Globe, House, Instagram, KeyRound, Linkedin, MapPin, Phone, Sparkles, Youtube, Zap, type LucideIcon } from "lucide-react";
 import {
   useNcClickTracking,
   useLeaseClickTracking,
@@ -17,9 +17,7 @@ import WebsiteInquiryModal from "@/components/WebsiteInquiryModal";
 import LeadForm from "@/components/LeadForm";
 import GuideTrail from "@/components/GuideTrail";
 import { ResponseBadge, TrustLine } from "@/components/TrustSignals";
-import { Zap } from "lucide-react";
-import VeteranBadge from "@/components/VeteranBadge";
-import LivingLogo from "@/components/LivingLogo";
+import { BRAND_IMG } from "@/lib/assets";
 
 /** Matches the .form-flash keyframe duration in index.css, plus a little slack. */
 const FLASH_MS = 1800;
@@ -41,12 +39,27 @@ function TikTokIcon({ className }: { className?: string }) {
   );
 }
 
+/** Each bio link's icon, by where it goes (the links are admin-managed rows, so this keys on the destination). */
+function linkIcon(url: string): LucideIcon {
+  if (url === SITE.newConstructionUrl || url.startsWith("/deals")) return House;
+  if (url.startsWith("/city-finder")) return MapPin;
+  if (url === "/") return Globe;
+  if (url.startsWith("/lease")) return KeyRound;
+  if (url.startsWith("/valuation")) return BarChart3;
+  if (url.startsWith("/join")) return Briefcase;
+  if (url.startsWith("/contact")) return CalendarDays;
+  return Sparkles;
+}
+
 /**
- * /links — link-in-bio page replacing Linktree. Mobile-first, on-brand.
- * Standalone layout (no nav) but keeps TREC links at the bottom.
- * Top: the same Now Hiring banner as the homepage (fixed; content is padded
- * below it via --hiring-banner-h). Bottom: quick lead-capture form, full
- * social row (admin-editable extra slots), and the LDT credit line.
+ * /links — link-in-bio page replacing Linktree. Mobile-first, standalone layout
+ * (no nav) that keeps the TREC links at the bottom.
+ *
+ * Oct 30, 2026 (Peter's white-skin mockup): warm white and ivory, charcoal text, deep gold. The brand mark is the
+ * still LDR monogram in its gold ring (the particle orb is retired here). A shallow photo strip, the links as cards
+ * (the first one, New Construction Search → /deals, filled gold), the callback form, the socials with their names,
+ * then the legal footer. Top: the same Now Hiring banner as the homepage (fixed; content is padded below it via
+ * --hiring-banner-h).
  */
 export default function Links() {
   const { data: links } = trpc.links.list.useQuery();
@@ -74,7 +87,7 @@ export default function Links() {
    * Promise chip → capture form. Smooth-scrolls (instantly for reduced-motion
    * users), draws the gold guide trail down the gutter alongside the scroll,
    * and lands it in the form's glow pulse so the tap reads as one connected
-   * movement rather than a teleport.
+   * movement rather than a teleport. It never submits anything.
    */
   const jumpToCapture = () => {
     logPromiseClick();
@@ -100,51 +113,40 @@ export default function Links() {
     );
   };
 
+  const socialCls = "inline-flex min-h-11 items-center gap-2.5 px-1 text-[15px] text-foreground transition-colors hover:text-gold";
+
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col items-center px-5 pb-12 pt-[calc(var(--hiring-banner-h,44px)+2.5rem)]">
+    <div className="flex min-h-screen flex-col items-center bg-background px-4 pb-12 pt-[calc(var(--hiring-banner-h,44px)+1.5rem)] text-foreground sm:px-6">
       {/* Same recruiting banner as the homepage — /links is almost entirely
           mobile bio traffic, so this is prime recruiting real estate. */}
       <NowHiringBanner />
-      <div className="w-full max-w-md flex flex-col items-center text-center">
-        {/* Profile header — the animated brand mark. The box is a fixed size so
-            the space is reserved before the canvas initialises (no layout
-            shift), and the LDR mark inside it doubles as the static fallback. */}
-        <LivingLogo size={168} />
-        <h1 className="font-serif text-2xl tracking-[0.12em] mt-1">
-          LIFESTYLE DESIGN <span className="text-gold">REALTY</span>
-        </h1>
-        <p className="eyebrow text-muted-foreground mt-2">Central Texas Real Estate Professionals</p>
-
-        {/* Compact trust signals — same treatments as the main site header.
-            One scannable line: veteran badge + Google rating. */}
-        <div className="mt-3 flex items-center justify-center gap-2.5 whitespace-nowrap">
-          <VeteranBadge compact className="tracking-[0.14em]" />
-          <span className="h-3 w-px bg-border shrink-0" aria-hidden />
-          <span className="inline-flex items-center gap-1 text-[8px] font-sans font-medium uppercase tracking-[0.14em] leading-none text-gold/90">
-            <span aria-hidden>4.6★</span>
-            <span className="text-muted-foreground">·</span>
-            <span>22 Google Reviews</span>
-          </span>
+      <div className="flex w-full max-w-[620px] flex-col items-center text-center">
+        {/* The brand: the LDR monogram in its gold ring, the name, the line, the veteran mark. */}
+        <div data-links-mark className="flex h-[96px] w-[96px] items-center justify-center rounded-full border-[1.5px] border-gold sm:h-[108px] sm:w-[108px]">
+          <span className="font-serif text-[30px] font-medium leading-none tracking-[-0.02em] text-gold sm:text-[34px]">LDR</span>
         </div>
+        <h1 className="mt-3 font-serif text-[2.35rem] font-medium leading-[1.05] tracking-[-0.01em] text-foreground sm:text-5xl">
+          Lifestyle Design Realty
+        </h1>
+        <p className="mt-2 text-[9px] font-medium uppercase tracking-[0.2em] text-foreground/85 min-[400px]:text-[10px] min-[400px]:tracking-[0.24em] sm:text-[11px] sm:tracking-[0.3em]">Central Texas Real Estate Professionals</p>
+        <p className="mt-3 rounded-[6px] border border-gold/70 px-4 py-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-gold sm:text-[11px]">
+          Veteran-Owned &amp; Operated
+        </p>
+        <p className="mt-2.5 inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+          <span className="text-gold">4.6★</span> 22 Google Reviews
+        </p>
 
-        {/* 30-minute promise — the highest-intent path on the page, so it sits
-            in the header where it is visible without scrolling rather than
-            buried under every button.
-            Shape carries the meaning here: every LINK below is a hard-cornered
-            bordered rectangle, so the promise is a soft-filled pill with no
-            border. Two gold rectangles stacked read as one control with a
-            secondary row; a chip does not. The "tap here" affordance is the
-            underline, not an arrow pointing at the button under it. */}
+        {/* 30-minute promise — the highest-intent path on the page, kept where it
+            is seen without scrolling. A soft-filled pill (the links below are
+            bordered cards), so it reads as its own thing; the "tap here" is the
+            underline. */}
         <button
           ref={promiseRef}
           type="button"
           onClick={jumpToCapture}
-          className="group mt-4 w-full rounded-full bg-gold/[0.09] px-6 py-3 text-center transition-colors hover:bg-gold/[0.15] active:scale-[0.995]">
-          <span className="text-[10.5px] leading-relaxed tracking-[0.06em] text-foreground/90">
-            <Zap
-              className="mr-1.5 inline-block h-3.5 w-3.5 align-[-0.15em] text-gold"
-              aria-hidden
-            />
+          className="group mt-4 w-full rounded-full bg-gold/[0.08] px-6 py-3 text-center transition-colors hover:bg-gold/[0.14] active:scale-[0.995]">
+          <span className="text-[12px] leading-relaxed tracking-[0.02em] text-foreground/90">
+            <Zap className="mr-1.5 inline-block h-3.5 w-3.5 align-[-0.15em] text-gold" aria-hidden />
             Skip the browsing — tell us what you need and we'll reach out{" "}
             <span className="text-gold">within 30 minutes</span>.{" "}
             <span className="text-gold underline decoration-gold/60 underline-offset-2 transition-colors group-hover:decoration-gold">
@@ -156,9 +158,11 @@ export default function Links() {
         {/* The trail this tap draws — fixed, pointer-events-none, zero layout. */}
         <GuideTrail runId={trailRun} fromRef={promiseRef} toRef={captureRef} />
 
-        {/* Links — mt-9 (not mt-6) so the promise chip reads as its own thing
-            with air under it, rather than as the first row of the button stack. */}
-        <div className="w-full mt-9 space-y-3">
+        {/* A shallow photo strip (illustrative, from Peter's approved mockup). */}
+        <img src={BRAND_IMG.linksFront} alt="Limestone Hill Country home with a covered front porch" fetchPriority="high" decoding="async" className="mt-5 aspect-[3.3/1] w-full rounded-[10px] object-cover" />
+
+        {/* Links */}
+        <div className="w-full mt-4 space-y-3">
           {/* Bio links are admin-managed data, so a paused route (e.g. the
               seeded "Home Search" → /search) can still be present in the DB.
               Filter here so no customer is sent to a coming-soon dead end. */}
@@ -169,23 +173,21 @@ export default function Links() {
             const visible = (links ?? BIO_LINKS_SNAPSHOT).filter((l) => isLinkVisible(l.url));
             return visible.map((l, i) => {
               const isInternal = l.url.startsWith("/");
-              // Visual hierarchy: the top button carries a gold border so the eye
-              // lands on the money path first. Everything else stays neutral so
-              // the emphasis actually means something.
+              // The first link is the money path: filled deep gold with white text. The rest are white cards.
               const primary = i === 0;
+              const Icon = linkIcon(l.url);
               const cls = cn(
-                "group lux-lift flex items-center justify-between w-full px-6 py-4 text-xs uppercase tracking-[0.2em] transition-colors",
+                "group flex min-h-[60px] w-full items-center gap-4 rounded-[10px] px-5 py-3 text-left transition-colors sm:min-h-[66px] sm:px-6",
                 primary
-                  ? "border border-gold/70 bg-gold/10 text-foreground hover:bg-gold/15 hover:border-gold"
-                  : "border border-border bg-card hover:border-gold hover:text-gold"
+                  ? "bg-gold text-white shadow-[0_10px_24px_-14px_rgb(131_99_36/0.8)] hover:bg-gold/90"
+                  : "border border-border bg-card text-foreground hover:border-gold/70"
               );
-              const arrow = (
-                <ArrowUpRight
-                  className={cn(
-                    "h-4 w-4 group-hover:opacity-100",
-                    primary ? "text-gold opacity-80" : "opacity-40"
-                  )}
-                />
+              const body = (
+                <>
+                  <Icon className={cn("h-6 w-6 shrink-0", primary ? "text-white" : "text-foreground/80")} strokeWidth={1.5} aria-hidden />
+                  <span className="min-w-0 flex-1 font-serif text-[1.35rem] leading-tight sm:text-[1.5rem]">{l.label}</span>
+                  <ArrowRight className={cn("h-5 w-5 shrink-0 transition-transform group-hover:translate-x-0.5", primary ? "text-white" : "text-gold")} aria-hidden />
+                </>
               );
               // Outbound clicks keep their existing first-party tracking.
               const onClick =
@@ -196,8 +198,7 @@ export default function Links() {
                     : undefined;
               return isInternal ? (
                 <Link key={l.id} href={l.url} onClick={onClick} className={cls}>
-                  {l.label}
-                  {arrow}
+                  {body}
                 </Link>
               ) : (
                 <a
@@ -207,8 +208,7 @@ export default function Links() {
                   rel="noreferrer"
                   className={cls}
                   onClick={onClick}>
-                  {l.label}
-                  {arrow}
+                  {body}
                 </a>
               );
             });
@@ -220,13 +220,13 @@ export default function Links() {
         <div
           ref={captureRef}
           className={cn(
-            "w-full mt-12 border border-gold/30 bg-card/60 p-6 text-left",
+            "mt-5 w-full rounded-[12px] border border-border bg-card p-5 text-left sm:p-7",
             flash && "form-flash"
           )}>
-          <p className="font-serif text-xl text-center leading-snug">
-            Or skip the browsing — <span className="text-gold">we'll reach out to you</span>
+          <p className="text-center font-serif text-[1.6rem] font-medium leading-snug sm:text-[1.9rem]">
+            Or skip the browsing — we'll reach out to you
           </p>
-          <div className="mt-4 flex flex-col items-center gap-2.5">
+          <div className="mt-3 flex flex-col items-center gap-2.5">
             <ResponseBadge />
             <TrustLine className="justify-center" />
           </div>
@@ -247,56 +247,64 @@ export default function Links() {
           </div>
         </div>
 
-        {/* Socials */}
-        <div className="flex gap-6 mt-8">
-          <a href={SITE.instagram} target="_blank" rel="noreferrer" aria-label="Instagram" className="text-muted-foreground hover:text-gold">
-            <Instagram className="h-5 w-5" />
+        {/* Socials, with their names (Instagram, Facebook, the phone), plus the admin-managed slots once set. */}
+        <div data-links-socials className="mt-6 flex w-full flex-wrap items-center justify-center gap-x-4 gap-y-1 sm:gap-x-6">
+          <a href={SITE.instagram} target="_blank" rel="noreferrer" className={socialCls}>
+            <Instagram className="h-6 w-6" strokeWidth={1.6} aria-hidden /> Instagram
           </a>
-          <a href={SITE.facebook} target="_blank" rel="noreferrer" aria-label="Facebook" className="text-muted-foreground hover:text-gold">
-            <Facebook className="h-5 w-5" />
+          <span className="hidden h-6 w-px bg-border sm:block" aria-hidden />
+          <a href={SITE.facebook} target="_blank" rel="noreferrer" className={socialCls}>
+            <Facebook className="h-6 w-6" strokeWidth={1.6} aria-hidden /> Facebook
+          </a>
+          <span className="hidden h-6 w-px bg-border sm:block" aria-hidden />
+          <a href={SITE.phoneHref} className={socialCls}>
+            <Phone className="h-5 w-5 text-gold" strokeWidth={1.8} aria-hidden /> {SITE.phone}
           </a>
           {/* Admin-managed slots — hidden until a URL is provided in
               Admin → Bio Links → Social Profiles */}
           {socials?.social_tiktok && (
-            <a href={socials.social_tiktok} target="_blank" rel="noreferrer" aria-label="TikTok" className="text-muted-foreground hover:text-gold">
-              <TikTokIcon className="h-5 w-5" />
+            <a href={socials.social_tiktok} target="_blank" rel="noreferrer" className={socialCls}>
+              <TikTokIcon className="h-5 w-5" /> TikTok
             </a>
           )}
           {socials?.social_youtube && (
-            <a href={socials.social_youtube} target="_blank" rel="noreferrer" aria-label="YouTube" className="text-muted-foreground hover:text-gold">
-              <Youtube className="h-5 w-5" />
+            <a href={socials.social_youtube} target="_blank" rel="noreferrer" className={socialCls}>
+              <Youtube className="h-6 w-6" strokeWidth={1.6} aria-hidden /> YouTube
             </a>
           )}
           {socials?.social_linkedin && (
-            <a href={socials.social_linkedin} target="_blank" rel="noreferrer" aria-label="LinkedIn" className="text-muted-foreground hover:text-gold">
-              <Linkedin className="h-5 w-5" />
+            <a href={socials.social_linkedin} target="_blank" rel="noreferrer" className={socialCls}>
+              <Linkedin className="h-5 w-5" strokeWidth={1.6} aria-hidden /> LinkedIn
             </a>
           )}
         </div>
 
-        <a href={SITE.phoneHref} className="mt-6 text-xs tracking-[0.2em] text-gold">{SITE.phone}</a>
-
         {/* TREC compliance (required on every page) */}
-        <div className="mt-12 space-y-2 text-[10px] text-muted-foreground/80 leading-relaxed">
-          <a href={SITE.iabsUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2 block">
+        <div className="mt-6 w-full space-y-2 border-t border-border pt-5 text-[11px] leading-relaxed text-muted-foreground">
+          <a href={SITE.iabsUrl} target="_blank" rel="noreferrer" className="block underline underline-offset-2 hover:text-gold">
             Texas Real Estate Commission Information About Brokerage Services
           </a>
-          <a href={SITE.cpnUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2 block">
+          <a href={SITE.cpnUrl} target="_blank" rel="noreferrer" className="block underline underline-offset-2 hover:text-gold">
             Texas Real Estate Commission Consumer Protection Notice
           </a>
+          <p className="flex justify-center gap-3">
+            <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>
+            <span aria-hidden>|</span>
+            <Link href="/terms" className="underline underline-offset-2 hover:text-gold">Terms</Link>
+          </p>
           <p>{SITE.disclaimer}</p>
           <p>{SITE.address} · {SITE.phone}</p>
         </div>
 
         {/* Lifestyle Design Technologies credit — same quiet flex as the
             site footer, opening the same website-inquiry modal. */}
-        <div className="mt-10 text-[11px] leading-relaxed text-muted-foreground/80">
+        <div className="mt-8 text-[11px] leading-relaxed text-muted-foreground">
           <p>
-            Website crafted by <span className="text-gold/90">Lifestyle Design Technologies</span> —{" "}
+            Website crafted by <span className="text-gold">Lifestyle Design Technologies</span> —{" "}
             <button
               type="button"
               onClick={() => setInquiryOpen(true)}
-              className="text-gold underline underline-offset-2 decoration-gold/50 hover:decoration-gold transition-colors cursor-pointer">
+              className="cursor-pointer text-gold underline decoration-gold/50 underline-offset-2 transition-colors hover:decoration-gold">
               Click here
             </button>{" "}
             to inquire about your own custom website.

@@ -43,7 +43,7 @@ export default function Join() {
   useEffect(() => { if (arrival.fromDeals) window.setTimeout(() => document.querySelector("[data-join-from-deals]")?.scrollIntoView({ block: "start" }), 300); }, [arrival.fromDeals]);
   return (
     <PageShell>
-      <section className="relative min-h-[60svh] flex items-end">
+      <section className="dark relative min-h-[60svh] flex items-end text-foreground">
         <div className="absolute inset-0">
           <img src={IMG.heroDarkInterior} alt="" aria-hidden className="h-full w-full object-cover" />
           <div className="absolute inset-0 bg-black/70" />
@@ -80,7 +80,7 @@ export default function Join() {
       </section>
 
       {/* How leads actually move through the system — visual proof, not claims */}
-      <section className="border-y border-border/60 bg-[oklch(0.165_0.005_285)]">
+      <section className="border-y border-border/60 bg-secondary/60">
         <div className="mx-auto max-w-[1200px] px-5 lg:px-8 py-20">
           <div className="text-center mb-14 reveal">
             <p className="eyebrow text-gold">The Lead System</p>

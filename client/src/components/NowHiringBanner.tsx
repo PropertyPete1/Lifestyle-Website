@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Link } from "wouter";
-import { ArrowRight, Rocket } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useBannerClickTracking } from "@/hooks/usePageTracking";
 
 /**
@@ -67,33 +67,22 @@ export default function NowHiringBanner() {
     };
   }, []);
 
+  // Oct 30, 2026 (Peter's white-skin mockups): a slim, readable line. Ivory with charcoal text on phones, the brand's
+  // deep gold with white text from desktop up; wording kept ("Now hiring: licensed agents" / "See what we offer").
   return (
     <Link href="/join">
       <div
         ref={ref}
         onClick={logBannerClick}
-        className="group fixed top-0 left-0 right-0 z-[60] block w-full cursor-pointer overflow-hidden border-b border-gold/40 bg-[oklch(0.14_0.01_285)]"
+        className="group fixed top-0 left-0 right-0 z-[60] block w-full cursor-pointer overflow-hidden border-b border-border bg-secondary text-foreground lg:border-gold lg:bg-gold lg:text-white"
         role="banner"
         aria-label="Now hiring licensed agents — see what we offer">
-        {/* Gold shimmer wash */}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-gold/[0.14] via-gold/[0.05] to-gold/[0.14]" />
-        <div className="pointer-events-none absolute inset-0 opacity-60 [background:radial-gradient(60%_120%_at_50%_0%,oklch(0.75_0.12_85_/_0.18),transparent_70%)]" />
-        <div className="relative mx-auto flex max-w-[1400px] flex-wrap items-center justify-center gap-x-3 gap-y-0.5 px-3 py-2.5 sm:py-3 text-center">
-          <span className="inline-flex items-center gap-1.5 text-gold">
-            <Rocket className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-[0.2em]">
-              Now Hiring: Licensed Agents
-            </span>
-          </span>
-          <span className="hidden sm:inline h-3.5 w-px bg-gold/40" aria-hidden />
-          {/* No dollar figures here — all visitors see this banner; the $6,000
-              detail lives on /join as the payoff for clicking. */}
-          <span className="text-[10px] sm:text-[11px] uppercase tracking-[0.14em] text-foreground/90">
-            Real leads. Real support. Real growth.
-          </span>
-          <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.16em] text-gold underline underline-offset-4 decoration-gold/50 group-hover:decoration-gold transition-colors">
+        <div className="relative mx-auto flex max-w-[1400px] flex-wrap items-center justify-center gap-x-3 gap-y-0.5 px-4 py-2 text-center font-serif text-[15px] leading-snug sm:text-base">
+          <span>Now hiring: licensed agents</span>
+          <span className="h-4 w-px bg-current opacity-40" aria-hidden />
+          <span className="inline-flex items-center gap-1 text-gold underline decoration-gold/50 underline-offset-4 transition-colors group-hover:decoration-gold lg:text-white lg:decoration-white/60 lg:group-hover:decoration-white">
             See what we offer
-            <ArrowRight className="h-3 w-3 shrink-0 transition-transform group-hover:translate-x-0.5" aria-hidden />
+            <ArrowRight className="h-3.5 w-3.5 shrink-0 transition-transform group-hover:translate-x-0.5" aria-hidden />
           </span>
         </div>
       </div>

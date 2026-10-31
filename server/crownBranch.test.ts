@@ -481,17 +481,25 @@ describe("the nanite swarm is unmounted, not deleted", () => {
     expect(() => read("shared/naniteSwarm.ts")).not.toThrow();
   });
 
-  it("leaves the /links orb completely untouched", () => {
+  it("keeps /links free of the line work, with the still LDR mark in place of the orb (Oct 30 white skin)", () => {
     const links = strip(read("client/src/pages/Links.tsx"));
-    expect(links).toContain("LivingLogo");
     expect(links).not.toContain("CrownBranch");
+    // The particle orb is retired on the light page; its component stays for its own suite.
+    expect(links).not.toContain("LivingLogo");
+    expect(links).toContain("data-links-mark");
+    expect(() => read("client/src/components/LivingLogo.tsx")).not.toThrow();
   });
 });
 
 describe("hero wiring", () => {
-  it("measures the crown from the real headline element", () => {
-    expect(HOME).toContain("headlineRef");
-    expect(HOME).toMatch(/<h1\s+ref=\{headlineRef\}/);
+  it("is unmounted from the light homepage (Oct 30 white skin) and its hero is visible from the first paint", () => {
+    expect(HOME).not.toContain("CrownBranch");
+    expect(HOME).not.toContain("heroRevealed");
+    expect(HOME).not.toMatch(/opacity-0/);
+    expect(() => read("client/src/components/CrownBranch.tsx")).not.toThrow();
+  });
+
+  it("still measures the crown from a headline element when mounted", () => {
     expect(CROWN).toContain("headlineRef.current?.getBoundingClientRect()");
     expect(CROWN).toContain("crownRectFromHeadline");
   });
@@ -509,26 +517,8 @@ describe("hero wiring", () => {
     expect(CROWN).not.toMatch(/crown\s*=\s*\{\s*left:\s*\d/);
   });
 
-  it("fades the hero content in fast, so the page is never gated on the lines", () => {
-    expect(HOME).toContain("onReveal");
-    // The markup duration must match CONTENT_FADE_MS, and reveal + fade has to
-    // land inside ~0.6s.
-    expect(HOME).toContain(`duration-[${CONTENT_FADE_MS}ms]`);
+  it("keeps the reveal budget for any page that mounts it", () => {
     expect(CONTENT_REVEAL_MAX_MS + CONTENT_FADE_MS).toBeLessThanOrEqual(650);
-    expect(HOME).toMatch(/heroRevealed \? "opacity-100" : "opacity-0"/);
-  });
-
-  it("can never leave the hero content invisible", () => {
-    // Default is visible; it only starts hidden when an entrance is definitely
-    // going to play, and a backstop timer un-hides it regardless.
-    expect(HOME).toMatch(/useState\(\(\) => !willPlayCrownEntrance\(\)\)/);
-    const backstop = HOME.match(/setTimeout\(\(\) => setHeroRevealed\(true\), (\d+)\)/);
-    expect(backstop).not.toBeNull();
-    const ms = Number(backstop![1]);
-    // Comfortably past the intended reveal, but no longer the old 2.5s wait —
-    // if rAF never runs, the visitor still sees the hero quickly.
-    expect(ms).toBeGreaterThan(CONTENT_REVEAL_MAX_MS * 2);
-    expect(ms).toBeLessThanOrEqual(1500);
     // Every exit from the loop reveals, including the degrade path.
     expect(CROWN.match(/revealRef\.current\?\.\(\)/g)?.length).toBeGreaterThanOrEqual(4);
   });

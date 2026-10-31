@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { Flame, Play, Send, Sparkles } from "lucide-react";
 import { redHotDeal } from "@shared/dealsFeatured";
 import { SITE } from "@shared/site";
-import { youtubeEmbedUrl, youtubeVideoId } from "@/lib/dealsVideo";
+import { REEL_CROP_STYLE, instagramEmbedUrl, youtubeEmbedUrl, youtubeVideoId } from "@/lib/dealsVideo";
 
 /**
  * A photo that tries again on its own: a first-time render can answer "busy" (503) while the server is working,
@@ -59,12 +59,13 @@ export function useInstagramEmbeds() {
  */
 export function ReelCard({ reelUrl, label, autoLoad = true, poster }: { reelUrl: string | null; label: string; autoLoad?: boolean; /** Oct 24 (Peter): with no video yet, the community's own best photo stands in (photos showing a builder's name never reach the site). */ poster?: string | null }) {
   const youtubeId = youtubeVideoId(reelUrl);
+  const instagramEmbed = youtubeId ? null : instagramEmbedUrl(reelUrl);
   const [fallback, setFallback] = useState(!reelUrl);
   const [started, setStarted] = useState(autoLoad);
   const [tapped, setTapped] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!reelUrl || !started || youtubeId) return;
+    if (!reelUrl || !started || youtubeId || instagramEmbed) return;
     const process = () => (window as any).instgrm?.Embeds?.process?.();
     process();
     const timer = window.setTimeout(() => {
@@ -87,6 +88,12 @@ export function ReelCard({ reelUrl, label, autoLoad = true, poster }: { reelUrl:
         <span className="mt-3 max-w-[16rem] font-serif text-2xl leading-tight">{label}</span>
       </button>
     );
+  }
+  // Oct 30, 2026 (Peter): the reel itself, edge to edge, without Instagram's header or the black bars at its sides.
+  if (instagramEmbed && started) {
+    return <div data-deals-reel="true" className="@container relative mx-auto aspect-[9/16] w-full max-w-[340px] overflow-hidden rounded-xl bg-black">
+      <iframe src={instagramEmbed} title={`Video tour of ${label}`} data-deals-reel-embed="true" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen loading="lazy" scrolling="no" className="absolute max-w-none border-0" style={REEL_CROP_STYLE} />
+    </div>;
   }
   if (fallback && !reelUrl && poster) return <PosterCard poster={poster} label={label} />;
   if (fallback) {

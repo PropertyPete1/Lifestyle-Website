@@ -292,8 +292,26 @@ describe("a long private list", () => {
     expect(deferred).toContain('data-deals-reel-cover="true"');
     expect(deferred).toContain("Watch the video tour");
     expect(deferred).not.toContain("instagram-media");
-    const loaded = renderToStaticMarkup(createElement(ReelCard, { reelUrl: "https://www.instagram.com/reel/abc/", label: "North | Homes" }));
-    expect(loaded).toContain("instagram-media");
+    const loaded = renderToStaticMarkup(createElement(ReelCard, { reelUrl: "https://www.instagram.com/reel/abc12/", label: "North | Homes" }));
+    // Oct 30, 2026 (Peter: no black bars): the reel's own embed page, cropped to the 9:16 reel, not Instagram's blockquote card.
+    expect(loaded).toContain('src="https://www.instagram.com/reel/abc12/embed/"');
+    expect(loaded).toContain("aspect-[9/16]");
+    expect(loaded).toContain("left:calc(-21.1111cqw - 2px)");
+    expect(loaded).not.toContain("instagram-media");
+    // A link that names no reel still goes through Instagram's own embed.
+    expect(renderToStaticMarkup(createElement(ReelCard, { reelUrl: "https://www.instagram.com/lifestyledesignrealtytexas/", label: "North | Homes" }))).toContain("instagram-media");
+  });
+
+  it("reads an Instagram reel or post link as its embed page", async () => {
+    const { instagramEmbedUrl } = await import("../client/src/lib/dealsVideo");
+    expect(instagramEmbedUrl("https://www.instagram.com/reel/De4ooRgsHjc/?igsh=x")).toBe("https://www.instagram.com/reel/De4ooRgsHjc/embed/");
+    expect(instagramEmbedUrl("https://instagram.com/lifestyledesignrealtytexas/reel/De4ooRgsHjc")).toBe("https://www.instagram.com/reel/De4ooRgsHjc/embed/");
+    expect(instagramEmbedUrl("https://www.instagram.com/reels/De4ooRgsHjc/")).toBe("https://www.instagram.com/reel/De4ooRgsHjc/embed/");
+    expect(instagramEmbedUrl("https://www.instagram.com/p/Cabc123/")).toBe("https://www.instagram.com/p/Cabc123/embed/");
+    expect(instagramEmbedUrl("https://evil.example/reel/De4ooRgsHjc/")).toBeNull();
+    expect(instagramEmbedUrl("https://www.instagram.com/lifestyledesignrealtytexas/")).toBeNull();
+    expect(instagramEmbedUrl("javascript:alert(1)")).toBeNull();
+    expect(instagramEmbedUrl(null)).toBeNull();
   });
 });
 

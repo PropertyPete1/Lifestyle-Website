@@ -48,4 +48,10 @@ describe("/join review fixes", () => {
     expect(sticky).toContain('href = "/#get-started"');
     expect(sticky).toContain("href={href}");
   });
+
+  it("says splits and lead delivery in Peter's words, without numbers (Oct 30, 10:20 PM)", () => {
+    expect(join_).toContain("data-join-terms");
+    expect(join_).toContain("Highly competitive splits on your own business, and fair, competitive splits on the leads we give you.");
+    expect(join_).toContain("Leads are given to you through our CRM, Follow Up Boss: hot buyers who are texting us for a buyer's consultation.");
+  });
 });

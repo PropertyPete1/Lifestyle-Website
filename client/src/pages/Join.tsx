@@ -5,7 +5,7 @@ import LeadFlowDiagram from "@/components/LeadFlowDiagram";
 import { SITE } from "@shared/site";
 import { BRAND_IMG } from "@/lib/assets";
 import { Link } from "wouter";
-import { ArrowRight, Flame, HandCoins, Heart, Instagram, Landmark, Link2, ListChecks, Mail } from "lucide-react";
+import { ArrowRight, Flame, HandCoins, Heart, Instagram, Landmark, Link2, ListChecks, Mail, MessageSquareText, Percent } from "lucide-react";
 
 /**
  * Instant payoff for the homepage Now Hiring banner: the three strongest
@@ -35,6 +35,16 @@ export const JOIN_TOOLKIT = [
   { icon: ListChecks, title: "Hand-picked short lists", body: "Pick the homes that fit and send just those, instead of the whole market." },
   { icon: Heart, title: "See what clients like", body: "See which homes each client saves and when they ask for a tour." },
   { icon: Instagram, title: "Your own bio link", body: "Put your link in your Instagram bio. Buyers who sign up through it land in Follow Up Boss under you." },
+] as const;
+
+/**
+ * Oct 30, 2026 (Peter, 10:20 PM): no split numbers on the page. "Just say our splits are highly competitive and
+ * lead-given splits are highly fair and competitive, and leads are given thru our CRM Follow Up Boss: hot leads
+ * currently texting us for a buyer's consultation."
+ */
+export const JOIN_TERMS = [
+  { icon: Percent, title: "Highly competitive splits", body: "Highly competitive splits on your own business, and fair, competitive splits on the leads we give you." },
+  { icon: MessageSquareText, title: "Hot leads through Follow Up Boss", body: "Leads are given to you through our CRM, Follow Up Boss: hot buyers who are texting us for a buyer's consultation." },
 ] as const;
 
 /** The site tools that create the leads, so an agent can see them for themselves. */
@@ -95,6 +105,26 @@ export default function Join() {
           <div className="relative aspect-[4/3] overflow-hidden lg:aspect-[5/4]">
             <img src={BRAND_IMG.heroDesktop} alt="Bright Hill Country living room" fetchPriority="high" decoding="async" className="absolute inset-0 h-full w-full object-cover" />
           </div>
+        </div>
+      </section>
+
+      {/* Oct 30, 2026: splits and how leads reach you, right under the hero (what a producing agent checks first). */}
+      <section data-join-terms className="border-y border-border/60 bg-secondary/60">
+        <div className="mx-auto max-w-[1200px] px-5 py-16 lg:px-8">
+          <div className="text-center reveal">
+            <p className="eyebrow text-gold">Splits &amp; Leads</p>
+            <h2 className="display-serif mt-3 text-3xl md:text-4xl">What you keep, and how leads reach you</h2>
+          </div>
+          <div className="mx-auto mt-10 grid max-w-4xl gap-4 md:grid-cols-2">
+            {JOIN_TERMS.map(({ icon: Icon, title, body }) => (
+              <div key={title} className="reveal border border-border border-t-2 border-t-gold bg-card p-6 lg:p-8">
+                <Icon className="h-5 w-5 text-gold" aria-hidden />
+                <h3 className="mt-4 font-serif text-2xl">{title}</h3>
+                <p className="mt-2 leading-relaxed text-muted-foreground">{body}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-8 text-center text-sm text-muted-foreground">We&rsquo;ll go over the details when we talk.</p>
         </div>
       </section>
 

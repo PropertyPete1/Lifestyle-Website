@@ -455,13 +455,14 @@ describe("the home cards of the unlocked list (Oct 27: New Home Buddy parity)", 
   });
 });
 
-describe("the loading page (Oct 28: the page's shape shows at once, not one line on a blank page)", async () => {
+describe("the loading page (Oct 28: never one line on a blank page; Oct 31: the branded loader)", async () => {
   const { ListSkeleton } = await import("../client/src/components/deals/GatedCatalog");
-  it("shows the header, grey cards and the status line", () => {
+  it("shows the header, the loader and what is loading", () => {
     const html = renderToStaticMarkup(createElement(ListSkeleton, { label: "Preparing the team list…" }));
     expect(html).toContain('data-deals-list-skeleton="true"');
     expect(html).toContain('role="status"');
-    expect(html).toContain("Preparing the team list…");
+    expect(html).toContain('data-deals-loader="true"');
+    expect(html).toContain("Preparing the team list");
     expect(html).toContain("LIFESTYLE DESIGN");
   });
 });

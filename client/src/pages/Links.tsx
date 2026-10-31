@@ -62,6 +62,18 @@ function linkIcon(url: string): LucideIcon {
  */
 export default function Links() {
   const { data: links } = trpc.links.list.useQuery();
+  // Oct 31, 2026 (Peter: the new home search "takes a second to load"): most Instagram visitors tap Browse New Homes,
+  // so once this page has painted, the deals list is fetched in the background; the tap then opens it at once.
+  const utils = trpc.useUtils();
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      void utils.deals.publicCatalog.prefetch(undefined);
+      void utils.deals.featured.prefetch();
+      void utils.deals.comingSoon.prefetch();
+      void utils.deals.state.prefetch(undefined);
+    }, 1200);
+    return () => window.clearTimeout(id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const { data: socials } = trpc.settings.socials.useQuery();
   const logNcClick = useNcClickTracking();
   const logLeaseClick = useLeaseClickTracking();

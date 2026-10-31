@@ -8,6 +8,7 @@ import { BrowseBar, BROWSE_COPY } from "./BrowseBar";
 import { BUYER_CARD_COPY, BuyerHomeCard, LockedDetails } from "./BuyerHomeCard";
 import { ComingSoonSection, type ComingSoonItem } from "./ComingSoon";
 import { FeaturedStrip, featuredForSearch, type FeaturedDealsData } from "./FeaturedDeals";
+import { DealsLoader } from "./DealsLoader";
 import { HOME_LIST_COPY, ProtectedGallery } from "./GatedCatalog";
 import { LandingBrowse, type LandingCommunity, type UseCommunityHomes } from "./LandingBrowse";
 import { PublicHomeList, byPayment, publicHomeEntries, publicSaveId, type PublicHomeEntry } from "./PublicHomeList";
@@ -123,9 +124,11 @@ export type PublicDealsPageProps = {
   openKey?: string | null;
   /** "Schedule a tour" (a card's, the featured row's or Coming Soon's): the sign-up for a tour. */
   onTour: (entry?: PublicHomeEntry) => void;
+  /** Oct 31, 2026: the homes are still on their way; the branded loader stands in for the list and map until they arrive. */
+  loading?: boolean;
 };
 
-export function PublicDealsPage({ communities: all, useHomes, featured, comingSoon, eyebrow, intro = PUBLIC_PAGE_COPY.intro, openKey, onTour }: PublicDealsPageProps) {
+export function PublicDealsPage({ communities: all, useHomes, featured, comingSoon, eyebrow, intro = PUBLIC_PAGE_COPY.intro, openKey, onTour, loading = false }: PublicDealsPageProps) {
   // Oct 30, 2026 (ChatGPT's test: back from the Privacy Policy, the saved-only view was gone): the filters last for the visit.
   const [filters, setFiltersState] = useState<BrowseFilters>(() => { try { const kept = JSON.parse(window.sessionStorage.getItem(FILTERS_KEY) ?? "null") as Partial<BrowseFilters> | null; return kept && typeof kept === "object" ? { ...EMPTY_FILTERS, ...kept } : EMPTY_FILTERS; } catch { return EMPTY_FILTERS; } });
   const setFilters = (next: BrowseFilters | ((current: BrowseFilters) => BrowseFilters)) => setFiltersState((current) => {
@@ -186,7 +189,7 @@ export function PublicDealsPage({ communities: all, useHomes, featured, comingSo
           {active > 0 && <button type="button" onClick={() => setFilters({ ...EMPTY_FILTERS, sort: filters.sort })} className="min-h-11 font-medium text-gold underline underline-offset-4">{BROWSE_COPY.clear}</button>}
         </div>}
         {all.length > 0 && matching.length === 0 && <p role="status" className="mt-8 text-sm text-muted-foreground">{BROWSE_COPY.none}</p>}
-        <LandingBrowse mapSide="left" phoneMap="external" phoneMapOpen={mapOpen} onPhoneMapOpenChange={setMapOpen} searchArea
+        {loading && all.length === 0 ? <DealsLoader minHeight="55vh" /> : <LandingBrowse mapSide="left" phoneMap="external" phoneMapOpen={mapOpen} onPhoneMapOpenChange={setMapOpen} searchArea
           onAreaChange={(keys) => setAreaKeys(keys ? new Set(keys) : null)}
           areaStatus={listView === "homes" ? (keys) => { const inArea = new Set(keys); return `Showing ${HOME_LIST_COPY.count(homeEntries.filter((entry) => inArea.has(entry.key)).length)} in this part of town`; } : undefined}
           renderList={listView === "homes" ? (context) => <PublicHomeList entries={homeEntries} context={context} useHomes={useHomes} assumptions={assumptions} onTour={(entry) => onTour(entry)} saved={saved} onToggleSave={toggleSave} /> : undefined}
@@ -196,7 +199,7 @@ export function PublicDealsPage({ communities: all, useHomes, featured, comingSo
             focusHero: (home, community) => <div className="mx-auto max-w-3xl p-4 pt-14 sm:p-6 sm:pt-14"><BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} tourLabel={BUYER_CARD_COPY.details} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour()} /></div>,
             renderHome: (home, isFeatured, community) => <BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} tourLabel={BUYER_CARD_COPY.details} featured={isFeatured} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour()} /> }}
           top={filters.savedOnly ? undefined : (actions) => <FeaturedStrip compact featured={strip?.featured} eyebrow={strip?.eyebrow} opens onHover={(deal) => actions.hover(deal?.landingKey ?? null)} onSelect={(deal) => { if (!deal.landingKey || !actions.openHome(deal.landingKey, { price: deal.price, sqft: deal.sqft, kind: deal.kind })) onTour(); }} />}
-          below={filters.savedOnly ? undefined : <ComingSoonSection items={comingSoon} action={{ kind: "text", phone: null, name: null }} />} />
+          below={filters.savedOnly ? undefined : <ComingSoonSection items={comingSoon} action={{ kind: "text", phone: null, name: null }} />} />}
       </div>
     </section>
     <DealsFooter />

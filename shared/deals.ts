@@ -4,6 +4,9 @@ import { parsePhoneNumberFromString } from "libphonenumber-js";
 export const DEALS_CONSENT_TEXT =
   "By tapping Continue, you agree that Lifestyle Design Realty may call and text you about new-build homes at the number you entered, including automated texts. Consent is not a condition of purchase. Msg and data rates may apply. Msg frequency varies. Reply STOP to opt out, HELP for help.";
 
+/** Oct 31, 2026: the same consent for "Get this home's details" (no code step), named for its button. */
+export const DEALS_DETAILS_CONSENT_TEXT = DEALS_CONSENT_TEXT.replace("By tapping Continue", "By tapping Send me the details");
+
 /** Buyer SMS contact copy is rendered from the protected admin setting. */
 export const DEALS_BLOCKED_SUFFIX = "Made a mistake? Contact our team by text.";
 

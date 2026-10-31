@@ -739,3 +739,47 @@ export async function stripBuilderDealsTestTag(personId: string) {
     return { ok: true as const };
   } catch { return { ok: false as const, error: "FUB TEST-tag cleanup failed" }; }
 }
+
+/**
+ * Oct 31, 2026 (Peter: "just get name number email required fields and notes if they wanna add notes and done"): a
+ * buyer asks for one home's details with no text code. The request goes straight to Follow Up Boss as an IG Builder
+ * Deals inquiry, assigned to the agent whose Builder Deals link they came through, else to Peter. The note carries the
+ * home (privately resolved for the agent), their notes and the consent record.
+ */
+export const DETAILS_REQUEST_TAG = "Builder Deals - Details Request";
+export type DetailsRequestFubInput = {
+  name: string;
+  phone: string;
+  email: string;
+  note: string;
+  agent: FubAgentRef | null;
+  isTest: boolean;
+};
+export async function sendBuilderDealsDetailsRequestToFub(input: DetailsRequestFubInput): Promise<{ ok: true; personId: string } | { ok: false; error: string; terminal?: boolean }> {
+  try {
+    const assignee = input.agent?.fubUserId?.trim() || await peterUserId();
+    const [firstName, ...last] = input.name.trim().split(/\s+/);
+    const tags = [BASE_TAG, DETAILS_REQUEST_TAG, input.agent ? AGENT_PAGE_TAG : null, input.isTest ? "TEST" : null].filter(Boolean) as string[];
+    const person: Record<string, unknown> = {
+      firstName,
+      lastName: last.join(" ") || undefined,
+      phones: [{ value: input.phone }],
+      emails: [{ value: input.email }],
+      tags,
+      ...(assignee ? { assignedUserId: /^\d+$/.test(assignee) ? Number(assignee) : assignee } : {}),
+    };
+    const res = await fub("/events", { method: "POST", body: JSON.stringify({ source: BASE_TAG, system: "Lifestyle Design Realty Website", type: "Property Inquiry", message: input.note, person }) });
+    if (res.status === 204) return { ok: false, terminal: true, error: "FUB did not accept the lead event (HTTP 204): the IG Builder Deals lead flow is set to ignore or archive these leads" };
+    const data = await res.json().catch(() => ({})) as FubPerson & { personId?: string | number; person?: FubPerson };
+    const returned: FubPerson | null = data.person ?? (data.id !== undefined ? data : null);
+    const personId = data.person?.id ?? data.personId ?? data.id;
+    if (personId === undefined || personId === null || String(personId).trim() === "") return { ok: false, error: "FUB event did not return a contact" };
+    // A brand-new contact that FUB left unassigned goes to the agent (or Peter); an existing assignment is never changed.
+    if (assignee && returned && !returned.assignedUserId) {
+      try { await fub(`/people/${encodeURIComponent(String(personId))}`, { method: "PUT", body: JSON.stringify({ assignedUserId: /^\d+$/.test(assignee) ? Number(assignee) : assignee }) }); } catch { /* the lead is in FUB either way */ }
+    }
+    return { ok: true, personId: String(personId) };
+  } catch {
+    return { ok: false, error: "FUB delivery failed" };
+  }
+}

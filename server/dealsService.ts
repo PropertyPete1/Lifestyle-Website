@@ -910,7 +910,7 @@ const PUBLIC_HOMES_CACHE_MS = 120_000;
 /** Landing key to community id for the live communities, read at most once a minute (one read at a time). */
 let landingKeys: { at: number; byKey: Map<string, number> } | null = null;
 let landingKeysRead: Promise<Map<string, number>> | null = null;
-async function landingCommunityId(key: string): Promise<number | null> {
+export async function landingCommunityId(key: string): Promise<number | null> {
   if (!landingKeys || Date.now() - landingKeys.at > 60_000) {
     landingKeysRead ??= (async () => {
       const db = await getDb();

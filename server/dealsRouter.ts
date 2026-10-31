@@ -46,6 +46,7 @@ import { createPublicPageCache } from "./publicPageCache";
 import { agentDisplayPhone, agentWorkspace, attachLiveSessionToClientLink, clientLinkTokenForLead, connectOfferFor, createClientLink, presentClientLink, recordClientLinkOpen, removeClientLink, resolveClientLink, restoreClientLink, revokeClientLink } from "./dealsClientLinks";
 import { AGENT_CLIENT_SOURCE, REALTOR_RECRUIT_PATH, adminTurnedOffLeadIds, browserIsAdminPaused, browserIsRealtorBlocked, dealsCardHandle, isTeamPhone, pausedAccessMessage, staleSessionLeadId, turnOffBuyerAccess, turnOnBuyerAccess } from "./dealsService";
 import { catalogWithSnapshot } from "./dealsCatalogSnapshot";
+import { detailsRequestInput } from "./dealsDetailsRequest";
 /** What a realtor sees for the moment before the recruiting page opens. */
 /**
  * The landing's two public reads (every community, the featured row) are the same for every visitor: kept for three minutes
@@ -510,6 +511,12 @@ export const dealsRouter = router({
       ip: ctx.req.ip || ctx.req.socket.remoteAddress || "0.0.0.0",
     });
     return { ok: true as const };
+  }),
+  /** Oct 31, 2026 (Peter): "Get this home's details" — name, mobile, email, optional notes, straight to Follow Up Boss. */
+  requestDetails: publicProcedure.input(detailsRequestInput).mutation(async ({ input, ctx }) => {
+    dealsPublicHeaders(ctx.res);
+    const { submitDetailsRequest } = await import("./dealsDetailsRequest");
+    return submitDetailsRequest(input, ctx.req, ctx.res);
   }),
   changeNumber: publicProcedure.mutation(async ({ ctx }) => { await removePending(ctx.req, ctx.res); return { ok: true as const }; }),
   mine: publicProcedure.query(async ({ ctx }) => {

@@ -10,6 +10,7 @@ import { startLogin } from "@/const";
 import { MINE_COPY, isUnauthorizedDealsError, parseMineCommunities, profileErrorCopy } from "@/lib/dealsMine";
 import { TRANSIENT_GATE_PARAMS, agentRecruitRedirect, clientLinkTokenInUrl, forgetClientLinkToken, keepClientLinkToken, readGateParams, rememberClientLinkToken } from "@/lib/dealsGate";
 import { GateSheet } from "@/components/deals/GateSheet";
+import { DetailsRequestSheet, type DetailsContext } from "@/components/deals/DetailsRequestSheet";
 import { GatedCatalog, HOME_LIST_COPY, ListSkeleton, pickedHomes, picksAsText, type GatedCommunity, type HomeRequest, type PickControl } from "@/components/deals/GatedCatalog";
 import { PublicDealsPage } from "@/components/deals/PublicDealsPage";
 import { keepSharedFilters, takeSharedFilters } from "@/lib/dealsListShare";
@@ -102,10 +103,15 @@ function Landing() {
   const paused = Boolean(state.data && "paused" in state.data && state.data.paused);
   useEffect(() => { if (paused) setGateOpen(true); }, [paused]);
   const eyebrow = shared ? `Shared by ${shared.agentName}` : agentPage ? `${agentPage.agentName}'s new home search` : null;
+  // Oct 31, 2026 (Peter): "Get this home's details" asks for name, mobile, email and notes and goes straight to Follow Up
+  // Boss; an agent's client link (which opens a private list) still verifies the number. undefined = closed.
+  const [details, setDetails] = useState<DetailsContext | null | undefined>(undefined);
+  const askForDetails = (home?: DetailsContext) => { if (shared || askToConnect) setGateOpen(true); else setDetails(home ?? null); };
   const intro = shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : agentPage ? `Hand-picked by ${agentPage.agentName} at Lifestyle Design Realty.` : undefined;
   // Oct 30, 2026 (design F): the page itself is presentational (PublicDealsPage); this keeps the session, links and gate.
   return <>
-    <PublicDealsPage loading={catalog.isLoading} communities={catalog.data ?? []} useHomes={useLandingHomes} featured={featured.data as FeaturedDealsData | undefined} comingSoon={comingSoon.data} eyebrow={eyebrow} intro={intro} openKey={sharedKey} onTour={() => setGateOpen(true)} />
+    <PublicDealsPage loading={catalog.isLoading} communities={catalog.data ?? []} useHomes={useLandingHomes} featured={featured.data as FeaturedDealsData | undefined} comingSoon={comingSoon.data} eyebrow={eyebrow} intro={intro} openKey={sharedKey} onTour={askForDetails} />
+    {details !== undefined && <DetailsRequestSheet context={details} agentSlug={agentPageSlug} onClose={() => setDetails(undefined)} />}
     {askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} teamSignIn={teamSignIn} onSiteLogin={() => startLogin({ returnTo: "/deals/team" })} onClose={() => setGateOpen(false)} />}
   </>;
 }

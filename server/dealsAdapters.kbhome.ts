@@ -1,7 +1,7 @@
 import {
   KBHOME_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
-  storiesFrom, primaryDownFrom,
+  storiesFrom,
 } from "./dealsAdapters";
 import { jsonLdRecords } from "./dealsAdapters.homefiniti";
 
@@ -29,16 +29,6 @@ export const KBHOME_MAX_HOMES = 150;
 
 type Json = Record<string, unknown>;
 const obj = (value: unknown): Json | null => value && typeof value === "object" && !Array.isArray(value) ? value as Json : null;
-
-/** Oct 31, 2026: KB's description is rich text, `{ fragments: [{ internalFormat: "<p>…</p>" }] }` (or a plain string). */
-export function kbDescription(value: unknown): string | null {
-  if (typeof value === "string") return value;
-  const fragments = value && typeof value === "object" ? (value as { fragments?: unknown }).fragments : null;
-  if (!Array.isArray(fragments)) return null;
-  const parts = fragments.map((fragment) => fragment && typeof fragment === "object" ? (fragment as { internalFormat?: unknown }).internalFormat : null).filter((part): part is string => typeof part === "string");
-  return parts.length ? parts.join(" ") : null;
-}
-
 const str = (value: unknown): string | null => typeof value === "string" && value.trim() ? decodeHtmlEntities(value).replace(/\s+/g, " ").trim() : null;
 const num = (value: unknown): number | null => {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -222,7 +212,6 @@ export function parseKbCommunity(html: string, pageUrl: string, now: Date = new 
       squareFeet: num(plan.size),
       garage: num(plan.garagesMin),
       stories: storiesFrom(plan.stories),
-      primaryDown: primaryDownFrom(kbDescription(plan.description)),
       readyNow: false,
       gallery: gallery(plan.thumbnailImage, host, true),
     });
@@ -254,7 +243,6 @@ export function parseKbCommunity(html: string, pageUrl: string, now: Date = new 
       squareFeet: num(home.size),
       garage: num(home.garages),
       stories: storiesFrom(home.stories),
-      primaryDown: primaryDownFrom(kbDescription(home.description)),
       homesite: lot ? `Lot ${lot.replace(/^0+(?=\d)/, "")}` : null,
       readyNow: status.readyNow,
       moveInDate: status.moveInDate,

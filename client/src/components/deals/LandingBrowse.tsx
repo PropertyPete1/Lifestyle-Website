@@ -743,7 +743,7 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
 }
 
 /** A home on the landing page: the same facts as the private list, with no address, plan, builder or community name. */
-export type PublicHome = { card: string; kind: string; beds?: string | number | null; baths?: string | number | null; sqft?: number | null; garage?: string | null; stories?: number | null; primaryDown?: boolean | null; price?: number | null; previousPrice?: number | null; moveInDate?: string | null; lotSize?: string | null; photos?: string[]; isNew?: boolean };
+export type PublicHome = { card: string; kind: string; beds?: string | number | null; baths?: string | number | null; sqft?: number | null; garage?: string | null; stories?: number | null; price?: number | null; previousPrice?: number | null; moveInDate?: string | null; lotSize?: string | null; photos?: string[]; isNew?: boolean };
 
 export function PublicHomeCard({ home, onAddress, featured = false }: { home: PublicHome; onAddress: () => void; featured?: boolean }) {
   return <article data-deals-public-home="true" data-deals-featured-home={featured ? "true" : undefined} className={`relative min-w-0 overflow-hidden rounded-xl border bg-card shadow-sm ${featured ? "border-gold ring-2 ring-gold/60" : "border-border"}`}>

@@ -1,7 +1,7 @@
 import {
   WEEKLEY_HOST, asUrl, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, htmlToText, makePublicSnapshot, parsePromotionalRate, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
-  storiesFrom, primaryDownFrom,
+  storiesFrom,
 } from "./dealsAdapters";
 
 /**
@@ -41,15 +41,6 @@ import {
  * - plan:      /new-homes/tx/san-antonio/<city>/<slug>/<plan>
  */
 /** A community with more homes for sale than this is held, never truncated. */
-
-/**
- * Oct 31, 2026: Weekley's MasterBedroomUpstairs flag. Only "upstairs" (true) is taken: every two-story plan on the saved
- * pages says false, so false is not proof the owner's retreat is down (a single-story plan counts as down anyway).
- */
-export function weekleyPrimaryDown(row: Record<string, unknown>): boolean | null {
-  return primaryDownFrom(row.MasterBedroomUpstairsOverride ?? row.MasterBedroomUpstairs) === true ? false : null;
-}
-
 export const WEEKLEY_MAX_HOMES = 150;
 /** A neighborhood listing more series than this is held, never read in part. */
 export const WEEKLEY_MAX_SERIES = 6;
@@ -225,7 +216,6 @@ export function parseWeekleyCommunity(html: string, pageUrl: string, now: Date =
       squareFeet: minimum(plan.SquareFootage),
       garage: minimum(plan.Garages),
       stories: storiesFrom(minimum(plan.Stories)),
-      primaryDown: weekleyPrimaryDown(plan),
       readyNow: false,
       gallery: gallery(host, "Representative image", ...arr(plan.Elevations).map((elevation) => obj(elevation)?.Renderings), plan.ExteriorPhotos),
     });
@@ -266,7 +256,6 @@ export function parseWeekleyCommunity(html: string, pageUrl: string, now: Date =
       squareFeet: num(home.SquareFootage),
       garage: num(home.Garages),
       stories: storiesFrom(minimum(home.Stories)),
-      primaryDown: weekleyPrimaryDown(home),
       homesite: str(home.JobNumber) ? `Job ${str(home.JobNumber)}` : null,
       readyNow: status.readyNow,
       moveInDate: status.moveInDate,

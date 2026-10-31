@@ -156,20 +156,6 @@ describe("official refresh: homes", () => {
     expect(stories()).toEqual({ [home("8301-a")]: 2, [home("8305-b")]: 1, [plan("fixture-a")]: 2 });
   });
 
-  it("Oct 31, 2026: stores where the primary bedroom is, keeps a known answer through a read without one, and a home takes its plan's floors and primary when it lists neither", async () => {
-    mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({
-      homes: [{ sourceUrl: home("8301-a"), privatePlanName: "Brandon" }, { sourceUrl: home("8305-b"), privatePlanName: "Evan", primaryDown: false }],
-      plans: [{ sourceUrl: plan("brandon"), privatePlanName: "Brandon", stories: 2, primaryDown: true }, { sourceUrl: plan("evan"), privatePlanName: "Evan", stories: 2, primaryDown: true }],
-    }));
-    await refreshOfficialDeals({ communityId, now: T0 });
-    const layout = () => Object.fromEntries(db.rows(dealHomes).map((row) => [row.sourceUrl, [row.stories ?? null, row.primaryDown ?? null]]));
-    // The Brandon home lists neither: its plan's two stories and downstairs primary. The Evan home says upstairs itself.
-    expect(layout()).toEqual({ [home("8301-a")]: [2, true], [home("8305-b")]: [2, false], [plan("brandon")]: [2, true], [plan("evan")]: [2, true] });
-    mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }, { sourceUrl: home("8305-b") }], plans: [{ sourceUrl: plan("brandon") }, { sourceUrl: plan("evan") }] }));
-    await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 3 * DAY) });
-    expect(layout()).toEqual({ [home("8301-a")]: [2, true], [home("8305-b")]: [2, false], [plan("brandon")]: [2, true], [plan("evan")]: [2, true] });
-  });
-
   it("fills the district from the ZIP code when the builder's page names none, and never stores page residue", async () => {
     mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }], facts: { fromPrice: 300_000, schoolDistrict: "Information Schools Schools", lotSizes: null, amenities: [] } }));
     await refreshOfficialDeals({ communityId, now: T0 });

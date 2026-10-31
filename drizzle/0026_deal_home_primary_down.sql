@@ -1,1 +1,0 @@
-ALTER TABLE `deal_homes` ADD `primary_down` boolean;

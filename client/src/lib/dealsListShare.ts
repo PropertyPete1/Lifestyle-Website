@@ -13,7 +13,7 @@ const SHARED_FILTERS_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 
 type Shareable = Omit<BrowseFilters, "savedOnly">;
 const NUMBER_KEYS = ["minPrice", "maxPrice", "minBeds", "minBaths", "minSqft", "maxSqft", "availableBy", "minGarage"] as const;
-const FLAG_KEYS = ["moveInReady", "toBeBuilt", "builderRate", "bigLots", "redHot", "newOnly", "primaryDown"] as const;
+const FLAG_KEYS = ["moveInReady", "toBeBuilt", "builderRate", "bigLots", "redHot", "newOnly"] as const;
 const TEXT_KEYS = ["area", "builder", "schoolDistrict"] as const;
 const SORTS: readonly BrowseSort[] = ["recommended", "price_asc", "price_desc", "newest", "largest"];
 
@@ -82,7 +82,6 @@ export function sharedFiltersSummary(filters: BrowseFilters): string {
   if (filters.minSqft !== null) parts.push(`${filters.minSqft.toLocaleString("en-US")}+ sq ft`);
   if (filters.stories === 1) parts.push("one story");
   if (filters.stories === 2) parts.push("two story");
-  if (filters.primaryDown) parts.push("primary bedroom downstairs");
   if (filters.minGarage !== null) parts.push(`${filters.minGarage}+ car garage`);
   if (filters.moveInReady && !filters.toBeBuilt) parts.push("move-in ready");
   if (filters.toBeBuilt && !filters.moveInReady) parts.push("to be built");

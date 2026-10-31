@@ -1,7 +1,6 @@
 import {
   LENNAR_HOST, asUrl, comparablePath, decodeHtmlEntities, emptyPrivate, failedResult, fetchFailureHold, getDocument, looksLikeStreetAddress, makePublicSnapshot, parseCommunityFacts, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
-  primaryDownFrom,
 } from "./dealsAdapters";
 
 /**
@@ -181,26 +180,6 @@ export function lennarHomesAvailable(html: string): number | null {
   return match[1] ? Number(match[1]) : 0;
 }
 
-/**
- * Oct 31, 2026 (the "primary bedroom downstairs" filter): a plan's floors from its floor-plan drawings ("... First Floor",
- * "... Second Floor"; none named: unknown) and its owner's suite's floor from the suite's own write-up in the walkthrough ("On the second
- * floor, the owner's suite is a restful retreat").
- */
-export function lennarPlanLayout(cache: Cache, plan: Json | null): { stories: number | null; primaryDown: boolean | null } {
-  if (!plan) return { stories: null, primaryDown: null };
-  const drawings = arr(resolveLennarRef(cache, plan.floorplans)).map((floor) => {
-    const image = obj(resolveLennarRef(cache, obj(resolveLennarRef(cache, obj(floor)?.default))?.image));
-    return `${str(image?.alt) ?? ""} ${str(image?.url) ?? ""}`;
-  }).join(" ");
-  const levels = new Set(Array.from(drawings.matchAll(/\b(first|second|third)[\s_-]*floor/gi), (match) => match[1]!.toLowerCase()));
-  const stories = levels.has("third") ? 3 : levels.has("second") ? 2 : levels.has("first") ? 1 : null;
-  // The rooms sit in the plan's walkthrough (`walkthrough.allRooms`), each with its own write-up.
-  const rooms = plan.allRooms ?? obj(resolveLennarRef(cache, plan.walkthrough))?.allRooms;
-  const suite = arr(resolveLennarRef(cache, rooms)).map((room) => obj(resolveLennarRef(cache, room))).find((room) => /^(?:owner|primary|master)/i.test(str(room?.name) ?? ""));
-  const desc = suite ? str(obj(obj(resolveLennarRef(cache, suite.content))?.hero)?.desc) : null;
-  return { stories, primaryDown: primaryDownFrom(desc) };
-}
-
 /** A homesite row as a home for sale: its street, status, price (and the previous one of a cut), figures, lot, pin and elevation photo. */
 function homeOf(cache: Cache, home: Json, link: URL, city: string | null, zip: string | null, planName: string | null): PrivatePlanOrHome {
   // A short tag after the street is Lennar's label, not part of the address: "20902 Blackberry Grove (WHC)" is the
@@ -225,7 +204,6 @@ function homeOf(cache: Cache, home: Json, link: URL, city: string | null, zip: s
     bedrooms: positive(home.beds),
     bathrooms: bathsOf(home),
     squareFeet: positive(home.sqft),
-    ...lennarPlanLayout(cache, obj(resolveLennarRef(cache, home.plan))),
     homesite: homesite && /^\d+$/.test(homesite) ? `Lot ${homesite}` : null,
     readyNow: status.readyNow,
     moveInDate: status.moveInDate,
@@ -324,7 +302,6 @@ export function parseLennarCommunity(html: string, pageUrl: string): LennarPage 
               bedrooms: positive(plan.beds),
               bathrooms: bathsOf(plan),
               squareFeet,
-              ...lennarPlanLayout(cache, plan),
               readyNow: false,
               gallery: gallery(cache, [elevationKey ? plan[elevationKey] : null, plan.heroImage]),
             });

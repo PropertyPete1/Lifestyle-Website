@@ -627,6 +627,18 @@ export const dealsRouter = router({
       const { nationalDigits, parsePicks } = await import("./dealsClientLinks");
       return { ok: true as const, id: result.link.id, path: result.path, expiresAt: result.link.expiresAt.toISOString(), clientName: result.link.clientName, clientPhoneDigits: nationalDigits(result.link.clientPhoneE164), pickCount: parsePicks(result.link.picks).length };
     }),
+    /** Oct 31, 2026 (Peter: the designed email for a client's list): the agent's signature card for it. */
+    clientEmail: publicProcedure.query(async ({ ctx }) => {
+      dealsPublicHeaders(ctx.res);
+      const session = await isLiveDealSession(ctx.req);
+      if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
+      if (session.lead.status !== "team") throw new TRPCError({ code: "FORBIDDEN" });
+      const { agentForLead } = await import("./dealsClientLinks");
+      const agent = await agentForLead(session.lead);
+      if (!agent) throw new TRPCError({ code: "FORBIDDEN", message: "Your number is not on the team list yet." });
+      const { clientEmailAgent } = await import("./dealsClientEmailData");
+      return { agent: await clientEmailAgent(agent) };
+    }),
     /** Oct 26, 2026: the agent's picks go onto one of their links (an empty list takes them off). */
     setClientLinkPicks: publicProcedure.input(z.object({ id: z.number().int().positive(), picks: z.array(z.string().regex(/^[a-f0-9]{20}$/)).max(30) })).mutation(async ({ input, ctx }) => {
       dealsPublicHeaders(ctx.res);

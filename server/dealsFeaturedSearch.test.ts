@@ -53,7 +53,7 @@ describe("featured row and the buyer's search", () => {
 
   it("shows only the saved homes' communities on the map in the saved view (Oct 30)", () => {
     const src = readFileSync(join(__dirname, "../client/src/components/deals/PublicDealsPage.tsx"), "utf-8");
-    expect(src).toContain("const mapCommunities = useMemo(() => { if (!savedOnly) return matching;");
+    expect(src).toContain("const mapCommunities = useMemo(() => { if (!savedOnly && paymentCap === null) return matching;");
     expect(src).toContain("communities={mapCommunities} filters={filters}");
   });
 });

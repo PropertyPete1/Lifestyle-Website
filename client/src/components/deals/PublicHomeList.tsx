@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { firstLookFirst, type PaymentAssumptions } from "@shared/dealsFeatured";
+import { firstLookFirst, homePaymentEstimate, type PaymentAssumptions } from "@shared/dealsFeatured";
 import { HOME_PAGE, type GatedHome } from "./GatedCatalog";
 import { BUYER_CARD_COPY, BuyerHomeCard } from "./BuyerHomeCard";
 import { AutoMore, type BrowseListContext, type LandingCommunity, type UseCommunityHomes } from "./LandingBrowse";
@@ -24,6 +24,25 @@ export function publicHomeEntries(communities: readonly WithFacts[], filters: Br
   })).filter((entry) => entry.key && (!narrow || homePasses(entry.home, { ...filters, bigLots: false })));
   // Oct 30, 2026 (Peter): "Recommended" opens on the $300K-$400K homes (FIRST_LOOK_PRICE), then the rest in the same order.
   return filters.sort === "recommended" ? firstLookFirst(entries, (entry) => entry.home.price) : sortHomes(entries.map((entry) => ({ ...entry.home, entry })), filters.sort).map((item) => item.entry);
+}
+
+/** A home's estimated monthly payment at its community's builder rate, as its card shows it; null when it has none. */
+export function entryPayment(entry: Pick<PublicHomeEntry, "community" | "home">, assumptions: PaymentAssumptions | null | undefined): number | null {
+  return homePaymentEstimate(entry.home.price, entry.community.incentive ?? null, assumptions)?.parts.total ?? null;
+}
+
+/**
+ * Oct 30, 2026 (ChatGPT's New Home Buddy comparison: shop by payment, which only we can offer): "Max monthly payment"
+ * keeps the homes whose card payment is at or under it (a home with no builder-rate payment can't be shown to fit), and
+ * "Lowest payment" orders by it, homes without one last, ties in the current order.
+ */
+export function byPayment(entries: readonly PublicHomeEntry[], filters: Pick<BrowseFilters, "maxPayment" | "sort">, assumptions: PaymentAssumptions | null | undefined): PublicHomeEntry[] {
+  const cap = filters.maxPayment ?? null;
+  if (cap === null && filters.sort !== "payment_asc") return [...entries];
+  const priced = entries.map((entry, index) => ({ entry, index, payment: entryPayment(entry, assumptions) }));
+  const kept = cap === null ? priced : priced.filter((item) => item.payment !== null && item.payment <= cap);
+  if (filters.sort === "payment_asc") kept.sort((a, b) => a.payment === null && b.payment === null ? a.index - b.index : a.payment === null ? 1 : b.payment === null ? -1 : a.payment - b.payment || a.index - b.index);
+  return kept.map((item) => item.entry);
 }
 
 /** A visitor's saved home, by its public figures (the list's card handles are per page load). Nothing private. */

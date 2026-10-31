@@ -3,14 +3,14 @@ import { Link } from "wouter";
 import { Heart, Menu, SlidersHorizontal, X } from "lucide-react";
 import type { PaymentAssumptions } from "@shared/dealsFeatured";
 import { SITE } from "@shared/site";
-import { BROWSE_SORTS, EMPTY_FILTERS, activeFilterCount, homePasses, landingMatches, newThisWeekKnown, sortLandingCommunities, storiesKnown, type BrowseFilters, type LandingHomeFacts } from "@/lib/dealsBrowse";
+import { BROWSE_SORTS, EMPTY_FILTERS, PAYMENT_SORT, activeFilterCount, homePasses, landingMatches, newThisWeekKnown, sortLandingCommunities, storiesKnown, type BrowseFilters, type LandingHomeFacts } from "@/lib/dealsBrowse";
 import { BrowseBar, BROWSE_COPY } from "./BrowseBar";
 import { BUYER_CARD_COPY, BuyerHomeCard, LockedDetails } from "./BuyerHomeCard";
 import { ComingSoonSection, type ComingSoonItem } from "./ComingSoon";
 import { FeaturedStrip, featuredForSearch, type FeaturedDealsData } from "./FeaturedDeals";
 import { HOME_LIST_COPY, ProtectedGallery } from "./GatedCatalog";
 import { LandingBrowse, type LandingCommunity, type UseCommunityHomes } from "./LandingBrowse";
-import { PublicHomeList, publicHomeEntries, publicSaveId, type PublicHomeEntry } from "./PublicHomeList";
+import { PublicHomeList, byPayment, publicHomeEntries, publicSaveId, type PublicHomeEntry } from "./PublicHomeList";
 import { DealsFooter, formatChicagoDate } from "./shared";
 
 /**
@@ -140,27 +140,29 @@ export function PublicDealsPage({ communities: all, useHomes, featured, comingSo
   const matching = useMemo(() => sortLandingCommunities(all.filter((community) => landingMatches(community as never, filters)) as never[], filters.sort) as unknown as PublicDealsCommunity[], [all, filters]);
   const { saved, toggle: toggleSave } = useLocalSaves();
   const savedOnly = filters.savedOnly && saved.size > 0;
-  const homeEntries = useMemo(() => { const entries = publicHomeEntries(matching as never, filters); return savedOnly ? entries.filter((entry) => saved.has(publicSaveId(entry))) : entries; }, [matching, filters, savedOnly, saved]);
+  const assumptions: PaymentAssumptions | null = useMemo(() => featured?.assumptions ? { defaultDownPercent: featured.assumptions.defaultDownPercent, termYears: featured.assumptions.termYears, costs: featured.assumptions.costs } : null, [featured]);
+  const homeEntries = useMemo(() => { const entries = publicHomeEntries(matching as never, filters); return byPayment(savedOnly ? entries.filter((entry) => saved.has(publicSaveId(entry))) : entries, filters, assumptions); }, [matching, filters, savedOnly, saved, assumptions]);
+  const paymentCap = filters.maxPayment ?? null;
   // Oct 30, 2026 (ChatGPT: "2 saved shows two cards, while the map keeps the wider inventory"): showing saved homes, the
   // map shows only their communities too.
-  const mapCommunities = useMemo(() => { if (!savedOnly) return matching; const keys = new Set(homeEntries.map((entry) => entry.key)); return matching.filter((community) => community.key && keys.has(community.key)); }, [matching, savedOnly, homeEntries]);
+  const mapCommunities = useMemo(() => { if (!savedOnly && paymentCap === null) return matching; const keys = new Set(homeEntries.map((entry) => entry.key)); return matching.filter((community) => community.key && keys.has(community.key)); }, [matching, savedOnly, paymentCap, homeEntries]);
   const shownHomes = areaKeys ? homeEntries.filter((entry) => areaKeys.has(entry.key)).length : homeEntries.length;
   const shownCommunities = areaKeys ? areaKeys.size : matching.length;
   const totalHomes = all.reduce((sum, community) => sum + (community.homeFacts?.length ?? 0), 0);
   const active = activeFilterCount(filters);
   const updatedAt = all.map((community) => community.updatedAt).filter((value): value is string => Boolean(value)).sort().at(-1);
-  const assumptions: PaymentAssumptions | null = featured?.assumptions ? { defaultDownPercent: featured.assumptions.defaultDownPercent, termYears: featured.assumptions.termYears, costs: featured.assumptions.costs } : null;
   const unit = listView === "homes" ? "homes" : "communities";
   // The featured row follows the search: a deal fits when its community is in the results (and in the map area, when one
   // is chosen) and the home itself passes the filters.
   const strip = useMemo(() => {
     if (!featured) return null;
     const inResults = new Set(matching.map((community) => community.key).filter((key): key is string => Boolean(key)));
-    const fits = (deal: { landingKey?: string; price: number; previousPrice?: number | null; beds?: string | number | null; sqft?: number | null; kind: string; acres: number | null }) =>
+    const fits = (deal: { landingKey?: string; price: number; previousPrice?: number | null; beds?: string | number | null; sqft?: number | null; kind: string; acres: number | null; estMonthly: number }) =>
       Boolean(deal.landingKey && inResults.has(deal.landingKey) && (!areaKeys || areaKeys.has(deal.landingKey)))
-      && homePasses({ kind: deal.kind, price: deal.price, previousPrice: deal.previousPrice ?? null, beds: deal.beds ?? null, sqft: deal.sqft ?? null }, filters, deal.acres);
+      && homePasses({ kind: deal.kind, price: deal.price, previousPrice: deal.previousPrice ?? null, beds: deal.beds ?? null, sqft: deal.sqft ?? null }, filters, deal.acres)
+      && (paymentCap === null || deal.estMonthly <= paymentCap);
     return featuredForSearch(featured, active > 0 || areaKeys !== null, fits);
-  }, [featured, matching, areaKeys, filters, active]);
+  }, [featured, matching, areaKeys, filters, active, paymentCap]);
   const resultCount = listView === "homes" ? shownHomes : shownCommunities;
   const segment = (on: boolean) => `min-h-11 rounded-full px-6 text-base transition-colors ${on ? "bg-gold font-semibold text-primary-foreground shadow-sm" : "text-foreground hover:text-gold"}`;
   return <main className="deals-light min-h-screen max-w-full overflow-x-clip bg-background [overflow-anchor:none]" data-deals-public-page="true">
@@ -207,11 +209,11 @@ export function PublicDealsPage({ communities: all, useHomes, featured, comingSo
           </select>
         </label>
         <label className="min-w-0 text-[11px] uppercase tracking-widest text-muted-foreground" data-deals-sort="true">{PUBLIC_PAGE_COPY.sort}
-          <select aria-label={PUBLIC_PAGE_COPY.sort} value={filters.sort} onChange={(event) => setFilters((current) => ({ ...current, sort: event.target.value as BrowseFilters["sort"] }))} className="mt-1 min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm normal-case tracking-normal text-foreground">{BROWSE_SORTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+          <select aria-label={PUBLIC_PAGE_COPY.sort} value={filters.sort} onChange={(event) => setFilters((current) => ({ ...current, sort: event.target.value as BrowseFilters["sort"] }))} className="mt-1 min-h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm normal-case tracking-normal text-foreground">{(assumptions ? [...BROWSE_SORTS, PAYMENT_SORT] : BROWSE_SORTS).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
         </label>
       </div>
       <div className="mt-4 border-t border-border pt-4">
-        <BrowseBar sheet filters={filters} onChange={setFilters} areas={all} shown={homeEntries.length} total={totalHomes} unit="homes" savedCount={saved.size} showStories={storiesKnown(all)} showNew={newThisWeekKnown(all)} />
+        <BrowseBar sheet payments={Boolean(assumptions)} filters={filters} onChange={setFilters} areas={all} shown={homeEntries.length} total={totalHomes} unit="homes" savedCount={saved.size} showStories={storiesKnown(all)} showNew={newThisWeekKnown(all)} />
       </div>
     </FiltersSheet>
   </main>;

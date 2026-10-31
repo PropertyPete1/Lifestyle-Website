@@ -39,9 +39,15 @@ export type BrowseFilters = {
   schoolDistrict: string;
   /** Oct 26, 2026: the order of the cards and homes; not a filter (never counted, "Clear filters" resets it too). */
   sort: BrowseSort;
+  /**
+   * Oct 30, 2026 (ChatGPT's New Home Buddy comparison: shop by monthly payment, which only we can offer): the highest
+   * estimated monthly payment at the builder's rate. The public page applies it (it knows the payment assumptions);
+   * homes with no builder-rate payment never match it.
+   */
+  maxPayment?: number | null;
 };
 
-export type BrowseSort = "recommended" | "price_asc" | "price_desc" | "newest" | "largest";
+export type BrowseSort = "recommended" | "price_asc" | "price_desc" | "newest" | "largest" | "payment_asc";
 export const BROWSE_SORTS: ReadonlyArray<{ value: BrowseSort; label: string }> = [
   { value: "recommended", label: "Recommended" },
   { value: "price_asc", label: "Price: low to high" },
@@ -49,8 +55,11 @@ export const BROWSE_SORTS: ReadonlyArray<{ value: BrowseSort; label: string }> =
   { value: "newest", label: "Newest first" },
   { value: "largest", label: "Largest first" },
 ];
+/** Oct 30, 2026: offered where the page can figure payments (the public page); homes without one go last. */
+export const PAYMENT_SORT: { value: BrowseSort; label: string } = { value: "payment_asc", label: "Lowest payment" };
+export const PAYMENT_CAPS = [1_500, 2_000, 2_500, 3_000, 3_500] as const;
 
-export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, maxSqft: null, availableBy: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, newOnly: false, savedOnly: false, builder: "", schoolDistrict: "", sort: "recommended" };
+export const EMPTY_FILTERS: BrowseFilters = { area: "", minPrice: null, maxPrice: null, minBeds: null, minBaths: null, minSqft: null, maxSqft: null, availableBy: null, minGarage: null, stories: null, moveInReady: false, toBeBuilt: false, builderRate: false, bigLots: false, redHot: false, newOnly: false, savedOnly: false, builder: "", schoolDistrict: "", sort: "recommended", maxPayment: null };
 export const PRICE_CAPS = [200_000, 300_000, 400_000, 500_000, 600_000, 750_000, 1_000_000] as const;
 export const PRICE_FLOORS = [200_000, 250_000, 300_000, 350_000, 400_000, 500_000, 600_000, 750_000] as const;
 export const BED_MINIMUMS = [2, 3, 4, 5] as const;
@@ -74,7 +83,7 @@ export function moreFilterCount(filters: BrowseFilters): number {
 }
 
 export function activeFilterCount(filters: BrowseFilters): number {
-  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.newOnly, filters.savedOnly, filters.builder, filters.schoolDistrict].filter(filterOn).length;
+  return [filters.area, filters.minPrice, filters.maxPrice, filters.minBeds, filters.minBaths, filters.minSqft, filters.maxSqft, filters.availableBy, filters.minGarage, filters.stories, filters.moveInReady, filters.toBeBuilt, filters.builderRate, filters.bigLots, filters.redHot, filters.newOnly, filters.savedOnly, filters.builder, filters.schoolDistrict, filters.maxPayment ?? null].filter(filterOn).length;
 }
 
 /** Areas present in the list, most communities first, for the area picker. */
@@ -254,7 +263,8 @@ export function landingMatches(community: LandingBrowseCommunity, filters: Brows
 const price = (value: number | null | undefined) => typeof value === "number" && value > 0 ? value : null;
 /** A stable sort: ties keep the recommended order. Missing figures sort last whichever way. */
 function orderBy<T>(items: readonly T[], sort: BrowseSort, keyOf: (item: T) => number | null): T[] {
-  if (sort === "recommended") return [...items];
+  // "Lowest payment" is ordered by the public page, which knows the payments; elsewhere it keeps the recommended order.
+  if (sort === "recommended" || sort === "payment_asc") return [...items];
   const direction = sort === "price_asc" ? 1 : -1;
   return items.map((item, index) => ({ item, index, key: keyOf(item) })).sort((a, b) => {
     if (a.key === null && b.key === null) return a.index - b.index;

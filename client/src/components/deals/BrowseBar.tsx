@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ArrowDownUp, SlidersHorizontal, X, Flame, ChevronDown, Sparkles } from "lucide-react";
-import { AVAILABLE_BY, BATH_MINIMUMS, BED_MINIMUMS, BROWSE_PAGE, BROWSE_SORTS, EMPTY_FILTERS, GARAGE_MINIMUMS, PRICE_CAPS, PRICE_FLOORS, SQFT_MAXIMUMS, SQFT_MINIMUMS, activeFilterCount, areaGroups, districtChoices, MARKET_AREA_PREFIX, moreFilterCount, priceCapLabel, type BrowseFilters } from "@/lib/dealsBrowse";
+import { AVAILABLE_BY, BATH_MINIMUMS, BED_MINIMUMS, BROWSE_PAGE, BROWSE_SORTS, EMPTY_FILTERS, GARAGE_MINIMUMS, PAYMENT_CAPS, PRICE_CAPS, PRICE_FLOORS, SQFT_MAXIMUMS, SQFT_MINIMUMS, activeFilterCount, areaGroups, districtChoices, MARKET_AREA_PREFIX, moreFilterCount, priceCapLabel, type BrowseFilters } from "@/lib/dealsBrowse";
 
 export const BROWSE_COPY = {
   heading: "Find your community",
@@ -12,6 +12,8 @@ export const BROWSE_COPY = {
   noMin: "No min",
   price: "Max price",
   anyPrice: "No max",
+  maxPayment: "Max monthly payment",
+  anyPayment: "Any payment",
   beds: "Bedrooms",
   anyBeds: "Any",
   baths: "Bathrooms",
@@ -76,7 +78,7 @@ function CompactNumber({ label, value, options, format, onChange, wide = false }
  * baths, size, garage, stories and home type under "More filters". The landing page filters on each community's
  * public home figures; the private list filters the homes themselves.
  */
-export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedCount = 0, showStories = true, builders = [], showNew = false, compact = false, sheet = false }: {
+export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedCount = 0, showStories = true, builders = [], showNew = false, compact = false, sheet = false, payments = false }: {
   filters: BrowseFilters;
   onChange: (filters: BrowseFilters) => void;
   areas: ReadonlyArray<{ area: string; schoolDistrict?: string | null }>;
@@ -98,6 +100,8 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
   compact?: boolean;
   /** Oct 30, 2026 (design F): every filter at once, for the Filters sheet (the caller adds the sort and the "Show" button). */
   sheet?: boolean;
+  /** Oct 30, 2026: the page figures builder-rate payments, so the sheet offers "Max payment". */
+  payments?: boolean;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const groups = areaGroups(areas);
@@ -155,6 +159,7 @@ export function BrowseBar({ filters, onChange, areas, shown, total, unit, savedC
         </label>
         <NumberSelect label={BROWSE_COPY.minPrice} value={filters.minPrice} options={PRICE_FLOORS} any={BROWSE_COPY.noMin} format={(value) => `${priceCapLabel(value)}+`} onChange={setMin} />
         <NumberSelect label={BROWSE_COPY.price} value={filters.maxPrice} options={PRICE_CAPS} any={BROWSE_COPY.anyPrice} format={(value) => `Under ${priceCapLabel(value)}`} onChange={setMax} />
+        {payments && <div className="col-span-2" data-deals-payment-filter="true"><NumberSelect label={BROWSE_COPY.maxPayment} value={filters.maxPayment ?? null} options={PAYMENT_CAPS} any={BROWSE_COPY.anyPayment} format={(value) => `Under $${value.toLocaleString("en-US")}/mo`} onChange={(maxPayment) => set({ maxPayment })} /></div>}
         <NumberSelect label={BROWSE_COPY.beds} value={filters.minBeds} options={BED_MINIMUMS} any={BROWSE_COPY.anyBeds} format={(value) => `${value}+ beds`} onChange={(minBeds) => set({ minBeds })} />
         {builders.length > 0 && <label className={LABEL} data-deals-builder-filter="true">{BROWSE_COPY.builder}
           <select aria-label={BROWSE_COPY.builder} value={filters.builder} onChange={(event) => set({ builder: event.target.value })} className={`mt-1 ${SELECT}`}>

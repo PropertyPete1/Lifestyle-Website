@@ -185,7 +185,6 @@ function PickTray({ count, onSend, onClear, onCopy }: { count: number; onSend: (
 function Team() {
   const mine = trpc.deals.mine.useQuery(undefined, { retry: false });
   const workspace = trpc.deals.team.workspace.useQuery(undefined, { retry: false });
-  const utils = trpc.useUtils();
   const comingSoon = trpc.deals.comingSoon.useQuery();
   const [picked, setPicked] = useState<string[]>(() => readPicks());
   // Oct 28, 2026 (New Home Buddy's bulk send): the filters on the list and their home count, for a link with no picks.
@@ -235,7 +234,7 @@ function Team() {
     created={create.data ?? null} creating={create.isPending} createError={create.isError ? create.error.message : null}
     onCreate={(input) => create.mutate(input)} onRevoke={(id) => revoke.mutate({ id })} onRestore={(id) => restore.mutate({ id })} onRemove={(id) => remove.mutate({ id })} onCopy={(url) => { void copy(url); }} copiedUrl={copiedUrl}
     onText={(input) => text.mutateAsync(input)} texting={text.isPending}
-    picked={picked} onClearPicks={clearPicks} onSetPicks={(input) => setPicks.mutateAsync(input)} settingPicks={setPicks.isPending} defaultClientsOpen={false} listShare={listShare} loadEmail={() => utils.deals.team.clientEmail.fetch()} />;
+    picked={picked} onClearPicks={clearPicks} onSetPicks={(input) => setPicks.mutateAsync(input)} settingPicks={setPicks.isPending} defaultClientsOpen={false} listShare={listShare} />;
   // Agents send the list; their own view has no Save hearts (a heart there would belong to no client). Pick buttons stand in.
   return <>
     <GatedCatalog lead={mine.data.lead} communities={communities} featured={mine.data.featured as FeaturedDealsData} tools={tools} onExpire={() => { void mine.refetch(); }} comingSoon={comingSoon.data} pick={pick} onListChange={setListShare} />

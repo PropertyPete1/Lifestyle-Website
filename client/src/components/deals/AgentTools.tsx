@@ -8,8 +8,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { formatPhoneInput, money } from "./shared";
 import { encodeSharedFilters, sharedFiltersOn, sharedFiltersSummary } from "@/lib/dealsListShare";
 import type { BrowseFilters } from "@/lib/dealsBrowse";
-import { ClientEmailSheet, type ClientEmailRequest } from "./ClientEmailSheet";
-import type { ClientEmailData } from "@/lib/dealsClientEmailCopy";
 
 /** deals.team.workspace as the tools need it. The link path carries the token. */
 export type AgentClient = {
@@ -226,17 +224,9 @@ export type AgentToolsProps = {
   defaultClientsOpen?: boolean;
   /** Oct 28, 2026 (New Home Buddy's bulk send): the filters on screen and how many homes they show; with no picks, a new link opens on them. */
   listShare?: { filters: BrowseFilters; count: number } | null;
-  /**
-   * Oct 31, 2026 (Peter: the designed email for a client's list): the agent's signature card. With it, "Email it"
-   * opens the designed email (just the link to the private list) to copy into Gmail; without it, the plain draft.
-   */
-  loadEmail?: () => Promise<ClientEmailData>;
 };
 
-export function AgentTools({ workspace, loading, error, created, creating, createError, onCreate, onRevoke, onRestore, onRemove, onCopy, copiedUrl, origin, confirm, onText, texting, picked = [], onClearPicks, onSetPicks, settingPicks, defaultClientsOpen = true, listShare = null, loadEmail }: AgentToolsProps) {
-  // Oct 31, 2026: the designed email being prepared (who, which link, which homes).
-  const [emailing, setEmailing] = useState<ClientEmailRequest | null>(null);
-
+export function AgentTools({ workspace, loading, error, created, creating, createError, onCreate, onRevoke, onRestore, onRemove, onCopy, copiedUrl, origin, confirm, onText, texting, picked = [], onClearPicks, onSetPicks, settingPicks, defaultClientsOpen = true, listShare = null }: AgentToolsProps) {
   const [clientName, setClientName] = useState("");
   const [putNote, setPutNote] = useState<{ id: number; text: string } | null>(null);
   const putPicks = async (client: AgentClient) => {
@@ -323,9 +313,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
           {created.clientPhoneDigits
             ? <button type="button" data-deals-text-it="true" onClick={() => openText({ id: created.id, clientName: created.clientName ?? "", clientPhoneDigits: created.clientPhoneDigits }, createdMessage)} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground"><MessageSquareText className="h-4 w-4" /> Text it</button>
             : <a href={smsHref(createdMessage, null)} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground"><MessageSquareText className="h-4 w-4" /> Text it</a>}
-          {loadEmail
-            ? <button type="button" data-deals-email-it="true" onClick={() => setEmailing({ clientName: created.clientName ?? "", listUrl: createdUrl, picked: Boolean(created.pickCount), homeCount: created.pickCount || linkShare?.count || 0 })} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</button>
-            : <a href={gmailComposeHref({ clientName: created.clientName ?? "", agentName, url: createdUrl, pickCount: created.pickCount, listCount: linkShare?.count, listSummary: linkShare?.summary, agentEmail: workspace?.agent.email })} target="_blank" rel="noreferrer" data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>}
+          <a href={gmailComposeHref({ clientName: created.clientName ?? "", agentName, url: createdUrl, pickCount: created.pickCount, listCount: linkShare?.count, listSummary: linkShare?.summary, agentEmail: workspace?.agent.email })} target="_blank" rel="noreferrer" data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>
           <Button type="button" variant="outline" onClick={() => onCopy(createdUrl)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === createdUrl ? AGENT_COPY.copied : "Copy link"}</Button>
         </div>
       </div>}
@@ -361,9 +349,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
             {client.clientPhoneDigits
               ? <button type="button" data-deals-text-it="true" onClick={() => openText(client, clientMessage({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length }))} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> {client.lastTextedAt ? "Text it again" : "Text it"}</button>
               : <a href={smsHref(clientMessage({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length }), null)} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> Text it</a>}
-            {loadEmail
-              ? <button type="button" data-deals-email-it="true" onClick={() => setEmailing({ clientName: client.clientName, listUrl: url, picked: Boolean(client.picks?.length), homeCount: client.picks?.length ?? 0 })} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</button>
-              : <a href={gmailComposeHref({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length, agentEmail: workspace?.agent.email })} target="_blank" rel="noreferrer" data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>}
+            <a href={gmailComposeHref({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length, agentEmail: workspace?.agent.email })} target="_blank" rel="noreferrer" data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>
             <Button type="button" variant="outline" onClick={() => onCopy(url)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === url ? AGENT_COPY.copied : "Copy link"}</Button>
           </div>}
         </article>;
@@ -396,6 +382,5 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    {emailing && loadEmail && <ClientEmailSheet request={emailing} load={loadEmail} origin={origin ?? (typeof window === "undefined" ? "" : window.location.origin)} agentEmail={workspace?.agent.email} onClose={() => setEmailing(null)} />}
   </section>;
 }

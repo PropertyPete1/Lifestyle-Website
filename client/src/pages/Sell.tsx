@@ -4,7 +4,8 @@ import LeadForm from "@/components/LeadForm";
 import ListingCard from "@/components/ListingCard";
 import { trpc } from "@/lib/trpc";
 import { FEATURES } from "@shared/site";
-import { IMG } from "@/lib/assets";
+import LightHero from "@/components/LightHero";
+import { BRAND_IMG } from "@/lib/assets";
 
 const PROCESS = [
   { n: "01", title: "Strategic Pricing", body: "Data-driven pricing built from live comps and buyer demand across your submarket — positioned to create competition, not compromise." },
@@ -18,20 +19,14 @@ export default function Sell() {
 
   return (
     <PageShell>
-      <section className="dark relative min-h-[60svh] flex items-end text-foreground">
-        <div className="absolute inset-0">
-          <img src={IMG.listingCordillera} alt="Luxury Texas home" className="h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-black/65" />
-          <div className="absolute inset-0 bg-gradient-to-t from-background to-transparent" />
-        </div>
-        <div className="relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pb-16 pt-40">
-          <p className="eyebrow text-gold">Sellers</p>
-          <h1 className="display-serif text-4xl md:text-6xl mt-3">Sell With Lifestyle Design Realty</h1>
-          <p className="mt-4 text-muted-foreground max-w-xl">
-            A marketing process built for maximum exposure — and results that speak for themselves.
-          </p>
-        </div>
-      </section>
+      {/* Oct 31, 2026 (Peter: "fix the black part"): the light hero, no dark band. */}
+      <LightHero
+        eyebrow="Sellers"
+        title="Sell With Lifestyle Design Realty"
+        intro="A marketing process built for maximum exposure — and results that speak for themselves."
+        image={BRAND_IMG.linksFront}
+        alt="Limestone Hill Country home with a covered front porch"
+      />
 
       <section className="mx-auto max-w-[1400px] px-5 lg:px-8 py-20 grid md:grid-cols-3 gap-10">
         {PROCESS.map((p, i) => (

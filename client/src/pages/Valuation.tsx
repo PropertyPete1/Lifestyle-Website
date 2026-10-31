@@ -1,6 +1,7 @@
 import PageShell from "@/components/PageShell";
 import LeadForm from "@/components/LeadForm";
-import { IMG } from "@/lib/assets";
+import LightHero from "@/components/LightHero";
+import { BRAND_IMG } from "@/lib/assets";
 import { CheckCircle2 } from "lucide-react";
 
 const PERKS = ["Instant result", "Sell for more", "Get expert advice"];
@@ -8,21 +9,14 @@ const PERKS = ["Instant result", "Sell for more", "Get expert advice"];
 export default function Valuation() {
   return (
     <PageShell>
-      <section className="dark relative min-h-[50svh] flex items-end text-foreground">
-        <div className="absolute inset-0">
-          <img src={IMG.listingPoolEstate} alt="Luxury Texas estate" className="h-full w-full object-cover" />
-          <div className="absolute inset-0 bg-black/65" />
-          <div className="absolute inset-0 bg-gradient-to-t from-background to-transparent" />
-        </div>
-        <div className="relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pb-14 pt-40">
-          <p className="eyebrow text-gold">Sellers</p>
-          <h1 className="display-serif text-4xl md:text-6xl mt-3">Get Your Instant Home Valuation</h1>
-          <p className="mt-4 text-muted-foreground max-w-xl">
-            Enter your details to see how much your home is worth — and how we'd market it to sell
-            for more.
-          </p>
-        </div>
-      </section>
+      {/* Oct 31, 2026 (Peter: "fix the black part"): the light hero, no dark band. */}
+      <LightHero
+        eyebrow="Sellers"
+        title="Get Your Instant Home Valuation"
+        intro="Enter your details to see how much your home is worth — and how we'd market it to sell for more."
+        image={BRAND_IMG.valuation}
+        alt="Bright kitchen with a marble island"
+      />
 
       {/* Oct 26, 2026: min-w-0 on both columns; on a phone the grid track grew past the screen and the page scrolled sideways. */}
       <section className="mx-auto max-w-[1400px] px-5 lg:px-8 py-16 lg:py-24 grid grid-cols-1 lg:grid-cols-3 gap-12">

@@ -2,6 +2,7 @@ import { useParams, Link } from "wouter";
 import PageShell from "@/components/PageShell";
 import ListingCard from "@/components/ListingCard";
 import LeadForm from "@/components/LeadForm";
+import LightHero from "@/components/LightHero";
 import { trpc } from "@/lib/trpc";
 import { useNcClickTracking } from "@/hooks/usePageTracking";
 import { SITE, FEATURES } from "@shared/site";
@@ -59,37 +60,35 @@ export default function NeighborhoodDetail() {
   return (
     <PageShell stickyCta>
       {/* Hero */}
-      <section className="dark relative min-h-[65svh] flex items-end text-foreground">
-        <div className="absolute inset-0">
-          {hood.heroImage && <img src={hood.heroImage} alt={hood.name} className="h-full w-full object-cover" />}
-          <div className="absolute inset-0 bg-black/60" />
-          <div className="absolute inset-0 bg-gradient-to-t from-background to-transparent" />
-        </div>
-        <div className="relative mx-auto w-full max-w-[1400px] px-5 lg:px-8 pb-16 pt-40">
-          <p className="eyebrow text-gold">{hood.region ?? "Texas"}</p>
-          <h1 className="display-serif text-5xl md:text-7xl mt-3">{hood.name}</h1>
-          {["San Antonio", "New Braunfels", "Austin", "DFW", "Houston"].includes(hood.name) && (
-            <p className="eyebrow text-foreground/70 mt-3">& Surrounding Areas</p>
-          )}
-          {hood.tagline && <p className="mt-4 text-muted-foreground max-w-xl">{hood.tagline}</p>}
-          {NEARBY_COMMUNITIES[hood.name] && (
-            <div className="mt-6">
-              <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground mb-2.5">
-                Nearby Communities We Serve
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {NEARBY_COMMUNITIES[hood.name].map((town) => (
-                  <span
-                    key={town}
-                    className="border border-gold/35 bg-black/30 backdrop-blur-sm text-foreground/85 px-3.5 py-1.5 text-[11px] uppercase tracking-[0.14em]">
-                    {town}
-                  </span>
-                ))}
-              </div>
+      {/* Oct 31, 2026 (Peter: "fix the black part"): the light hero, the city photo beside the words, no dark band. */}
+      <LightHero
+        eyebrow={hood.region ?? "Texas"}
+        title={hood.name}
+        titleClassName="text-5xl md:text-7xl"
+        image={hood.heroImage}
+        alt={hood.name}
+      >
+        {["San Antonio", "New Braunfels", "Austin", "DFW", "Houston"].includes(hood.name) && (
+          <p className="eyebrow text-foreground/70 mt-3">& Surrounding Areas</p>
+        )}
+        {hood.tagline && <p className="mt-4 text-muted-foreground max-w-xl">{hood.tagline}</p>}
+        {NEARBY_COMMUNITIES[hood.name] && (
+          <div className="mt-6">
+            <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground mb-2.5">
+              Nearby Communities We Serve
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {NEARBY_COMMUNITIES[hood.name].map((town) => (
+                <span
+                  key={town}
+                  className="border border-border bg-card text-foreground px-3.5 py-1.5 text-[11px] uppercase tracking-[0.14em]">
+                  {town}
+                </span>
+              ))}
             </div>
-          )}
-        </div>
-      </section>
+          </div>
+        )}
+      </LightHero>
 
       {/* Overview */}
       <section className="mx-auto max-w-[1400px] px-5 lg:px-8 py-16 lg:py-24 grid lg:grid-cols-3 gap-12">

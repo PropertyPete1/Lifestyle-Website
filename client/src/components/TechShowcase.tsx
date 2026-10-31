@@ -67,7 +67,7 @@ export default function TechShowcase() {
     (c) => c.href !== "/search" || FEATURES.SHOW_PROPERTY_SEARCH
   );
   return (
-    <section className="border-b border-border/60 bg-[oklch(0.165_0.005_285)]">
+    <section className="border-b border-border/60 bg-secondary/60">
       <div className="mx-auto max-w-[1400px] px-5 lg:px-8 py-20 lg:py-24">
         <div className="text-center mb-14 reveal">
           <p className="eyebrow text-gold">Built Into This Site</p>

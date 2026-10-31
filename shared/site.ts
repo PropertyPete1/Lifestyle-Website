@@ -53,8 +53,11 @@ export const SITE = {
   phoneHref: "tel:+12109813830",
   email: "team@lifestyledesignrealty.com",
   address: "1212 Chicon St Unit 101, Austin TX 78702",
-  /** New Construction Search — external builder-network tool (vendor name never shown in UI) */
-  newConstructionUrl: "https://a.nhb.app/u/peter-allen",
+  /**
+   * New Construction Search: our own Builder Deals site (Oct 30, 2026, Peter: "switch to this new build searcher").
+   * It was the external builder-network tool (a.nhb.app) before; every link now opens /deals in the same tab.
+   */
+  newConstructionUrl: "/deals",
   // Oct 30, 2026: the old file was gone ("file does not exist" for every visitor, found by ChatGPT's test). This is
   // the brokerage's IABS shared publicly from Steven's Drive; it is the 2015 form (IABS 1-0), TREC's current is IABS 1-2.
   iabsUrl: "https://drive.google.com/file/d/1rZZD89IeAN3LBlzH5l3w6RwEV77t0wZx/view",

@@ -10,7 +10,7 @@ import { selectCityImage } from "@shared/cityImagery";
 import { IMG } from "@/lib/assets";
 import { cn } from "@/lib/utils";
 import { Link, useRoute, useLocation } from "wouter";
-import { ArrowLeft, ArrowRight, Copy, ExternalLink, MapPin, MessageCircle, Share2, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, Copy, MapPin, MessageCircle, Share2, Sparkles } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
@@ -257,7 +257,7 @@ function CityMatchResults({
         return (
           <div key={c.slug} className="border border-border bg-card overflow-hidden">
             {/* Image + badge */}
-            <div className="relative aspect-[16/9] md:aspect-[16/5]">
+            <div className="dark relative aspect-[16/9] md:aspect-[16/5] text-foreground">
               <img src={image.src} alt={image.alt} className="h-full w-full object-cover" />
               {/* Bottom scrim: keeps the vibe caption legible on any photo */}
               <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/40" />
@@ -330,11 +330,9 @@ function CityMatchResults({
                 </Link>
                 <a
                   href={SITE.newConstructionUrl}
-                  target="_blank"
-                  rel="noreferrer"
                   onClick={logNcClick}
                   className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.15em] text-muted-foreground hover:text-gold transition-colors">
-                  See New Construction in {c.name} <ExternalLink className="h-3 w-3" />
+                  See New Construction in {c.name} <ArrowRight className="h-3 w-3" />
                 </a>
               </div>
             </div>

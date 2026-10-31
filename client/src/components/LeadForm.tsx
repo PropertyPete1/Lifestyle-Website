@@ -210,7 +210,7 @@ export default function LeadForm({
       <Button
         type="submit"
         disabled={submit.isPending}
-        className="w-full sm:w-auto bg-gold text-primary-foreground hover:bg-gold/90 uppercase tracking-[0.2em] text-xs px-8 py-5 rounded-none">
+        className="min-h-12 w-full sm:w-auto bg-gold text-primary-foreground hover:bg-gold/90 font-serif text-[19px] font-normal normal-case tracking-normal px-8 py-5 rounded-none">
         {submit.isPending ? "Submitting..." : submitLabel}
       </Button>
     </form>

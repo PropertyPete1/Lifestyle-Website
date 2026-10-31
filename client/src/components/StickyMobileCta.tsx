@@ -70,12 +70,12 @@ export default function StickyMobileCta({ label = "Ready? Get Started" }: { labe
   if (!visible || typing) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-[70] md:hidden border-t border-gold/40 bg-[oklch(0.14_0.01_285)]/95 backdrop-blur-sm">
+    <div className="fixed inset-x-0 bottom-0 z-[70] md:hidden border-t border-border bg-background/95 backdrop-blur-sm shadow-[0_-8px_24px_-18px_rgb(0_0_0/0.3)]">
       <div className="flex items-center gap-2 px-4 py-2.5">
         <a
           href="/#get-started"
           onClick={track}
-          className="flex flex-1 items-center justify-center gap-2 bg-gold px-4 py-2.5 text-[11px] font-medium uppercase tracking-[0.18em] text-primary-foreground">
+          className="flex min-h-11 flex-1 items-center justify-center gap-2 bg-gold px-4 py-2 font-serif text-[18px] text-primary-foreground">
           {label} <ArrowRight className="h-3.5 w-3.5" />
         </a>
         <button

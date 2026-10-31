@@ -26,7 +26,7 @@ export default function Neighborhoods() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-12">
             {(hoods ?? []).map((n, i) => (
               <Link key={n.id} href={`/${n.slug}`}>
-                <div className="group relative aspect-[4/3] overflow-hidden reveal" style={{ transitionDelay: `${(i % 3) * 60}ms` }}>
+                <div className="dark group relative aspect-[4/3] overflow-hidden reveal text-foreground" style={{ transitionDelay: `${(i % 3) * 60}ms` }}>
                   {n.heroImage && (
                     <img src={n.heroImage} alt={n.name} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" />
                   )}

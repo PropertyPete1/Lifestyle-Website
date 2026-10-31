@@ -199,8 +199,9 @@ describe("promise chip — stops sharing the buttons' visual vocabulary", () => 
   });
 
   it("puts real air between the chip and the first button", () => {
-    // mt-6 grouped the chip with the stack; mt-9 separates them.
-    expect(LINKS).toContain('className="w-full mt-9 space-y-3"');
+    // Oct 30 white skin: the photo strip sits between the chip and the stack, so the chip never groups with it.
+    expect(LINKS.indexOf("onClick={jumpToCapture}")).toBeLessThan(LINKS.indexOf("BRAND_IMG.linksFront"));
+    expect(LINKS.indexOf("BRAND_IMG.linksFront")).toBeLessThan(LINKS.indexOf("isLinkVisible(l.url)"));
   });
 
   it("stays above the fold — no new markup between the header and the chip", () => {

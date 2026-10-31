@@ -19,7 +19,7 @@ export const BIO_LINKS_SNAPSHOT: BioLink[] = [
   {
     id: 30005,
     label: "New Construction Search",
-    url: "https://a.nhb.app/u/peter-allen",
+    url: "/deals",
     sortOrder: 1,
     active: true,
   },
@@ -35,13 +35,6 @@ export const BIO_LINKS_SNAPSHOT: BioLink[] = [
     label: "Explore Our Full Website",
     url: "/",
     sortOrder: 6,
-    active: true,
-  },
-  {
-    id: 150001,
-    label: "Top Recommended Cleaning Service",
-    url: "https://grapeclean.com/",
-    sortOrder: 11,
     active: true,
   },
 ];

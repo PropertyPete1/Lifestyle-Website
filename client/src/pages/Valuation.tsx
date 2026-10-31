@@ -8,7 +8,7 @@ const PERKS = ["Instant result", "Sell for more", "Get expert advice"];
 export default function Valuation() {
   return (
     <PageShell>
-      <section className="relative min-h-[50svh] flex items-end">
+      <section className="dark relative min-h-[50svh] flex items-end text-foreground">
         <div className="absolute inset-0">
           <img src={IMG.listingPoolEstate} alt="Luxury Texas estate" className="h-full w-full object-cover" />
           <div className="absolute inset-0 bg-black/65" />

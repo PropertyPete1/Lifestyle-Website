@@ -18,3 +18,18 @@ export const IMG = {
   areaKyle: "/manus-storage/area-kyle_5abc0638.jpg",
   areaAlamoRanch: "/manus-storage/area-alamo-ranch_6b62089f.jpg",
 } as const;
+
+/**
+ * Oct 30, 2026 (Peter's white-skin mockups): the homepage and /links photography, cut from the mockups he approved and
+ * served from client/public/brand. Illustrative lifestyle images, never shown as a listing.
+ */
+export const BRAND_IMG = {
+  heroDesktop: "/brand/hero-living-desktop.webp",
+  heroMobile: "/brand/hero-living-mobile.webp",
+  texasRiver: "/brand/texas-river.webp",
+  newBuild: "/brand/new-build.webp",
+  newBuildBanner: "/brand/new-build-banner.webp",
+  lease: "/brand/lease.webp",
+  valuation: "/brand/valuation.webp",
+  linksFront: "/brand/links-front.webp",
+} as const;

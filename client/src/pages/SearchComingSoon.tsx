@@ -2,7 +2,7 @@ import PageShell from "@/components/PageShell";
 import { useNcClickTracking } from "@/hooks/usePageTracking";
 import { SITE } from "@shared/site";
 import { Link } from "wouter";
-import { ArrowRight, ExternalLink, Hammer } from "lucide-react";
+import { ArrowRight, Hammer } from "lucide-react";
 
 /**
  * Pre-IDX stand-in for every placeholder-powered search/browse/listing
@@ -31,12 +31,9 @@ export default function SearchComingSoon() {
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
           <a
             href={SITE.newConstructionUrl}
-            target="_blank"
-            rel="noreferrer"
             onClick={logNcClick}
             className="inline-flex items-center gap-3 bg-gold text-primary-foreground px-9 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:bg-gold/90 transition-colors">
             <Hammer className="h-4 w-4" /> Search New Construction Now
-            <ExternalLink className="h-3.5 w-3.5" />
           </a>
           <Link
             href="/get-started"

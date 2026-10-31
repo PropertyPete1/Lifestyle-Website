@@ -59,7 +59,7 @@ export default function NeighborhoodDetail() {
   return (
     <PageShell stickyCta>
       {/* Hero */}
-      <section className="relative min-h-[65svh] flex items-end">
+      <section className="dark relative min-h-[65svh] flex items-end text-foreground">
         <div className="absolute inset-0">
           {hood.heroImage && <img src={hood.heroImage} alt={hood.name} className="h-full w-full object-cover" />}
           <div className="absolute inset-0 bg-black/60" />
@@ -113,8 +113,6 @@ export default function NeighborhoodDetail() {
           </div>
           <a
             href={SITE.newConstructionUrl}
-            target="_blank"
-            rel="noreferrer"
             onClick={logNcClick}
             className="mt-10 inline-flex items-center gap-3 bg-gold text-primary-foreground px-8 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:bg-gold/90 transition-colors reveal">
             New Construction in {hood.name} <ArrowRight className="h-4 w-4" />

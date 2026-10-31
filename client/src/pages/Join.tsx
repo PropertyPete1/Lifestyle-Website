@@ -56,7 +56,8 @@ export const JOIN_LEAD_TOOLS = [
 
 /** The owners an agent works with, with the titles the team page uses. */
 export const JOIN_BROKERS = [
-  { name: "Steven Van Orden", title: "Broker & Owner · Designated Broker", photo: "/team/steven-van-orden.webp" },
+  // Oct 31, 2026 (Peter): "Designated Broker" removed from Steven's title.
+  { name: "Steven Van Orden", title: "Broker & Owner", photo: "/team/steven-van-orden.webp" },
   { name: "Peter Allen", title: "Owner · REALTOR®", photo: "/team/peter-allen.webp" },
 ] as const;
 

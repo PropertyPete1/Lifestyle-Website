@@ -255,8 +255,8 @@ export default function Home() {
           {(team ?? []).slice(0, 4).map((m, i) => (
             <Link key={m.id} href="/team">
               <div className="group reveal" style={{ transitionDelay: `${i * 50}ms` }}>
-                <div className="flex aspect-[3/4] items-center justify-center overflow-hidden bg-secondary">
-                  <TeamPhoto photo={m.photo} name={m.name} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" fallbackClassName="font-serif text-5xl text-gold/60" />
+                <div className="relative flex aspect-[3/4] items-center justify-center overflow-hidden bg-secondary">
+                  <TeamPhoto photo={m.photo} name={m.name} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" />
                 </div>
                 <h3 className="mt-4 font-sans text-sm uppercase tracking-[0.15em]">{m.name}</h3>
                 <p className="mt-1 text-[11px] uppercase tracking-[0.15em] text-gold">{m.title}</p>

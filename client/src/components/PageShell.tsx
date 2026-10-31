@@ -17,12 +17,17 @@ export default function PageShell({
   solidNav = false,
   hiringBanner = false,
   stickyCta = false,
+  stickyCtaLabel,
+  stickyCtaHref,
 }: {
   children: ReactNode;
   solidNav?: boolean;
   hiringBanner?: boolean;
   /** Slim persistent mobile "Get Started" bar — key conversion pages only. */
   stickyCta?: boolean;
+  /** Oct 30, 2026: /join points the bar at its own application instead of Get Started. */
+  stickyCtaLabel?: string;
+  stickyCtaHref?: string;
 }) {
   useReveal([children]);
   return (
@@ -33,7 +38,7 @@ export default function PageShell({
       <SiteFooter />
       {/* Fixed, so it adds no layout; the padding below reserves its height so
           it never covers the end of the page. */}
-      {stickyCta && <StickyMobileCta />}
+      {stickyCta && <StickyMobileCta label={stickyCtaLabel} href={stickyCtaHref} />}
       {stickyCta && <div style={{ height: "var(--sticky-cta-h, 0px)" }} aria-hidden />}
     </div>
   );

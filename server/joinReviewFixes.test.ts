@@ -31,4 +31,21 @@ describe("/join review fixes", () => {
     expect(emailInput).not.toBe("");
     expect(emailInput).not.toMatch(/\brequired\b/);
   });
+
+  it("shows the Builder Deals toolkit, the lead tools and the brokers, with no invented numbers", () => {
+    for (const hook of ["data-join-toolkit", "data-join-lead-tools", "data-join-brokers"]) expect(join_).toContain(hook);
+    for (const title of ["Private client links", "Hand-picked short lists", "See what clients like", "Your own bio link"]) expect(join_).toContain(title);
+    for (const href of ['"/city-finder"', '"/valuation"', '"/deals"']) expect(join_).toContain(href);
+    expect(join_).toContain('"/team/steven-van-orden.webp"');
+    expect(join_).toContain('"/team/peter-allen.webp"');
+    // no splits, fees or income promises until Peter supplies real ones
+    expect(join_).not.toMatch(/\d+\s*\/\s*\d+\s*split|\d+%/i);
+  });
+
+  it("points the phone sticky bar at the application on /join only", () => {
+    expect(join_).toContain('<PageShell stickyCta stickyCtaLabel="Apply to Join the Team" stickyCtaHref="#apply">');
+    const sticky = read("client/src/components/StickyMobileCta.tsx");
+    expect(sticky).toContain('href = "/#get-started"');
+    expect(sticky).toContain("href={href}");
+  });
 });

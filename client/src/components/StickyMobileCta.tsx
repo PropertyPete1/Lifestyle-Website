@@ -19,7 +19,7 @@ import { useStickyCtaTracking } from "@/hooks/usePageTracking";
 
 const DISMISSED_KEY = "ldr_sticky_cta_dismissed";
 
-export default function StickyMobileCta({ label = "Ready? Get Started" }: { label?: string }) {
+export default function StickyMobileCta({ label = "Ready? Get Started", href = "/#get-started" }: { label?: string; href?: string }) {
   const [visible, setVisible] = useState(false);
   const [typing, setTyping] = useState(false);
   const track = useStickyCtaTracking();
@@ -73,7 +73,7 @@ export default function StickyMobileCta({ label = "Ready? Get Started" }: { labe
     <div className="fixed inset-x-0 bottom-0 z-[70] md:hidden border-t border-border bg-background/95 backdrop-blur-sm shadow-[0_-8px_24px_-18px_rgb(0_0_0/0.3)]">
       <div className="flex items-center gap-2 px-4 py-2.5">
         <a
-          href="/#get-started"
+          href={href}
           onClick={track}
           className="flex min-h-11 flex-1 items-center justify-center gap-2 bg-gold px-4 py-2 font-serif text-[18px] text-primary-foreground">
           {label} <ArrowRight className="h-3.5 w-3.5" />

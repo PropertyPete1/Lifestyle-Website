@@ -4,7 +4,8 @@ import RecruitForm, { BUILDER_DEALS_RECRUIT_SOURCE } from "@/components/RecruitF
 import LeadFlowDiagram from "@/components/LeadFlowDiagram";
 import { SITE } from "@shared/site";
 import { BRAND_IMG } from "@/lib/assets";
-import { ArrowRight, Flame, HandCoins, Landmark, Mail } from "lucide-react";
+import { Link } from "wouter";
+import { ArrowRight, Flame, HandCoins, Heart, Instagram, Landmark, Link2, ListChecks, Mail } from "lucide-react";
 
 /**
  * Instant payoff for the homepage Now Hiring banner: the three strongest
@@ -22,6 +23,32 @@ const PILLARS = [
   { title: "Brokerage-First Brand", body: "Plug into a luxury brand with real marketing infrastructure — not a logo you have to build alone." },
   { title: "Broker Support", body: "Direct access to Broker & Owner Steven Van Orden and Owner Peter Allen — deal structuring, negotiation help, and mentorship on demand. Proudly veteran-owned and operated, we run our brokerage with the same discipline and accountability." },
 ];
+
+/**
+ * Oct 30, 2026 (Peter: "make sure it makes agents want to join and inquire"): what an agent gets on day one, shown
+ * with facts the site already backs. Each line matches a real feature of the agents' Builder Deals portal
+ * (client links, picks, saves and tour requests, the /deals/u/<name> bio link that files sign-ups under the agent in
+ * Follow Up Boss). No splits, fees or income numbers until Peter supplies real ones.
+ */
+export const JOIN_TOOLKIT = [
+  { icon: Link2, title: "Private client links", body: "Type a client's name and text or email them a private list of new-build deals, with the addresses, rates and photos." },
+  { icon: ListChecks, title: "Hand-picked short lists", body: "Pick the homes that fit and send just those, instead of the whole market." },
+  { icon: Heart, title: "See what clients like", body: "See which homes each client saves and when they ask for a tour." },
+  { icon: Instagram, title: "Your own bio link", body: "Put your link in your Instagram bio. Buyers who sign up through it land in Follow Up Boss under you." },
+] as const;
+
+/** The site tools that create the leads, so an agent can see them for themselves. */
+export const JOIN_LEAD_TOOLS = [
+  { label: "Find My Texas City", href: "/city-finder" },
+  { label: "Home Valuation", href: "/valuation" },
+  { label: "Builder Deals", href: "/deals" },
+] as const;
+
+/** The owners an agent works with, with the titles the team page uses. */
+export const JOIN_BROKERS = [
+  { name: "Steven Van Orden", title: "Broker & Owner · Designated Broker", photo: "/team/steven-van-orden.webp" },
+  { name: "Peter Allen", title: "Owner · REALTOR®", photo: "/team/peter-allen.webp" },
+] as const;
 
 /** A realtor sent here from the Builder Deals gate (?from=builder-deals), with the number they typed there (this tab only). */
 function builderDealsArrival(): { fromDeals: boolean; phone: string; name: string; email: string } {
@@ -42,7 +69,7 @@ export default function Join() {
   // Straight to the application for an agent sent from Builder Deals.
   useEffect(() => { if (arrival.fromDeals) window.setTimeout(() => document.querySelector("[data-join-from-deals]")?.scrollIntoView({ block: "start" }), 300); }, [arrival.fromDeals]);
   return (
-    <PageShell>
+    <PageShell stickyCta stickyCtaLabel="Apply to Join the Team" stickyCtaHref="#apply">
       {/* Oct 30, 2026 (Peter: "fix the black part on the recruiting page"): the white-skin hero, text beside a bright
           photo, with the three hooks and a straight line to the application. */}
       <section className="pt-[calc(68px+2.25rem)] lg:pt-[calc(80px+3rem)]">
@@ -80,6 +107,26 @@ export default function Join() {
         ))}
       </section>
 
+      {/* Oct 30, 2026: the Builder Deals toolkit every agent gets. */}
+      <section data-join-toolkit className="mx-auto max-w-[1200px] px-5 pb-20 lg:px-8">
+        <div className="mx-auto max-w-2xl text-center reveal">
+          <p className="eyebrow text-gold">Builder Deals, for your clients</p>
+          <h2 className="display-serif mt-3 text-3xl md:text-4xl">Your own new-construction deal platform</h2>
+          <p className="mt-4 leading-relaxed text-muted-foreground">
+            Every agent on the team gets our Builder Deals platform: thousands of new-build homes with builder incentives, and the tools to send them to your clients.
+          </p>
+        </div>
+        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {JOIN_TOOLKIT.map(({ icon: Icon, title, body }, i) => (
+            <div key={title} className="reveal border border-border bg-card p-6" style={{ transitionDelay: `${i * 60}ms` }}>
+              <Icon className="h-5 w-5 text-gold" aria-hidden />
+              <h3 className="mt-4 font-serif text-xl">{title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* How leads actually move through the system — visual proof, not claims */}
       <section className="border-y border-border/60 bg-secondary/60">
         <div className="mx-auto max-w-[1200px] px-5 lg:px-8 py-20">
@@ -88,11 +135,42 @@ export default function Join() {
             <h2 className="display-serif text-3xl md:text-4xl mt-3">Where Your Next Client Comes From</h2>
           </div>
           <LeadFlowDiagram />
+          {/* Proof: the tools that create the leads, one tap away. */}
+          <div data-join-lead-tools className="mt-12 text-center">
+            <p className="text-sm text-muted-foreground">See the tools behind your leads:</p>
+            <div className="mt-4 flex flex-wrap justify-center gap-3">
+              {JOIN_LEAD_TOOLS.map((t) => (
+                <Link key={t.href} href={t.href} className="inline-flex min-h-11 items-center gap-2 border border-gold/60 bg-card px-5 font-serif text-[17px] text-foreground transition-colors hover:border-gold hover:text-gold">
+                  {t.label} <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                </Link>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 
       <section className="mx-auto max-w-3xl px-5 lg:px-8 pb-24">
-        <div className="pt-4" />
+        {/* Oct 30, 2026: who an agent works with, by face and name, right before the application. */}
+        <div data-join-brokers className="pt-16 pb-12 reveal">
+          <p className="eyebrow text-center text-gold">Your Brokers</p>
+          <h2 className="display-serif mt-3 text-center text-3xl md:text-4xl">Work directly with the owners</h2>
+          <p className="mx-auto mt-4 max-w-xl text-center leading-relaxed text-muted-foreground">
+            Deal structuring, negotiation help and mentorship, straight from the people who run the brokerage.
+          </p>
+          <div className="mt-8 grid grid-cols-2 gap-4 sm:gap-6">
+            {JOIN_BROKERS.map((b) => (
+              <div key={b.name} className="border border-border bg-card">
+                <div className="aspect-[4/5] overflow-hidden bg-secondary">
+                  <img src={b.photo} alt={b.name} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+                </div>
+                <div className="p-4 sm:p-5">
+                  <p className="font-serif text-lg leading-tight sm:text-xl">{b.name}</p>
+                  <p className="mt-1.5 text-[10px] font-medium uppercase leading-snug tracking-[0.14em] text-gold sm:text-[11px]">{b.title}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
         {/* Screening message — exact copy per brief */}
         <div className="border-l-2 border-gold pl-6 mb-10 reveal">
           <p className="text-muted-foreground leading-relaxed whitespace-pre-line">

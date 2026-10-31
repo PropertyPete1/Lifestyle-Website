@@ -83,6 +83,8 @@ const CLOSE_BUTTON = "float-right -mr-2 -mt-2 flex h-11 w-11 items-center justif
 
 /** Listing photos are per-lead renders behind the session cookie; the markup never carries a storage URL. */
 /** Arrows stay readable on bright exteriors and dark interiors alike, with a near-44 px tap target. */
+/** Oct 31, 2026: behind a whole (uncropped) photo, the same photo blurred to fill the frame. */
+export const WHOLE_PHOTO_BACKDROP = "pointer-events-none absolute inset-0 h-full w-full scale-110 select-none object-cover opacity-60 blur-xl";
 const GALLERY_ARROW = "z-10 size-10 border-white/30 bg-black/60 text-white shadow-md hover:bg-black/75 hover:text-white dark:border-white/30 dark:bg-black/60 dark:hover:bg-black/75";
 
 export function ProtectedGallery({ photos: all }: { photos?: string[] }) {
@@ -102,7 +104,12 @@ export function ProtectedGallery({ photos: all }: { photos?: string[] }) {
   if (!photos?.length) return <div className="mt-4 flex aspect-[4/3] w-full min-w-0 max-w-full items-center justify-center border border-border bg-secondary px-4 text-center text-xs text-muted-foreground">{PHOTOS_ON_REQUEST}</div>;
   const many = photos.length > 1;
   return <Carousel setApi={setApi} className="relative mt-4 w-full min-w-0 max-w-full overflow-hidden" opts={{ loop: many }}>
-    <CarouselContent className="ml-0 min-w-0 bg-secondary">{photos.map((src, index) => <CarouselItem key={src} className="min-w-0 basis-full pl-0"><RetryImage src={src} onGiveUp={() => setBroken((current) => new Set(current).add(src))} alt={`Home photo ${index + 1} of ${photos.length}`} loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} className="block aspect-[4/3] w-full min-w-0 max-w-full select-none bg-secondary object-cover [-webkit-touch-callout:none]" /></CarouselItem>)}</CarouselContent>
+    {/* Oct 31, 2026 (Peter: "the picture is zoomed in a bunch, every photo needs to show the entire house"): the whole
+        photo, never cropped, over a soft blur of itself so a wide or tall photo has no empty bars. */}
+    <CarouselContent className="ml-0 min-w-0 bg-secondary">{photos.map((src, index) => <CarouselItem key={src} className="min-w-0 basis-full pl-0"><div data-deals-whole-photo="true" className="relative aspect-[3/2] w-full min-w-0 max-w-full overflow-hidden bg-secondary">
+      <img src={src} alt="" aria-hidden="true" loading="lazy" decoding="async" draggable={false} className={WHOLE_PHOTO_BACKDROP} />
+      <RetryImage src={src} onGiveUp={() => setBroken((current) => new Set(current).add(src))} alt={`Home photo ${index + 1} of ${photos.length}`} loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} className="relative block h-full w-full min-w-0 max-w-full select-none object-contain [-webkit-touch-callout:none]" />
+    </div></CarouselItem>)}</CarouselContent>
     {many && <>
       <CarouselPrevious aria-label="Previous home photo" className={`left-2 ${GALLERY_ARROW}`} />
       <CarouselNext aria-label="Next home photo" className={`right-2 ${GALLERY_ARROW}`} />
@@ -421,13 +428,16 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
   const viewerOpen = shown !== null;
   useEffect(() => viewerOpen ? sheetHistory(() => setShown(null)) : undefined, [viewerOpen]);
   // The big photo shows its card-size copy (already loaded by the list) until the full one arrives; the small ones are cards.
-  const tile = (src: string, index: number, className: string) => <button key={src} type="button" onClick={() => setShown(index)} style={index === 0 ? { backgroundImage: `url("${cardPhoto(src)}")`, backgroundSize: "cover", backgroundPosition: "center" } : undefined} className={`relative min-h-0 min-w-0 overflow-hidden bg-secondary ${className}`} aria-label={`Photo ${index + 1} of ${photos.length}`}>
-    <RetryImage src={index === 0 ? src : cardPhoto(src)} alt="" loading={index === 0 ? "eager" : "lazy"} decoding="async" draggable={false} onGiveUp={() => setBroken((current) => new Set(current).add(src))} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
+  // Oct 31, 2026 (Peter: "every photo needs to show the entire house, not zoomed in"): the big photo is the whole photo
+  // (contained) over a blur of its card copy, which also shows while the full one loads; the small tiles stay previews.
+  const tile = (src: string, index: number, className: string) => <button key={src} type="button" onClick={() => setShown(index)} className={`relative min-h-0 min-w-0 overflow-hidden bg-secondary ${className}`} aria-label={`Photo ${index + 1} of ${photos.length}`}>
+    {index === 0 && <img src={cardPhoto(src)} alt="" aria-hidden="true" decoding="async" draggable={false} className={WHOLE_PHOTO_BACKDROP} />}
+    <RetryImage src={index === 0 ? src : cardPhoto(src)} alt="" loading={index === 0 ? "eager" : "lazy"} decoding="async" draggable={false} onGiveUp={() => setBroken((current) => new Set(current).add(src))} onContextMenu={(event) => event.preventDefault()} className={`relative block h-full w-full select-none [-webkit-touch-callout:none] ${index === 0 ? "object-contain" : "object-cover"}`} data-deals-hero-whole={index === 0 ? "true" : undefined} />
   </button>;
   return <section aria-label={`${title}, the home you opened`} className="min-w-0 p-5 pt-14 sm:p-6 sm:pt-6">
     {photos.length === 0
       ? <div className="flex aspect-[16/7] w-full items-center justify-center rounded-xl bg-secondary text-sm text-muted-foreground">{PHOTOS_ON_REQUEST}</div>
-      : <div className={`relative grid h-[38vh] min-h-[220px] gap-1.5 overflow-hidden rounded-xl ${grid ? "grid-cols-4 grid-rows-2" : "grid-cols-1"}`} data-deals-hero-photos={photos.length}>
+      : <div className={`relative grid aspect-[3/2] gap-1.5 overflow-hidden rounded-xl sm:aspect-auto sm:h-[42vh] sm:min-h-[260px] ${grid ? "grid-cols-4 grid-rows-2" : "grid-cols-1"}`} data-deals-hero-photos={photos.length}>
           {grid ? <>{tile(photos[0]!, 0, "col-span-4 row-span-2 sm:col-span-2")}{photos.slice(1, 5).map((src, index) => tile(src, index + 1, "hidden sm:block"))}</> : tile(photos[0]!, 0, "")}
           {photos.length > 1 && <button type="button" onClick={() => setShown(0)} className="absolute bottom-3 right-3 rounded-md bg-black/70 px-3 py-1.5 text-xs font-semibold text-white">See all {photos.length} photos</button>}
         </div>}

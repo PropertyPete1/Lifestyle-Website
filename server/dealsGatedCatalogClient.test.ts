@@ -80,8 +80,10 @@ describe("gated catalog stays inside a 375 px phone viewport (A19)", () => {
     expect(cards.length).toBe(3);
     for (const tag of cards) expect(tag).toMatch(/class="[^"]*\bmin-w-0\b/);
     // The community photo standing in for a missing video (Oct 24) is not a gallery image.
-    const galleryImages = openingTags(html, /^<img\b[^>]*src="\/deals\/mine\/img\//).filter((tag) => !tag.includes('alt="Photo of a home in'));
+    // Oct 31, 2026: each whole (uncropped) photo sits over a decorative blur of itself (aria-hidden), not counted here.
+    const galleryImages = openingTags(html, /^<img\b[^>]*src="\/deals\/mine\/img\//).filter((tag) => !tag.includes('alt="Photo of a home in') && !tag.includes('aria-hidden="true"'));
     expect(galleryImages.length).toBe(4);
+    expect(openingTags(html, /^<img\b[^>]*aria-hidden="true"[^>]*src="\/deals\/mine\/img\/|^<img\b[^>]*src="\/deals\/mine\/img\/[^>]*aria-hidden="true"/).length).toBe(4);
     for (const tag of galleryImages) {
       expect(tag).toContain('loading="lazy"');
       expect(tag).toMatch(/class="[^"]*\bmax-w-full\b/);

@@ -36,6 +36,7 @@ import {
   type DealScrubConfig,
 } from "../shared/deals";
 import { getDb } from "./db";
+import { exteriorFirst } from "./dealsPhotoExterior";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { effectiveScrubConfig } from "./dealsScrub";
 import { loanTypeLabel, newThisWeek, priceBandFloor, priceBandLabel, redHotDeal } from "../shared/dealsFeatured";
@@ -944,11 +945,12 @@ async function readPublicCommunityHomes(communityId: number, key: string): Promi
   const { publicPhotoUrl } = await import("./dealsPhotoToken");
   const homes = selectDealCatalogHomes(await db.select().from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)));
   const photoRows = homes.length
-    ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, homes.map((home) => home.id)), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
+    ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId, processedVersion: dealPhotos.processedVersion }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, homes.map((home) => home.id)), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
     : [];
   const photosBy = groupBy(photoRows, (photo) => photo.homeId);
   const result = homes.map((home, index) => {
-    const photos = photosBy.get(home.id) ?? [];
+    // The home's outside shot leads its gallery when it is known (exteriorFirst reads nothing).
+    const photos = exteriorFirst(photosBy.get(home.id) ?? []);
     return {
       // Position on this page only: never an id, a source key or a card handle.
       card: `${key}-${index}`,
@@ -1113,7 +1115,7 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
   const homesMs = Date.now() - homesStartedAt;
   const photosStartedAt = Date.now();
   const photoRows = shownHomeIds.length
-    ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, shownHomeIds), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
+    ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId, processedVersion: dealPhotos.processedVersion }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, shownHomeIds), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
     : [];
   const photosBy = groupBy(photoRows, (photo) => photo.homeId);
   const readMs = Date.now() - startedAt;
@@ -1125,7 +1127,7 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
     const homes = [] as Array<Record<string, unknown>>;
     // Quick move-ins win; To Be Built cards appear only when there are none.
     for (const home of shownHomes.get(community.id) ?? []) {
-      const photos = photosBy.get(home.id) ?? [];
+      const photos = exteriorFirst(photosBy.get(home.id) ?? []);
       homes.push({
         // Opaque, deterministic card handle for React only. It is not a
         // builder listing ID, database ID, source URL, or reversible key.

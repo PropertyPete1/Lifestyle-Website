@@ -14,7 +14,7 @@ import { AUTO_ACCEPTED_ADMIN_STATUS, AUTO_ACCEPTED_NO_DEADLINE, HELD_INCENTIVE_A
 const mocks = vi.hoisted(() => ({ getDb: vi.fn(), loadOfficialDeals: vi.fn(), sendBuilderDealsEmail: vi.fn(), refreshCommunityGeography: vi.fn(), processDealPhoto: vi.fn(), processPendingDealPhotos: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 // Not a photo test: every home's photos count as unread (it keeps its first photo); the outside-cover rule is tested in dealsFeaturedFirstLook.test.ts.
-vi.mock("./dealsPhotoExterior", () => ({ exteriorCovers: async (ids: readonly number[]) => new Map(ids.map((id) => [id, undefined])) }));
+vi.mock("./dealsPhotoExterior", () => ({ exteriorCovers: async (ids: readonly number[]) => new Map(ids.map((id) => [id, undefined])), exteriorFirst: <T,>(rows: readonly T[]) => rows.slice() }));
 vi.mock("./dealsEmail", () => ({ sendBuilderDealsEmail: (...args: unknown[]) => mocks.sendBuilderDealsEmail(...args) }));
 vi.mock("./dealsMap", () => ({ refreshCommunityGeography: (...args: unknown[]) => mocks.refreshCommunityGeography(...args), communityAreaMap: () => null, areaMapGeometry: () => null, areaMapRadius: () => 5 }));
 vi.mock("./dealsPhotos", () => ({ processDealPhoto: (...args: unknown[]) => mocks.processDealPhoto(...args), processPendingDealPhotos: (...args: unknown[]) => mocks.processPendingDealPhotos(...args) }));

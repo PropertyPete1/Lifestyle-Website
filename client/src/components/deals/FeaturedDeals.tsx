@@ -17,6 +17,9 @@ export const FEATURED_COPY = {
   details: "See details",
   perMonth: "/mo est.",
   updated: "Updated every time the builders' sites are checked.",
+  /** Oct 30, 2026 (ChatGPT's New Home Buddy comparison): the row says how it relates to the buyer's search. */
+  matching: "Best deals matching your search",
+  outside: "Best deals outside your search",
 } as const;
 
 const thousands = (value: number) => `$${Math.round(value / 1000)}K`;
@@ -90,11 +93,24 @@ export function featuredInOrder(featured: FeaturedDealsData): Array<{ deal: Feat
 }
 
 /**
+ * Oct 30, 2026 (ChatGPT: "Austin + under $200K still promotes New Braunfels deals at $300K to $400K"): while the buyer
+ * is searching, the row keeps only the deals that fit the search. When none fit, it keeps them all and says they are
+ * outside the search, so the row never pretends to match.
+ */
+export function featuredForSearch(featured: FeaturedDealsData, searching: boolean, fits: (deal: FeaturedDeal) => boolean): { featured: FeaturedDealsData; eyebrow?: string } {
+  if (!searching) return { featured };
+  const kept: FeaturedDealsData = { ...featured, lowestPayment: featured.lowestPayment.filter(fits), bestRate: featured.bestRate && fits(featured.bestRate) ? featured.bestRate : null, bigLots: featured.bigLots.filter(fits) };
+  return featuredInOrder(kept).length ? { featured: kept, eyebrow: FEATURED_COPY.matching } : { featured, eyebrow: FEATURED_COPY.outside };
+}
+
+/**
  * The landing page's featured row (October 24, 2026, Peter): one compact, swipeable row across the top of the list, so
  * the search bar and the map are on screen before anyone scrolls. Tapping a home opens the gate.
  */
-export function FeaturedStrip({ featured, onSelect, onHover, opens = false, compact = false }: {
+export function FeaturedStrip({ featured, onSelect, onHover, opens = false, compact = false, eyebrow }: {
   featured: FeaturedDealsData | null | undefined;
+  /** Replaces the heading's eyebrow (featuredForSearch: matching or outside the buyer's search). */
+  eyebrow?: string;
   onSelect?: (deal: FeaturedDeal) => void;
   /** Lights the home's area on the map while the pointer is on it (null when it leaves). */
   onHover?: (deal: FeaturedDeal | null) => void;
@@ -111,7 +127,7 @@ export function FeaturedStrip({ featured, onSelect, onHover, opens = false, comp
   const items = featuredInOrder(featured);
   if (!items.length) return null;
   if (compact) return <section aria-labelledby="deals-featured-heading" data-deals-featured-section="true" data-deals-featured-strip="compact" className="min-w-0">
-    <h2 id="deals-featured-heading" className="eyebrow text-gold">{featuredEyebrow(featured)}</h2>
+    <h2 id="deals-featured-heading" className="eyebrow text-gold" data-deals-featured-eyebrow="true">{eyebrow ?? featuredEyebrow(featured)}</h2>
     <ol ref={row} className="-mx-4 mt-3 flex min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:mx-0 sm:px-0">
       {items.map(({ deal, tags }, index) => <li key={`${dealKey(deal)}-${index}`} className="w-[88%] max-w-[330px] shrink-0 snap-start">
         <button type="button" onClick={() => onSelect?.(deal)} onMouseEnter={() => onHover?.(deal)} onMouseLeave={() => onHover?.(null)} onFocus={() => onHover?.(deal)} onBlur={() => onHover?.(null)} data-deals-featured={deal.reason} aria-label={`${opens ? FEATURED_COPY.details : FEATURED_COPY.unlock}: ${deal.area}, ${money.format(deal.estMonthly)} a month estimated`} className="flex h-full w-full min-w-0 items-stretch gap-3 rounded-2xl border border-border bg-card p-2 text-left shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:border-gold/60">
@@ -131,7 +147,7 @@ export function FeaturedStrip({ featured, onSelect, onHover, opens = false, comp
   return <section aria-labelledby="deals-featured-heading" data-deals-featured-section="true" data-deals-featured-strip="true" className="min-w-0">
     <div className="flex min-w-0 items-end justify-between gap-3">
       <div className="min-w-0">
-        <p className="eyebrow text-gold">{featuredEyebrow(featured)}</p>
+        <p className="eyebrow text-gold" data-deals-featured-eyebrow="true">{eyebrow ?? featuredEyebrow(featured)}</p>
         <h2 id="deals-featured-heading" className="mt-1 text-xl leading-tight sm:text-2xl">{FEATURED_COPY.heading}</h2>
       </div>
       <div className="hidden shrink-0 gap-2 sm:flex">

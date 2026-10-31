@@ -11,7 +11,7 @@ import { FIRST_LOOK_PRICE, firstLookFirst, inFirstLookRange, rankFeaturedFirstLo
 const mocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 
-import { EXTERIOR_MIN_SCORE, exteriorScore, exteriorScoreFromPixels, firstExteriorPhoto, resetExteriorScores } from "./dealsPhotoExterior";
+import { EXTERIOR_MIN_SCORE, exteriorFirst, exteriorScore, exteriorScoreFromPixels, firstExteriorPhoto, resetExteriorScores } from "./dealsPhotoExterior";
 import { withOutsideCovers } from "./dealsFeatured";
 
 (globalThis as { React?: typeof React }).React = React;
@@ -70,6 +70,19 @@ describe("telling the outside of a house from the inside", () => {
     expect(await firstExteriorPhoto([], read)).toBeNull();
     // Storage down: unknown, so the row is never emptied by a hiccup.
     expect(await firstExteriorPhoto([row(6, "gone")], read)).toBeUndefined();
+  });
+
+  it("leads a home's gallery with its known front photo, without reading anything (Oct 30: the bathroom-sink sheet)", async () => {
+    const files = new Map([["sink", await png(inside)], ["porch", await png(outside)], ["den", await png(inside)]]);
+    const read = async (key: string) => { const file = files.get(key); if (!file) throw new Error("missing"); return file; };
+    const row = (id: number, key: string) => ({ id, homeId: 2, processedStorageKey: key, processedVersion: `v2-${key}` });
+    const gallery = [row(11, "sink"), row(12, "porch"), row(13, "den")];
+    // Never measured: gallery order unchanged.
+    expect(exteriorFirst(gallery).map((photo) => photo.id)).toEqual([11, 12, 13]);
+    // Once the featured row has measured it, the front photo leads and the rest keep their order.
+    expect(await firstExteriorPhoto(gallery, read)).toBe(12);
+    expect(exteriorFirst(gallery).map((photo) => photo.id)).toEqual([12, 11, 13]);
+    expect(exteriorFirst([]).length).toBe(0);
   });
 });
 

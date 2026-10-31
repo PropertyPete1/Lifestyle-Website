@@ -110,6 +110,20 @@ export async function firstExteriorPhoto(rows: readonly PhotoRow[], read: Reader
 const defaultReader: Reader = async (key) => (await storageReadPrivate(key)).data;
 
 /**
+ * Oct 30, 2026 (ChatGPT: a featured home's sheet opened on a bathroom sink, 1 of 15): a home's photos with its outside
+ * shot first, the same one firstExteriorPhoto picks. Only scores already measured count; nothing is read here, so a
+ * page of homes costs nothing extra. Homes never measured keep their gallery order.
+ */
+export function exteriorFirst<T extends { processedVersion: string | null }>(rows: readonly T[]): T[] {
+  const index = rows.slice(0, EXTERIOR_PHOTOS_PER_HOME).findIndex((row) => {
+    const score = row.processedVersion ? scores.get(row.processedVersion) : undefined;
+    return score !== undefined && score >= EXTERIOR_MIN_SCORE;
+  });
+  if (index <= 0) return rows.slice();
+  return [rows[index]!, ...rows.slice(0, index), ...rows.slice(index + 1)];
+}
+
+/**
  * Each home's outside cover (see firstExteriorPhoto: a photo id, null for none, undefined for unknown). Only shown,
  * processed photos count, in the gallery's own order. Homes are looked at four at a time.
  */

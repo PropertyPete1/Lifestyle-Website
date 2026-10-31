@@ -51,7 +51,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 // Not a photo test: every home's photos count as unread (it keeps its first photo); the outside-cover rule is tested in dealsFeaturedFirstLook.test.ts.
-vi.mock("./dealsPhotoExterior", () => ({ exteriorCovers: async (ids: readonly number[]) => new Map(ids.map((id) => [id, undefined])) }));
+vi.mock("./dealsPhotoExterior", () => ({ exteriorCovers: async (ids: readonly number[]) => new Map(ids.map((id) => [id, undefined])), exteriorFirst: <T,>(rows: readonly T[]) => rows.slice() }));
 vi.mock("./dealsService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./dealsService")>()),
   getDealSettings: (...args: unknown[]) => mocks.getDealSettings(...args),

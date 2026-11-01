@@ -114,6 +114,9 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
   const [open, setOpen] = useState(false);
   const breakdownId = useId();
   const photo = !failed ? home.photos?.[0] : undefined;
+  // Nov 1, 2026 (Peter: homes "take a second or two to populate"): the photo fades in over its grey frame once it has
+  // loaded, instead of popping in line by line.
+  const [loaded, setLoaded] = useState<string | null>(null);
   const estimate = homePaymentEstimate(home.price, incentive, assumptions);
   const drop = home.previousPrice && home.price && home.previousPrice > home.price ? home.previousPrice - home.price : 0;
   const hot = redHotDeal(home.price ?? null, home.previousPrice ?? null);
@@ -129,7 +132,10 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
   return <article data-deals-buyer-card="true" data-deals-featured-home={featured ? "true" : undefined} className={`@container relative min-w-0 rounded-2xl border bg-card p-3 shadow-[0_1px_2px_rgb(0_0_0/0.04)] sm:p-4 ${featured ? "border-gold ring-2 ring-gold/50" : "border-border"}`}>
     {gallery ? <div className="overflow-hidden rounded-xl [&>*]:mt-0">{gallery}</div> : <button type="button" onClick={onOpen} className="block w-full min-w-0 overflow-hidden rounded-xl text-left" aria-label={openLabel ?? `Home in ${area}, ${price}. See photos and details`}>
       <div className="relative aspect-[16/10] w-full overflow-hidden bg-secondary">
-        {photo ? <RetryImage src={photo} alt="" loading="lazy" decoding="async" draggable={false} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
+        {photo ? <>
+            {loaded !== photo && <div className="absolute inset-0 animate-pulse bg-foreground/[0.06]" aria-hidden="true" data-deals-photo-loading="true" />}
+            <RetryImage src={photo} alt="" loading="lazy" decoding="async" draggable={false} onLoad={() => setLoaded(photo)} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className={`relative block h-full w-full select-none object-cover transition-opacity duration-300 [-webkit-touch-callout:none] ${loaded === photo ? "opacity-100" : "opacity-0"}`} />
+          </>
           : photoPending ? <div className="h-full w-full animate-pulse bg-foreground/[0.06]" aria-hidden="true" />
           : <div className="flex h-full w-full items-center justify-center text-xs uppercase tracking-widest text-muted-foreground">{BUYER_CARD_COPY.noPhoto}</div>}
         <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-1.5">

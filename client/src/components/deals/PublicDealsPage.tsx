@@ -7,7 +7,7 @@ import { BROWSE_SORTS, EMPTY_FILTERS, PAYMENT_SORT, activeFilterCount, homePasse
 import { BrowseBar, BROWSE_COPY } from "./BrowseBar";
 import { BUYER_CARD_COPY, BuyerHomeCard, LockedDetails } from "./BuyerHomeCard";
 import { ComingSoonSection, type ComingSoonItem } from "./ComingSoon";
-import { FeaturedStrip, featuredForSearch, type FeaturedDealsData } from "./FeaturedDeals";
+import { FeaturedStrip, featuredForSearch, featuredPreview, type FeaturedDealsData } from "./FeaturedDeals";
 import { DealsLoader } from "./DealsLoader";
 import type { DetailsContext } from "./DetailsRequestSheet";
 import { HOME_LIST_COPY, ProtectedGallery } from "./GatedCatalog";
@@ -200,7 +200,7 @@ export function PublicDealsPage({ communities: all, useHomes, featured, comingSo
             // Oct 30, 2026 (ChatGPT's test: a home opened onto its community, not its photos): the opened home leads the sheet.
             focusHero: (home, community) => <div className="mx-auto max-w-3xl p-4 pt-14 sm:p-6 sm:pt-14"><BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} tourLabel={BUYER_CARD_COPY.details} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour({ key: community.key, area: community.area, price: home.price, beds: home.beds, sqft: home.sqft, kind: home.kind })} /></div>,
             renderHome: (home, isFeatured, community) => <BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} tourLabel={BUYER_CARD_COPY.details} featured={isFeatured} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour({ key: community.key, area: community.area, price: home.price, beds: home.beds, sqft: home.sqft, kind: home.kind })} /> }}
-          top={filters.savedOnly ? undefined : (actions) => <FeaturedStrip compact featured={strip?.featured} eyebrow={strip?.eyebrow} opens onHover={(deal) => actions.hover(deal?.landingKey ?? null)} onSelect={(deal) => { if (!deal.landingKey || !actions.openHome(deal.landingKey, { price: deal.price, sqft: deal.sqft, kind: deal.kind })) onTour({ key: deal.landingKey, area: deal.area, price: deal.price, beds: deal.beds, sqft: deal.sqft, kind: deal.kind }); }} />}
+          top={filters.savedOnly ? undefined : (actions) => <FeaturedStrip compact featured={strip?.featured} eyebrow={strip?.eyebrow} opens onHover={(deal) => actions.hover(deal?.landingKey ?? null)} onSelect={(deal) => { if (!deal.landingKey || !actions.openHome(deal.landingKey, { price: deal.price, sqft: deal.sqft, kind: deal.kind, preview: featuredPreview(deal) })) onTour({ key: deal.landingKey, area: deal.area, price: deal.price, beds: deal.beds, sqft: deal.sqft, kind: deal.kind }); }} />}
           below={filters.savedOnly ? undefined : <ComingSoonSection items={comingSoon} action={{ kind: "text", phone: null, name: null }} />} />}
       </div>
     </section>

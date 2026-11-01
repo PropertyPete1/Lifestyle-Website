@@ -582,7 +582,17 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
 export type UseCommunityHomes = (key: string | undefined) => { isLoading: boolean; data?: readonly PublicHome[] | null };
 
 /** The home a featured card stands for, by its public figures (the sheet's homes carry no shared key). */
-export type SheetFocus = { price?: number | null; sqft?: number | null; beds?: string | number | null; kind?: string; /** The unlocked list knows the home by its card handle. */ card?: string };
+export type SheetFocus = { price?: number | null; sqft?: number | null; beds?: string | number | null; kind?: string; /** The unlocked list knows the home by its card handle. */ card?: string;
+  /** Nov 1, 2026 (Peter: a featured home opened "zoomed in" for a second or two): what the card already showed (its figures and
+   *  photo), led with while the community's homes load, so the sheet opens on the whole home instead of the community's tall cover. */
+  preview?: PublicHome };
+
+/** Nov 1, 2026: the opened home with the photo its card showed first, so the hero keeps the picture the visitor tapped. */
+export function leadWithPreviewPhoto(home: PublicHome, preview: PublicHome | undefined): PublicHome {
+  const first = preview?.photos?.[0];
+  if (!first || !home.photos?.includes(first) || home.photos[0] === first) return home;
+  return { ...home, photos: [first, ...home.photos.filter((src) => src !== first)] };
+}
 
 /** True when a sheet home is the featured one: same kind, price and size. */
 export function isFocusHome(home: PublicHome, focus: SheetFocus | undefined): boolean {
@@ -706,8 +716,11 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
   // When no home passes (the community matched on its offer or area), every home shows rather than an empty sheet.
   const base = sortHomes(narrowed && narrowed.length ? narrowed : all, filters?.sort ?? "recommended");
   // A featured home leads the sheet, whatever the filters say.
-  const featuredHome = all.find((home) => isFocusHome(home, focus));
-  const list = featuredHome ? [featuredHome, ...base.filter((home) => home !== featuredHome)] : base;
+  const found = all.find((home) => isFocusHome(home, focus));
+  const featuredHome = found ? leadWithPreviewPhoto(found, focus?.preview) : undefined;
+  // While the homes load, the card the visitor tapped leads the sheet (the same figures and photo), never an empty slot.
+  const pendingHome = !found && homes.isLoading && focus?.preview ? focus.preview : undefined;
+  const list = featuredHome ? [featuredHome, ...base.filter((home) => home !== found)] : base;
   const homesTop = useRef<HTMLDivElement>(null);
   // A featured home is scrolled to in the list, unless the sheet leads with it (the unlocked list's home hero).
   useEffect(() => { if (featuredHome && !options.focusHero) window.setTimeout(() => homesTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 250); }, [featuredHome]);
@@ -716,7 +729,7 @@ export function CommunitySheet({ community, onClose, onUnlock, useHomes, filters
     <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="deals-community-title" data-deals-community-sheet="true" onClick={(event) => event.stopPropagation()} className="deals-light relative max-h-[94vh] w-full max-w-6xl overflow-y-auto rounded-t-2xl bg-background shadow-2xl sm:rounded-2xl">
       {/* Oct 30, 2026 (ChatGPT's test: the X scrolled away): a zero-height sticky row keeps it in the corner while the sheet scrolls. */}
       <div className="sticky top-0 z-20 h-0"><button ref={closeButton} type="button" onClick={onClose} aria-label={LANDING_COPY.close} className="absolute right-2 top-2 flex h-11 w-11 items-center justify-center rounded-full bg-background/90 text-muted-foreground shadow hover:text-foreground"><X className="h-5 w-5" /></button></div>
-      {featuredHome && options.focusHero && <div className="border-b border-border" data-deals-focus-hero="true">{options.focusHero(featuredHome, community)}</div>}
+      {(featuredHome ?? pendingHome) && options.focusHero && <div className="border-b border-border" data-deals-focus-hero={featuredHome ? "true" : "pending"}>{options.focusHero((featuredHome ?? pendingHome)!, community)}</div>}
       <div className="grid min-w-0 gap-6 p-5 sm:p-6 md:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
         <div className="mx-auto w-full min-w-0 max-w-[340px]"><ReelCard reelUrl={community.reelUrl} label={community.label} autoLoad poster={community.cover ?? null} /></div>
         <div className="min-w-0">

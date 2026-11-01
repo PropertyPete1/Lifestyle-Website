@@ -3,6 +3,7 @@ import { ArrowRight, ChevronLeft, ChevronRight, LockKeyhole, Percent, Trees, Tro
 import { formatRate, type FeaturedDeal, type FeaturedDeals as FeaturedDealsData, type PaymentCosts } from "@shared/dealsFeatured";
 import { RED_HOT_COPY, RedHotSavings, RetryImage, money } from "./shared";
 import { redHotDeal } from "@shared/dealsFeatured";
+import type { PublicHome } from "./LandingBrowse";
 
 export type { FeaturedDealsData };
 
@@ -24,6 +25,14 @@ export const FEATURED_COPY = {
 
 const thousands = (value: number) => `$${Math.round(value / 1000)}K`;
 /** "Best deals · $300K to $400K" when the whole row is drawn from that price range (Peter, Oct 30), else the plain heading. */
+/**
+ * Nov 1, 2026 (Peter: a featured home opened "zoomed in", then jumped to the whole house): the featured card as the home it
+ * stands for (its figures and the photo the card already loaded), so the sheet leads with it while the community's homes load.
+ */
+export function featuredPreview(deal: Pick<FeaturedDeal, "key" | "card" | "label" | "price" | "kind" | "beds" | "sqft" | "photo" | "previousPrice">): PublicHome {
+  return { card: `featured:${dealKey(deal)}`, kind: deal.kind, price: deal.price, previousPrice: deal.previousPrice ?? null, beds: deal.beds ?? null, sqft: deal.sqft ?? null, photos: deal.photo ? [deal.photo] : [] };
+}
+
 export function featuredEyebrow(featured: Pick<FeaturedDealsData, "priceRange">): string {
   return featured.priceRange ? `Best deals · ${thousands(featured.priceRange.min)} to ${thousands(featured.priceRange.max)}` : FEATURED_COPY.eyebrow;
 }

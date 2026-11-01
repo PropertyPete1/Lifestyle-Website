@@ -60,6 +60,17 @@ function publicPageCache<T>(key: string, load: () => Promise<T>, options: { stal
   return publicPages.get(key, load, options);
 }
 /**
+ * Nov 1, 2026 (Peter: the homes on the landing page "take a second or two to populate"): one community's public homes
+ * (the photos on its cards) are the same for every visitor, so they are kept for two minutes and shared by requests that
+ * arrive together, and served stale up to ten while a rebuild runs. Never kept warm on a timer (there is one per
+ * community). Every photo is still checked on its own request, so a photo taken off stops showing on its own.
+ */
+const publicHomesPages = createPublicPageCache({ freshMs: 2 * 60_000, staleMs: 10 * 60_000, keepWarmMs: 0 });
+export function publicHomesCache<T>(key: string, load: () => Promise<T>): Promise<T> {
+  if (process.env.VITEST) return load();
+  return publicHomesPages.get(`homes:${key}`, load);
+}
+/**
  * Oct 28, 2026 (8:30 PM sweep: the team list took 7 s to open after two quiet hours, on a process that had served it
  * before: its copy was past the 15-minute stale limit, so the visitor waited for the rebuild). The unlocked lists may be
  * served up to 12 hours stale while they rebuild; what the visitor gets is re-checked against the communities that are
@@ -355,7 +366,7 @@ export const dealsRouter = router({
   publicHomes: publicProcedure.input(z.object({ key: z.string().regex(/^[a-f0-9]{12}$/) })).query(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);
     const { publicCommunityHomes } = await import("./dealsService");
-    return (await publicCommunityHomes(input.key)) ?? [];
+    return publicHomesCache(input.key, async () => (await publicCommunityHomes(input.key)) ?? []);
   }),
   publicCatalog: publicProcedure.input(z.object({ src: z.string().trim().max(40).optional() }).optional()).query(async ({ input, ctx }) => {
     dealsPublicHeaders(ctx.res);

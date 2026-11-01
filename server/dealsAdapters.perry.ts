@@ -1,7 +1,7 @@
 import {
   PERRY_HOST, asUrl, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseSitemapUrls, sameOfficialHost, sourcePage, successfulResult,
   type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlFetcher, type PrivateDealSnapshot, type PrivateGalleryImage, type PrivatePlanOrHome,
-  storiesFrom,
+  htmlToText, primaryDownFromFloorWalk, storiesFrom,
 } from "./dealsAdapters";
 
 /**
@@ -85,6 +85,16 @@ export function perrySlugKind(pathname: string, communityPath: string): PerrySlu
 export type PerryHome = PrivatePlanOrHome & { kind: "home" | "plan"; designId: string | null };
 
 /**
+ * Nov 1, 2026: the page's own write-up, the one clamped paragraph block under the price ("A two-story entry leads past...
+ * Upstairs features a game room..."). Plan and home pages each carry their own. Null when the page has none.
+ */
+export function perryDescription(html: string): string | null {
+  const block = /<div\b[^>]*class="[^"]*\bline-clamp-5\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i.exec(html);
+  const text = block ? htmlToText(block[1]!).replace(/\s+/g, " ").trim() : "";
+  return text || null;
+}
+
+/**
  * One home or plan page. The home's own object sits in the Flight payload as
  * `"address":{...},"home_details":{"baths":..,"bedrooms":..,...,"price":..,
  * "price_discounted":..,"sq_ft":..},...,"move_in_ready_display_status":..,
@@ -147,6 +157,8 @@ export function parsePerryDetail(html: string, pageUrl: string): PerryHome | nul
     squareFeet: sqft,
     garage,
     stories,
+    // Perry walks each plan floor by floor; a single-story home is primary-down by its floors (homePrimaryDown).
+    primaryDown: stories === 1 ? null : primaryDownFromFloorWalk(perryDescription(html)),
     readyNow,
     moveInDate: moveIn ? titleCase(badge!.trim().replace(/\s+move[- ]?in$/i, "")) : null,
     gallery,

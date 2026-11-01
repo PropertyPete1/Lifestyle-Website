@@ -221,6 +221,46 @@ export function primaryDownFrom(value: unknown): boolean | null {
   return down === up ? null : down;
 }
 
+const WALK_UPPER = /\b(?:upstairs|(?:second|2nd|upper)[\s-]+(?:floor|level))\b/i;
+const WALK_UP_THE_STAIRS = /^up\s+(?:the\s+)?(?:[a-z]+\s+)?stair/i;
+const WALK_LOWER = /\b(?:downstairs|(?:first|1st|main|ground)[\s-]+(?:floor|level))\b/i;
+const WALK_PRIMARY = new RegExp(String.raw`\b${OWNER}\s+(?:bedroom|bed|suite|retreat)\b`, "i");
+
+/**
+ * Nov 1, 2026 (Peter: the "primary bedroom downstairs" filter caught only 90 two-story homes): a floor-by-floor write-up
+ * places the primary by where it is described. Perry writes every plan this way: "...The secluded primary suite highlights a
+ * wall of windows... A guest suite with a private bath completes downstairs. Upstairs hosts a game room, two secondary
+ * bedrooms, and a full bath." Sentences run on the main floor until one opens the upstairs ("Upstairs...", "Second floor
+ * hosts...", "Up the curved stairs, ..."); a staircase that merely leads to the second floor, with nothing listed there, opens
+ * nothing. A sentence naming a lower floor goes back down. An explicit phrase (primaryDownFrom) wins; the walk answers only
+ * when the text has an upstairs part and every primary bedroom it names is on one floor. A sentence naming both floors with
+ * the primary in it, or an option, makes it null. Only for builders whose write-ups walk the house in order (Perry).
+ */
+export function primaryDownFromFloorWalk(value: string | null | undefined): boolean | null {
+  const explicit = primaryDownFrom(value ?? null);
+  if (explicit !== null) return explicit;
+  const text = decodeHtmlEntities(String(value ?? "")).replace(/<[^>]*>/g, " ").replace(/[ \s]+/g, " ").replace(/[‘’]/g, "'").trim();
+  if (!text) return null;
+  let floor: "down" | "up" = "down";
+  let hasUpstairs = false, down = false, up = false;
+  for (const sentence of text.split(/(?<=[.!?])\s+/)) {
+    const upperWord = WALK_UPPER.exec(sentence);
+    const upper = Boolean(upperWord) || WALK_UP_THE_STAIRS.test(sentence);
+    const lower = WALK_LOWER.test(sentence);
+    if (upper) hasUpstairs = true;
+    const here: "down" | "up" | null = upper && lower ? null : upper ? "up" : lower ? "down" : floor;
+    if (WALK_PRIMARY.test(sentence)) {
+      if (here === null || /\boption/i.test(sentence)) return null;
+      if (here === "down") down = true; else up = true;
+    }
+    // "...adjacent to the curved staircase leading to the second floor." names the upstairs without walking into it.
+    const onlyLeadsThere = Boolean(upperWord) && /stair/i.test(sentence) && !sentence.slice(upperWord!.index + upperWord![0].length).replace(/[\s.!?]+/g, "");
+    if (here && !onlyLeadsThere) floor = here;
+  }
+  if (!hasUpstairs) return null;
+  return down === up ? null : down;
+}
+
 /**
  * Oct 31, 2026: floors from one plan's or one home's own description: "single-story home" -> 1, "two-story design" -> 2.
  * A two-story room ("two-story family room", "two-story ceilings") says nothing about the house; both kinds: null.

@@ -1103,6 +1103,7 @@ type CatalogReads = NonNullable<CatalogBuildStat["reads"]>;
 async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number): Promise<{ entries: GatedCatalogBuilt[]; readMs: number; reads?: CatalogReads }> {
   const db = await getDb();
   if (!db) return { entries: [], readMs: 0 };
+  const { publicPhotoUrl } = await import("./dealsPhotoToken");
   const full = view.view === "full";
   const now = new Date();
   const settings = await getDealSettings();
@@ -1159,6 +1160,10 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
         // The server route checks the active session again before streaming a
         // per-lead derivative; neither storage nor builder URLs are exposed.
         photos: photos.map((photo) => `/deals/mine/img/${photo.id}`),
+        // Nov 2, 2026 (Peter: on the team list "it does take a minute to load some houses"): the card shows the first photo's
+        // shared public render (the brokerage-marked copy every landing visitor already sees, rendered once and kept for
+        // everyone) instead of a fresh per-lead render for each viewer; the full photos stay "Prepared for" this lead.
+        cover: photos[0] ? publicPhotoUrl(photos[0].id) : null,
         photoCount: photos.length,
         photosOnRequest: photos.length === 0,
         ...(full ? { details: { address: home.privateAddress, planName: home.privatePlanName, builderPage: view.builderPages && /^https?:\/\//i.test(home.sourceUrl) ? builderPageFor(home.sourceUrl) : null } } : {}),

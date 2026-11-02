@@ -45,6 +45,8 @@ export type GatedHome = {
   moveInDate?: string | null;
   lotSize?: string | null;
   photos?: string[];
+  /** Nov 2, 2026: the first photo's shared public render, for the card (fast, already rendered); the gallery stays per-lead. */
+  cover?: string | null;
   details?: GatedHomeDetails | null;
   isNew?: boolean;
 };
@@ -383,11 +385,13 @@ export function HomeTile({ home, community, onOpen, onHover, pick, saved, saving
   const subtitle = lines?.city ?? (plan ? community.area : null);
   const place = [community.details?.communityName, community.details?.builderName].filter(Boolean).join(" · ") || community.area;
   const picked = pick?.picked.has(home.card) ?? false;
+  // The shared cover first (rendered once for everyone, so it shows at once); this lead's own card copy if it will not load.
   const photo = home.photos?.[0] ? cardPhoto(home.photos[0]) : undefined;
+  const cardPhotos = [home.cover, photo].filter((src): src is string => Boolean(src));
   // Oct 30, 2026 (Peter: the team view and the buyer's list get design F): the public card, with the full list's
   // address, community and builder, the builder badge on the photo, and Pick (team) or the heart (buyer).
   return <div id={`tile-${home.card}`} data-deals-home-tile="true" data-deals-picked={picked ? "true" : undefined} onMouseEnter={() => onHover?.(true)} onMouseLeave={() => onHover?.(false)} className={`min-w-0 rounded-2xl ${picked ? "ring-2 ring-gold/70" : ""}`}>
-    <BuyerHomeCard home={{ ...home, photos: photo ? [photo] : [] }} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} photoPending={photoPending}
+    <BuyerHomeCard home={{ ...home, photos: cardPhotos }} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} photoPending={photoPending}
       title={title} subtitle={[place !== title ? place : null, subtitle].filter(Boolean).join(" · ") || null} status={homeStatusLabel(home)}
       openLabel={`${title}, ${home.price ? money.format(home.price) : "price on request"}. Open details`} onOpen={onOpen} onTour={onTour}
       photoBadge={community.details?.builderName ? <span data-deals-tile-builder="true" className="pointer-events-none absolute bottom-3 right-3 max-w-[60%] truncate rounded-md bg-white/95 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-foreground shadow">{community.details.builderName}</span> : undefined}
@@ -430,11 +434,13 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
   // The big photo shows its card-size copy (already loaded by the list) until the full one arrives; the small ones are cards.
   // Oct 31, 2026 (Peter: "every photo needs to show the entire house, not zoomed in"): the big photo is the whole photo
   // (contained) over a blur of its card copy, which also shows while the full one loads; the small tiles stay previews.
+  // Nov 2, 2026: the quick copy under the big photo is the shared cover (already rendered) when it is that same photo.
+  const quickCopy = (src: string) => home.cover && src === home.photos?.[0] ? home.cover : cardPhoto(src);
   const tile = (src: string, index: number, className: string) => <button key={src} type="button" onClick={() => setShown(index)} className={`relative min-h-0 min-w-0 overflow-hidden bg-secondary ${className}`} aria-label={`Photo ${index + 1} of ${photos.length}`}>
-    {index === 0 && <img src={cardPhoto(src)} alt="" aria-hidden="true" decoding="async" draggable={false} className={WHOLE_PHOTO_BACKDROP} />}
+    {index === 0 && <img src={quickCopy(src)} alt="" aria-hidden="true" decoding="async" draggable={false} className={WHOLE_PHOTO_BACKDROP} />}
     {/* Nov 1, 2026 (Peter: a home opened "zoomed in", then jumped to the whole house): the card copy, whole and sharp, under the
         full photo, so the house is framed the same from the first frame and only sharpens when the full photo arrives. */}
-    {index === 0 && cardPhoto(src) !== src && <img src={cardPhoto(src)} alt="" aria-hidden="true" decoding="async" draggable={false} data-deals-hero-card-copy="true" className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain" />}
+    {index === 0 && quickCopy(src) !== src && <img src={quickCopy(src)} alt="" aria-hidden="true" decoding="async" draggable={false} data-deals-hero-card-copy="true" className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain" />}
     <RetryImage src={index === 0 ? src : cardPhoto(src)} alt="" loading={index === 0 ? "eager" : "lazy"} decoding="async" draggable={false} onGiveUp={() => setBroken((current) => new Set(current).add(src))} onContextMenu={(event) => event.preventDefault()} className={`relative block h-full w-full select-none [-webkit-touch-callout:none] ${index === 0 ? "object-contain" : "object-cover"}`} data-deals-hero-whole={index === 0 ? "true" : undefined} />
   </button>;
   return <section aria-label={`${title}, the home you opened`} className="min-w-0 p-5 pt-14 sm:p-6 sm:pt-6">

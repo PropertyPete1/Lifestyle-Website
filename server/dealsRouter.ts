@@ -99,9 +99,11 @@ export function warmPublicPages(): void {
   if (process.env.VITEST) return;
   publicPages.pin("catalog:", () => publicDealsCatalog(undefined));
   publicPages.pin("featured", async () => (await import("./dealsFeatured")).featuredDeals("public"));
+  // Nov 2, 2026: the landing map's picture too (read from storage on a new process), so the first visitor's map is there.
+  void import("./dealsRegionMap").then(({ loadRegionMap }) => loadRegionMap()).catch(() => undefined);
   // Oct 29, 2026: the team list and a buyer's list are loaded at start too (from the last stored build), so the first
   // open on a new process takes ~1 s, not 6–10 s. Loaded once, not kept rebuilt: a process nobody opens them on does no
-  // more work for them. The agent-client view is opened rarely and is left to load on demand.
+  // more work for them. (Nov 2: the agent-client view is primed as well, see PRIMED_LIST_VIEWS.)
   void (async () => {
     const { featuredDeals } = await import("./dealsFeatured");
     for (const view of PRIMED_LIST_VIEWS) {
@@ -111,7 +113,9 @@ export function warmPublicPages(): void {
     }
   })().catch(() => undefined);
 }
-const PRIMED_LIST_VIEWS: DealsCatalogView[] = [{ view: "full", builderPages: true }, { view: "gated" }];
+// Nov 2, 2026: an agent's client link now opens the list with no form, so the agent-client view (full, no builder pages)
+// is primed too: a client tapping the link on a new process gets the list in about a second, not 6-10.
+const PRIMED_LIST_VIEWS: DealsCatalogView[] = [{ view: "full", builderPages: true }, { view: "full", builderPages: false }, { view: "gated" }];
 /** One view's unlocked list as every lead with that view gets it (before their own order). */
 function mineListLoad(view: DealsCatalogView) {
   return process.env.VITEST ? buildGatedCatalog(view) : catalogWithSnapshot(gatedCatalogViewKey(view), () => buildGatedCatalog(view));

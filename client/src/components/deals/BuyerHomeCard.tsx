@@ -110,10 +110,11 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
   /** The photo button's label for screen readers. */
   openLabel?: string;
 }) {
-  const [failed, setFailed] = useState(false);
+  // A photo that will not load gives way to the next copy (the shared cover first, then this lead's own), then "no photo".
+  const [skipped, setSkipped] = useState(0);
   const [open, setOpen] = useState(false);
   const breakdownId = useId();
-  const photo = !failed ? home.photos?.[0] : undefined;
+  const photo = home.photos?.[skipped];
   // Nov 1, 2026 (Peter: homes "take a second or two to populate"): the photo fades in over its grey frame once it has
   // loaded, instead of popping in line by line.
   const [loaded, setLoaded] = useState<string | null>(null);
@@ -134,7 +135,7 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
       <div className="relative aspect-[16/10] w-full overflow-hidden bg-secondary">
         {photo ? <>
             {loaded !== photo && <div className="absolute inset-0 animate-pulse bg-foreground/[0.06]" aria-hidden="true" data-deals-photo-loading="true" />}
-            <RetryImage src={photo} alt="" loading="lazy" decoding="async" draggable={false} onLoad={() => setLoaded(photo)} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className={`relative block h-full w-full select-none object-cover transition-opacity duration-300 [-webkit-touch-callout:none] ${loaded === photo ? "opacity-100" : "opacity-0"}`} />
+            <RetryImage src={photo} alt="" loading="lazy" decoding="async" draggable={false} onLoad={() => setLoaded(photo)} onGiveUp={() => setSkipped((value) => value + 1)} onContextMenu={(event) => event.preventDefault()} className={`relative block h-full w-full select-none object-cover transition-opacity duration-300 [-webkit-touch-callout:none] ${loaded === photo ? "opacity-100" : "opacity-0"}`} />
           </>
           : photoPending ? <div className="h-full w-full animate-pulse bg-foreground/[0.06]" aria-hidden="true" />
           : <div className="flex h-full w-full items-center justify-center text-xs uppercase tracking-widest text-muted-foreground">{BUYER_CARD_COPY.noPhoto}</div>}

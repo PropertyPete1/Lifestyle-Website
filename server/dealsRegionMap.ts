@@ -140,10 +140,28 @@ function regionMapUrl(center: Centroid): string {
   return url.toString();
 }
 
+/**
+ * Nov 2, 2026 (Peter: on his phone "the map does too" take a minute): the stitched picture is also kept in storage, so a
+ * new server process (the host starts dozens a day) reads one file instead of fetching nine map tiles and stitching them.
+ */
+const REGION_STORAGE_KEY = "builder-deals-private/maps/region-v1.webp";
+type RegionStore = { read: (key: string) => Promise<Buffer | null>; write: (key: string, bytes: Buffer) => Promise<void> };
+const defaultStore: RegionStore = {
+  read: async (key) => { const { storageReadPrivate } = await import("./storage"); const stored = await storageReadPrivate(key); return stored.data.length ? stored.data : null; },
+  write: async (key, bytes) => { const { storagePut } = await import("./storage"); await storagePut(key, bytes, "image/webp", { unique: false }); },
+};
+let storedChecked = false;
+
 /** The region picture: fetched once a day server-side (never by the visitor's browser), a failure retried after ten minutes. */
-export async function loadRegionMap(fetcher: typeof fetch = fetch): Promise<Buffer | null> {
+export async function loadRegionMap(fetcher: typeof fetch = fetch, store: RegionStore = defaultStore): Promise<Buffer | null> {
   if (cached && cached.expiresAt > Date.now()) return cached.bytes;
-  if (failedUntil > Date.now() || !ENV.forgeApiUrl || !ENV.forgeApiKey) return null;
+  // A fresh process serves the stored picture at once (good for a day) and only rebuilds when it has none.
+  if (!cached && !storedChecked) {
+    storedChecked = true;
+    const stored = await store.read(REGION_STORAGE_KEY).catch(() => null);
+    if (stored) { cached = { bytes: stored, expiresAt: Date.now() + DAY_MS }; return stored; }
+  }
+  if (failedUntil > Date.now() || !ENV.forgeApiUrl || !ENV.forgeApiKey) return cached?.bytes ?? null;
   let urls: string[];
   try { urls = mosaicTileCenters().map(regionMapUrl); } catch { failedUntil = Date.now() + FAILURE_MS; return null; }
   loading ??= (async () => {
@@ -169,6 +187,7 @@ export async function loadRegionMap(fetcher: typeof fetch = fetch): Promise<Buff
       // Three quarters of full resolution keeps the file near a megabyte and the streets readable when zoomed in.
       const bytes = await sharp(stitched, { limitInputPixels: 40_000_000 }).resize(Math.round(width * 0.75), Math.round(height * 0.75)).webp({ quality: 72 }).toBuffer();
       cached = { bytes, expiresAt: Date.now() + DAY_MS };
+      void store.write(REGION_STORAGE_KEY, bytes).catch(() => undefined);
       return bytes;
     } catch {
       failedUntil = Date.now() + FAILURE_MS;
@@ -183,7 +202,8 @@ export async function loadRegionMap(fetcher: typeof fetch = fetch): Promise<Buff
 export async function regionMapHandler(_req: Request, res: Response) {
   const bytes = await loadRegionMap();
   if (!bytes) return res.status(404).end();
-  res.setHeader("Cache-Control", "public, max-age=3600");
+  // A day in the browser, and a week served from its cache while it checks again: the picture changes about never.
+  res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.type("image/webp").send(bytes);
 }
@@ -193,4 +213,5 @@ export function resetRegionMap() {
   cached = null;
   failedUntil = 0;
   loading = null;
+  storedChecked = false;
 }

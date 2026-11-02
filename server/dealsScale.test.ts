@@ -63,6 +63,10 @@ describe("catalog reads at the scale of every community", () => {
     expect(bigGated.find((entry) => entry.label === "Area 17 | New Homes")).toMatchObject({ incentive: { text: "Offer 17" } });
     expect(bigGated.every((entry) => entry.homes.length === 3 && entry.homes.every((home) => home.photos.length === 1))).toBe(true);
     expect(new Set(bigGated.flatMap((entry) => entry.homes.flatMap((home) => home.photos))).size).toBe(120);
+    // Nov 2, 2026: each card also carries its first photo's shared public render (an opaque token, never an id).
+    const covers = bigGated.flatMap((entry) => entry.homes.map((home) => (home as { cover?: string | null }).cover));
+    expect(covers.every((cover) => typeof cover === "string" && /^\/deals\/pub\/img\/[a-f0-9]{32}$/.test(cover))).toBe(true);
+    expect(new Set(covers).size).toBe(120);
   });
 
   it("puts the community from the visitor's reel first on the landing page and on their private list", async () => {

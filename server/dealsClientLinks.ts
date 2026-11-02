@@ -112,9 +112,11 @@ export async function teamRowsForLead(lead: Pick<LeadRow, "phoneE164" | "email">
   const db = await getDb();
   if (!db) return [];
   const email = lead.email?.trim().toLowerCase() || null;
+  // A lead with neither (a link opened without a number, no email) is nobody on the team.
+  if (!lead.phoneE164 && !email) return [];
   return db.select().from(dealTeamAllowlist).where(and(
     eq(dealTeamAllowlist.active, true),
-    or(eq(dealTeamAllowlist.phoneE164, lead.phoneE164), ...(email ? [eq(dealTeamAllowlist.email, email)] : [])),
+    or(...(lead.phoneE164 ? [eq(dealTeamAllowlist.phoneE164, lead.phoneE164)] : []), ...(email ? [eq(dealTeamAllowlist.email, email)] : [])),
   )).orderBy(desc(dealTeamAllowlist.id));
 }
 
@@ -281,7 +283,8 @@ export async function resolveClientLink(token: string | null | undefined): Promi
 }
 
 export type LinkPresentation =
-  | { state: "live"; agentName: string; clientFirstName: string }
+  /** opensDirectly (Nov 1, 2026): the agent did not lock the link to the client's mobile, so the list opens with no code. */
+  | { state: "live"; agentName: string; clientFirstName: string; opensDirectly: boolean }
   | { state: "dead"; agentName: string | null };
 
 /**
@@ -299,7 +302,7 @@ export async function presentClientLink(token: string | null | undefined): Promi
   if (!link) return { state: "dead", agentName: null };
   const agent = await agentForTeamId(link.agentTeamId);
   if (!agent?.active || !linkIsOpen(link)) return { state: "dead", agentName: agent?.active ? agent.name : null };
-  return { state: "live", agentName: agent.name, clientFirstName: link.clientName.split(/\s+/)[0] ?? "" };
+  return { state: "live", agentName: agent.name, clientFirstName: link.clientName.split(/\s+/)[0] ?? "", opensDirectly: !link.clientPhoneE164 };
 }
 
 export type LinkForPhone =
@@ -354,13 +357,20 @@ export async function liveAgentForClient(lead: Pick<LeadRow, "id" | "agentTeamId
   return agent?.active ? agent : null;
 }
 
-export type ConnectOffer = "ask" | "connected" | "not_theirs";
+/** "open" (Nov 1, 2026): a session opened through a link without a number, shown another live link, opens that one. */
+export type ConnectOffer = "ask" | "connected" | "not_theirs" | "open";
 /**
  * What a buyer with a live list sees when they open a live client link: their
  * own link again goes straight to the list, a link made for another number is
  * not offered, anything else asks "Connect your list with X?".
  */
 export async function connectOfferFor(lead: Pick<LeadRow, "id" | "phoneE164" | "clientLinkId">, token: string): Promise<ConnectOffer | null> {
+  // Nov 1, 2026: a session opened through a link without a number is that link's; another live link opens on its own.
+  if (!lead.phoneE164) {
+    const resolved = await resolveClientLink(token);
+    if (!resolved) return null;
+    return resolved.link.id === lead.clientLinkId ? "connected" : "open";
+  }
   const usable = await clientLinkForPhone(token, lead.phoneE164);
   if (!usable) return null;
   if (!usable.ok) return usable.kind === "other_phone" ? "not_theirs" : null;
@@ -413,6 +423,8 @@ export async function attachLiveSessionToClientLink(input: { lead: LeadRow; toke
   const db = await getDb();
   if (!db) return { ok: false, kind: "unavailable" };
   if (input.lead.status === "team") return { ok: true, attached: false, reason: "team" };
+  // A session opened through a link without a number is never moved to another link this way (that link opens on its own).
+  if (!input.lead.phoneE164) return { ok: false, kind: "invalid_link" };
   const usable = await clientLinkForPhone(input.token, input.lead.phoneE164);
   if (!usable || !usable.ok) return { ok: false, kind: usable && !usable.ok && usable.kind === "other_phone" ? "other_phone" : "invalid_link" };
   const resolved = usable.resolved;

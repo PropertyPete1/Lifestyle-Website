@@ -32,12 +32,13 @@ function identityPredicates(identity: DealIdentity) {
 }
 
 function teamIdentityMatch(
-  lead: { phoneE164: string; email: string | null },
+  lead: { phoneE164: string | null; email: string | null },
   members: Array<{ phoneE164: string | null; email: string | null }>,
   testTeamNumbers: readonly string[],
 ) {
-  return testTeamNumbers.includes(lead.phoneE164) || members.some((member) =>
-    member.phoneE164 === lead.phoneE164 || Boolean(lead.email && member.email === lead.email),
+  // A missing phone never matches a member with no phone (null === null).
+  return (lead.phoneE164 !== null && testTeamNumbers.includes(lead.phoneE164)) || members.some((member) =>
+    (lead.phoneE164 !== null && member.phoneE164 === lead.phoneE164) || Boolean(lead.email && member.email === lead.email),
   );
 }
 
@@ -106,7 +107,7 @@ export async function revokeOrphanedTeamPreviewLinks(db: DealsDb): Promise<numbe
     db.select({ phoneE164: dealTeamAllowlist.phoneE164, email: dealTeamAllowlist.email }).from(dealTeamAllowlist).where(eq(dealTeamAllowlist.active, true)),
   ]);
   const ids = teamLeads
-    .filter((lead: { id: number; phoneE164: string; email: string | null }) => !teamIdentityMatch(lead, members, settings.testTeamNumbers))
+    .filter((lead: { id: number; phoneE164: string | null; email: string | null }) => !teamIdentityMatch(lead, members, settings.testTeamNumbers))
     .map((lead: { id: number }) => lead.id);
   if (!ids.length) return 0;
   const now = new Date();

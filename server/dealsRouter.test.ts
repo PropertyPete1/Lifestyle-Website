@@ -284,7 +284,8 @@ describe("agent client links through the router", () => {
 
   it("names the agent on the landing state for a live link, counts the open, and names them on a dead one too", async () => {
     const state = await visitor().state({ c: TOKEN });
-    expect(state.clientLink).toEqual({ state: "live", agentName: "Tiffany Agent", clientFirstName: "Maria" });
+    // Nov 1, 2026: not locked to the client's mobile, so the page opens it with no code.
+    expect(state.clientLink).toEqual({ state: "live", agentName: "Tiffany Agent", clientFirstName: "Maria", opensDirectly: true });
     expect(db.rows(dealClientLinks)[0]).toMatchObject({ openCount: 1 });
     expect((await visitor().state({ c: "nope" })).clientLink).toBeNull();
     expect((await visitor().state()).clientLink).toBeNull();

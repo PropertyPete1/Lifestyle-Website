@@ -583,8 +583,10 @@ async function leadDeviceHashes(db: any, lead: { id: number; deviceHash: string 
 }
 
 /** The admin turn-off rows that cover this lead (phone, email or one of their browsers). */
-async function adminTurnOffRows(db: any, lead: { phoneE164: string; email: string | null }, devices: string[]) {
-  const matches = [eq(dealBlocklist.phoneE164, lead.phoneE164), lead.email ? eq(dealBlocklist.email, lead.email.toLowerCase()) : undefined, devices.length ? inArray(dealBlocklist.deviceHash, devices) : undefined].filter(Boolean) as any[];
+async function adminTurnOffRows(db: any, lead: { phoneE164: string | null; email: string | null }, devices: string[]) {
+  const matches = [lead.phoneE164 ? eq(dealBlocklist.phoneE164, lead.phoneE164) : undefined, lead.email ? eq(dealBlocklist.email, lead.email.toLowerCase()) : undefined, devices.length ? inArray(dealBlocklist.deviceHash, devices) : undefined].filter(Boolean) as any[];
+  // Nothing to match on must never read (and lift) every turn-off row.
+  if (!matches.length) return [];
   const rows: Array<typeof dealBlocklist.$inferSelect> = await db.select().from(dealBlocklist).where(or(...matches));
   return rows.filter((row) => isAdminTurnOffReason(row.reason));
 }
@@ -600,17 +602,21 @@ export async function turnOffBuyerAccess(input: { leadId: number; by: string; no
   // A team member (or a test team number) is never switched off by this button.
   const settings = await getDealSettings();
   const email = lead.email?.toLowerCase() ?? null;
-  const team = lead.status === "team" || settings.testTeamNumbers.includes(lead.phoneE164) || (await db.select({ id: dealTeamAllowlist.id }).from(dealTeamAllowlist).where(and(eq(dealTeamAllowlist.active, true), or(eq(dealTeamAllowlist.phoneE164, lead.phoneE164), ...(email ? [eq(dealTeamAllowlist.email, email)] : [])))).limit(1)).length > 0;
+  // A lead with no phone (an agent's link opened without a number) and no email matches no team row.
+  const teamMatches = [...(lead.phoneE164 ? [eq(dealTeamAllowlist.phoneE164, lead.phoneE164)] : []), ...(email ? [eq(dealTeamAllowlist.email, email)] : [])];
+  const team = lead.status === "team" || (lead.phoneE164 !== null && settings.testTeamNumbers.includes(lead.phoneE164)) || (teamMatches.length > 0 && (await db.select({ id: dealTeamAllowlist.id }).from(dealTeamAllowlist).where(and(eq(dealTeamAllowlist.active, true), or(...teamMatches))).limit(1)).length > 0);
   if (team) return { ok: false, kind: "team" };
   const devices = await leadDeviceHashes(db, lead);
   const note = input.note?.trim();
   const reason = (note ? `${ADMIN_TURN_OFF_REASON}: ${note}` : ADMIN_TURN_OFF_REASON).slice(0, 255);
   const now = new Date();
   await db.transaction(async (tx: any) => {
-    await tx.insert(dealBlocklist).values({ phoneE164: lead.phoneE164, email, reason });
+    if (lead.phoneE164 || email) await tx.insert(dealBlocklist).values({ phoneE164: lead.phoneE164, email, reason });
     for (const deviceHash of devices) await tx.insert(dealBlocklist).values({ deviceHash, reason });
-    // Every lead row on this phone or email loses its links now (a buyer can have signed up twice).
-    const others: Array<{ id: number; status: string }> = await tx.select({ id: dealLeads.id, status: dealLeads.status }).from(dealLeads).where(or(eq(dealLeads.phoneE164, lead.phoneE164), ...(email ? [eq(dealLeads.email, email)] : [])));
+    // Every lead row on this phone or email loses its links now (a buyer can have signed up twice); a lead with
+    // neither (an agent's link opened without a number) is only itself.
+    const sameBuyer = [...(lead.phoneE164 ? [eq(dealLeads.phoneE164, lead.phoneE164)] : []), ...(email ? [eq(dealLeads.email, email)] : [])];
+    const others: Array<{ id: number; status: string }> = sameBuyer.length ? await tx.select({ id: dealLeads.id, status: dealLeads.status }).from(dealLeads).where(or(...sameBuyer)) : [];
     const ids = Array.from(new Set([lead.id, ...others.filter((row) => row.status !== "team").map((row) => row.id)]));
     await tx.update(dealLeads).set({ status: "blocked", revokedAt: now }).where(inArray(dealLeads.id, ids));
     await tx.update(dealAccessTokens).set({ revokedAt: now }).where(and(inArray(dealAccessTokens.leadId, ids), isNull(dealAccessTokens.revokedAt)));
@@ -635,9 +641,10 @@ export async function turnOnBuyerAccess(input: { leadId: number; by: string }): 
 }
 
 /** Which of these leads an admin has turned off (for the Leads table's pill and its "Turn back on" button). */
-export async function adminTurnedOffLeadIds(leads: ReadonlyArray<{ id: number; phoneE164: string; email: string | null; status: string }>): Promise<number[]> {
+export async function adminTurnedOffLeadIds(leads: ReadonlyArray<{ id: number; phoneE164: string | null; email: string | null; status: string }>): Promise<number[]> {
   const db = await getDb();
-  const blocked = leads.filter((lead) => lead.status === "blocked");
+  // A lead with no phone and no email (an agent's link opened without a number) has no turn-off row to find here.
+  const blocked = leads.filter((lead): lead is typeof lead & { phoneE164: string } => lead.status === "blocked" && Boolean(lead.phoneE164));
   if (!db || !blocked.length) return [];
   const rows: Array<{ phoneE164: string | null; email: string | null; reason: string }> = await db.select({ phoneE164: dealBlocklist.phoneE164, email: dealBlocklist.email, reason: dealBlocklist.reason }).from(dealBlocklist)
     .where(or(inArray(dealBlocklist.phoneE164, blocked.map((lead) => lead.phoneE164)), ...(blocked.some((lead) => lead.email) ? [inArray(dealBlocklist.email, blocked.flatMap((lead) => lead.email ? [lead.email.toLowerCase()] : []))] : [])));
@@ -1302,6 +1309,67 @@ export async function exchangeAccessToken(req: Request, res: Response, rawToken:
 
 /** Buyers an LDR agent sent carry this source; it is never one of the reel codes. */
 export const AGENT_CLIENT_SOURCE = "agent";
+
+/**
+ * What the lead row records as consent for a list opened through an agent's link with no number: none was asked for
+ * or given. Kept honest so nothing downstream (a CRM note, an export) can read it as a TCPA consent.
+ */
+export const CLIENT_LINK_NO_CONSENT_TEXT = "No consent captured: opened their agent's private link without a number. No calls or texts were agreed to on Builder Deals.";
+
+export type OpenClientLinkResult =
+  | { ok: true; token: string; leadId: number; firstUnlock: boolean }
+  | { ok: false; kind: "dead" | "locked" | "cookie_blocked" | "paused" | "unavailable" };
+
+/**
+ * Nov 1, 2026 (Peter: "Since I'm the agent sending the list ... it should just open for whoever gets sent the link").
+ * An agent's live link opens the full list with no code: the first open creates the link's lead (no phone, named
+ * after the link, no consent) and every later open, on any device, signs in to that same lead, so the agent sees one
+ * client's opens and saves. Not for a link the agent locked to the client's mobile (that one still verifies the
+ * number), a turned-off or expired link, a link whose client was blocked or is on the team, or a browser an admin
+ * turned off. Forwarding the link forwards the list: Peter's call, with "Turn off" on his client list.
+ */
+export async function openClientLinkWithoutCode(input: { req: Request; res: Response; token: string }): Promise<OpenClientLinkResult> {
+  const { resolveClientLink, attachLeadToClientLink } = await import("./dealsClientLinks");
+  const resolved = await resolveClientLink(input.token);
+  if (!resolved) return { ok: false, kind: "dead" };
+  const { link, agent } = resolved;
+  if (link.clientPhoneE164) return { ok: false, kind: "locked" };
+  const { deviceHash, hasProbe } = ensureDealsCookies(input.req, input.res);
+  if (!hasProbe) return { ok: false, kind: "cookie_blocked" };
+  const block = await getActiveBlock({ deviceHash, ignoreHasAgent: true });
+  if (block) return { ok: false, kind: "paused" };
+  const db = await getDb();
+  if (!db) return { ok: false, kind: "unavailable" };
+  const settings = await getDealSettings();
+  const now = new Date();
+  const freshExpiry = new Date(now.getTime() + settings.clientLinkExpiryHours * 60 * 60_000);
+  const ip = realClientIp(input.req);
+  const existing = link.leadId ? (await db.select().from(dealLeads).where(eq(dealLeads.id, link.leadId)).limit(1))[0] : undefined;
+  let leadId: number;
+  let expiresAt = freshExpiry;
+  let firstUnlock = false;
+  if (existing) {
+    // The client already on this link (opened before, or verified by code): a blocked or team lead never opens here.
+    // So is a client who has since moved to another agent's link: this one no longer opens their list.
+    if (existing.status === "blocked" || existing.status === "team" || (existing.clientLinkId !== null && existing.clientLinkId !== link.id)) return { ok: false, kind: "locked" };
+    if (existing.phoneE164 && await getActiveBlock({ phone: existing.phoneE164, ignoreHasAgent: true })) return { ok: false, kind: "paused" };
+    expiresAt = existing.status === "verified" && existing.expiresAt > freshExpiry ? existing.expiresAt : freshExpiry;
+    await db.update(dealLeads).set({ status: "verified", expiresAt, revokedAt: null, agentTeamId: existing.agentTeamId ?? agent.teamId, clientLinkId: existing.clientLinkId ?? link.id, name: existing.name ?? link.clientName }).where(eq(dealLeads.id, existing.id));
+    leadId = existing.id;
+  } else {
+    const result = await db.insert(dealLeads).values({
+      phoneE164: null, name: link.clientName, sourceCode: AGENT_CLIENT_SOURCE, status: "verified", flags: JSON.stringify(["client_link_open"]),
+      consentText: CLIENT_LINK_NO_CONSENT_TEXT, consentAt: now, consentIp: ip, deviceHash, expiresAt,
+      // Nothing to send: a lead with no phone never reaches Follow Up Boss (the agent already has the client).
+      fubStatus: "synced", agentTeamId: agent.teamId, clientLinkId: link.id,
+    });
+    leadId = Number((result as unknown as [{ insertId: number }])[0].insertId);
+    firstUnlock = true;
+  }
+  await attachLeadToClientLink(db, link.id, leadId, existing?.clientLinkId ?? null);
+  await logDealEvent({ leadId, kind: "client_link_opened", sourceCode: AGENT_CLIENT_SOURCE, deviceHash, ip, detail: firstUnlock ? "first open" : "returning open" });
+  return { ok: true, token: await issueAccessToken(leadId, deviceHash, expiresAt), leadId, firstUnlock };
+}
 
 /** The name and email typed on the gate, cleaned: a name of 2-190 characters, an email that looks like one (lowercased). */
 export function typedIdentity(name?: string | null, email?: string | null): { name: string | null; email: string | null } {

@@ -245,8 +245,10 @@ export function isInAppBrowser(userAgent: string | undefined): boolean {
   return /Instagram|FBAN|FBAV|TikTok|\bwv\b/i.test(ua) || (/iPhone|iPad/i.test(ua) && !/Safari/i.test(ua));
 }
 
-export function displayForLead(input: { name?: string | null; instagramHandle?: string | null; phoneE164: string }): string {
+export function displayForLead(input: { name?: string | null; instagramHandle?: string | null; phoneE164: string | null }): string {
   if (input.name?.trim()) return input.name.trim();
   if (input.instagramHandle) return `@${input.instagramHandle}`;
+  // Nov 1, 2026: a link opened without a number (its lead is named after the agent's link, so this is a last resort).
+  if (!input.phoneE164) return "Your agent's client";
   return `••••${input.phoneE164.replace(/\D/g, "").slice(-4)}`;
 }

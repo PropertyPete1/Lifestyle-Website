@@ -415,7 +415,11 @@ export const dealLeads = mysqlTable(
   "deal_leads",
   {
     id: int("id").autoincrement().primaryKey(),
-    phoneE164: varchar("phone_e164", { length: 20 }).notNull().unique(),
+    /**
+     * Nov 1, 2026 (Peter: an agent's client link "should just open for whoever gets sent the link"): null for the one
+     * lead behind an agent's link that was opened without a number (no code, no consent). Every verified buyer has one.
+     */
+    phoneE164: varchar("phone_e164", { length: 20 }).unique(),
     email: varchar("email", { length: 320 }),
     name: varchar("name", { length: 190 }),
     instagramHandle: varchar("instagram_handle", { length: 31 }),

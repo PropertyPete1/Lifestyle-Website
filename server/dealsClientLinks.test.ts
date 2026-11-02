@@ -31,7 +31,7 @@ import { resetFubAssignmentCache } from "./dealsFub";
 import { AGENT_PAGE_SOURCE, agentForPageSlug, agentNameSlug, agentPageEntries, agentPageForLead, resetAgentPageCache } from "./dealsAgentPages";
 import { classifyDealsAccess, revokeNonTeamMatchingDealLinks } from "./dealsEligibility";
 import { createDealsHomeRequest, setDealsHomeSaved } from "./dealsRequests";
-import { AGENT_CLIENT_SOURCE, HAS_AGENT_BLOCK_REASON, builderPageFor, catalogViewForSession, completeVerification, createPendingVerification, dealsCardHandle, exchangeAccessToken, gatedDealsCatalog, getActiveBlock, hashSecret, issueAccessToken, savedDealCards } from "./dealsService";
+import { AGENT_CLIENT_SOURCE, CLIENT_LINK_NO_CONSENT_TEXT, HAS_AGENT_BLOCK_REASON, openClientLinkWithoutCode, builderPageFor, catalogViewForSession, completeVerification, createPendingVerification, dealsCardHandle, exchangeAccessToken, gatedDealsCatalog, getActiveBlock, hashSecret, issueAccessToken, savedDealCards } from "./dealsService";
 
 const HOUR = 3_600_000;
 const AGENT_PHONE = "+12105550101";
@@ -961,5 +961,91 @@ describe("Oct 27, 2026: agents get in and stay in", () => {
     // A team member's number is never a "skip the text" test number.
     expect(await isTeamPhone(AGENT_PHONE)).toBe(true);
     expect(await isTeamPhone(CLIENT_PHONE)).toBe(false);
+  });
+});
+
+/**
+ * Nov 1, 2026 (Peter: "Since I'm the agent sending the list I already have their number ... it should just open for
+ * whoever gets sent the link"). A link the agent did not lock to the client's mobile opens the full list with no code.
+ */
+describe("an agent's link opens with no code", () => {
+  const browser = (device: string) => request({ [DEALS_COOKIE.device]: device, [DEALS_COOKIE.probe]: "p" });
+
+  it("creates the link's own lead (no phone, named after the link, no consent) and signs the browser in to the full list", async () => {
+    testSettings();
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Karyme Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    expect(await presentClientLink(created.link.token)).toMatchObject({ state: "live", agentName: "Tiffany Agent", clientFirstName: "Karyme", opensDirectly: true });
+    const opened = await openClientLinkWithoutCode({ req: browser("phone-1"), res: responseRecorder().response, token: created.link.token });
+    expect(opened).toMatchObject({ ok: true, firstUnlock: true });
+    if (!opened.ok) return;
+    const client = db.rows(dealLeads).find((row) => row.id === opened.leadId) as typeof dealLeads.$inferSelect;
+    expect(client).toMatchObject({ phoneE164: null, name: "Karyme Lopez", status: "verified", sourceCode: AGENT_CLIENT_SOURCE, agentTeamId: teamId, clientLinkId: created.link.id, consentText: CLIENT_LINK_NO_CONSENT_TEXT, fubStatus: "synced" });
+    expect(client.expiresAt.getTime() - Date.now()).toBeGreaterThan(71 * HOUR);
+    expect(db.rows(dealClientLinks).find((row) => row.id === created.link.id)).toMatchObject({ leadId: opened.leadId });
+    // The one-time token signs this browser in, and the list is the full one (addresses, builders, picks), no builder pages.
+    const signIn = responseRecorder();
+    expect(await exchangeAccessToken(browser("phone-1"), signIn.response, opened.token)).toBe("ok");
+    expect(signIn.cookie(DEALS_COOKIE.session)).toBeTruthy();
+    expect((await catalogViewForSession(client)).view).toEqual({ view: "full", builderPages: false });
+    // Another device (or a forward) opens the same client's list: one lead, so the agent sees one client's activity.
+    const again = await openClientLinkWithoutCode({ req: browser("laptop-2"), res: responseRecorder().response, token: created.link.token });
+    expect(again).toMatchObject({ ok: true, leadId: opened.leadId, firstUnlock: false });
+    expect(db.rows(dealLeads).filter((row) => row.clientLinkId === created.link.id)).toHaveLength(1);
+    // The agent's list shows the client opened it (no phone to show).
+    const client0 = (await agentWorkspace(agent))!.clients.find((row) => row.id === created.link.id)!;
+    expect(client0).toMatchObject({ clientName: "Karyme Lopez", clientPhone: null });
+    expect(client0.verifiedAt).toBeTruthy();
+    // Shown another live link, this session opens that one rather than asking to connect a number.
+    const other = await createClientLink({ agentLead: agent, clientName: "Sam Reyes" });
+    if (!other.ok) throw new Error("link not created");
+    expect(await connectOfferFor(client, created.link.token)).toBe("connected");
+    expect(await connectOfferFor(client, other.link.token)).toBe("open");
+  });
+
+  it("does not open a link locked to the client's mobile, a turned-off link, or a browser an admin turned off", async () => {
+    testSettings();
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const locked = await createClientLink({ agentLead: agent, clientName: "Sam Reyes", clientPhone: "(210) 555-0404" });
+    if (!locked.ok) throw new Error("link not created");
+    expect(await presentClientLink(locked.link.token)).toMatchObject({ state: "live", opensDirectly: false });
+    expect(await openClientLinkWithoutCode({ req: browser("p1"), res: responseRecorder().response, token: locked.link.token })).toEqual({ ok: false, kind: "locked" });
+    const off = await createClientLink({ agentLead: agent, clientName: "Old Link" });
+    if (!off.ok) throw new Error("link not created");
+    await revokeClientLink(agent, off.link.id);
+    expect(await openClientLinkWithoutCode({ req: browser("p2"), res: responseRecorder().response, token: off.link.token })).toEqual({ ok: false, kind: "dead" });
+    const open = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!open.ok) throw new Error("link not created");
+    // No probe cookie yet: the page has not loaded once in this browser.
+    expect(await openClientLinkWithoutCode({ req: request({ [DEALS_COOKIE.device]: "p3" }), res: responseRecorder().response, token: open.link.token })).toEqual({ ok: false, kind: "cookie_blocked" });
+    const res = responseRecorder();
+    const req = browser("p4");
+    // An admin turn-off on this browser keeps it off.
+    const first = await openClientLinkWithoutCode({ req, res: res.response, token: open.link.token });
+    expect(first.ok).toBe(true);
+    const deviceHash = (db.rows(dealEvents).find((row) => row.kind === "client_link_opened") as { deviceHash: string }).deviceHash;
+    db.seed(dealBlocklist, { deviceHash, reason: "Turned off by admin" });
+    expect(await openClientLinkWithoutCode({ req, res: responseRecorder().response, token: open.link.token })).toEqual({ ok: false, kind: "paused" });
+  });
+
+  it("opens the client already verified through an unlocked link into their own list, but never a client who moved to another link", async () => {
+    vi.stubEnv("DEALS_TEST_OTP", TEST_OTP);
+    testSettings();
+    const agent = lead({ phoneE164: AGENT_PHONE, status: "team" });
+    const created = await createClientLink({ agentLead: agent, clientName: "Maria Lopez" });
+    if (!created.ok) throw new Error("link not created");
+    const { done } = await verifyThrough(created.link.token, CLIENT_PHONE);
+    if (!done?.ok) throw new Error("not verified");
+    const opened = await openClientLinkWithoutCode({ req: browser("tablet"), res: responseRecorder().response, token: created.link.token });
+    expect(opened).toMatchObject({ ok: true, leadId: done.leadId, firstUnlock: false });
+    // The same client verifies through another agent's link: the first link no longer opens their list.
+    db.seed(dealTeamAllowlist, { name: "Other Agent", phoneE164: "+12105550303", source: "manual", active: true });
+    const otherAgent = lead({ phoneE164: "+12105550303", status: "team" });
+    const theirs = await createClientLink({ agentLead: otherAgent, clientName: "Maria" });
+    if (!theirs.ok) throw new Error("link not created");
+    const moved = db.rows(dealLeads).find((row) => row.id === done.leadId) as typeof dealLeads.$inferSelect;
+    moved.clientLinkId = theirs.link.id;
+    expect(await openClientLinkWithoutCode({ req: browser("tablet-2"), res: responseRecorder().response, token: created.link.token })).toEqual({ ok: false, kind: "locked" });
   });
 });

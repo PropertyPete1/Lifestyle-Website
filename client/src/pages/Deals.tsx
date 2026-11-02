@@ -89,12 +89,16 @@ function Landing() {
   const agentPage = !shared && state.data && "agentPage" in state.data ? state.data.agentPage ?? null : null;
   // A buyer with a live list is asked before a new agent's link is connected; their own link, or one made for another number, goes straight to their list.
   const askToConnect = hasSession && !teamSession && Boolean(linkToken && shared) && state.data?.connectOffer === "ask";
+  // Nov 1, 2026 (Peter: the agent's link "should just open for whoever gets sent the link"): a live link the agent did
+  // not lock to the client's mobile opens the list with no form. ?code=1 is the server sending a link back to the gate.
+  const [backToGate] = useState(() => new URLSearchParams(window.location.search).has("code"));
+  const opensDirectly = Boolean(linkToken && shared && "opensDirectly" in shared && shared.opensDirectly && !backToGate && !teamSession && (!hasSession || state.data?.connectOffer === "open"));
   // A lapsed reel buyer back from a bookmark sees "comment again or reach out"; a fresh DM link (?src=) still opens the gate.
   const lapsedReelBuyer = Boolean(state.data?.lapsed) && !linkToken && !new URLSearchParams(window.location.search).has("src");
   useEffect(() => {
-    if (!hasSession || askToConnect) return;
+    if (!hasSession || askToConnect || opensDirectly) return;
     window.location.assign(teamSession ? "/deals/team" : "/deals/mine");
-  }, [hasSession, teamSession, askToConnect]);
+  }, [hasSession, teamSession, askToConnect, opensDirectly]);
   const pendingKey = state.data?.pending?.expiresAt ?? null;
   useEffect(() => { if (pendingKey) setGateOpen(true); }, [pendingKey]);
   // A buyer whose list lapsed is told how to get back in.
@@ -108,12 +112,31 @@ function Landing() {
   const [details, setDetails] = useState<DetailsContext | null | undefined>(undefined);
   const askForDetails = (home?: DetailsContext) => { if (shared || askToConnect) setGateOpen(true); else setDetails(home ?? null); };
   const intro = shared ? `${shared.agentName} shared this list with you. Verify your number once to open every address, photo and incentive.` : agentPage ? `Hand-picked by ${agentPage.agentName} at Lifestyle Design Realty.` : undefined;
+  // An agent's link shows "Opening your list" while the link is looked up (no flash of the form), then opens on its own.
+  if (clientToken && !backToGate && (state.isLoading || opensDirectly)) return <OpeningClientList token={clientToken} submit={opensDirectly} agentName={shared?.agentName ?? null} />;
   // Oct 30, 2026 (design F): the page itself is presentational (PublicDealsPage); this keeps the session, links and gate.
   return <>
     <PublicDealsPage loading={catalog.isLoading} communities={catalog.data ?? []} useHomes={useLandingHomes} featured={featured.data as FeaturedDealsData | undefined} comingSoon={comingSoon.data} eyebrow={eyebrow} intro={intro} openKey={sharedKey} onTour={askForDetails} />
     {details !== undefined && <DetailsRequestSheet context={details} agentSlug={agentPageSlug} onClose={() => setDetails(undefined)} />}
     {askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} teamSignIn={teamSignIn} onSiteLogin={() => startLogin({ returnTo: "/deals/team" })} onClose={() => setGateOpen(false)} />}
   </>;
+}
+
+/**
+ * Nov 1, 2026 (Peter: the agent's link "should just open for whoever gets sent the link"): the page posts the link to
+ * /deals/open (a POST, so a link preview opens nothing) and the server signs this browser in to the client's list.
+ */
+export const OPENING_COPY = { heading: "Opening your list…", shared: (agent: string) => `Shared by ${agent}` } as const;
+export function OpeningClientList({ token, submit, agentName }: { token: string; submit: boolean; agentName: string | null }) {
+  const form = useRef<HTMLFormElement>(null);
+  const sent = useRef(false);
+  useEffect(() => { if (submit && !sent.current && form.current) { sent.current = true; form.current.submit(); } }, [submit]);
+  return <main data-deals-opening-link={submit ? "open" : "checking"} className="deals-light flex min-h-screen flex-col items-center justify-center bg-background px-6 text-center">
+    <p className="eyebrow text-gold">{agentName ? OPENING_COPY.shared(agentName) : "Lifestyle Design Realty"}</p>
+    <h1 className="mt-3 font-serif text-3xl leading-tight sm:text-4xl">{OPENING_COPY.heading}</h1>
+    <div aria-hidden="true" className="mt-6 h-1 w-40 overflow-hidden rounded-full bg-secondary"><div className="h-full w-1/3 animate-pulse rounded-full bg-gold" /></div>
+    <form ref={form} action="/deals/open" method="post" className="hidden"><input type="hidden" name="c" value={token} /></form>
+  </main>;
 }
 
 /**

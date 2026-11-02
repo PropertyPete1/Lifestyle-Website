@@ -77,6 +77,19 @@ export function registerDealsRoutes(app: Express) {
     else res.redirect(302, "/deals?expired=1");
   }));
 
+  // Nov 1, 2026 (Peter: an agent's link "should just open for whoever gets sent the link"): the landing page posts the
+  // link here (a POST, so a link preview that fetches the URL opens nothing). A link the agent locked to the client's
+  // mobile, a dead link, or a turned-off browser goes back to the page, which shows the code gate or the dead link.
+  app.post("/deals/open", safe(async (req, res) => {
+    const token = typeof req.body?.c === "string" ? req.body.c.trim() : "";
+    const link = linkSuffix(token);
+    if (!token) return res.redirect(302, "/deals");
+    const { openClientLinkWithoutCode } = await import("./dealsService");
+    const opened = await openClientLinkWithoutCode({ req, res, token });
+    if (!opened.ok) return res.redirect(302, opened.kind === "cookie_blocked" ? `/deals?cookieBlocked=1${link}` : `/deals?code=1${link}`);
+    res.redirect(302, `/deals/v/${opened.token}`);
+  }));
+
   app.post("/deals/verify", safe(async (req, res) => {
     const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
     const link = linkSuffix(req.body?.c);

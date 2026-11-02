@@ -1,0 +1,1 @@
+ALTER TABLE `deal_leads` MODIFY COLUMN `phone_e164` varchar(20);

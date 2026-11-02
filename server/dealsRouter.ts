@@ -580,7 +580,7 @@ export const dealsRouter = router({
     const { extendLiveSession } = await import("./dealsService");
     await extendLiveSession(ctx.req, ctx.res, result.expiresAt);
     // The FUB note and the agent's email ride the durable outbox/alert paths; a quiet test number stays quiet.
-    const isTest = settings.testNumbers.includes(session.lead.phoneE164);
+    const isTest = session.lead.phoneE164 !== null && settings.testNumbers.includes(session.lead.phoneE164);
     if (!isTest || settings.testModeFullPipeline) {
       try {
         const { enqueueDealsFubJob, runPendingDealsFubJobs } = await import("./dealsFubJobs");
@@ -618,7 +618,7 @@ export const dealsRouter = router({
       if (!workspace) {
         const { agentRowsForLead, SHARED_TEAM_NUMBER_MESSAGE } = await import("./dealsClientLinks");
         const shared = (await agentRowsForLead(session.lead)).kind === "shared";
-        throw new TRPCError({ code: "FORBIDDEN", message: shared ? SHARED_TEAM_NUMBER_MESSAGE : settings_testTeamNote(session.lead.phoneE164, await getDealSettings()) });
+        throw new TRPCError({ code: "FORBIDDEN", message: shared ? SHARED_TEAM_NUMBER_MESSAGE : settings_testTeamNote(session.lead.phoneE164 ?? "", await getDealSettings()) });
       }
       const { agentPageForLead } = await import("./dealsAgentPages");
       const page = await agentPageForLead(session.lead).catch(() => null);

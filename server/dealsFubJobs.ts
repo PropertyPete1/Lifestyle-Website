@@ -142,8 +142,8 @@ export async function enqueueDealsProfileUpdate(leadId: number) {
  */
 export async function handleDealsProfileUpdate(input: { lead: LeadRow; newFlags: readonly string[] }) {
   const settings = await getDealSettings();
-  const isTest = settings.testNumbers.includes(input.lead.phoneE164);
-  if (input.lead.status === "team" || input.lead.status === "blocked" || (isTest && !settings.testModeFullPipeline)) return { queued: false as const, alerted: false as const };
+  const isTest = input.lead.phoneE164 !== null && settings.testNumbers.includes(input.lead.phoneE164);
+  if (!input.lead.phoneE164 || input.lead.status === "team" || input.lead.status === "blocked" || (isTest && !settings.testModeFullPipeline)) return { queued: false as const, alerted: false as const };
   await enqueueDealsProfileUpdate(input.lead.id);
   let alerted = false;
   if (input.newFlags.length) {
@@ -175,9 +175,9 @@ export async function enqueueDealsActivityJobs(day = previousChicagoDay()) {
   let queued = 0;
   let skipped = 0;
   for (const lead of leads) {
-    const isTest = settings.testNumbers.includes(lead.phoneE164);
-    // Team previews and blocked leads create no FUB writes; test numbers only in full-pipeline mode.
-    if (lead.status === "team" || lead.status === "blocked" || (isTest && !settings.testModeFullPipeline)) { skipped += 1; continue; }
+    const isTest = lead.phoneE164 !== null && settings.testNumbers.includes(lead.phoneE164);
+    // Team previews, blocked leads and a link opened without a number create no FUB writes; test numbers only in full-pipeline mode.
+    if (!lead.phoneE164 || lead.status === "team" || lead.status === "blocked" || (isTest && !settings.testModeFullPipeline)) { skipped += 1; continue; }
     await enqueueDealsFubJob(lead.id, `activity:${day}`, { chicagoDay: day });
     queued += 1;
   }
@@ -231,10 +231,19 @@ async function leaseDueJob(job: typeof dealFubJobs.$inferSelect) {
 }
 
 /** Toggle (c): a test number writes to FUB and emails the team only with the full pipeline on; what it then creates is marked TEST. */
-export async function requestTestMode(phoneE164: string): Promise<{ quiet: boolean; isTest: boolean }> {
+export async function requestTestMode(phoneE164: string | null): Promise<{ quiet: boolean; isTest: boolean }> {
   const settings = await getDealSettings();
-  const isTest = settings.testNumbers.includes(phoneE164);
+  const isTest = phoneE164 !== null && settings.testNumbers.includes(phoneE164);
   return { isTest, quiet: isTest && !settings.testModeFullPipeline };
+}
+
+/**
+ * Nov 1, 2026: the lead behind an agent's link opened without a number has no phone and never reaches Follow Up Boss
+ * (no person to create, no consent captured); the agent and the owners are still emailed about its saves and requests.
+ */
+type WithPhone<T extends { phoneE164: string | null }> = T & { phoneE164: string };
+function withPhone<T extends { phoneE164: string | null }>(lead: T): WithPhone<T> | null {
+  return lead.phoneE164 ? lead as WithPhone<T> : null;
 }
 
 async function loadRequestJob(job: typeof dealFubJobs.$inferSelect) {
@@ -300,9 +309,11 @@ function combinedDelivery(results: Array<Extract<FubDeliveryResult, { ok: true }
 
 async function executeRequestTask(job: typeof dealFubJobs.$inferSelect): Promise<FubDeliveryResult> {
   const db = await getDb();
-  const loaded = await loadRequestJob(job);
+  const found = await loadRequestJob(job);
   if (!db) return { ok: false, error: "Database unavailable" };
-  if (!loaded) return { ok: true, records: [] };
+  const lead = found ? withPhone(found.lead) : null;
+  if (!found || !lead) return { ok: true, records: [] };
+  const loaded = { ...found, lead };
   const group = taskGroupTypes(loaded.request.requestType);
   const dayRequests = await loadDayRequestJobs(loaded, group);
   if (!dayRequests?.length) return { ok: false, error: "Builder Deals request home unavailable" };
@@ -335,9 +346,11 @@ async function executeRequestTask(job: typeof dealFubJobs.$inferSelect): Promise
 
 async function executeRequestNote(job: typeof dealFubJobs.$inferSelect): Promise<FubDeliveryResult> {
   const db = await getDb();
-  const loaded = await loadRequestJob(job);
+  const found = await loadRequestJob(job);
   if (!db) return { ok: false, error: "Database unavailable" };
-  if (!loaded) return { ok: true, records: [] };
+  const lead = found ? withPhone(found.lead) : null;
+  if (!found || !lead) return { ok: true, records: [] };
+  const loaded = { ...found, lead };
   const dayRequests = await loadDayRequestJobs(loaded);
   if (!dayRequests?.length) return { ok: false, error: "Builder Deals request home unavailable" };
   const pending = dayRequests.filter(({ request }) => !request.fubNoteSentAt && !request.removedAt);
@@ -412,8 +425,8 @@ async function executeRequestEmail(job: typeof dealFubJobs.$inferSelect): Promis
 }
 
 /** "Jane Doe (210) 555-0101 saved: 123 Elm St · Perry Homes / Fixture Lakes" — the first line is what shows on the lock screen. */
-export function requestPingText(loaded: { lead: { id: number; name: string | null; phoneE164: string; isTest: boolean; agent: { name: string } | null }; request: { requestType: string }; privateDescription: string }): { title: string; content: string } {
-  const phone = loaded.lead.phoneE164.replace(/^\+1(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3");
+export function requestPingText(loaded: { lead: { id: number; name: string | null; phoneE164: string | null; isTest: boolean; agent: { name: string } | null }; request: { requestType: string }; privateDescription: string }): { title: string; content: string } {
+  const phone = loaded.lead.phoneE164 ? loaded.lead.phoneE164.replace(/^\+1(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3") : "(no number: opened their agent's link)";
   const who = loaded.lead.name?.trim() || "A buyer";
   const verb = loaded.request.requestType === "save" ? "saved" : loaded.request.requestType === "tour" ? "wants to tour" : "asked about";
   const title = `${loaded.lead.isTest ? "TEST: " : ""}${who} ${verb} a home${loaded.lead.agent ? ` (${loaded.lead.agent.name}'s client)` : ""}`;
@@ -432,7 +445,7 @@ type DeferredCheckOutcome = "clear" | "blocked" | "team" | "unavailable";
  * the full classification with the background timeout before any FUB write: a
  * match writes the verified-phone blocklist rows and kills the live link.
  */
-async function runDeferredRealtorCheck(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, lead: LeadRow, settings: Awaited<ReturnType<typeof getDealSettings>>): Promise<DeferredCheckOutcome> {
+async function runDeferredRealtorCheck(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, lead: WithPhone<LeadRow>, settings: Awaited<ReturnType<typeof getDealSettings>>): Promise<DeferredCheckOutcome> {
   const { classifyDealsAccess } = await import("./dealsEligibility");
   // An agent's own client skips the realtor screening here exactly as at the gate.
   const { liveAgentForClient } = await import("./dealsClientLinks");
@@ -457,7 +470,8 @@ async function runDeferredRealtorCheck(db: NonNullable<Awaited<ReturnType<typeof
 async function executeLeadJob(job: typeof dealFubJobs.$inferSelect): Promise<FubDeliveryResult> {
   const db = await getDb();
   if (!db) return { ok: false, error: "Database unavailable" };
-  const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, job.leadId)).limit(1))[0];
+  const row = (await db.select().from(dealLeads).where(eq(dealLeads.id, job.leadId)).limit(1))[0];
+  const lead = row ? withPhone(row) : null;
   if (!lead || lead.status === "blocked" || lead.status === "team") return { ok: true, records: [] };
   let flags = parseLeadFlags(lead.flags);
   const settings = await getDealSettings();
@@ -483,7 +497,8 @@ async function executeActivityJob(job: typeof dealFubJobs.$inferSelect): Promise
   const metadata = parseMetadata(job.payload) as ActivityJobMetadata;
   const day = metadata.chicagoDay ?? job.operation.split(":")[1] ?? "";
   if (!DAY_PATTERN.test(day)) return { ok: false, error: "Builder Deals activity day is invalid", terminal: true };
-  const lead = (await db.select().from(dealLeads).where(eq(dealLeads.id, job.leadId)).limit(1))[0];
+  const row = (await db.select().from(dealLeads).where(eq(dealLeads.id, job.leadId)).limit(1))[0];
+  const lead = row ? withPhone(row) : null;
   if (!lead || lead.status === "blocked" || lead.status === "team") return { ok: true, records: [] };
   const { start, end } = chicagoDayRange(day);
   const [viewRows, requests] = await Promise.all([

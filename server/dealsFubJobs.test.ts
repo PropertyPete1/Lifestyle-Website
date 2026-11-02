@@ -112,6 +112,10 @@ describe("the phone ping on a save or tour request (Peter, Oct 25: like New Home
     const tour = requestPingText({ lead: { id: 7, name: null, phoneE164: "+15125550199", isTest: true, agent: { name: "Tiffany" } }, request: { requestType: "tour" }, privateDescription: "x" });
     expect(tour.title).toBe("TEST: A buyer wants to tour a home (Tiffany's client)");
     expect(tour.content).toContain("A buyer (512) 555-0199");
+    // Nov 1, 2026: a client who opened their agent's link with no number.
+    const opened = requestPingText({ lead: { id: 9, name: "Karyme Lopez", phoneE164: null, isTest: false, agent: { name: "Peter Allen" } }, request: { requestType: "save" }, privateDescription: "x" });
+    expect(opened.title).toBe("Karyme Lopez saved a home (Peter Allen's client)");
+    expect(opened.content).toContain("Karyme Lopez (no number: opened their agent's link)");
   });
 });
 

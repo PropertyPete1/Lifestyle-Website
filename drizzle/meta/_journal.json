@@ -190,6 +190,13 @@
       "when": 1793469275329,
       "tag": "0026_deal_home_primary_down",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "5",
+      "when": 1793594126452,
+      "tag": "0027_deal_lead_link_open",
+      "breakpoints": true
     }
   ]
 }

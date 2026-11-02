@@ -51,7 +51,9 @@ export function agentTeamLink() {
   return `${origin}/deals/team`;
 }
 
-function displayPhone(phoneE164: string) {
+function displayPhone(phoneE164: string | null) {
+  // Nov 1, 2026: the lead behind an agent's link opened without a number has none.
+  if (!phoneE164) return "no number (opened through the agent's link)";
   const parsed = normalizeUsPhone(phoneE164, { allowCanada: true });
   return parsed.ok ? parsed.display : phoneE164;
 }

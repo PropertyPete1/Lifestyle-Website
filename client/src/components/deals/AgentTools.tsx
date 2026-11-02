@@ -59,7 +59,8 @@ export const TEXT_MAX_CHARS = 320;
 
 export const AGENT_COPY = {
   heading: "Send the list to a client",
-  intro: "Your client gets this week's full list: every address, photo and current incentive. They verify their own mobile number once, and you hear about it when they save a home or ask for a tour. Each link works for one client; add their mobile so nobody else can use it.",
+  // Nov 1, 2026 (Peter): the link opens the list with no form; locking it to the client's mobile adds a one-time code.
+  intro: "Your client taps the link and this week's full list opens: every address, photo and current incentive, no form. You see when they open it, and you hear about it when they save a home or ask for a tour. Anyone the link is forwarded to sees it too; lock it to their mobile to require a one-time code, or turn it off any time.",
   created: (name: string) => `${name.trim() ? `${name.trim().split(/\s+/)[0]}'s link` : "Link"} is ready. Text it or copy it. It's saved under Your clients; type a new name for the next client.`,
   copied: "Link copied.",
   noClients: "No client links yet. Send your first one above.",
@@ -158,7 +159,8 @@ export function linkSendable(client: AgentClient, now = Date.now()) {
 export function clientStatus(client: AgentClient, now = Date.now()): { label: string; tone: "muted" | "gold" | "live" } {
   if (client.revoked) return { label: AGENT_COPY.revoked, tone: "muted" };
   if (client.movedAway) return { label: AGENT_COPY.movedAway, tone: "muted" };
-  if (client.verifiedAt) return { label: `${AGENT_COPY.verified} ${when(client.verifiedAt)}${client.accessExpiresAt ? ` · list open until ${when(client.accessExpiresAt)}` : " · access lapsed, the same link renews it"}`, tone: "live" };
+  // Nov 1, 2026: a link not locked to the client's mobile opens with no code, so its client "opened" rather than "verified".
+  if (client.verifiedAt) return { label: `${client.clientPhone ? AGENT_COPY.verified : AGENT_COPY.opened} ${when(client.verifiedAt)}${client.accessExpiresAt ? ` · list open until ${when(client.accessExpiresAt)}` : " · access lapsed, the same link renews it"}`, tone: "live" };
   if (new Date(client.expiresAt).getTime() <= now) return { label: AGENT_COPY.expired, tone: "muted" };
   if (client.openedAt) return { label: `${AGENT_COPY.opened} ${when(client.openedAt)}, not verified yet`, tone: "gold" };
   return { label: AGENT_COPY.notOpened, tone: "muted" };

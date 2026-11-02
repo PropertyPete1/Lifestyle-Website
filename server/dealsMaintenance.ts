@@ -352,7 +352,7 @@ export async function cleanupDealsTestRecords(now = new Date()): Promise<DealsTe
       .where(and(lte(dealLeads.createdAt, twentyFourHoursAgo), lte(dealLeads.expiresAt, now)));
     // The configured normalized number list, not a conditional screening flag,
     // is authoritative when full-pipeline test mode runs with that flag off.
-    const eligible = candidates.filter((lead) => settings.testNumbers.includes(lead.phoneE164));
+    const eligible = candidates.filter((lead) => lead.phoneE164 !== null && settings.testNumbers.includes(lead.phoneE164));
 
     for (const lead of eligible) {
       await db.update(dealLeads).set({ status: "expired" }).where(eq(dealLeads.id, lead.id));

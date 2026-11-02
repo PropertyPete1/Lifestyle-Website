@@ -16,7 +16,7 @@ import NowHiringBanner from "@/components/NowHiringBanner";
 import LeadForm from "@/components/LeadForm";
 import GuideTrail from "@/components/GuideTrail";
 import { ResponseBadge } from "@/components/TrustSignals";
-import { BRAND_IMG } from "@/lib/assets";
+import { BRAND_IMG, LINKS_FRONT_SIZES, LINKS_FRONT_SRCSET } from "@/lib/assets";
 
 /** Matches the .form-flash keyframe duration in index.css, plus a little slack. */
 const FLASH_MS = 1800;
@@ -167,7 +167,7 @@ export default function Links() {
         <GuideTrail runId={trailRun} fromRef={promiseRef} toRef={captureRef} />
 
         {/* A shallow photo strip (illustrative, from Peter's approved mockup). */}
-        <img src={BRAND_IMG.linksFront} alt="Limestone Hill Country home with a covered front porch" fetchPriority="high" decoding="async" className="mt-5 aspect-[3.3/1] w-full rounded-[10px] object-cover" />
+        <img src={BRAND_IMG.linksFront} srcSet={LINKS_FRONT_SRCSET} sizes={LINKS_FRONT_SIZES} alt="Limestone Hill Country home with a covered front porch" fetchPriority="high" decoding="async" className="mt-5 aspect-[3.3/1] w-full rounded-[10px] bg-[#ece6dc] object-cover" />
 
         {/* Links */}
         <div className="w-full mt-4 space-y-3">

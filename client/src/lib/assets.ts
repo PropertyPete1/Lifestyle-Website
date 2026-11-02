@@ -33,3 +33,10 @@ export const BRAND_IMG = {
   valuation: "/brand/valuation.webp",
   linksFront: "/brand/links-front.webp",
 } as const;
+
+/**
+ * Nov 1, 2026 (Peter: the /links photo "populates after like 5 seconds"): the same photo at phone sizes (52 KB and 72 KB
+ * instead of 167 KB). index.html preloads the same set with the page's HTML, so keep the two in step.
+ */
+export const LINKS_FRONT_SRCSET = "/brand/links-front-800.webp 800w, /brand/links-front-1050.webp 1050w, /brand/links-front.webp 1526w";
+export const LINKS_FRONT_SIZES = "(min-width: 680px) 620px, calc(100vw - 2.5rem)";

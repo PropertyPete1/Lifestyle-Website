@@ -174,6 +174,8 @@ describe("verification through a client link", () => {
     if (!done?.ok) return;
     const buyer = db.rows(dealLeads).find((row) => row.id === done.leadId) as typeof dealLeads.$inferSelect;
     expect(buyer).toMatchObject({ phoneE164: CLIENT_PHONE, status: "verified", sourceCode: AGENT_CLIENT_SOURCE, agentTeamId: teamId, clientLinkId: created.link.id });
+    // Nov 1, 2026: the link asks for the number only; the name the agent gave the link names the buyer.
+    expect(buyer.name).toBe("Maria Lopez");
     expect(buyer.expiresAt.getTime() - Date.now()).toBeGreaterThan(71 * HOUR);
     const link = db.rows(dealClientLinks).find((row) => row.id === created.link.id)!;
     expect(link).toMatchObject({ leadId: done.leadId });

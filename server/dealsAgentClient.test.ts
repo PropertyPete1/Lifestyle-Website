@@ -48,6 +48,10 @@ describe("the gate for an agent's client", () => {
     expect(html).not.toContain("Are you a realtor, or working with one?");
     expect(html).not.toContain("No, just me");
     expect(html).not.toContain("Continue with Google");
+    // Nov 1, 2026 (Peter): the agent already named the client, so the link asks for the mobile number only.
+    expect(html).not.toContain('id="deals-name"');
+    expect(html).not.toContain('id="deals-email"');
+    expect(html).toContain('id="deals-phone"');
     // Continue is enabled with no choice made: the link answered the question.
     const continueButton = html.match(/<button[^>]*>(?:(?!<\/button>).)*Continue(?:(?!<\/button>).)*<\/button>/)?.[0] ?? "";
     expect(continueButton).not.toContain('disabled=""');

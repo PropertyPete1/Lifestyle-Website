@@ -6,6 +6,7 @@ import { parse as parseCookie } from "cookie";
 import {
   dealAccessTokens,
   dealBlocklist,
+  dealClientLinks,
   dealCommunities,
   dealEvents,
   dealHomes,
@@ -1538,13 +1539,18 @@ async function finishVerification(input: VerificationInput, pending: typeof deal
   // returning lead is new or has no handle of their own yet.
   const handleOwner = pending.instagramHandle ? (await db.select({ id: dealLeads.id }).from(dealLeads).where(and(eq(dealLeads.instagramHandle, pending.instagramHandle), sql`${dealLeads.phoneE164} <> ${pending.phoneE164}`)).limit(1))[0] : null;
   const instagramHandle = handleOwner ? null : pending.instagramHandle;
+  // Nov 1, 2026: an agent's client is asked for the mobile number only; the name the agent gave their link names the lead.
+  let linkName: string | null = null;
+  if (attachLink && !identity.google?.name && !identity.typed?.name) {
+    try { linkName = (await db.select({ clientName: dealClientLinks.clientName }).from(dealClientLinks).where(eq(dealClientLinks.id, attachLink.linkId)).limit(1))[0]?.clientName?.trim() || null; } catch { linkName = null; }
+  }
   let leadId: number;
   if (old) {
-    await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? instagramHandle, email: old.email ?? identity.google?.email ?? identity.typed?.email ?? null, name: old.name ?? identity.google?.name ?? identity.typed?.name ?? null, flags: JSON.stringify(flags), ...agentFields }).where(eq(dealLeads.id, old.id));
+    await db.update(dealLeads).set({ status: eligibility.team ? "team" : "verified", deviceHash, expiresAt, sourceCode: pending.sourceCode, instagramHandle: old.instagramHandle ?? instagramHandle, email: old.email ?? identity.google?.email ?? identity.typed?.email ?? null, name: old.name ?? identity.google?.name ?? identity.typed?.name ?? linkName ?? null, flags: JSON.stringify(flags), ...agentFields }).where(eq(dealLeads.id, old.id));
     leadId = old.id;
   } else {
     try {
-      const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle, email: identity.google?.email ?? identity.typed?.email ?? null, name: identity.google?.name ?? identity.typed?.name ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentAt: pending.consentAt, consentIp: pending.clientIp, deviceHash, expiresAt, status: eligibility.team ? "team" : "verified", flags: JSON.stringify(flags), ...agentFields });
+      const result = await db.insert(dealLeads).values({ phoneE164: pending.phoneE164, instagramHandle, email: identity.google?.email ?? identity.typed?.email ?? null, name: identity.google?.name ?? identity.typed?.name ?? linkName ?? null, sourceCode: pending.sourceCode, consentText: DEALS_CONSENT_TEXT, consentAt: pending.consentAt, consentIp: pending.clientIp, deviceHash, expiresAt, status: eligibility.team ? "team" : "verified", flags: JSON.stringify(flags), ...agentFields });
       leadId = Number((result as unknown as [{ insertId: number }])[0].insertId);
     } catch (error) {
       // Two verify submissions can legitimately race. The unique normalized

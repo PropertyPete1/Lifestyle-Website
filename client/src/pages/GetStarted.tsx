@@ -13,7 +13,7 @@ export default function GetStarted() {
               Ready to Buy or Sell?<br />Let's Get Started.
             </h1>
             <p className="mt-6 text-muted-foreground leading-relaxed max-w-md">
-              Drop your number and Pete will text you in a few minutes to hear what you&rsquo;re
+              Drop your number and we'll text you in a few minutes to hear what you&rsquo;re
               looking for — no forms, no pressure, no obligation.
             </p>
             <div className="mt-8 space-y-3 text-sm text-muted-foreground">

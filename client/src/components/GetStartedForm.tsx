@@ -41,7 +41,7 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
         <MessageSquareText className="h-10 w-10 text-gold" />
         <h3 className="font-serif text-2xl">Check your texts.</h3>
         <p className="text-sm text-muted-foreground max-w-sm">
-          Pete will text you in the next few minutes to hear what you're looking for — we typically respond within 30 minutes.
+          We'll text you in the next few minutes to hear what you're looking for — we typically respond within 30 minutes.
         </p>
       </div>
     );

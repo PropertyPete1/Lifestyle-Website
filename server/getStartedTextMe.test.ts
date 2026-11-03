@@ -9,7 +9,7 @@ const read = (rel: string) => readFileSync(join(__dirname, "..", rel), "utf-8");
  * one box: the buyer's mobile number. They are filed in Follow Up Boss under "Website - Get Started" as before, and
  * Pete's FUB action plan on that tag texts them a few minutes later; buying/selling and timeline move to that text.
  */
-describe("Get Started: drop your number, Pete texts you", () => {
+describe("Get Started: drop your number, we text you", () => {
   const form = read("client/src/components/GetStartedForm.tsx");
 
   it("asks for a first name and a mobile number, nothing else", () => {
@@ -27,7 +27,7 @@ describe("Get Started: drop your number, Pete texts you", () => {
 
   it("the home page and /get-started say what happens", () => {
     for (const page of ["client/src/pages/Home.tsx", "client/src/pages/GetStarted.tsx"]) {
-      expect(read(page)).toContain("Drop your number and Pete will text you in a few minutes");
+      expect(read(page)).toContain("Drop your number and we'll text you in a few minutes");
       expect(read(page)).toContain("<GetStartedForm />");
     }
   });

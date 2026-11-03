@@ -142,7 +142,7 @@ export default function Home() {
               Ready to Buy or Sell?<br />Let&rsquo;s Get Started.
             </h2>
             <p className="mt-6 max-w-md leading-relaxed text-muted-foreground">
-              Drop your number and Pete will text you in a few minutes to hear what you&rsquo;re
+              Drop your number and we'll text you in a few minutes to hear what you&rsquo;re
               looking for — no forms, no pressure, no obligation.
             </p>
             <div className="mt-8 space-y-3 text-sm text-muted-foreground">

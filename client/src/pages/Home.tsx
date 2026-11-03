@@ -133,6 +133,23 @@ export default function Home() {
         <FinancingBanner className="mt-5 lg:mt-6" />
       </section>
 
+      {/* ============ CONVINCE YOUR PARTNER — Nov 3, 2026 (Peter): right under the four paths, not at the bottom ============ */}
+      <section>
+        <div className="mx-auto max-w-[1400px] px-5 pt-8 lg:px-8 lg:pt-10">
+          <div className="reveal flex flex-col items-center justify-between gap-6 border border-gold/30 bg-gold/[0.04] px-8 py-8 sm:flex-row">
+            <div className="text-center sm:text-left">
+              <p className="eyebrow text-gold">One of you is already sold on Texas?</p>
+              <p className="mt-2 font-serif text-2xl md:text-3xl">
+                Let us write the case for the other one.
+              </p>
+            </div>
+            <Link href="/convince" className={cn(GOLD_BUTTON, BUTTON_SM, "shrink-0")}>
+              Convince Your Partner <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {/* ============ GET STARTED (high-intent form) ============ */}
       <section id="get-started" className="mx-auto max-w-[1400px] scroll-mt-28 px-5 py-16 lg:px-8 lg:py-24">
         <div className="grid items-center gap-12 lg:grid-cols-2 lg:gap-20">
@@ -279,23 +296,6 @@ export default function Home() {
           <TestimonialCarousel />
           <div className="mt-10 text-center">
             <Link href="/testimonials" className="text-cta">View All</Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ============ CONVINCE YOUR PARTNER (fun secondary placement) ============ */}
-      <section>
-        <div className="mx-auto max-w-[1400px] px-5 py-14 lg:px-8 lg:py-16">
-          <div className="reveal flex flex-col items-center justify-between gap-6 border border-gold/30 bg-gold/[0.04] px-8 py-8 sm:flex-row">
-            <div className="text-center sm:text-left">
-              <p className="eyebrow text-gold">One of you is already sold on Texas?</p>
-              <p className="mt-2 font-serif text-2xl md:text-3xl">
-                Let us write the case for the other one.
-              </p>
-            </div>
-            <Link href="/convince" className={cn(GOLD_BUTTON, BUTTON_SM, "shrink-0")}>
-              Convince Your Partner <ArrowRight className="h-4 w-4" />
-            </Link>
           </div>
         </div>
       </section>

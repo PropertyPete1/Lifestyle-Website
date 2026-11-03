@@ -12,8 +12,8 @@ import VeteranBadge from "@/components/VeteranBadge";
  * items + phone + CTA physically could not fit at 1280–1500px and clipped
  * off-screen. Property-related links are now consolidated under one
  * "Properties" dropdown, so the desktop nav renders only 5 top-level
- * items. "Now Hiring" is a standalone priority item that must NEVER be
- * the one that clips — it stays top-level at every width. Below `lg`
+ * items. (Nov 3, 2026: "Now Hiring" left the row; the hiring banner above
+ * the header is the recruiting link at every width.) Below `lg`
  * everything collapses to the hamburger. A vitest width-budget test
  * (server/navOverflow.test.ts) guards this from regressing.
  */
@@ -42,7 +42,7 @@ export const NAV_ITEMS = [
   { label: "Properties", href: "/search", menu: PROPERTIES_MENU },
   { label: "Home Valuation", href: "/valuation" },
   { label: "Consultation", href: "/contact" },
-  { label: "Now Hiring", href: "/join" },
+  // Nov 3, 2026 (Peter): the "Now hiring" banner above the header already carries this; no second link in the row.
 ] as const;
 
 const SECONDARY_ITEMS = [
@@ -176,8 +176,6 @@ export default function SiteNav({
 
             <Link href="/valuation" className={linkCls(location === "/valuation")}>Home Valuation</Link>
             <Link href="/contact" className={linkCls(location === "/contact")}>Consultation</Link>
-            {/* Priority item — must always be fully visible, never clipped */}
-            <Link href="/join" className={linkCls(location === "/join")}>Now Hiring</Link>
             <a href={SITE.phoneHref} className="hidden whitespace-nowrap font-serif text-[17px] text-gold xl:inline">
               {SITE.phone}
             </a>

@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 /**
  * Nav overflow regression guard (bug shipped twice — Jul 28).
  *
@@ -72,8 +74,11 @@ describe("desktop nav width budget", () => {
     expect(NAV_ITEMS.length).toBeLessThanOrEqual(4);
   });
 
-  it("Now Hiring is always a top-level item (priority — never buried or clipped)", () => {
-    expect(NAV_ITEMS.some((i) => i.label === "Now Hiring" && i.href === "/join")).toBe(true);
+  it("Now Hiring is not in the row (Nov 3, 2026: the hiring banner above the header carries it)", () => {
+    expect(NAV_ITEMS.some((i) => i.label === "Now Hiring")).toBe(false);
+    const nav = readFileSync(join(__dirname, "../client/src/components/SiteNav.tsx"), "utf-8");
+    expect(nav).not.toContain('<Link href="/join" className={linkCls(location === "/join")}>Now Hiring</Link>');
+    expect(nav).toContain("Now Hiring — Join Our Team"); // the phone menu still lists it
   });
 
   it("Properties dropdown matches the property-search flag (pre-IDX gating)", () => {

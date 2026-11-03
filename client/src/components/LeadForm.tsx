@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, MessageSquareText } from "lucide-react";
 
 export interface QualifyingField {
   key: string;
@@ -38,6 +38,11 @@ interface LeadFormProps {
   extraAnswers?: Record<string, unknown>;
   compact?: boolean;
   onSuccess?: () => void;
+  /**
+   * Nov 3, 2026 (Peter: "make our social links text them too"): first name and number only. The email box and the
+   * consent checkbox go; consent is the sentence under the button, and the thank-you says a text is coming.
+   */
+  textMe?: boolean;
 }
 
 /**
@@ -54,6 +59,7 @@ export default function LeadForm({
   extraAnswers,
   compact = false,
   onSuccess,
+  textMe = false,
 }: LeadFormProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -69,12 +75,23 @@ export default function LeadForm({
     onSuccess: () => {
       setDone(true);
       markLeadCaptured();
-      toast.success("Thank you — we typically respond within 30 minutes.");
+      if (!textMe) toast.success("Thank you — we typically respond within 30 minutes.");
       onSuccess?.();
     },
     onError: (err) => setSubmitError(humanizeSubmitError(err)),
   });
 
+  if (done && textMe) {
+    return (
+      <div data-lead-converted className="flex flex-col items-center text-center py-10 gap-3">
+        <MessageSquareText className="h-10 w-10 text-gold" />
+        <h3 className="font-serif text-2xl">Check your texts.</h3>
+        <p className="text-sm text-muted-foreground max-w-sm">
+          Pete will text you in the next few minutes — we typically respond within 30 minutes.
+        </p>
+      </div>
+    );
+  }
   if (done) {
     return (
       <div data-lead-converted className="flex flex-col items-center text-center py-10 gap-3">
@@ -101,7 +118,7 @@ export default function LeadForm({
       phone,
       message: message || undefined,
       sourceTag,
-      answers: { ...answers, ...extraAnswers },
+      answers: { ...answers, ...extraAnswers, ...(textMe ? { textMe: "Yes - asked to be texted from the website" } : {}) },
       tcpaConsent: true,
       visitorId: getVisitorId() || undefined,
     });
@@ -111,7 +128,7 @@ export default function LeadForm({
     e.preventDefault();
     setSubmitError(null);
     setFieldError(null);
-    if (!consent) {
+    if (!consent && !textMe) {
       // Inline + persistent, not a toast: the checkbox is below the fold on
       // mobile, so a disappearing toast left the submit looking dead.
       setFieldError("Please agree to the consent terms to continue.");
@@ -127,22 +144,24 @@ export default function LeadForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 text-left">
+    <form onSubmit={handleSubmit} data-lead-text-me={textMe ? "true" : undefined} className="space-y-4 text-left">
       {heading && <h3 className="font-serif text-2xl md:text-3xl mb-2">{heading}</h3>}
       <div className={compact ? "space-y-3" : "grid sm:grid-cols-2 gap-4"}>
         <div className="space-y-1.5">
-          <Label htmlFor={`${sourceTag}-name`} className="text-xs uppercase tracking-widest text-muted-foreground">Full Name *</Label>
-          <Input id={`${sourceTag}-name`} value={name} onChange={(e) => setName(e.target.value)} required className="bg-secondary/60 border-border" />
+          <Label htmlFor={`${sourceTag}-name`} className="text-xs uppercase tracking-widest text-muted-foreground">{textMe ? "First name *" : "Full Name *"}</Label>
+          <Input id={`${sourceTag}-name`} autoComplete={textMe ? "given-name" : undefined} value={name} onChange={(e) => setName(e.target.value)} required className="bg-secondary/60 border-border" />
         </div>
-        <div className="space-y-1.5">
+        {!textMe && <div className="space-y-1.5">
           <Label htmlFor={`${sourceTag}-email`} className="text-xs uppercase tracking-widest text-muted-foreground">Email <span className="normal-case tracking-normal">(optional)</span></Label>
           <Input id={`${sourceTag}-email`} type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className="bg-secondary/60 border-border" />
-        </div>
+        </div>}
         <div className="space-y-1.5 sm:col-span-2">
-          <Label htmlFor={`${sourceTag}-phone`} className="text-xs uppercase tracking-widest text-muted-foreground">Phone *</Label>
+          <Label htmlFor={`${sourceTag}-phone`} className="text-xs uppercase tracking-widest text-muted-foreground">{textMe ? "Your mobile number *" : "Phone *"}</Label>
           <Input
             id={`${sourceTag}-phone`}
             type="tel"
+            autoComplete="tel"
+            inputMode="tel"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             required
@@ -185,8 +204,8 @@ export default function LeadForm({
         </div>
       )}
 
-      {/* TCPA consent — required on every lead form */}
-      <div className="flex items-start gap-3 pt-1">
+      {/* TCPA consent — required on every lead form (the text-me form carries it as the sentence under the button) */}
+      {!textMe && <div className="flex items-start gap-3 pt-1">
         <Checkbox
           id={`${sourceTag}-consent`}
           checked={consent}
@@ -198,7 +217,7 @@ export default function LeadForm({
           <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>{" "}
           and <Link href="/terms" className="underline underline-offset-2 hover:text-gold">Terms</Link>.
         </label>
-      </div>
+      </div>}
 
       {fieldError && fieldError !== PHONE_HINT && (
         <p role="alert" className="text-[11px] text-destructive">{fieldError}</p>
@@ -211,8 +230,16 @@ export default function LeadForm({
         type="submit"
         disabled={submit.isPending}
         className="min-h-12 w-full sm:w-auto bg-gold text-primary-foreground hover:bg-gold/90 font-serif text-[19px] font-normal normal-case tracking-normal px-8 py-5 rounded-none">
-        {submit.isPending ? "Submitting..." : submitLabel}
+        {submit.isPending ? (textMe ? "Sending..." : "Submitting...") : submitLabel}
       </Button>
+      {textMe && (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          By tapping the button you agree to get a text from Lifestyle Design Realty at this number. Message and data rates may apply.
+          Reply STOP anytime. See our{" "}
+          <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>{" "}
+          and <Link href="/terms" className="underline underline-offset-2 hover:text-gold">Terms</Link>.
+        </p>
+      )}
     </form>
   );
 }

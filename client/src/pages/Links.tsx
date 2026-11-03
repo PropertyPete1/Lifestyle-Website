@@ -245,7 +245,7 @@ export default function Links() {
             flash && "form-flash"
           )}>
           <p className="text-center font-serif text-[1.6rem] font-medium leading-snug sm:text-[1.9rem]">
-            Or skip the browsing — we'll reach out to you
+            Or skip the browsing — drop your number and Pete will text you
           </p>
           <div className="mt-3 flex flex-col items-center gap-2.5">
             <ResponseBadge />
@@ -253,8 +253,9 @@ export default function Links() {
           <div className="mt-5">
             <LeadForm
               sourceTag="Website - Links Page"
-              submitLabel="Reach Out to Me"
+              submitLabel="Text me"
               compact
+              textMe
               qualifying={[
                 {
                   key: "interest",

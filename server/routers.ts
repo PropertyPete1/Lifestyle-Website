@@ -403,6 +403,19 @@ export const appRouter = router({
       return { success: true, intent } as const;
     }),
     list: adminProcedure.query(() => db.getLeads()),
+    /**
+     * Nov 3, 2026 (Peter: Claude texts every website sign-up as Pete from his Mac, and every send and reply is a
+     * FUB note). The texting task calls this after each text: the note goes on the lead's FUB contact and a copy is
+     * kept on the lead row, so nothing depends on FUB being up.
+     */
+    textingNote: adminProcedure.input(z.object({ id: z.number().int().positive(), subject: z.string().trim().min(1).max(190), body: z.string().trim().min(1).max(5000) })).mutation(async ({ input }) => {
+      const lead = (await db.getLeads()).find((row) => row.id === input.id);
+      if (!lead) throw new TRPCError({ code: "NOT_FOUND" });
+      const stamp = new Date().toISOString();
+      await db.updateLead(input.id, { message: [lead.message, `[${stamp}] ${input.subject}: ${input.body}`].filter(Boolean).join("\n") });
+      const fub = lead.fubId ? await sendFubNote(lead.fubId, input.subject, input.body) : { ok: false as const, error: "no FUB contact on the lead" };
+      return { ok: true as const, fub };
+    }),
   }),
 
   /**

@@ -1,33 +1,28 @@
 import { useState } from "react";
 import { Link } from "wouter";
-import { toast } from "sonner";
 import FormError from "@/components/FormError";
 import { humanizeSubmitError, isUsablePhone, PHONE_HINT } from "@shared/formErrors";
 import { trpc } from "@/lib/trpc";
-import { SITE } from "@shared/site";
 import { getVisitorId } from "@/lib/visitor";
 import { markLeadCaptured } from "@/lib/leadSession";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckCircle2 } from "lucide-react";
+import { MessageSquareText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * High-intent buyer/seller form — THE primary site conversion point.
- * Short by design: name, phone, email, buying/selling, timeline.
- * Posts to FUB tagged "Website - Get Started" with intent scoring.
- * Visually distinct (gold-framed) from the lightweight newsletter form.
+ * THE primary site conversion point. Nov 3, 2026 (Peter: "make it so they put their number and we text them in two
+ * or three minutes"): one box, the buyer's mobile number (first name optional). The buying/selling and timeline
+ * questions moved into that text conversation (Peter: name and number, so the text can say their name). Posts to FUB tagged "Website - Get Started"; Pete's FUB action
+ * plan on that tag sends the text a few minutes later.
  */
+/** What the FUB note says, so the agent sees why the person is there. */
+export const GET_STARTED_TEXT_ME_ANSWER = "Yes - asked to be texted from the website";
+
 export default function GetStartedForm({ compact = false }: { compact?: boolean }) {
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [goal, setGoal] = useState("");
-  const [timeline, setTimeline] = useState("");
-  const [consent, setConsent] = useState(false);
   const [done, setDone] = useState(false);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -36,7 +31,6 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
     onSuccess: () => {
       setDone(true);
       markLeadCaptured(); // suppresses the exit-intent nudge for the rest of the session
-      toast.success("Thank you — we typically respond within 30 minutes.");
     },
     onError: (err) => setSubmitError(humanizeSubmitError(err)),
   });
@@ -44,10 +38,10 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
   if (done) {
     return (
       <div data-lead-converted className="flex flex-col items-center text-center py-12 gap-3">
-        <CheckCircle2 className="h-10 w-10 text-gold" />
-        <h3 className="font-serif text-2xl">Thank You</h3>
+        <MessageSquareText className="h-10 w-10 text-gold" />
+        <h3 className="font-serif text-2xl">Check your texts.</h3>
         <p className="text-sm text-muted-foreground max-w-sm">
-          You're on our radar. A Lifestyle Design Realty professional will reach out — we typically respond within 30 minutes.
+          Pete will text you in the next few minutes to hear what you're looking for — we typically respond within 30 minutes.
         </p>
       </div>
     );
@@ -60,11 +54,11 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
     if (submit.isPending) return;
     setSubmitError(null);
     submit.mutate({
-      name,
-      email,
+      name: name.trim(),
+      email: "",
       phone,
       sourceTag: "Website - Get Started",
-      answers: { goal, timeline },
+      answers: { textMe: GET_STARTED_TEXT_ME_ANSWER },
       tcpaConsent: true,
       visitorId: getVisitorId() || undefined,
     });
@@ -74,12 +68,8 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
     e.preventDefault();
     setSubmitError(null);
     setFieldError(null);
-    if (!goal || !timeline) {
-      setFieldError("Please tell us whether you're buying or selling, and your timeline.");
-      return;
-    }
-    if (!consent) {
-      setFieldError("Please agree to the consent terms to continue.");
+    if (!name.trim()) {
+      setFieldError("Please add your first name so we know who to text.");
       return;
     }
     if (!isUsablePhone(phone)) {
@@ -90,68 +80,34 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 text-left">
+    <form onSubmit={handleSubmit} data-get-started-text-me="true" className="space-y-4 text-left">
       <div className={cn("gap-4", compact ? "space-y-3" : "grid sm:grid-cols-2")}>
         <div className="space-y-1.5">
-          <Label htmlFor="gs-name" className="text-xs uppercase tracking-widest text-muted-foreground">Full Name *</Label>
-          <Input id="gs-name" value={name} onChange={(e) => setName(e.target.value)} required className="bg-secondary/60 border-border" />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="gs-phone" className="text-xs uppercase tracking-widest text-muted-foreground">Phone *</Label>
+          <Label htmlFor="gs-phone" className="text-xs uppercase tracking-widest text-muted-foreground">Your mobile number *</Label>
           <Input
             id="gs-phone"
             type="tel"
+            autoComplete="tel"
+            inputMode="tel"
+            placeholder="(210) 555-0123"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             required
             aria-invalid={fieldError === PHONE_HINT || undefined}
             aria-describedby={fieldError === PHONE_HINT ? "gs-phone-error" : undefined}
-            className="bg-secondary/60 border-border"
+            className="h-12 bg-secondary/60 border-border text-base"
           />
           {fieldError === PHONE_HINT && (
             <p id="gs-phone-error" role="alert" className="text-[11px] text-destructive">{PHONE_HINT}</p>
           )}
         </div>
-        <div className={cn("space-y-1.5", !compact && "sm:col-span-2")}>
-          <Label htmlFor="gs-email" className="text-xs uppercase tracking-widest text-muted-foreground">Email <span className="normal-case tracking-normal">(optional)</span></Label>
-          <Input id="gs-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className="bg-secondary/60 border-border" />
-        </div>
         <div className="space-y-1.5">
-          <Label className="text-xs uppercase tracking-widest text-muted-foreground">I'm Looking To *</Label>
-          <Select value={goal} onValueChange={setGoal}>
-            <SelectTrigger className="bg-secondary/60 border-border w-full"><SelectValue placeholder="Select..." /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Buy">Buy</SelectItem>
-              <SelectItem value="Sell">Sell</SelectItem>
-              <SelectItem value="Buy & Sell">Buy & Sell</SelectItem>
-              <SelectItem value="List for Lease">List for Lease</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs uppercase tracking-widest text-muted-foreground">Timeline *</Label>
-          <Select value={timeline} onValueChange={setTimeline}>
-            <SelectTrigger className="bg-secondary/60 border-border w-full"><SelectValue placeholder="Select..." /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ASAP">ASAP</SelectItem>
-              <SelectItem value="3-6 months">3–6 months</SelectItem>
-              <SelectItem value="6-12 months">6–12 months</SelectItem>
-              <SelectItem value="Just browsing">Just exploring</SelectItem>
-            </SelectContent>
-          </Select>
+          <Label htmlFor="gs-name" className="text-xs uppercase tracking-widest text-muted-foreground">First name *</Label>
+          <Input id="gs-name" autoComplete="given-name" value={name} onChange={(e) => setName(e.target.value)} required className="h-12 bg-secondary/60 border-border text-base" />
         </div>
       </div>
 
-      <div className="flex items-start gap-3 pt-1">
-        <Checkbox id="gs-consent" checked={consent} onCheckedChange={(v) => setConsent(v === true)} className="mt-0.5" />
-        <label htmlFor="gs-consent" className="text-[11px] leading-relaxed text-muted-foreground cursor-pointer">
-          {SITE.tcpaConsent}{" "}
-          <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>{" "}
-          and <Link href="/terms" className="underline underline-offset-2 hover:text-gold">Terms</Link>.
-        </label>
-      </div>
-
-{fieldError && fieldError !== PHONE_HINT && (
+      {fieldError && fieldError !== PHONE_HINT && (
         <p role="alert" className="text-[11px] text-destructive">{fieldError}</p>
       )}
       {submitError && (
@@ -162,8 +118,15 @@ export default function GetStartedForm({ compact = false }: { compact?: boolean 
         type="submit"
         disabled={submit.isPending}
         className="glow-gold min-h-12 w-full bg-gold text-primary-foreground hover:bg-gold/90 font-serif text-[19px] font-normal normal-case tracking-normal px-8 py-6 rounded-none">
-        {submit.isPending ? "Submitting..." : "Get Started"}
+        {submit.isPending ? "Sending..." : "Text me about homes"}
       </Button>
+
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        By tapping the button you agree to get a text from Lifestyle Design Realty at this number about buying or selling a home. Message and data rates may apply.
+        Reply STOP anytime. See our{" "}
+        <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>{" "}
+        and <Link href="/terms" className="underline underline-offset-2 hover:text-gold">Terms</Link>.
+      </p>
     </form>
   );
 }

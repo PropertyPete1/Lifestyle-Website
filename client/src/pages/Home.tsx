@@ -142,8 +142,8 @@ export default function Home() {
               Ready to Buy or Sell?<br />Let&rsquo;s Get Started.
             </h2>
             <p className="mt-6 max-w-md leading-relaxed text-muted-foreground">
-              Tell us what you&rsquo;re planning and a Lifestyle Design Realty professional will reach
-              out with a strategy tailored to your goals — no pressure, no obligation.
+              Drop your number and Pete will text you in a few minutes to hear what you&rsquo;re
+              looking for — no forms, no pressure, no obligation.
             </p>
             <div className="mt-8 space-y-3 text-sm text-muted-foreground">
               <p className="flex items-center gap-3"><span className="inline-block h-px w-8 bg-gold" /> Local expertise across five Texas markets</p>

@@ -7,6 +7,10 @@ import { useEffect, useState } from "react";
  *
  * A gold ring turns around a little house that draws itself, a serif line, and a step line that changes every moment.
  * With reduced motion the ring and the house hold still.
+ *
+ * Nov 3, 2026 (Peter, from Instagram's in-app browser on his phone: "the house isn't in the circle"): the house SVG
+ * carries an explicit width and height. With only insets, Safari sizes an absolutely positioned SVG at its intrinsic
+ * 300×150 and it spilled out of the ring to the bottom right; Chrome happened to fit it.
  */
 export const DEALS_LOADER_COPY = {
   heading: "Finding this week's best builder deals",
@@ -32,7 +36,7 @@ export function DealsLoader({ heading = DEALS_LOADER_COPY.heading, className = "
         <circle cx="48" cy="48" r="44" fill="none" stroke="currentColor" strokeOpacity="0.18" strokeWidth="2" />
         <circle cx="48" cy="48" r="44" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="70 207" />
       </svg>
-      <svg viewBox="0 0 48 48" className="absolute inset-[24%] text-gold" aria-hidden="true">
+      <svg viewBox="0 0 48 48" className="absolute left-[24%] top-[24%] h-[52%] w-[52%] text-gold" aria-hidden="true">
         <path d="M7 22 L24 8 L41 22 M12 18.5 V39 H36 V18.5 M20.5 39 V29 H27.5 V39" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" pathLength={64} style={{ strokeDasharray: 64, animation: "ldrDraw 2.4s ease-in-out infinite" }} />
       </svg>
     </div>

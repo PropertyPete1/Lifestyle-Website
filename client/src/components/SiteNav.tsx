@@ -189,7 +189,7 @@ export default function SiteNav({
               onClick={onJoin ? goApply : goGetStarted}
               data-nav-cta={onJoin ? "apply" : "get-started"}
               className="whitespace-nowrap bg-gold px-7 py-3 font-serif text-[18px] text-primary-foreground transition-colors hover:bg-gold/90">
-              {onJoin ? "Apply Now" : "Get Started"}
+              {onJoin ? "Text Me the Offer" : "Get Started"}
             </button>
           </nav>
 
@@ -211,7 +211,7 @@ export default function SiteNav({
               onClick={onJoin ? goApply : goGetStarted}
               data-nav-cta={onJoin ? "apply" : "get-started"}
               className="bg-gold px-5 py-3 text-center font-serif text-[18px] text-primary-foreground transition-colors hover:bg-gold/90">
-              {onJoin ? "Apply to Join the Team" : "Ready to Buy or Sell? Get Started"}
+              {onJoin ? "Agents: Text Me the Offer" : "Ready to Buy or Sell? Get Started"}
             </button>
             {PROPERTIES_MENU.map((item, i) => (
               item.external ? (

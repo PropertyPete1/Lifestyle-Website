@@ -39,6 +39,8 @@ export interface FubLeadInput {
   sourceTag: string;
   intent: IntentLevel;
   answers?: Record<string, unknown>;
+  /** The FUB user the contact is assigned to (Nov 3, 2026: website recruits go to Steven). */
+  assignedUserId?: string | null;
 }
 
 export interface FubResult {
@@ -79,6 +81,9 @@ export function computeIntent(answers: Record<string, unknown> | undefined): Int
   if (timeline) return "Cold";
   return "Unknown";
 }
+
+/** The recruiting source tags ("Recruit - Website", "Recruit - Builder Deals"). */
+export function isRecruitSource(sourceTag: string, answers?: Record<string, unknown>): boolean { return /^recruit\b/i.test(sourceTag.trim()) || String(answers?.interest ?? "") === "Joining the team"; }
 
 /** Build the full FUB tag: e.g. "Website - Valuation - Hot" */
 export function buildTag(
@@ -145,6 +150,7 @@ export async function sendToFub(input: FubLeadInput): Promise<FubResult> {
       emails: input.email ? [{ value: input.email }] : undefined,
       phones: input.phone ? [{ value: input.phone }] : undefined,
       tags: buildTag(input.sourceTag, input.intent, input.answers),
+      ...(input.assignedUserId ? { assignedUserId: Number(input.assignedUserId) } : {}),
     },
   };
 

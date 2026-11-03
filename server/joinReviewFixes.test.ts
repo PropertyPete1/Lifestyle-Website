@@ -18,18 +18,19 @@ describe("/join review fixes", () => {
     expect(nav).toMatch(/const onJoin = location\.replace\(\/\\\/\+\$\/, ""\) === "\/join";/);
     expect(nav).toContain('document.getElementById("apply")');
     expect(nav.match(/onClick=\{onJoin \? goApply : goGetStarted\}/g)?.length).toBe(2);
-    expect(nav).toContain('{onJoin ? "Apply Now" : "Get Started"}');
-    expect(nav).toContain('{onJoin ? "Apply to Join the Team" : "Ready to Buy or Sell? Get Started"}');
+    expect(nav).toContain('{onJoin ? "Text Me the Offer" : "Get Started"}');
+    expect(nav).toContain('{onJoin ? "Agents: Text Me the Offer" : "Ready to Buy or Sell? Get Started"}');
     // the application anchor the CTA scrolls to still exists
     expect(join_).toContain('id="apply"');
   });
 
-  it("keeps phone required and makes email optional on the agent application", () => {
-    expect(recruit).toMatch(/htmlFor="rc-phone"[^>]*>Phone \*</);
+  it("keeps phone required and everything else optional on the agent number box (Nov 3, 2026: no application)", () => {
+    expect(recruit).toMatch(/htmlFor="rc-phone"[^>]*>Your mobile number \*</);
     expect(recruit).toContain("(optional)");
-    const emailInput = recruit.split("\n").find((line) => line.includes('<Input id="rc-email"')) ?? "";
-    expect(emailInput).not.toBe("");
-    expect(emailInput).not.toMatch(/\brequired\b/);
+    const nameInput = recruit.split("\n").find((line) => line.includes('<Input id="rc-name"')) ?? "";
+    expect(nameInput).not.toBe("");
+    expect(nameInput).not.toMatch(/\brequired\b/);
+    expect(recruit).not.toContain("rc-license");
   });
 
   it("shows the Builder Deals toolkit, the lead tools and the brokers, with no invented numbers", () => {
@@ -43,7 +44,7 @@ describe("/join review fixes", () => {
   });
 
   it("points the phone sticky bar at the application on /join only", () => {
-    expect(join_).toContain('<PageShell stickyCta stickyCtaLabel="Apply to Join the Team" stickyCtaHref="#apply">');
+    expect(join_).toContain('<PageShell stickyCta stickyCtaLabel="Text Me the Offer" stickyCtaHref="#apply">');
     const sticky = read("client/src/components/StickyMobileCta.tsx");
     expect(sticky).toContain('href = "/#get-started"');
     expect(sticky).toContain("href={href}");

@@ -5,7 +5,8 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
-import { computeIntent, sendFubNote, sendToFub, sendWebsiteInquiryToFub, WEBSITE_INQUIRY_SOURCE, WEBSITE_INQUIRY_TAG } from "./fub";
+import { computeIntent, isRecruitSource, sendFubNote, sendToFub, sendWebsiteInquiryToFub, WEBSITE_INQUIRY_SOURCE, WEBSITE_INQUIRY_TAG } from "./fub";
+import { stevenUserId } from "./dealsFub";
 import { emailWebsiteInquiryCopy } from "./inquiryEmail";
 import { buildActivityNote } from "./activityNote";
 import { extractCriteria, matchListings } from "./aiSearch";
@@ -350,6 +351,8 @@ export const appRouter = router({
         visitorId: input.visitorId || null,
       });
 
+      // Nov 3, 2026 (Peter): a recruit is filed under Steven, whose FUB action plan texts them the offer.
+      const assignedUserId = isRecruitSource(input.sourceTag, input.answers) ? await stevenUserId().catch(() => null) : null;
       const fub = await sendToFub({
         name: input.name,
         email: input.email || undefined,
@@ -358,6 +361,7 @@ export const appRouter = router({
         sourceTag: input.sourceTag,
         intent,
         answers: input.answers,
+        assignedUserId,
       });
 
       await db.updateLead(leadId, {

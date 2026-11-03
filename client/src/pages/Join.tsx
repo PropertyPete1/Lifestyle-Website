@@ -77,10 +77,10 @@ function builderDealsArrival(): { fromDeals: boolean; phone: string; name: strin
 
 export default function Join() {
   const [arrival] = useState(builderDealsArrival);
-  // Straight to the application for an agent sent from Builder Deals.
+  // Straight to the number box for an agent sent from Builder Deals.
   useEffect(() => { if (arrival.fromDeals) window.setTimeout(() => document.querySelector("[data-join-from-deals]")?.scrollIntoView({ block: "start" }), 300); }, [arrival.fromDeals]);
   return (
-    <PageShell stickyCta stickyCtaLabel="Apply to Join the Team" stickyCtaHref="#apply">
+    <PageShell stickyCta stickyCtaLabel="Text Me the Offer" stickyCtaHref="#apply">
       {/* Oct 30, 2026 (Peter: "fix the black part on the recruiting page"): the white-skin hero, text beside a bright
           photo, with the three hooks and a straight line to the application. */}
       <section className="pt-[calc(68px+2.25rem)] lg:pt-[calc(80px+3rem)]">
@@ -100,7 +100,7 @@ export default function Join() {
               ))}
             </div>
             <a href="#apply" className="mt-7 inline-flex min-h-12 items-center justify-center gap-2.5 bg-gold px-8 font-serif text-[19px] text-white transition-colors hover:bg-gold/90">
-              Apply to Join the Team <ArrowRight className="h-4 w-4" />
+              Text me what you offer <ArrowRight className="h-4 w-4" />
             </a>
           </div>
           <div className="relative aspect-[4/3] overflow-hidden lg:aspect-[5/4]">
@@ -202,23 +202,23 @@ export default function Join() {
             ))}
           </div>
         </div>
-        {/* Screening message — exact copy per brief */}
-        <div className="border-l-2 border-gold pl-6 mb-10 reveal">
-          <p className="text-muted-foreground leading-relaxed whitespace-pre-line">
-            {"In an effort to find the best fit, can you please tell me the following:\n1. License number\n2. # of transactions closed this year\n3. Are you a full time agent?\n4. Do you currently use a CRM? If yes which one?\n5. What brokerage are you with?\nThanks!"}
-          </p>
-          <p className="mt-3 font-serif italic text-lg text-foreground/90">— Stefanie</p>
+        {/* Nov 3, 2026 (Peter): no application. An agent drops their number and Steven texts the offer a few minutes
+            later. The five screening questions moved to that text conversation. */}
+        <div data-join-text-me-intro="true" className="border-l-2 border-gold pl-6 mb-10 reveal">
+          <p className="eyebrow text-gold">No application</p>
+          <h2 className="display-serif mt-3 text-3xl md:text-4xl">Curious? Drop your number.</h2>
+          <p className="mt-4 max-w-2xl text-muted-foreground leading-relaxed">Steven will text you what we offer in a few minutes: splits, how leads reach you, and what day one looks like. Reply to that text and you two take it from there. No call to book, nothing to fill out.</p>
         </div>
         {arrival.fromDeals && <div data-join-from-deals="true" className="mb-6 scroll-mt-28 border border-gold/50 bg-gold/10 p-5">
           <p className="eyebrow text-gold">From Builder Deals</p>
-          <p className="mt-2 leading-relaxed text-foreground/90">Builder Deals are for home buyers. Agents on our team get every one of these deals, with the addresses, rates and photos, for their own clients. Tell us about yourself and our broker will reach out.</p>
+          <p className="mt-2 leading-relaxed text-foreground/90">Builder Deals are for home buyers. Agents on our team get every one of these deals, with the addresses, rates and photos, for their own clients. Drop your number below and Steven will text you what we offer.</p>
         </div>}
         <div id="apply" className="scroll-mt-28 bg-card border border-border p-6 lg:p-10">
           <RecruitForm sourceTag={arrival.fromDeals ? BUILDER_DEALS_RECRUIT_SOURCE : undefined} initialPhone={arrival.phone} initialName={arrival.name} initialEmail={arrival.email} />
         </div>
 
         {/* Closing tagline + email contact for agents who prefer email.
-            The screening form above remains the primary application path. */}
+            The number box above remains the primary path. */}
         <div className="mt-16 text-center reveal">
           <p className="display-serif text-2xl md:text-3xl leading-snug">
             Lifestyle Design Realty.

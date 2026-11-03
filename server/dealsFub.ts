@@ -5,6 +5,7 @@ const FUB_API_URL = "https://api.followupboss.com/v1";
 const FUB_APP_PERSON_URL = "https://app.followupboss.com/2/people/view";
 const BASE_TAG = "IG Builder Deals";
 const PETER_EMAIL = "peter@lifestyledesignrealty.com";
+const STEVEN_EMAIL = "steven@lifestyledesignrealty.com";
 const FUB_PAGE_SIZE = 100;
 const MAX_FUB_PAGES = 100;
 const FUB_TIMEOUT_MS = 30_000;
@@ -382,20 +383,22 @@ export function detectPriorOptOut(person: FubPerson | null | undefined, notes: u
   return notes.some((note) => !isBuilderDealsSystemNote(note) && textInFubObject(note).some((text) => OPT_OUT_NOTE.test(text)));
 }
 
-type CachedPeter = { id: string | null; expiresAt: number };
-let cachedPeter: CachedPeter | null = null;
+type CachedUser = { id: string | null; expiresAt: number };
+const cachedUsers = new Map<string, CachedUser>();
 /** FUB's users endpoint is paged and does not rely on an undocumented email filter. */
-export async function peterUserId() {
-  if (cachedPeter && cachedPeter.expiresAt > Date.now()) return cachedPeter.id;
+export async function fubUserIdByEmail(email: string): Promise<string | null> {
+  const wanted = email.toLowerCase();
+  const cached = cachedUsers.get(wanted);
+  if (cached && cached.expiresAt > Date.now()) return cached.id;
   for (let page = 0; page < MAX_FUB_PAGES; page += 1) {
     const params = new URLSearchParams({ limit: String(FUB_PAGE_SIZE), offset: String(page * FUB_PAGE_SIZE) });
     const res = await fub(`/users?${params.toString()}`);
     const body = await res.json().catch(() => ({})) as { users?: Array<Record<string, unknown>> };
     const users = Array.isArray(body.users) ? body.users : [];
-    const found = users.find((user) => fubValues(user.email ?? user.emails).some((email) => email.toLowerCase() === PETER_EMAIL));
+    const found = users.find((user) => fubValues(user.email ?? user.emails).some((value) => value.toLowerCase() === wanted));
     const id = found ? stringValue(found.id) : null;
     if (id) {
-      cachedPeter = { id, expiresAt: Date.now() + 5 * 60_000 };
+      cachedUsers.set(wanted, { id, expiresAt: Date.now() + 5 * 60_000 });
       return id;
     }
     // Some FUB accounts return pages smaller than the requested limit while
@@ -404,11 +407,14 @@ export async function peterUserId() {
   }
   // Short negative cache avoids a thundering herd, while allowing a newly added
   // user to become visible shortly afterwards.
-  cachedPeter = { id: null, expiresAt: Date.now() + 60_000 };
+  cachedUsers.set(wanted, { id: null, expiresAt: Date.now() + 60_000 });
   return null;
 }
-/** Test seam: the Peter lookup is cached for five minutes. */
-export function resetPeterUserCache() { cachedPeter = null; }
+export async function peterUserId() { return fubUserIdByEmail(PETER_EMAIL); }
+/** Nov 3, 2026: website recruits are filed under Steven, who texts them the offer. */
+export async function stevenUserId() { return fubUserIdByEmail(STEVEN_EMAIL); }
+/** Test seam: the user lookups are cached for five minutes. */
+export function resetPeterUserCache() { cachedUsers.clear(); }
 
 async function fubUserName(userId: string): Promise<string | null> {
   try {

@@ -1,38 +1,32 @@
 import { useState } from "react";
 import { Link } from "wouter";
-import { toast } from "sonner";
 import FormError from "@/components/FormError";
 import { humanizeSubmitError, isUsablePhone, PHONE_HINT } from "@shared/formErrors";
 import { trpc } from "@/lib/trpc";
-import { SITE } from "@shared/site";
 import { getVisitorId } from "@/lib/visitor";
 import { markLeadCaptured } from "@/lib/leadSession";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CheckCircle2 } from "lucide-react";
+import { MessageSquareText } from "lucide-react";
 
 /**
- * Agent recruiting screening form (per Stefanie's exact message).
- * Posts to FUB tagged "Recruit - Website"; all five answers saved as notes;
- * intent per rules: active license + full-time + closed transactions = Hot.
+ * Nov 3, 2026 (Peter: zero agents filled out the five-question application in 30 days; every recruit came from a DM
+ * or a text, "a form feels like applying for a job"). The application is now one box: an agent drops their number
+ * and gets the offer by text a few minutes later, written as Steven. The text itself is sent by Follow Up Boss (an
+ * action plan on the "Recruit - Website" tag), so this form's whole job is to file the agent under Steven with that
+ * tag and the note that they asked for the offer by text.
  */
 /** Recruits sent from Builder Deals carry their own FUB tag, so recruiting knows which track they came in on. */
 export const BUILDER_DEALS_RECRUIT_SOURCE = "Recruit - Builder Deals";
+/** What the FUB note says, so Steven sees at a glance why the agent is there. */
+export const RECRUIT_TEXT_ME_ANSWER = "Yes - asked for the offer by text from the website";
+/** A recruit who gave only a number is still a person in FUB; the first name is replaced when they reply. */
+export const RECRUIT_FALLBACK_NAME = "Agent";
 
 export default function RecruitForm({ sourceTag = "Recruit - Website", initialPhone = "", initialName = "", initialEmail = "" }: { sourceTag?: string; initialPhone?: string; initialName?: string; initialEmail?: string } = {}) {
   const [name, setName] = useState(initialName);
-  const [email, setEmail] = useState(initialEmail);
   const [phone, setPhone] = useState(initialPhone);
-  const [licenseNumber, setLicenseNumber] = useState("");
-  const [transactionsClosed, setTransactionsClosed] = useState("");
-  const [fullTime, setFullTime] = useState("");
-  const [crm, setCrm] = useState("");
-  const [currentBrokerage, setCurrentBrokerage] = useState("");
-  const [consent, setConsent] = useState(false);
   const [done, setDone] = useState(false);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -48,9 +42,9 @@ export default function RecruitForm({ sourceTag = "Recruit - Website", initialPh
   if (done) {
     return (
       <div data-lead-converted className="flex flex-col items-center text-center py-12 gap-3">
-        <CheckCircle2 className="h-10 w-10 text-gold" />
-        <h3 className="font-serif text-2xl">Thank you!</h3>
-        <p className="text-sm text-muted-foreground max-w-sm">Our broker will be reaching out — we typically respond within 30 minutes.</p>
+        <MessageSquareText className="h-10 w-10 text-gold" />
+        <h3 className="font-serif text-2xl">Check your texts.</h3>
+        <p className="text-sm text-muted-foreground max-w-sm">Steven will text you what we offer in the next few minutes. Reply to that text with any questions.</p>
       </div>
     );
   }
@@ -62,20 +56,12 @@ export default function RecruitForm({ sourceTag = "Recruit - Website", initialPh
     if (submit.isPending) return;
     setSubmitError(null);
     submit.mutate({
-      name,
-      email,
+      name: name.trim() || RECRUIT_FALLBACK_NAME,
+      email: initialEmail.trim(),
       phone,
       sourceTag,
       visitorId: getVisitorId() || undefined,
-      answers: {
-        licenseNumber,
-        transactionsClosed,
-        fullTimeAgent: fullTime,
-        crm: crm || "No CRM",
-        currentBrokerage,
-        licenseStatus: licenseNumber ? "Licensed active" : "Not licensed",
-        fullTime,
-      },
+      answers: { textMeTheOffer: RECRUIT_TEXT_ME_ANSWER },
       tcpaConsent: true,
     });
   };
@@ -84,14 +70,6 @@ export default function RecruitForm({ sourceTag = "Recruit - Website", initialPh
     e.preventDefault();
     setSubmitError(null);
     setFieldError(null);
-    if (!licenseNumber || !transactionsClosed || !fullTime || !currentBrokerage) {
-      setFieldError("Please answer all five screening questions.");
-      return;
-    }
-    if (!consent) {
-      setFieldError("Please agree to the consent terms to continue.");
-      return;
-    }
     if (!isUsablePhone(phone)) {
       setFieldError(PHONE_HINT);
       return;
@@ -100,73 +78,33 @@ export default function RecruitForm({ sourceTag = "Recruit - Website", initialPh
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 text-left">
-      <div className="grid sm:grid-cols-2 gap-4">
+    <form onSubmit={handleSubmit} data-recruit-text-me="true" className="space-y-4 text-left">
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="space-y-1.5">
-          <Label htmlFor="rc-name" className="text-xs uppercase tracking-widest text-muted-foreground">Full Name *</Label>
-          <Input id="rc-name" value={name} onChange={(e) => setName(e.target.value)} required className="bg-secondary/60 border-border" />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="rc-phone" className="text-xs uppercase tracking-widest text-muted-foreground">Phone *</Label>
+          <Label htmlFor="rc-phone" className="text-xs uppercase tracking-widest text-muted-foreground">Your mobile number *</Label>
           <Input
             id="rc-phone"
             type="tel"
+            autoComplete="tel"
+            inputMode="tel"
+            placeholder="(210) 555-0123"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             required
             aria-invalid={fieldError === PHONE_HINT || undefined}
             aria-describedby={fieldError === PHONE_HINT ? "rc-phone-error" : undefined}
-            className="bg-secondary/60 border-border"
+            className="h-12 bg-secondary/60 border-border text-base"
           />
           {fieldError === PHONE_HINT && (
             <p id="rc-phone-error" role="alert" className="text-[11px] text-destructive">{PHONE_HINT}</p>
           )}
         </div>
-        <div className="space-y-1.5 sm:col-span-2">
-          {/* Oct 30, 2026 (Peter's rule for every form: phone required, email optional). */}
-          <Label htmlFor="rc-email" className="text-xs uppercase tracking-widest text-muted-foreground">Email <span className="normal-case tracking-normal">(optional)</span></Label>
-          <Input id="rc-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="bg-secondary/60 border-border" />
-        </div>
         <div className="space-y-1.5">
-          <Label htmlFor="rc-license" className="text-xs uppercase tracking-widest text-muted-foreground">1. License Number *</Label>
-          <Input id="rc-license" value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} required className="bg-secondary/60 border-border" />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="rc-transactions" className="text-xs uppercase tracking-widest text-muted-foreground">2. Transactions Closed This Year *</Label>
-          <Input id="rc-transactions" type="number" min="0" value={transactionsClosed} onChange={(e) => setTransactionsClosed(e.target.value)} required className="bg-secondary/60 border-border" />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs uppercase tracking-widest text-muted-foreground">3. Are You a Full-Time Agent? *</Label>
-          <Select value={fullTime} onValueChange={setFullTime}>
-            <SelectTrigger className="bg-secondary/60 border-border w-full"><SelectValue placeholder="Select..." /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Yes">Yes</SelectItem>
-              <SelectItem value="No">No</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="rc-crm" className="text-xs uppercase tracking-widest text-muted-foreground">4. Current CRM (If Any)</Label>
-          <Input id="rc-crm" value={crm} onChange={(e) => setCrm(e.target.value)} placeholder="e.g. Follow Up Boss, kvCORE, none" className="bg-secondary/60 border-border" />
-        </div>
-        <div className="space-y-1.5 sm:col-span-2">
-          <Label htmlFor="rc-brokerage" className="text-xs uppercase tracking-widest text-muted-foreground">5. What Brokerage Are You With? *</Label>
-          <Textarea id="rc-brokerage" value={currentBrokerage} onChange={(e) => setCurrentBrokerage(e.target.value)} rows={2} required className="bg-secondary/60 border-border" />
+          <Label htmlFor="rc-name" className="text-xs uppercase tracking-widest text-muted-foreground">First name <span className="normal-case tracking-normal">(optional)</span></Label>
+          <Input id="rc-name" autoComplete="given-name" value={name} onChange={(e) => setName(e.target.value)} className="h-12 bg-secondary/60 border-border text-base" />
         </div>
       </div>
 
-      <div className="flex items-start gap-3 pt-1">
-        <Checkbox id="rc-consent" checked={consent} onCheckedChange={(v) => setConsent(v === true)} className="mt-0.5" />
-        <label htmlFor="rc-consent" className="text-[11px] leading-relaxed text-muted-foreground cursor-pointer">
-          {SITE.tcpaConsent}{" "}
-          <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>{" "}
-          and <Link href="/terms" className="underline underline-offset-2 hover:text-gold">Terms</Link>.
-        </label>
-      </div>
-
-{fieldError && fieldError !== PHONE_HINT && (
-        <p role="alert" className="text-[11px] text-destructive">{fieldError}</p>
-      )}
       {submitError && (
         <FormError message={submitError} onRetry={doSubmit} retrying={submit.isPending} />
       )}
@@ -174,9 +112,16 @@ export default function RecruitForm({ sourceTag = "Recruit - Website", initialPh
       <Button
         type="submit"
         disabled={submit.isPending}
-        className="w-full sm:w-auto bg-gold text-primary-foreground hover:bg-gold/90 uppercase tracking-[0.2em] text-xs px-10 py-6 rounded-none">
-        {submit.isPending ? "Submitting..." : "Submit Application"}
+        className="w-full bg-gold text-primary-foreground hover:bg-gold/90 uppercase tracking-[0.2em] text-xs px-10 py-6 rounded-none sm:w-auto">
+        {submit.isPending ? "Sending..." : "Text me what you offer"}
       </Button>
+
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        By tapping the button you agree to get a text from Lifestyle Design Realty at this number about joining the team. Message and data rates may apply.
+        Reply STOP anytime. See our{" "}
+        <Link href="/privacy" className="underline underline-offset-2 hover:text-gold">Privacy Policy</Link>{" "}
+        and <Link href="/terms" className="underline underline-offset-2 hover:text-gold">Terms</Link>.
+      </p>
     </form>
   );
 }

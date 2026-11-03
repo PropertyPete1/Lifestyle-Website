@@ -21,14 +21,13 @@ export function TrustLine({ className }: { className?: string }) {
         "flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground",
         className
       )}>
-      <span className="text-gold">4.6★ on Google</span>
+      {/* Nov 3, 2026 (Peter): no Google star rating anywhere on the site. */}
       {closed && (
         <>
+          <span className="text-gold">{closed} homes closed</span>
           <span aria-hidden>·</span>
-          <span>{closed} homes closed</span>
         </>
       )}
-      <span aria-hidden>·</span>
       <span>Veteran-owned</span>
     </p>
   );

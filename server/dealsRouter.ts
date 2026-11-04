@@ -115,7 +115,10 @@ export function warmPublicPages(): void {
 }
 // Nov 2, 2026: an agent's client link now opens the list with no form, so the agent-client view (full, no builder pages)
 // is primed too: a client tapping the link on a new process gets the list in about a second, not 6-10.
-const PRIMED_LIST_VIEWS: DealsCatalogView[] = [{ view: "full", builderPages: true }, { view: "full", builderPages: false }, { view: "gated" }];
+// Nov 4, 2026: the client view ({ view: "full", builderPages: false }) is no longer primed. With three primed lists the
+// drain's peak RSS climbed to 492 MB on the 512 MB host and boots reached 54 a day; a client link now builds its list
+// on first open (a few seconds, cached after) instead of holding a third copy in memory.
+const PRIMED_LIST_VIEWS: DealsCatalogView[] = [{ view: "full", builderPages: true }, { view: "gated" }];
 /** One view's unlocked list as every lead with that view gets it (before their own order). */
 function mineListLoad(view: DealsCatalogView) {
   return process.env.VITEST ? buildGatedCatalog(view) : catalogWithSnapshot(gatedCatalogViewKey(view), () => buildGatedCatalog(view));

@@ -1,6 +1,6 @@
 {
-  "date": "2026-11-03",
-  "generated_at": "2026-11-04T05:09:16Z",
+  "date": "2026-11-04",
+  "generated_at": "2026-11-04T13:53:23Z",
   "timezone": "America/Chicago",
   "days": {},
   "unavailable": [
@@ -9,11 +9,11 @@
       "reason": "page_events stores no session identifier — only anonymous per-visitor rows. A session count would have to come from an invented inactivity-timeout heuristic, which would be an estimate, not a measurement."
     },
     {
-      "metric": "page_views, unique_visitors, top_pages, lead_submissions (today 2026-11-03)",
+      "metric": "page_views, unique_visitors, top_pages, lead_submissions (today 2026-11-04)",
       "reason": "query failed: ER_UNKNOWN_ERROR: Access denied. Please check your user name and password. See https://docs.pingcap.com/tidbcloud/select-cluster-tier#user-name-prefix (in Failed query: select `path`, COUNT(*), COUNT(DISTINCT CASE WHEN `visitorId` <> '' THEN `visitorId` END) from `page_event)"
     },
     {
-      "metric": "page_views, unique_visitors, top_pages, lead_submissions (yesterday 2026-11-02)",
+      "metric": "page_views, unique_visitors, top_pages, lead_submissions (yesterday 2026-11-03)",
       "reason": "query failed: ER_UNKNOWN_ERROR: Access denied. Please check your user name and password. See https://docs.pingcap.com/tidbcloud/select-cluster-tier#user-name-prefix (in Failed query: select SUM(`kind` = 'view'), COUNT(DISTINCT CASE WHEN `kind` = 'view' AND `visitorId` <> '' THEN `visitorI)"
     }
   ]

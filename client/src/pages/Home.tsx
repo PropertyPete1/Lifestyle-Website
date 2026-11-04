@@ -172,6 +172,8 @@ export default function Home() {
             {/* Social proof + the response promise, right where the visitor
                 decides whether to hand over their details. */}
             <div className="mb-5 flex flex-col gap-3">
+              {/* Nov 3, 2026 (Peter): say who follows up, above the response promise. */}
+              <p data-agent-reaching-out className="font-serif text-2xl leading-tight text-foreground">One of our agents will be reaching out.</p>
               <ResponseBadge className="self-start" />
               <TrustLine />
             </div>

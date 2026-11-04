@@ -29,6 +29,7 @@ describe("Get Started: drop your number, we text you", () => {
     for (const page of ["client/src/pages/Home.tsx", "client/src/pages/GetStarted.tsx"]) {
       expect(read(page)).toContain("Drop your number and we'll text you in a few minutes");
       expect(read(page)).toContain("<GetStartedForm />");
+      expect(read(page)).toContain("One of our agents will be reaching out."); // Nov 3 (Peter): above the 30-minute badge
     }
   });
 });

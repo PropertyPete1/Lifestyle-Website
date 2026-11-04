@@ -1,5 +1,6 @@
 import PageShell from "@/components/PageShell";
 import GetStartedForm from "@/components/GetStartedForm";
+import { ResponseBadge } from "@/components/TrustSignals";
 
 /** Dedicated Get Started page — target of the persistent nav CTA on non-home pages. */
 export default function GetStarted() {
@@ -23,6 +24,10 @@ export default function GetStarted() {
             </div>
           </div>
           <div className="border border-gold/40 bg-card p-6 lg:p-10">
+            <div className="mb-5 flex flex-col gap-3">
+              <p data-agent-reaching-out className="font-serif text-2xl leading-tight text-foreground">One of our agents will be reaching out.</p>
+              <ResponseBadge className="self-start" />
+            </div>
             <GetStartedForm />
           </div>
         </div>

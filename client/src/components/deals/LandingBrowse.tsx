@@ -936,7 +936,9 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
         </div>}
         {/* With the caller's Homes / Map switch on Map, a phone shows the map alone (the homes are one tap away). */}
         <div className={external && mapOnPhone ? "max-lg:hidden" : undefined}>
-        {top && <div className="mb-6 min-w-0">{typeof top === "function" ? top(actions) : top}</div>}
+        {/* Nov 4, 2026 (Peter: "the 3 deals pop up on every page"): the featured row leads the first screen only. Once the
+            visitor narrows the list to a map bubble or a drawn area, the list starts with their homes. */}
+        {top && !area && <div className="mb-6 min-w-0" data-deals-top-slot="landing">{typeof top === "function" ? top(actions) : top}</div>}
         <div ref={listTop} className="scroll-mt-4" />
         {area && <div role="status" data-deals-list-area={shape ? "draw" : "area"} className="mb-4 flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-gold/40 bg-gold/5 px-4 py-2 text-sm"><span>{areaText}</span><button type="button" onClick={clearArea} className="min-h-11 font-medium text-gold underline underline-offset-4">{shape ? DRAW_COPY.clear : LANDING_COPY.clearArea}</button></div>}
         {renderList ? renderList({ keys: new Set(matching.map((item) => item.key)), open: (key, homeFocus) => { const community = keyed.find((item) => item.key === key) ?? lookup?.find((item) => item.key === key); if (community) { setFocus(homeFocus); setOpen(community); } }, hover: setActiveKey, activeKey }) : <>

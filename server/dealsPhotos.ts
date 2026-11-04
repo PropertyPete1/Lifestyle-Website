@@ -26,8 +26,10 @@ import { interactiveBusy } from "./interactiveLoad";
  * that ends above PHOTO_RSS_RELEASE_MB (its thread and WASM memory go back; with MALLOC_ARENA_MAX=2 the process
  * returns to about its idle size). The next recognition starts a new worker in a second or two.
  */
-export const PHOTO_RSS_STOP_MB = 450;
-export const PHOTO_RSS_RELEASE_MB = 380;
+// Nov 4, 2026: the process now boots near 460 MB (two primed lists) and was still being killed mid-drain (59 boots in a
+// day, peak 499 MB), so the guards sit lower: no new photo past 420 MB, the OCR worker goes after a drain ending above 350.
+export const PHOTO_RSS_STOP_MB = 420;
+export const PHOTO_RSS_RELEASE_MB = 350;
 let readRssBytes = () => process.memoryUsage.rss();
 /** Test seam: the process memory the guards read. */
 export function setDealPhotoRssReader(reader: (() => number) | null) { readRssBytes = reader ?? (() => process.memoryUsage.rss()); }
@@ -95,7 +97,7 @@ export const PHOTO_PROCESSING_CONCURRENCY = 2;
  * OCR stays on one worker; the extra lane overlaps its download and image work with the other two.
  */
 export const PHOTO_EXTRA_LANES = 1;
-export const PHOTO_EXTRA_LANE_MAX_MB = 320;
+export const PHOTO_EXTRA_LANE_MAX_MB = 300;
 /** At most this many downloads from one builder image host at a time, whatever the lane count. */
 const HOST_DOWNLOAD_CONCURRENCY = 2;
 /**

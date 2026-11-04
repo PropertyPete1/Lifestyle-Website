@@ -35,6 +35,11 @@ import {
  * to a community only when that list links its page. Read-only, plain GET,
  * official host only. Everything here is private operational data.
  *
+ * Nov 4, 2026: the site was rebuilt. The region page now embeds only `oceanFloorModules.homepageCommunities` (name,
+ * page, pin per community); the community page's hero became `.module-community-intro` (status badge, h1, Google
+ * Maps address link, tel link) and the module's cards state their specs as text ("1,609 Sq. Ft. | 3 Beds | 2 Baths",
+ * "2 Garage") with "Plan: X" and "Move In: Oct 2026" in `.home-preview__details`. Both shapes are read.
+ *
  * Page shapes (October 2026):
  * - roster:    /region/texas/                       (about 250 KB)
  * - community: /communities/<slug>/                 (about 300 KB)
@@ -109,7 +114,7 @@ export function viewHomesStatus(label: string | null, moveIn: string | null, now
 
 export type ViewHomesCommunityRecord = { name: string; street: string | null; city: string | null; zip: string | null; phone: string | null; priceFrom: number | null; geo: { lat: number; lng: number } | null };
 export type ViewHomesListedHome = { url: string; street: string | null; plan: string | null; statusText: string | null; moveIn: string | null; price: number | null; squareFeet: number | null; bedrooms: number | null; bathrooms: number | null; garage: number | null; photo: string | null };
-export type ViewHomesListedCommunity = { postId: number | null; url: string; status: { value: string | null; label: string | null }; record: ViewHomesCommunityRecord; homes: ViewHomesListedHome[] };
+export type ViewHomesListedCommunity = { postId: number | null; url: string; status: { value: string | null; label: string | null }; record: ViewHomesCommunityRecord; homes: ViewHomesListedHome[]; /** True for the November 2026 roster, which lists no status and no homes: the page's cards are the inventory. */ cardsOnly?: boolean };
 
 /** The JSON array that starts at `html[start]` (a `[`), read with string-aware bracket matching; null when unbalanced. */
 function jsonArrayAt(html: string, start: number): string | null {
@@ -182,9 +187,48 @@ function listedHome(row: Json, host: string): ViewHomesListedHome | null {
 }
 
 /** The region page's roster: every community with its record, status and homes for sale, one entry per page; null when the page embeds no roster. */
+/**
+ * Nov 4, 2026: the region page stopped embedding the full roster. It now pushes `oceanFloorModules.homepageCommunities`
+ * with `communities: [{post_id, post_title, permalink, lat, lng}]` — a name, a page and a pin per community, no status,
+ * no homes. Such a roster still proves a page belongs to the market; the homes then come from the page's own cards.
+ */
+function parseViewHomesMapRoster(html: string, host: string): ViewHomesListedCommunity[] | null {
+  const push = html.indexOf("oceanFloorModules.homepageCommunities.push(");
+  if (push < 0) return null;
+  const key = /\bcommunities\s*:\s*\[/g;
+  key.lastIndex = push;
+  const match = key.exec(html);
+  if (!match) return null;
+  const text = jsonArrayAt(html, match.index + match[0].length - 1);
+  let rows: unknown;
+  try { rows = text ? JSON.parse(text) : null; } catch { return null; }
+  if (!Array.isArray(rows)) return null;
+  const out = new Map<string, ViewHomesListedCommunity>();
+  for (const raw of rows) {
+    const row = obj(raw);
+    const name = row ? str(row.post_title) : null;
+    const link = row ? str(row.permalink) : null;
+    const url = link ? asUrl(link) : null;
+    if (!row || !name || !url || !sameOfficialHost(url, host)) continue;
+    const page = pageUrlOf(url);
+    if (out.has(page)) continue;
+    const lat = Number(row.lat);
+    const lng = Number(row.lng);
+    out.set(page, {
+      postId: positive(row.post_id),
+      url: page,
+      status: { value: null, label: null },
+      record: { name, street: null, city: null, zip: null, phone: null, priceFrom: null, geo: Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat !== 0 || lng !== 0) ? { lat, lng } : null },
+      homes: [],
+      cardsOnly: true,
+    });
+  }
+  return out.size ? Array.from(out.values()) : null;
+}
+
 export function parseViewHomesRoster(html: string, host: string): ViewHomesListedCommunity[] | null {
   const push = html.indexOf("oceanFloorModules.communitiesMapList.push(");
-  if (push < 0) return null;
+  if (push < 0) return parseViewHomesMapRoster(html, host);
   const key = /\bregions\s*:\s*\[/g;
   key.lastIndex = push;
   const match = key.exec(html);
@@ -221,7 +265,7 @@ export function parseViewHomesRoster(html: string, host: string): ViewHomesListe
 /** The roster's communities for discovery: every selling record (a coming-soon row has nothing to read yet, as with Drees). */
 export function viewHomesListingEntries(html: string, host: string): Array<{ url: string; record: ViewHomesCommunityRecord }> | null {
   const roster = parseViewHomesRoster(html, host);
-  return roster ? roster.filter((row) => !/^soon$/i.test(row.status.value ?? "") && !/coming\s+soon/i.test(row.status.label ?? "")).map((row) => ({ url: row.url, record: row.record })) : null;
+  return roster ? roster.filter((row) => row.cardsOnly || (!/^soon$/i.test(row.status.value ?? "") && !/coming\s+soon/i.test(row.status.label ?? ""))).map((row) => ({ url: row.url, record: row.record })) : null;
 }
 
 function classText(scope: readonly HtmlElement[], html: string, token: string): string | null {
@@ -239,6 +283,24 @@ function specPairs(scope: readonly HtmlElement[], html: string, prefix: string):
     if (label) out[label] = positive(value);
   }
   return out;
+}
+
+/** The November 2026 card's specs line: "1,609 Sq. Ft. | 3 Beds | 2 Baths" and "2 Garage" in `${prefix}__specs`. */
+function specText(scope: readonly HtmlElement[], html: string, prefix: string): Record<string, number | null> {
+  const out: Record<string, number | null> = {};
+  const text = classText(scope, html, `${prefix}__specs`) ?? "";
+  const take = (pattern: RegExp) => { const match = pattern.exec(text); return match ? positive(match[1]) : null; };
+  out.sqft = take(/([\d,]+)\s*sq\.?\s*ft/i);
+  out.beds = take(/([\d.]+)\s*beds?\b/i);
+  out.baths = take(/([\d.]+)\s*baths?\b/i);
+  out.garage = take(/([\d.]+)\s*(?:car\s+)?garage/i);
+  return out;
+}
+
+/** Specs by label (October page) or from the specs line (November page). */
+function cardSpecs(scope: readonly HtmlElement[], html: string, prefix: string): Record<string, number | null> {
+  const pairs = specPairs(scope, html, prefix);
+  return Object.keys(pairs).length ? pairs : specText(scope, html, prefix);
 }
 
 function cardPhotos(scope: readonly HtmlElement[], token: string): PrivateGalleryImage[] {
@@ -271,6 +333,8 @@ export type ViewHomesPage = {
   hasHomesTab: boolean;
   /** The home cards' page URLs under this community. */
   homeUrls: string[];
+  /** The home cards themselves (the November 2026 page is the only inventory source; the October page's cards duplicate the roster). */
+  homes: ViewHomesListedHome[];
   /** True when a home or plan card links under another community's path. */
   foreignHome: boolean;
   foreignPlan: boolean;
@@ -286,11 +350,13 @@ export function parseViewHomesCommunity(html: string, pageUrl: string): ViewHome
   if (!community || !root) return null;
   const host = community.hostname;
   const all = descendants(root);
-  const heading = all.find((item) => item.tag === "h1" && elementClass(item, "hero__heading"));
+  // October 2026: h1.hero__heading inside .hero__content. November 2026: h1.module-community-intro__title with the
+  // status badge, address and phone in the .module-community-intro block.
+  const heading = all.find((item) => item.tag === "h1" && (elementClass(item, "hero__heading") || elementClass(item, "module-community-intro__title")));
   const name = heading ? elementText(heading, html).replace(/^welcome\s+to\s*/i, "").trim() : "";
   if (!name) return null;
   const base = pagePath(community);
-  const hero = all.find((item) => elementClass(item, "hero__content"));
+  const hero = all.find((item) => elementClass(item, "hero__content")) ?? all.find((item) => elementClass(item, "module-community-intro"));
   const heroParts = hero ? descendants(hero) : [];
   const addressLink = heroParts.find((item) => item.tag === "a" && elementClass(item, "notranslate") && /maps/i.test(item.attributes.href ?? ""));
   const addressText = addressLink ? elementText(addressLink, html) : "";
@@ -305,18 +371,43 @@ export function parseViewHomesCommunity(html: string, pageUrl: string): ViewHome
   const canonical = all.find((item) => item.tag === "link" && (item.attributes.rel ?? "").toLowerCase() === "canonical" && item.attributes.href);
   const canonicalUrl = canonical ? asUrl(decodeHtmlEntities(canonical.attributes.href!)) : null;
   const foreignPage = canonicalUrl !== null && sameOfficialHost(canonicalUrl, host) && pagePath(canonicalUrl) !== base;
-  const module = all.find((item) => elementClass(item, "module-community-floorplans-homes"));
-  const moduleParts = module ? descendants(module) : [];
-  const hasHomesTab = moduleParts.some((item) => elementClass(item, "js-tabs-title") && (item.attributes["data-slug"] ?? "").toLowerCase() === "homes");
+  // October: one module holds both tabs. November: the homes grid and the plans grid are separate modules; all are read.
+  const modules = all.filter((item) => elementClass(item, "module-community-floorplans-homes") && item.tag !== "ul" && item.tag !== "li");
+  const module = modules[0];
+  const moduleParts = modules.flatMap((item) => descendants(item)).filter((item, index, list) => list.indexOf(item) === index);
+  // October: an "Available Homes" tab (js-tabs-title[data-slug=homes]); November: the #homes-list grid.
+  const hasHomesTab = moduleParts.some((item) => (elementClass(item, "js-tabs-title") && (item.attributes["data-slug"] ?? "").toLowerCase() === "homes") || item.attributes.id === "homes-list");
   const homeUrls: string[] = [];
+  const homes: ViewHomesListedHome[] = [];
   let foreignHome = false;
   for (const card of moduleParts.filter((item) => elementClass(item, "home-preview"))) {
-    const link = descendants(card).find((item) => item.tag === "a" && elementClass(item, "home-preview__link") && item.attributes.href);
+    const inner = descendants(card);
+    const link = inner.find((item) => item.tag === "a" && elementClass(item, "home-preview__link") && item.attributes.href);
     const url = link ? asUrl(new URL(decodeHtmlEntities(link.attributes.href!), community).toString()) : null;
     if (!url || !sameOfficialHost(url, host)) { foreignHome = true; continue; }
     if (!pagePath(url).startsWith(`${base}homes/`)) { foreignHome = true; continue; }
     const page = pageUrlOf(url);
-    if (!homeUrls.includes(page)) homeUrls.push(page);
+    if (homeUrls.includes(page)) continue;
+    homeUrls.push(page);
+    const specs = cardSpecs(inner, html, "home-preview");
+    const details = classText(inner, html, "home-preview__details") ?? "";
+    const plan = /plan:\s*(.+?)(?:\s+move\s+in:|$)/i.exec(details)?.[1]?.trim() ?? null;
+    const moveIn = /move\s+in:\s*([A-Za-z]+\.?\s+\d{4})/i.exec(details)?.[1] ?? null;
+    const price = /\$\s*([\d,]{5,9})/.exec(classText(inner, html, "home-preview__price") ?? "");
+    const photo = cardPhotos(inner, "home-preview__image")[0]?.sourceUrl ?? null;
+    homes.push({
+      url: page,
+      street: classText(inner, html, "home-preview__title"),
+      plan,
+      statusText: classText(inner, html, "home-preview__status"),
+      moveIn,
+      price: price ? positive(price[1]) : null,
+      squareFeet: specs.sqft ?? null,
+      bedrooms: specs.beds ?? null,
+      bathrooms: specs.baths ?? null,
+      garage: specs.garage ?? null,
+      photo,
+    });
   }
   const plans: PrivatePlanOrHome[] = [];
   let foreignPlan = false;
@@ -327,7 +418,7 @@ export function parseViewHomesCommunity(html: string, pageUrl: string): ViewHome
     const url = link ? asUrl(new URL(decodeHtmlEntities(link.attributes.href!), community).toString()) : null;
     if (!planName || !url || !sameOfficialHost(url, host)) continue;
     if (!pagePath(url).startsWith(`${base}floorplans/`)) { foreignPlan = true; continue; }
-    const specs = specPairs(inner, html, "floorplan-preview");
+    const specs = cardSpecs(inner, html, "floorplan-preview");
     const price = /\$\s*([\d,]{5,9})/.exec(classText(inner, html, "floorplan-preview__price") ?? "");
     plans.push({
       sourceUrl: pageUrlOf(url),
@@ -347,7 +438,7 @@ export function parseViewHomesCommunity(html: string, pageUrl: string): ViewHome
   const bannerUrl = banner ? asUrl(new URL(decodeHtmlEntities(banner.attributes.href!), community).toString()) : null;
   return {
     name,
-    heroStatus: hero ? classText(heroParts, html, "hero__status") : null,
+    heroStatus: hero ? classText(heroParts, html, "hero__status") ?? classText(heroParts, html, "module-community-intro__status") : null,
     street: looksLikeStreetAddress(street) ? street : null,
     city: address?.[2]?.trim() ?? null,
     zip: address?.[3] ?? null,
@@ -357,6 +448,7 @@ export function parseViewHomesCommunity(html: string, pageUrl: string): ViewHome
     hasModule: Boolean(module),
     hasHomesTab,
     homeUrls,
+    homes,
     foreignHome,
     foreignPlan,
     plans,
@@ -454,19 +546,25 @@ export class ViewHomesAdapter implements DealAdapter {
     const row = market.communities.find((item) => pagePath(new URL(item.url)) === pagePath(community));
     // The roster must list the page's community.
     if (!row) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
-    // A page without the module is a community with nothing for sale only when the roster also lists it as coming soon, with no homes.
-    if (comingSoonPage && !((/^soon$/i.test(row.status.value ?? "") || /^coming\s+soon$/i.test(row.status.label ?? "")) && row.homes.length === 0)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // A page without the module is a community with nothing for sale only when the roster also lists it as coming soon, with no
+    // homes (the November roster lists no status, so the hero badge alone decides).
+    if (comingSoonPage && !row.cardsOnly && !((/^soon$/i.test(row.status.value ?? "") || /^coming\s+soon$/i.test(row.status.label ?? "")) && row.homes.length === 0)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The page's home cards and the roster's homes must be the same set; an "Available Homes" tab with no cards is a changed page.
-    const listedUrls = row.homes.map((home) => pagePath(new URL(home.url)));
     const cardUrls = parsed.homeUrls.map((url) => pagePath(new URL(url)));
     if (parsed.hasHomesTab && cardUrls.length === 0) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
-    if (cardUrls.length !== listedUrls.length || !cardUrls.every((url) => listedUrls.includes(url))) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
-    if (row.homes.length > VIEWHOMES_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+    if (!row.cardsOnly) {
+      const listedUrls = row.homes.map((home) => pagePath(new URL(home.url)));
+      if (cardUrls.length !== listedUrls.length || !cardUrls.every((url) => listedUrls.includes(url))) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
+    }
+    // November page: every card must carry a street, a price and a status, or the card layout changed.
+    const listedHomes = row.cardsOnly ? parsed.homes : row.homes;
+    if (row.cardsOnly && parsed.homes.some((home) => !home.street || home.price === null || !home.statusText)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    if (listedHomes.length > VIEWHOMES_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     const city = parsed.city ?? row.record.city;
     const zip = parsed.zip ?? row.record.zip;
     const cityLine = city ? `${city}, ${zip ? `TX ${zip}` : "TX"}` : "TX";
     const homes: PrivatePlanOrHome[] = [];
-    for (const home of row.homes) {
+    for (const home of listedHomes) {
       const readable = looksLikeStreetAddress(home.street);
       const status = viewHomesStatus(home.statusText, home.moveIn, now());
       homes.push({

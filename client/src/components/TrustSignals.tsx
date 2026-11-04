@@ -1,33 +1,23 @@
 import { Zap } from "lucide-react";
-import { trpc } from "@/lib/trpc";
 import { cn } from "@/lib/utils";
 
 /**
  * Small trust elements shown beside conversion points.
  *
- * The closed-deal count is read from the live site_stats rows — the same data
- * the homepage strip uses, refreshed by the daily FUB sync — so this number
- * tracks reality instead of going stale in markup. If stats haven't loaded (or
- * the sync has never run), the count is simply omitted rather than rendering a
- * placeholder or a zero.
+ * The closed-deal count is Peter's stated brokerage total ("100+", Nov 3, 2026), not the FUB-synced site_stats
+ * figure, which only counts deals closed since FUB was set up.
  */
 export function TrustLine({ className }: { className?: string }) {
-  const { data: stats } = trpc.stats.list.useQuery();
-  const closed = stats?.find((s) => /closed sales/i.test(s.label))?.value?.trim();
-
   return (
     <p
       className={cn(
         "flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground",
         className
       )}>
-      {/* Nov 3, 2026 (Peter): no Google star rating anywhere on the site. */}
-      {closed && (
-        <>
-          <span className="text-gold">{closed} homes closed</span>
-          <span aria-hidden>·</span>
-        </>
-      )}
+      {/* Nov 3, 2026 (Peter): no Google star rating anywhere on the site, and the closed count is the brokerage's
+          real total, "100+" — FUB only knows the deals closed since it was set up (81), so the live stat undercounts. */}
+      <span className="text-gold">100+ homes closed</span>
+      <span aria-hidden>·</span>
       <span>Veteran-owned</span>
     </p>
   );

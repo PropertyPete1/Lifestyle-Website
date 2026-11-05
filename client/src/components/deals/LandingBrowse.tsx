@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Flame, Home, LockKeyhole, MapPin, PenLine, Play, Search, Share2, Sparkles, X } from "lucide-react";
 import { AreaMap } from "./AreaMap";
-import { Incentive, NEW_COPY, NewBadge, RedHotBadge, RedHotSavings, ReelCard, RetryImage, money, type DealsIncentive } from "./shared";
+import { Incentive, NEW_COPY, NewBadge, PhotoBackdrop, RedHotBadge, RedHotSavings, ReelCard, RetryImage, WHOLE_PHOTO_IMG, money, type DealsIncentive } from "./shared";
 import { ProtectedGallery } from "./GatedCatalog";
 import { ShowMore } from "./BrowseBar";
 import { BROWSE_PAGE, homeFiltersOn, homePasses, numberFrom, sortHomes, type BrowseFilters } from "@/lib/dealsBrowse";
@@ -96,7 +96,7 @@ export function CommunityCard({ community, active, onHover, onOpen }: { communit
     <button type="button" onClick={onOpen} onFocus={() => onHover(true)} onBlur={() => onHover(false)} className="block w-full min-w-0 text-left">
       <div className="relative aspect-[4/3] w-full overflow-hidden bg-secondary">
         {cover
-          ? <RetryImage src={cover} alt="" loading="lazy" decoding="async" draggable={false} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />
+          ? <><PhotoBackdrop src={cover} /><RetryImage src={cover} alt="" loading="lazy" decoding="async" draggable={false} onGiveUp={() => setFailed(true)} onContextMenu={(event) => event.preventDefault()} className={WHOLE_PHOTO_IMG} /></>
           : <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-muted-foreground"><Home className="h-8 w-8" /><span className="text-xs">{LANDING_COPY.photosSoon}</span></div>}
         <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-1.5">
           {community.fromYourReel && <span className="rounded-full bg-gold px-2.5 py-1 text-[11px] font-semibold text-primary-foreground shadow">{LANDING_COPY.fromYourReel}</span>}

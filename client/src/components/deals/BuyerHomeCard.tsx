@@ -2,7 +2,7 @@ import { useId, useState, type ReactNode } from "react";
 import { ArrowDown, Bath, BedDouble, ChevronDown, Flame, Heart, Home, LockKeyhole } from "lucide-react";
 import { formatRate, homePaymentEstimate, type HomePaymentEstimate, type PaymentAssumptions } from "@shared/dealsFeatured";
 import { redHotDeal } from "@shared/dealsFeatured";
-import { NewBadge, RetryImage, money } from "./shared";
+import { NewBadge, PhotoBackdrop, RetryImage, WHOLE_PHOTO_IMG, money } from "./shared";
 
 /**
  * Oct 30, 2026 (Peter picked design "F / Warm Ivory"): the public homes list. One card per
@@ -135,7 +135,8 @@ export function BuyerHomeCard({ home, area, incentive, assumptions, photoPending
       <div className="relative aspect-[16/10] w-full overflow-hidden bg-secondary">
         {photo ? <>
             {loaded !== photo && <div className="absolute inset-0 animate-pulse bg-foreground/[0.06]" aria-hidden="true" data-deals-photo-loading="true" />}
-            <RetryImage src={photo} alt="" loading="lazy" decoding="async" draggable={false} onLoad={() => setLoaded(photo)} onGiveUp={() => setSkipped((value) => value + 1)} onContextMenu={(event) => event.preventDefault()} className={`relative block h-full w-full select-none object-cover transition-opacity duration-300 [-webkit-touch-callout:none] ${loaded === photo ? "opacity-100" : "opacity-0"}`} />
+            <PhotoBackdrop src={photo} />
+            <RetryImage src={photo} alt="" loading="lazy" decoding="async" draggable={false} onLoad={() => setLoaded(photo)} onGiveUp={() => setSkipped((value) => value + 1)} onContextMenu={(event) => event.preventDefault()} className={`${WHOLE_PHOTO_IMG} transition-opacity duration-300 ${loaded === photo ? "opacity-100" : "opacity-0"}`} />
           </>
           : photoPending ? <div className="h-full w-full animate-pulse bg-foreground/[0.06]" aria-hidden="true" />
           : <div className="flex h-full w-full items-center justify-center text-xs uppercase tracking-widest text-muted-foreground">{BUYER_CARD_COPY.noPhoto}</div>}

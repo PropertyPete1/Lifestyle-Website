@@ -437,11 +437,11 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
   // Nov 2, 2026: the quick copy under the big photo is the shared cover (already rendered) when it is that same photo.
   const quickCopy = (src: string) => home.cover && src === home.photos?.[0] ? home.cover : cardPhoto(src);
   const tile = (src: string, index: number, className: string) => <button key={src} type="button" onClick={() => setShown(index)} className={`relative min-h-0 min-w-0 overflow-hidden bg-secondary ${className}`} aria-label={`Photo ${index + 1} of ${photos.length}`}>
-    {index === 0 && <img src={quickCopy(src)} alt="" aria-hidden="true" decoding="async" draggable={false} className={WHOLE_PHOTO_BACKDROP} />}
+    <img src={quickCopy(src)} alt="" aria-hidden="true" decoding="async" draggable={false} className={WHOLE_PHOTO_BACKDROP} />
     {/* Nov 1, 2026 (Peter: a home opened "zoomed in", then jumped to the whole house): the card copy, whole and sharp, under the
         full photo, so the house is framed the same from the first frame and only sharpens when the full photo arrives. */}
     {index === 0 && quickCopy(src) !== src && <img src={quickCopy(src)} alt="" aria-hidden="true" decoding="async" draggable={false} data-deals-hero-card-copy="true" className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain" />}
-    <RetryImage src={index === 0 ? src : cardPhoto(src)} alt="" loading={index === 0 ? "eager" : "lazy"} decoding="async" draggable={false} onGiveUp={() => setBroken((current) => new Set(current).add(src))} onContextMenu={(event) => event.preventDefault()} className={`relative block h-full w-full select-none [-webkit-touch-callout:none] ${index === 0 ? "object-contain" : "object-cover"}`} data-deals-hero-whole={index === 0 ? "true" : undefined} />
+    <RetryImage src={index === 0 ? src : cardPhoto(src)} alt="" loading={index === 0 ? "eager" : "lazy"} decoding="async" draggable={false} onGiveUp={() => setBroken((current) => new Set(current).add(src))} onContextMenu={(event) => event.preventDefault()} className="relative block h-full w-full select-none object-contain [-webkit-touch-callout:none]" data-deals-hero-whole={index === 0 ? "true" : undefined} />
   </button>;
   return <section aria-label={`${title}, the home you opened`} className="min-w-0 p-5 pt-14 sm:p-6 sm:pt-6">
     {photos.length === 0

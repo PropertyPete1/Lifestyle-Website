@@ -9,6 +9,15 @@ import { REEL_CROP_STYLE, instagramEmbedUrl, youtubeEmbedUrl, youtubeVideoId } f
  * A photo that tries again on its own: a first-time render can answer "busy" (503) while the server is working,
  * so the image waits a moment and asks twice more before giving up.
  */
+/**
+ * Nov 4, 2026 (Peter, again: "make sure every photo is not zoomed in"): every card and thumbnail shows the whole photo
+ * inside its frame, over a soft blur of the same photo so there are no empty bars. Only the frame's shape is fixed.
+ */
+export const WHOLE_PHOTO_IMG = "relative block h-full w-full select-none object-contain [-webkit-touch-callout:none]";
+export function PhotoBackdrop({ src }: { src: string }) {
+  return <img src={src} alt="" aria-hidden="true" loading="lazy" decoding="async" draggable={false} data-deals-photo-backdrop="true" className="pointer-events-none absolute inset-0 h-full w-full scale-110 select-none object-cover opacity-60 blur-xl" />;
+}
+
 export function RetryImage({ src, onGiveUp, ...rest }: ImgHTMLAttributes<HTMLImageElement> & { src: string; onGiveUp?: () => void }) {
   const [attempt, setAttempt] = useState(0);
   const shown = attempt ? `${src}${src.includes("?") ? "&" : "?"}r=${attempt}` : src;

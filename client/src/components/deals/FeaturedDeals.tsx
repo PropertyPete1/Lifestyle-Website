@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { ArrowRight, ChevronLeft, ChevronRight, LockKeyhole, Percent, Trees, Trophy } from "lucide-react";
 import { formatRate, type FeaturedDeal, type FeaturedDeals as FeaturedDealsData, type PaymentCosts } from "@shared/dealsFeatured";
-import { RED_HOT_COPY, RedHotSavings, RetryImage, money } from "./shared";
+import { PhotoBackdrop, RED_HOT_COPY, RedHotSavings, RetryImage, WHOLE_PHOTO_IMG, money } from "./shared";
 import { redHotDeal } from "@shared/dealsFeatured";
 import type { PublicHome } from "./LandingBrowse";
 
@@ -61,7 +61,7 @@ function DealRow({ deal, rank, locked, onSelect, tags = [] }: { deal: FeaturedDe
   const action = locked ? FEATURED_COPY.unlock : FEATURED_COPY.see;
   return <li className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
     <button type="button" onClick={() => onSelect?.(deal)} className="block w-full min-w-0 text-left" data-deals-featured={deal.reason} aria-label={`${action}: ${deal.label}, ${money.format(deal.estMonthly)} a month estimated`}>
-      {deal.photo && <RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className="block aspect-[4/3] w-full min-w-0 select-none bg-secondary object-cover [-webkit-touch-callout:none]" />}
+      {deal.photo && <span className="relative block aspect-[4/3] w-full min-w-0 overflow-hidden bg-secondary"><PhotoBackdrop src={deal.photo} /><RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className={WHOLE_PHOTO_IMG} /></span>}
       <span className="flex w-full min-w-0 items-start gap-4 p-4">
         {rank !== undefined && <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gold/50 font-serif text-lg text-gold">{rank}</span>}
         <span className="min-w-0 flex-1">
@@ -140,7 +140,7 @@ export function FeaturedStrip({ featured, onSelect, onHover, opens = false, comp
     <ol ref={row} className="-mx-4 mt-3 flex min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:mx-0 sm:px-0">
       {items.map(({ deal, tags }, index) => <li key={`${dealKey(deal)}-${index}`} className="w-[88%] max-w-[330px] shrink-0 snap-start">
         <button type="button" onClick={() => onSelect?.(deal)} onMouseEnter={() => onHover?.(deal)} onMouseLeave={() => onHover?.(null)} onFocus={() => onHover?.(deal)} onBlur={() => onHover?.(null)} data-deals-featured={deal.reason} aria-label={`${opens ? FEATURED_COPY.details : FEATURED_COPY.unlock}: ${deal.area}, ${money.format(deal.estMonthly)} a month estimated`} className="flex h-full w-full min-w-0 items-stretch gap-3 rounded-2xl border border-border bg-card p-2 text-left shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:border-gold/60">
-          <span className="relative block aspect-[3/2] w-28 shrink-0 self-center overflow-hidden rounded-xl bg-secondary" data-deals-featured-thumb="true">{deal.photo && <RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />}</span>
+          <span className="relative block aspect-[3/2] w-28 shrink-0 self-center overflow-hidden rounded-xl bg-secondary" data-deals-featured-thumb="true">{deal.photo && <><PhotoBackdrop src={deal.photo} /><RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className={WHOLE_PHOTO_IMG} /></>}</span>
           <span className="flex min-w-0 flex-1 flex-col justify-center py-1 pr-1">
             <span className="truncate text-[10px] font-semibold uppercase tracking-widest text-gold">{redHotDeal(deal.price, deal.previousPrice) ? RED_HOT_COPY.badge : tags[0] ?? FEATURED_COPY.lowest}</span>
             <span className="mt-0.5 block font-serif text-2xl font-semibold leading-none text-foreground lining-nums">{money.format(deal.estMonthly)}<span className="ml-1 font-sans text-[11px] font-normal text-muted-foreground">/mo est.</span></span>
@@ -168,7 +168,7 @@ export function FeaturedStrip({ featured, onSelect, onHover, opens = false, comp
       {items.map(({ deal, tags }, index) => <li key={`${dealKey(deal)}-${index}`} className="w-[78%] max-w-[270px] shrink-0 snap-start overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md sm:w-[250px]">
         <button type="button" onClick={() => onSelect?.(deal)} onMouseEnter={() => onHover?.(deal)} onMouseLeave={() => onHover?.(null)} onFocus={() => onHover?.(deal)} onBlur={() => onHover?.(null)} className="block h-full w-full min-w-0 text-left" data-deals-featured={deal.reason} aria-label={`${opens ? FEATURED_COPY.details : FEATURED_COPY.unlock}: ${deal.label}, ${money.format(deal.estMonthly)} a month estimated`}>
           <span className="relative block aspect-[16/10] w-full overflow-hidden bg-secondary">
-            {deal.photo && <RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className="block h-full w-full select-none object-cover [-webkit-touch-callout:none]" />}
+            {deal.photo && <><PhotoBackdrop src={deal.photo} /><RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className={WHOLE_PHOTO_IMG} /></>}
             <span className="pointer-events-none absolute left-2 top-2 flex flex-wrap gap-1">{redHotDeal(deal.price, deal.previousPrice) && <span data-deals-featured-tag="red-hot" className="rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white shadow">{RED_HOT_COPY.badge}</span>}{tags.map((tag) => <span key={tag} data-deals-featured-tag={tag} className="rounded-full bg-gold px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary-foreground shadow">{tag}</span>)}</span>
           </span>
           <span className="block min-w-0 p-3">

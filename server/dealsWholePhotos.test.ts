@@ -19,7 +19,9 @@ describe("whole photos", () => {
 
   it("the opened home's big photo is contained, in a 3:2 frame on a phone", () => {
     const src = readFileSync(join(__dirname, "..", "client/src/components/deals/GatedCatalog.tsx"), "utf-8");
-    expect(src).toContain('${index === 0 ? "object-contain" : "object-cover"}');
+    // Nov 4, 2026 (Peter: "every photo is not zoomed in"): the small tiles are whole too, over their own blur.
+    expect(src).toContain('className="relative block h-full w-full select-none object-contain [-webkit-touch-callout:none]"');
+    expect(src).not.toContain('"object-cover"}');
     expect(src).toContain("relative grid aspect-[3/2] gap-1.5 overflow-hidden rounded-xl sm:aspect-auto sm:h-[42vh]");
     expect(src).not.toContain("h-[38vh] min-h-[220px]");
   });

@@ -52,6 +52,7 @@ describe("list photos fade in over their grey frame", () => {
   it("a card's photo starts hidden over a pulsing frame until it has loaded", () => {
     const html = renderToStaticMarkup(React.createElement(BuyerHomeCard, { home: { card: "c", kind: "quick_move_in", price: 300_000, photos: ["/deals/pub/img/aaaa"] } as never, area: "Seguin", incentive: null, onOpen: () => undefined }));
     expect(html).toContain('data-deals-photo-loading="true"');
-    expect(html).toMatch(/<img [^>]*class="[^"]*object-cover[^"]*opacity-0"[^>]*src="\/deals\/pub\/img\/aaaa"/);
+    // Nov 4, 2026: the card photo is contained (whole house), never cropped.
+    expect(html).toMatch(/<img [^>]*class="[^"]*object-contain[^"]*opacity-0"[^>]*src="\/deals\/pub\/img\/aaaa"/);
   });
 });

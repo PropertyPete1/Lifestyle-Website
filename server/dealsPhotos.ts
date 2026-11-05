@@ -140,6 +140,8 @@ export const AWAITING_REGION = "awaiting_region";
 export const UPLOAD_SOURCE_PREFIX = "upload:";
 export const RENDERABLE_LEAD_STATUSES = ["verified", "team"] as const;
 const APPROVED_IMAGE_HOSTS = new Set([
+  "wildoakhomes.com",
+  "bellairehomes.net",
   "www.mihomes.com",
   "mihomes.com",
   "dam.mihomes.com",

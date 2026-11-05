@@ -7,7 +7,7 @@ import { getDb } from "./db";
 import { sendBuilderDealsEmail } from "./dealsEmail";
 import { chicagoDay, getDealSettings } from "./dealsService";
 import { leaseBuilder } from "./dealsSync";
-import { ASHTON_HOST, PERRY_HOST, CENTURY_HOST, DRB_HOST, DREES_HOST, LEGEND_HOST, VIEWHOMES_HOST, TEXASHOMES_HOST, HAKES_HOST, BEAZER_HOST, LENNAR_HOST, EMPIRE_HOST, PACESETTER_HOST, SARATOGA_HOST, JOSEPHCREEK_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
+import { ASHTON_HOST, PERRY_HOST, CENTURY_HOST, DRB_HOST, DREES_HOST, LEGEND_HOST, VIEWHOMES_HOST, TEXASHOMES_HOST, HAKES_HOST, BEAZER_HOST, LENNAR_HOST, EMPIRE_HOST, PACESETTER_HOST, SARATOGA_HOST, JOSEPHCREEK_HOST, WILDOAK_HOST, BELLAIRE_HOST, LGI_HOST, SCOTTFELDER_HOST, STARLIGHT_HOST, SITTERLE_HOST, DAVIDSON_HOST, HIGHLAND_HOST, KBHOME_HOST, TOLL_HOST, WEEKLEY_HOST, HOMEFINITI_HOSTS, PULTEGROUP_HOSTS, asUrl, decodeHtmlEntities, getDocument, hasBuilderReader, parseSitemapUrls, sameOfficialHost, type BuilderId, type HtmlFetcher } from "./dealsAdapters";
 import { parsePulteListing, pulteListingUrl, type PulteGroupBrand } from "./dealsAdapters.pultegroup";
 import { homefinitiMarketLinks } from "./dealsAdapters.homefiniti";
 import { davidsonMarketLinks, davidsonRecord } from "./dealsAdapters.davidson";
@@ -31,6 +31,8 @@ import { beazerListingEntries, beazerListingUrl, beazerRecord } from "./dealsAda
 import { pacesetterCommunitySitemapUrl, pacesetterSitemapEntries, parsePacesetterCommunity } from "./dealsAdapters.pacesetter";
 import { parseSaratogaCommunity, saratogaCommunitiesUrl, saratogaListingEntries } from "./dealsAdapters.saratoga";
 import { josephCreekCommunitiesUrl, josephCreekListingEntries, parseJosephCreekCommunity } from "./dealsAdapters.josephcreek";
+import { wildOakListingUrl, wildOakListingEntries, wildOakRecord, wildOakHomesUrl, wildOakCommunityPins } from "./dealsAdapters.wildoak";
+import { bellaireListingUrl, bellaireListingEntries, bellaireRecord } from "./dealsAdapters.bellaire";
 import { lennarListingEntries, lennarListingUrl, lennarRecord } from "./dealsAdapters.lennar";
 import { empireRecord, empireRegionLinks, empireRegionUrl } from "./dealsAdapters.empire";
 import { onboardDiscoveredCommunities, type DiscoveredCommunity, type OnboardingResult } from "./dealsOnboarding";
@@ -139,6 +141,18 @@ export function perryDiscoveryReader(): DiscoveryReader {
     more: [{ index: { kind: "reader", entries: (fetcher, now) => perryMarketEntries(fetcher, now, "austin") }, communityPath: perryCommunityPath("austin") }],
     record: (html, pageUrl, fetcher) => perryCommunityRecord(html, pageUrl, fetcher),
   };
+}
+
+/** The Wild Oak all-homes page's community pins, read once per process run (reset with the other discovery caches). */
+let wildOakPinsCache: { fetcher: HtmlFetcher; pins: Promise<Map<string, { lat: number; lng: number }>> } | null = null;
+async function wildOakPinsFor(fetcher: HtmlFetcher): Promise<Map<string, { lat: number; lng: number }>> {
+  if (!wildOakPinsCache || wildOakPinsCache.fetcher !== fetcher) {
+    wildOakPinsCache = { fetcher, pins: (async () => {
+      const page = await getDocument(wildOakHomesUrl(), fetcher, "text/html,application/xhtml+xml", WILDOAK_HOST);
+      return page.ok ? wildOakCommunityPins(page.text) : new Map();
+    })() };
+  }
+  return wildOakPinsCache.pins;
 }
 
 export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
@@ -326,6 +340,27 @@ export const DISCOVERY_READERS: readonly DiscoveryReader[] = [
     index: { kind: "listing", url: josephCreekCommunitiesUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => josephCreekListingEntries(body, host) },
     communityPath: /^\/communities\/[a-z0-9-]+\/?$/i,
     record: (html, url) => parseJosephCreekCommunity(html, url)?.record ?? null,
+  },
+  {
+    // Wild Oak (Nov 5, 2026; La Vernia, Devine, New Braunfels, Dripping Springs, Brenham): the communities page links each; the page's "Model & sales office" line gives the address. No pin: the address is geocoded. The 45-mile rule drops Brenham.
+    builder: "Wild Oak Homes", host: WILDOAK_HOST,
+    index: { kind: "listing", url: wildOakListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => wildOakListingEntries(body, host) },
+    communityPath: /^\/(?!our-communities|available-homes|floor-plans|build-on-your-lot|property|about|contact|blog|gallery|privacy-policy|wp-)[a-z0-9-]+\/?$/i,
+    record: async (html, _url, fetcher) => {
+      const record = wildOakRecord(html);
+      if (!record || record.geo) return record;
+      // The pin comes from the all-homes page's map (read once per run); a community with no home on it has no pin and is skipped.
+      const pins = await wildOakPinsFor(fetcher);
+      const pin = pins.get(record.name.toLowerCase()) ?? null;
+      return { ...record, geo: pin };
+    },
+  },
+  {
+    // Bellaire (Nov 5, 2026; San Antonio, Schertz, Seguin): the neighborhoods index links each; the page's map embed gives the sales address and pin.
+    builder: "Bellaire Homes", host: BELLAIRE_HOST,
+    index: { kind: "listing", url: bellaireListingUrl(), accept: "text/html,application/xhtml+xml", entries: (body, host) => bellaireListingEntries(body, host) },
+    communityPath: /^\/texas\/neighborhoods\/[a-z0-9-]+\/?$/i,
+    record: (html) => bellaireRecord(html),
   },
   ...(Object.keys(PULTEGROUP_HOSTS) as PulteGroupBrand[]).map((brand): DiscoveryReader => ({
     builder: brand, host: PULTEGROUP_HOSTS[brand], index: { kind: "listing", url: pulteListingUrl(PULTEGROUP_HOSTS[brand], brand), accept: "application/json", entries: (body, host) => pulteListingEntries(body, host, brand) },

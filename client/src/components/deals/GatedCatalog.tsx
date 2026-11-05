@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { DealsLoader } from "./DealsLoader";
 import { ComingSoonSection, type ComingSoonItem } from "./ComingSoon";
 import { Link } from "wouter";
-import { ArrowDown, ArrowDownUp, Bath, BedDouble, Check, ChevronDown, Clock3, ExternalLink, Flame, Heart, Plus, Ruler, X } from "lucide-react";
+import { ArrowDown, ArrowDownUp, Bath, BedDouble, Check, ChevronDown, Clock3, ExternalLink, Flame, Heart, MapPin, Plus, Ruler, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useIsMobile } from "@/hooks/useMobile";
 import { Button } from "@/components/ui/button";
@@ -150,7 +150,7 @@ function HomeCard({ home, teamPreview, saved, saving, onRequest, onSave, pick }:
     <ProtectedGallery photos={home.photos} />
     <h3 className="mt-3 text-3xl">{home.price ? money.format(home.price) : "Ask for current pricing"}</h3>
     <RedHotSavings price={home.price} previousPrice={home.previousPrice} />
-    {details && (details.address || details.planName) && <p className="mt-3 text-sm text-foreground" data-deals-home-details="true">{[details.planName, details.address].filter(Boolean).join(" · ")}</p>}
+    {details && (details.address || details.planName) && <p className="mt-3 text-sm text-foreground" data-deals-home-details="true">{details.planName}{details.planName && details.address ? " · " : ""}{details.address && <MapsLink address={details.address} className="underline decoration-gold/50 underline-offset-4 hover:text-gold">{details.address}</MapsLink>}</p>}
     <p className="mt-4 text-sm text-muted-foreground">{[home.beds && `${home.beds} beds`, home.baths && `${home.baths} baths`, home.sqft && `${home.sqft.toLocaleString()} sq ft`, numberFrom(home.garage) && `${numberFrom(home.garage)}-car garage`, home.stories && `${home.stories} ${home.stories === 1 ? "story" : "stories"}`].filter(Boolean).join(" · ")}</p>
     {home.moveInDate && <p className="mt-2 text-sm text-muted-foreground">Est. move-in: {home.moveInDate}</p>}
     {home.lotSize && <p className="mt-1 text-sm text-muted-foreground">Lot: {home.lotSize}</p>}
@@ -169,7 +169,7 @@ function CommunityDetails({ details }: { details?: GatedCommunityDetails | null 
   if (!details || (!details.builderName && !details.communityName && !details.address)) return null;
   return <div className="mt-3 border border-gold/30 bg-gold/5 p-4 text-sm" data-deals-community-details="true">
     <p className="text-foreground">{[details.builderName, details.communityName].filter(Boolean).join(" · ")}</p>
-    {details.address && <p className="mt-1 text-muted-foreground">{details.address}</p>}
+    {details.address && <p className="mt-1 text-muted-foreground"><MapsLink address={details.address} className="underline decoration-gold/50 underline-offset-4 hover:text-gold">{details.address}</MapsLink></p>}
     {details.salesLine && <p className="mt-1 text-muted-foreground">Sales office: {details.salesLine}</p>}
     {details.builderPage && <a href={details.builderPage} target="_blank" rel="noreferrer" className="mt-2 inline-flex min-h-11 items-center gap-1 text-xs uppercase tracking-widest text-gold underline-offset-4 hover:underline">Builder community page <ExternalLink className="h-3.5 w-3.5" /></a>}
   </div>;
@@ -316,6 +316,17 @@ export const HOME_LIST_COPY = {
 } as const;
 export const HOME_PAGE = 24;
 
+/**
+ * Nov 5, 2026 (Peter: "the address should be a clickable link that automatically goes to Google Maps, for all homes
+ * sent from our agents"): every address an agent has unlocked opens Google Maps in a new tab.
+ */
+export function mapsUrl(address: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address.trim())}`;
+}
+function MapsLink({ address, className, children }: { address: string; className?: string; children: ReactNode }) {
+  return <a href={mapsUrl(address)} target="_blank" rel="noreferrer" data-deals-maps-link="true" className={className}>{children}</a>;
+}
+
 /** The street line and the city line of a full address ("118 Main St, San Antonio, TX 78263"). */
 export function addressLines(address: string | null | undefined): { street: string; city: string | null } | null {
   if (!address?.trim()) return null;
@@ -452,8 +463,9 @@ export function HomeHero({ home, community, teamPreview, pick, saved, saving, on
         </div>}
     <div className="mt-4 flex min-w-0 flex-wrap items-start justify-between gap-x-6 gap-y-2">
       <div className="min-w-0">
-        <h2 className="break-words font-serif text-2xl leading-tight sm:text-3xl">{title}</h2>
+        <h2 className="break-words font-serif text-2xl leading-tight sm:text-3xl">{home.details?.address && lines?.street ? <MapsLink address={home.details.address} className="decoration-gold/50 underline-offset-[6px] hover:underline">{title}</MapsLink> : title}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{[lines?.city, place].filter(Boolean).join(" · ")}</p>
+        {home.details?.address && lines?.street && <MapsLink address={home.details.address} className="mt-2 inline-flex min-h-11 items-center gap-1.5 text-xs uppercase tracking-widest text-gold underline-offset-4 hover:underline"><MapPin className="h-3.5 w-3.5" aria-hidden="true" />Open in Google Maps</MapsLink>}
         <p className="mt-2 text-sm text-foreground">{[home.beds && `${home.beds} beds`, home.baths && `${home.baths} baths`, home.sqft && `${home.sqft.toLocaleString("en-US")} sq ft`, numberFrom(home.garage) && `${numberFrom(home.garage)}-car garage`, home.stories && `${home.stories} ${home.stories === 1 ? "story" : "stories"}`, home.lotSize && `Lot ${home.lotSize}`].filter(Boolean).join(" · ")}</p>
       </div>
       <div className="text-left sm:text-right">

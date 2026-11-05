@@ -105,7 +105,10 @@ describe("the full list for an agent's client", () => {
     expect(html).toContain("Demo Builder · Demo Lakes");
     expect(html).toContain("100 Demo Lakes Blvd, San Antonio, TX");
     expect(html).toContain("Sales office: (210) 555-0999");
-    expect(html).toContain("Brandon · 118 Demo Lakes Blvd");
+    // Nov 5, 2026: the address is a Google Maps link.
+    expect(html).toContain("Brandon · <a href=");
+    expect(html).toContain('query=118%20Demo%20Lakes%20Blvd" target="_blank" rel="noreferrer" data-deals-maps-link="true"');
+    expect(html).toContain(">118 Demo Lakes Blvd</a>");
     expect(html).toContain("Shared with you by Tiffany Agent.");
     expect(html).toContain("Tiffany hears about it right away");
     expect(html).toContain("Text Tiffany at (210) 555-0101");

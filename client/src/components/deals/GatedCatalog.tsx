@@ -631,7 +631,9 @@ export function GatedCatalog({ lead, communities, now, saved, savingCard, onSave
         <LandingBrowse mapSide="left" phoneMap="floating" searchArea onAreaChange={(keys) => setAreaKeys(keys ? new Set(keys) : null)} areaStatus={listView === "homes" ? (keys) => { const inArea = new Set(keys); const homes = homeEntries.filter((entry) => inArea.has(entry.key)).length; return `Showing ${HOME_LIST_COPY.count(homes)} in this part of town`; } : undefined} communities={landing} lookup={landingAll} floatingMapBottom={pick && pick.picked.size > 0 ? "bottom-24" : "bottom-6"} useHomes={useSheetHomes} filters={{ ...EMPTY_FILTERS, sort: filters.sort }}
           renderList={listView === "homes" ? (context) => <HomeList entries={homeEntries} context={context} pick={pick} savedSet={savedSet} savingCard={savingCard} onSave={onSave} onRequest={lead.teamPreview ? undefined : onRequest} assumptions={featured?.assumptions ? { defaultDownPercent: featured.assumptions.defaultDownPercent, termYears: featured.assumptions.termYears, costs: featured.assumptions.costs } : null} /> : undefined}
           onOpenCommunity={(key) => { const community = byKey.get(key); if (community?.key && onViewCommunity && !reported.has(key)) { reported.add(key); onViewCommunity(community.key); } }}
-          top={listView === "homes" ? undefined : (actions) => <FeaturedDeals featured={featured} onSelect={(deal) => {
+          // Nov 4, 2026 (Peter, opening his own page on the Homes tab: "it doesn't show the 3 best deals"): the featured row
+          // heads both tabs, first screen only (LandingBrowse drops it once an area is picked or drawn).
+          top={(actions) => <FeaturedDeals featured={featured} onSelect={(deal) => {
             const key = deal.card ? keyByCard.get(deal.card) : undefined;
             if (!key) return;
             // A featured home the filters hide: the filters go so its sheet shows it.

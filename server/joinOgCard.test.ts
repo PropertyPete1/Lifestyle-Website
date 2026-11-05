@@ -20,8 +20,8 @@ describe("join OG card", () => {
     expect(JOIN_OG_TITLE).toBe("Now Hiring: Licensed Agents — Lifestyle Design Realty");
   });
 
-  it("describes the offer with the lease commission figure and all four markets", () => {
-    expect(JOIN_OG_DESCRIPTION).toContain("Real leads. Real support.");
+  it("describes the offer (no lease-commission line) and all four markets", () => {
+    expect(JOIN_OG_DESCRIPTION).toContain("Real buyer leads. Real support.");
     // Nov 5, 2026 (Peter: "most agents don't care about leases"): no lease-commission line on the recruiting preview.
     expect(JOIN_OG_DESCRIPTION).not.toContain("Lease");
     expect(JOIN_OG_DESCRIPTION).toContain("Real buyer leads");

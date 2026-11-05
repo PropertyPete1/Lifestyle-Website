@@ -40,7 +40,8 @@ export function wildOakStatus(badge: string | null): { status: string | null; re
   if (text === "floor plan") return { status: null, readyNow: false, kind: "plan" };
   if (text === "model home") return { status: "Model Home", readyNow: false, kind: "model" };
   if (text === "quick move-in" || text === "move-in ready") return { status: "Quick Move-In (Move-In Ready)", readyNow: true, kind: "home" };
-  if (text === "under construction" || text === "coming soon" || text === "now pre-selling" || text === "now selling") return { status: "Quick Move-In", readyNow: false, kind: "home" };
+  // "New Home" (Medina Trails, Nov 5: a lot with a plan chosen, "Reserve early") is a home for sale that is not built yet.
+  if (text === "under construction" || text === "coming soon" || text === "now pre-selling" || text === "now selling" || text === "new home") return { status: "Quick Move-In", readyNow: false, kind: "home" };
   if (/under\s+contract|sold|pending/.test(text)) return { status: "Sold", readyNow: false, kind: "home" };
   return { status: null, readyNow: false, kind: "home" };
 }
@@ -148,13 +149,18 @@ export function parseWildOakCommunity(html: string, pageUrl: string): WildOakPag
     // A card under another community's eyebrow is not this community's inventory (the all-communities page mixes them).
     const eyeCommunity = eye ? eye.split("·")[0]!.trim() : null;
     if (record && eyeCommunity && eyeCommunity.toLowerCase() !== record.name.toLowerCase()) foreignHome = true;
-    const street = addr ? addr.split("·")[0]!.trim() : null;
+    // The address line is a street ("105 Tempranillo Terrace"), or only the city ("Devine, TX") on a lot that has no
+    // street yet: then the lot is the home's name and the plan page its link.
+    const addrLine = addr ? addr.split("·")[0]!.trim() : null;
+    const street = addrLine && /^\d/.test(addrLine) ? addrLine : null;
     const city = eye?.includes("·") ? eye.split("·")[1]!.trim() : record?.city ?? null;
-    const readable = Boolean(street && link && status.status);
+    const where = street ?? lot;
+    const readable = Boolean(where && link && status.status);
+    const cityLine = city ? `${city}, TX${record?.zip && city === record.city ? ` ${record.zip}` : ""}` : "TX";
     homes.push({
       sourceUrl: readable ? link!.toString() : `${community.origin}${community.pathname.replace(/\/+$/, "")}/unreadable-${homes.length}`,
-      privateName: street ? `${planName ? `${planName} – ` : ""}${street}` : planName,
-      privateAddress: street ? `${street}, ${city ?? "TX"}${city ? ", TX" : ""}${record?.zip && city === record.city ? ` ${record.zip}` : ""}` : null,
+      privateName: where ? `${planName ? `${planName} – ` : ""}${where}` : planName,
+      privateAddress: where ? `${where}, ${cityLine}` : null,
       privatePlanName: planName,
       status: readable ? status.status : null,
       price: price && price > 0 ? price : null,

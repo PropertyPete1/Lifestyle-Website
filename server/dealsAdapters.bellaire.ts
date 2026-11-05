@@ -183,7 +183,9 @@ export class BellaireAdapter implements DealAdapter {
       const current = row.now;
       const previous = row.was && current && row.was > current ? row.was : null;
       privateSnapshot.homes.push({
-        sourceUrl: row.photoPage ?? `${homesUrl}#${row.address.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+        // A home without a photo page gets its own path under the table's page: the sync keys homes by URL path (a #hash
+        // would make every such home one key).
+        sourceUrl: row.photoPage ?? `${homesUrl}${row.address.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}/`,
         privateName: row.address,
         privateAddress: cityLine ? `${row.address}, ${cityLine}` : row.address,
         privatePlanName: row.plan,

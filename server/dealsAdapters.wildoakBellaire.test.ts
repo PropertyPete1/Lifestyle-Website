@@ -33,6 +33,7 @@ describe("Wild Oak Homes reader", () => {
     expect(wildOakStatus("Quick Move-In")).toEqual({ status: "Quick Move-In (Move-In Ready)", readyNow: true, kind: "home" });
     expect(wildOakStatus("Under Construction")).toEqual({ status: "Quick Move-In", readyNow: false, kind: "home" });
     expect(wildOakStatus("Coming Soon").status).toBe("Quick Move-In");
+    expect(wildOakStatus("New Home").status).toBe("Quick Move-In");
     expect(wildOakStatus("Under Contract").status).toBe("Sold");
     expect(wildOakStatus("Model Home").kind).toBe("model");
     expect(wildOakStatus("Floor Plan").kind).toBe("plan");
@@ -76,6 +77,12 @@ describe("Wild Oak Homes reader", () => {
     expect(parsed.homes).toHaveLength(3);
     expect(parsed.plans).toHaveLength(11);
     expect(parsed.homes.every((home) => home.privateAddress?.endsWith(", Devine, TX 78016"))).toBe(true);
+    // "New Home" cards on lots with no street yet: the lot names the home, the plan page is its link, and it is for sale.
+    expect(parsed.homes.map((home) => [home.status, home.privateName, home.privateAddress, home.sourceUrl])).toEqual([
+      ["Quick Move-In", "Elm – Lot 5", "Lot 5, Devine, TX 78016", "https://wildoakhomes.com/property/elm-mt/"],
+      ["Quick Move-In", "Angelina – Lot 4", "Lot 4, Devine, TX 78016", "https://wildoakhomes.com/property/angelina-mt/"],
+      ["Quick Move-In", "Sabine – Lot 1", "Lot 1, Devine, TX 78016", "https://wildoakhomes.com/property/sabine-mt/"],
+    ]);
   });
 
   it("holds a page whose cards are missing or carry an unknown badge", () => {
@@ -187,6 +194,9 @@ describe("Bellaire Homes reader", () => {
       ["5128 Island Park, Schertz, TX 78108", "Rainier", "Quick Move-In (Move-In Ready)", 544_195, null, null, 1, 3, 3, 3, 2_394, true, 15],
     ]);
     expect(result.private.communityFacts?.fromPrice).toBe(459_990);
+    // Homes without a photo page keep distinct source keys (a hash would collapse them into one).
+    expect(new Set(result.private.homes.map((home) => home.sourceUrl.replace(/#.*$/, ""))).size).toBe(4);
+    expect(result.private.homes[1]!.sourceUrl).toBe(`${PK_HOMES}5108-island-park/`);
     expect(JSON.stringify(result.public)).not.toMatch(/Parklands|Island Park|Schertz|bellaire/i);
   });
 

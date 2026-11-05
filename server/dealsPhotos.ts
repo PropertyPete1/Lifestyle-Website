@@ -28,8 +28,10 @@ import { interactiveBusy } from "./interactiveLoad";
  */
 // Nov 4, 2026: the process now boots near 460 MB (two primed lists) and was still being killed mid-drain (59 boots in a
 // day, peak 499 MB), so the guards sit lower: no new photo past 420 MB, the OCR worker goes after a drain ending above 350.
-export const PHOTO_RSS_STOP_MB = 420;
-export const PHOTO_RSS_RELEASE_MB = 350;
+// Nov 5, 2026: with 420/350/300 the drain process was still killed six times in an afternoon at 430-495 MB peaks
+// (the host kills at about 500); the guards drop to 380/320/260 so a drain stops well before the host does.
+export const PHOTO_RSS_STOP_MB = 380;
+export const PHOTO_RSS_RELEASE_MB = 320;
 let readRssBytes = () => process.memoryUsage.rss();
 /** Test seam: the process memory the guards read. */
 export function setDealPhotoRssReader(reader: (() => number) | null) { readRssBytes = reader ?? (() => process.memoryUsage.rss()); }
@@ -97,7 +99,7 @@ export const PHOTO_PROCESSING_CONCURRENCY = 2;
  * OCR stays on one worker; the extra lane overlaps its download and image work with the other two.
  */
 export const PHOTO_EXTRA_LANES = 1;
-export const PHOTO_EXTRA_LANE_MAX_MB = 300;
+export const PHOTO_EXTRA_LANE_MAX_MB = 260;
 /** At most this many downloads from one builder image host at a time, whatever the lane count. */
 const HOST_DOWNLOAD_CONCURRENCY = 2;
 /**

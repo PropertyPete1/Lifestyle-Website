@@ -2,7 +2,18 @@ import type { Express, NextFunction, Request, Response } from "express";
 import { getCityMatchBySlug, getPartnerPitchBySlug } from "./db";
 import { selectCityImage } from "../shared/cityImagery";
 
-const OG_IMAGE = "/manus-storage/convince-og-card_a3d08b2e.png";
+/**
+ * Nov 4, 2026 (Peter, after a /join link showed the old black card in Messenger: "update all these to make them nice
+ * and clean"): every share card is the same light design as the site (cream, serif, gold hairline), rendered at
+ * 1200x630 into client/public/og/. Before this, pages without their own card (home, /links, /get-started) had no
+ * og:image at all and the host filled in a screenshot of the app.
+ */
+export const BRAND_OG_IMAGE = "/og/brand-1200x630.png";
+export const BRAND_OG_TITLE = "Lifestyle Design Realty — Central Texas Real Estate";
+export const BRAND_OG_DESCRIPTION = "Buy, sell or build across Austin, San Antonio and New Braunfels. Veteran-owned, 100+ homes closed. Drop your number and one of our agents will text you.";
+export const CONVINCE_OG_IMAGE = "/og/convince-1200x630.png";
+export const CITY_FINDER_OG_IMAGE = "/og/city-finder-1200x630.png";
+const OG_IMAGE = BRAND_OG_IMAGE;
 
 /**
  * Recruiting-specific share card for /join. Shared links must sell the hiring
@@ -10,7 +21,7 @@ const OG_IMAGE = "/manus-storage/convince-og-card_a3d08b2e.png";
  * Rendered at exactly 1200x630 to match the declared og:image dimensions —
  * crawlers reserve space from those numbers, so they must not lie.
  */
-export const JOIN_OG_IMAGE = "/manus-storage/join-og-card-1200x630_68cc9bda.png";
+export const JOIN_OG_IMAGE = "/og/join-1200x630.png";
 
 export const JOIN_OG_TITLE = "Now Hiring: Licensed Agents — Lifestyle Design Realty";
 
@@ -18,7 +29,7 @@ export const JOIN_OG_DESCRIPTION =
   "Real leads. Real support. Lease commissions up to $6,000 per deal. Veteran-owned brokerage hiring in Austin, San Antonio, Dallas & Houston.";
 
 /** Public landing-only card. Never attach metadata to personal Deals URLs. */
-export const DEALS_OG_IMAGE = "/manus-storage/builder-deals-og-card_1b97dbbc.png";
+export const DEALS_OG_IMAGE = "/og/deals-1200x630.png";
 export const DEALS_OG_TITLE = "This week's best new-build deals in San Antonio";
 export const DEALS_OG_DESCRIPTION =
   "A private, phone-verified list for buyers who have not chosen an agent yet.";
@@ -99,8 +110,9 @@ export function registerOgMeta(app: Express) {
     const isDealsLanding = req.path === "/deals" || req.path === "/deals/";
     const isDealsPrivateDocument = req.path.startsWith("/deals/") && !req.path.startsWith("/deals/v/") && !req.path.startsWith("/deals/auth/");
     // Personal Deals routes deliberately have no OG preview. A pasted private
-    // token or /mine URL must reveal nothing useful to a crawler.
-    if (!isConvince && !isCityFinder && !isJoin && !isDealsLanding && !isDealsPrivateDocument) return next();
+    // token or /mine URL must reveal nothing useful to a crawler. Verification and auth paths get none either.
+    // Every other page gets a card: its own where it has one, the brand card otherwise (Nov 4, 2026).
+    if (req.path.startsWith("/deals/v/") || req.path.startsWith("/deals/auth/") || req.path.startsWith("/api/")) return next();
     // Only intercept HTML document requests, not assets/api
     const accepts = req.headers.accept || "";
     if (!accepts.includes("text/html") && accepts !== "*/*" && accepts !== "") return next();
@@ -109,10 +121,14 @@ export function registerOgMeta(app: Express) {
     const host = req.headers["x-forwarded-host"] || req.headers.host || "";
     const fullUrl = `${proto}://${host}${req.originalUrl}`;
 
-    let title = "A letter written for you about your life in Texas";
-    let description =
-      "Someone wants to move to Texas with you — and asked us to make the case. Read the letter Lifestyle Design Realty wrote about the life waiting for you here.";
-    let image: string | undefined;
+    let title = BRAND_OG_TITLE;
+    let description = BRAND_OG_DESCRIPTION;
+    let image: string | undefined = BRAND_OG_IMAGE;
+    if (isConvince) {
+      title = "A letter written for you about your life in Texas";
+      description = "Someone wants to move to Texas with you — and asked us to make the case. Read the letter Lifestyle Design Realty wrote about the life waiting for you here.";
+      image = CONVINCE_OG_IMAGE;
+    }
     let imageSize: { width: number; height: number } | null | undefined;
 
     // Recruiting card: canonicalised to the non-trailing-slash /join URL so
@@ -149,6 +165,7 @@ export function registerOgMeta(app: Express) {
 
     const cityFinderSlug = req.path.match(/^\/city-finder\/([A-Za-z0-9_-]+)$/);
     if (isCityFinder) {
+      image = CITY_FINDER_OG_IMAGE;
       title = "Find Your Texas City — Lifestyle Design Realty";
       description =
         "Answer a few questions about your budget, lifestyle, and timeline, and we'll match you with the Texas cities that fit you best.";

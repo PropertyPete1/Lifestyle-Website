@@ -48,7 +48,7 @@ describe("Builder Deals privacy boundary", () => {
     const og = `${DEALS_OG_TITLE} ${DEALS_OG_DESCRIPTION} ${DEALS_OG_IMAGE}`;
     expect(og).toContain("This week's best new-build deals in San Antonio");
     expect(hasPrivateTerm(og, privateTerms)).toBe(false);
-    expect(DEALS_OG_IMAGE).toMatch(/^\/manus-storage\/builder-deals-og-card_/);
+    expect(DEALS_OG_IMAGE).toBe("/og/deals-1200x630.png");
   });
 });
 

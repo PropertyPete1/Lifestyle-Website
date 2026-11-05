@@ -17,7 +17,7 @@ describe("ogMeta", () => {
       `<meta property="og:title" content="A letter written for Taylor about life in San Antonio, Texas" />`
     );
     expect(tags).toContain(`<meta property="og:url" content="https://example.com/convince/abc123" />`);
-    expect(tags).toContain(`<meta property="og:image" content="https://example.com/manus-storage/convince-og-card_a3d08b2e.png" />`);
+    expect(tags).toContain(`<meta property="og:image" content="https://example.com/og/brand-1200x630.png" />`);
     expect(tags).toContain(`<meta name="twitter:card" content="summary_large_image" />`);
   });
 
@@ -43,14 +43,14 @@ describe("ogMeta", () => {
       url: "https://example.com/convince/xyz",
     });
     expect(tags).toContain(
-      `<meta property="og:image" content="https://example.com/manus-storage/convince-og-card_a3d08b2e.png" />`
+      `<meta property="og:image" content="https://example.com/og/brand-1200x630.png" />`
     );
   });
 
   it("does not emit a malformed image URL for a non-absolute url", () => {
     const tags = buildTags({ title: "t", description: "d", url: "not-a-url" });
     // origin resolves to "" rather than throwing; path stays relative
-    expect(tags).toContain(`<meta property="og:image" content="/manus-storage/convince-og-card_a3d08b2e.png" />`);
+    expect(tags).toContain(`<meta property="og:image" content="/og/brand-1200x630.png" />`);
   });
 
   it("escapes injected quotes in dynamic titles", () => {
@@ -66,7 +66,7 @@ describe("ogMeta", () => {
   it("has a generic branded Builder Deals card without private inventory metadata", () => {
     const tags = buildTags({ title: DEALS_OG_TITLE, description: DEALS_OG_DESCRIPTION, image: DEALS_OG_IMAGE, url: "https://example.com/deals" });
     expect(tags).toContain("This week's best new-build deals in San Antonio");
-    expect(tags).toContain("builder-deals-og-card");
+    expect(tags).toContain("/og/deals-1200x630.png");
     expect(tags).not.toMatch(/Sienna|Vista|Chesmar|M\/I|Rio Grande|Hanging Basket/i);
   });
 

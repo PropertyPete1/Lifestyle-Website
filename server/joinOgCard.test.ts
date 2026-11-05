@@ -30,10 +30,10 @@ describe("join OG card", () => {
   });
 
   it("points at a recruiting-specific card, not the Convince letter card", () => {
-    expect(JOIN_OG_IMAGE).toContain("join-og-card");
+    expect(JOIN_OG_IMAGE).toContain("/og/join-");
     expect(JOIN_OG_IMAGE).not.toContain("convince-og-card");
     // must be a project-lifecycle storage URL, not a local/dev path
-    expect(JOIN_OG_IMAGE.startsWith("/manus-storage/")).toBe(true);
+    expect(JOIN_OG_IMAGE.startsWith("/og/")).toBe(true);
   });
 
   it("uses an asset rendered at the declared 1200x630, so the tags don't lie", () => {

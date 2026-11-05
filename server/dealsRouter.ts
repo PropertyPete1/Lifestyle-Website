@@ -118,7 +118,11 @@ export function warmPublicPages(): void {
 // Nov 4, 2026: the client view ({ view: "full", builderPages: false }) is no longer primed. With three primed lists the
 // drain's peak RSS climbed to 492 MB on the 512 MB host and boots reached 54 a day; a client link now builds its list
 // on first open (a few seconds, cached after) instead of holding a third copy in memory.
-const PRIMED_LIST_VIEWS: DealsCatalogView[] = [{ view: "full", builderPages: true }, { view: "gated" }];
+// Nov 5, 2026: the gated (phone-verified public) view is no longer primed either. Through the morning builder sync the
+// drain process still peaked at 490-497 MB and was killed twice with the 420/350/300 guards in place; one primed list
+// (the team view) is what the host can carry. A verified visitor's first open builds the gated list (a few seconds,
+// cached after).
+const PRIMED_LIST_VIEWS: DealsCatalogView[] = [{ view: "full", builderPages: true }];
 /** One view's unlocked list as every lead with that view gets it (before their own order). */
 function mineListLoad(view: DealsCatalogView) {
   return process.env.VITEST ? buildGatedCatalog(view) : catalogWithSnapshot(gatedCatalogViewKey(view), () => buildGatedCatalog(view));

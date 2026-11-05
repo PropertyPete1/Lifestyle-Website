@@ -26,7 +26,7 @@ export const JOIN_OG_IMAGE = "/og/join-1200x630.png";
 export const JOIN_OG_TITLE = "Now Hiring: Licensed Agents — Lifestyle Design Realty";
 
 export const JOIN_OG_DESCRIPTION =
-  "Real leads. Real support. Lease commissions up to $6,000 per deal. Veteran-owned brokerage hiring in Austin, San Antonio, Dallas & Houston.";
+  "Real buyer leads. Real support. Veteran-owned brokerage hiring in Austin, San Antonio, Dallas & Houston.";
 
 /** Public landing-only card. Never attach metadata to personal Deals URLs. */
 export const DEALS_OG_IMAGE = "/og/deals-1200x630.png";

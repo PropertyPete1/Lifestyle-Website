@@ -22,7 +22,9 @@ describe("join OG card", () => {
 
   it("describes the offer with the lease commission figure and all four markets", () => {
     expect(JOIN_OG_DESCRIPTION).toContain("Real leads. Real support.");
-    expect(JOIN_OG_DESCRIPTION).toContain("$6,000 per deal");
+    // Nov 5, 2026 (Peter: "most agents don't care about leases"): no lease-commission line on the recruiting preview.
+    expect(JOIN_OG_DESCRIPTION).not.toContain("Lease");
+    expect(JOIN_OG_DESCRIPTION).toContain("Real buyer leads");
     expect(JOIN_OG_DESCRIPTION).toContain("Veteran-owned");
     for (const market of ["Austin", "San Antonio", "Dallas", "Houston"]) {
       expect(JOIN_OG_DESCRIPTION).toContain(market);

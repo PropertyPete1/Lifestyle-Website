@@ -85,10 +85,14 @@ beforeEach(() => {
   mocks.processDealPhoto.mockResolvedValue({ ok: true });
   mocks.processPendingDealPhotos.mockResolvedValue({ processed: 0, retried: 0, skipped: 0 });
   communityId = seedCommunity();
+  // Never reach the live network: a held community's "is it gone?" probe would otherwise hit the fixture URL on the
+  // real builder site and give a different answer with and without internet. By default the page is still there.
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("still here", { status: 200 })));
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("official refresh: homes", () => {

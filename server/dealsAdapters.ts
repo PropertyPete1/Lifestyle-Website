@@ -592,6 +592,62 @@ export async function getDocument(
 }
 
 /**
+ * Is a community's official page gone? "gone" when it answers 404/410, or when the builder now redirects it up to a
+ * broader listing on its own site: a shallower path that no longer names the community (Lennar, Nov 2026: a closed-out
+ * community 307s to /texas/san-antonio). "present" on a 200; "unknown" for anything else (errors, timeouts, a redirect
+ * off the host or sideways to another community-level page), which never retires anything.
+ */
+export async function probeCommunityGone(url: string, fetcher: HtmlFetcher, expectedHost: string): Promise<"gone" | "present" | "unknown"> {
+  // Like getDocument: a server error or a dropped connection gets one more attempt.
+  for (let attempt = 0; ; attempt++) {
+    const result = await probeCommunityGoneOnce(url, fetcher, expectedHost);
+    if (result !== "retry") return result;
+    if (attempt >= 1) return "unknown";
+    await new Promise((resolve) => setTimeout(resolve, FETCH_RETRY_DELAY_MS));
+  }
+}
+
+async function probeCommunityGoneOnce(url: string, fetcher: HtmlFetcher, expectedHost: string): Promise<"gone" | "present" | "unknown" | "retry"> {
+  const source = asUrl(url);
+  if (!source || !sameOfficialHost(source, expectedHost)) return "unknown";
+  const segments = (pathname: string) => comparablePath(pathname).split("/").filter(Boolean);
+  const sourceSegments = segments(source.pathname);
+  const slug = sourceSegments[sourceSegments.length - 1];
+  if (!slug || sourceSegments.length < 2) return "unknown";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    let target: URL | null = source;
+    let redirected = false;
+    for (let hop = 0; hop <= 5 && target; hop++) {
+      if (!sameOfficialHost(target, expectedHost)) return "unknown";
+      const response = await fetcher(target.toString(), {
+        method: "GET", redirect: "manual", signal: controller.signal,
+        headers: { Accept: "text/html,application/xhtml+xml", "User-Agent": "LifestyleDesignRealtyDeals/1.0 (read-only official-page parser)" },
+      });
+      await response.body?.cancel().catch(() => undefined);
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const location = response.headers.get("location");
+        target = location ? absoluteUrl(location, target) : null;
+        redirected = true;
+        continue;
+      }
+      if (response.status === 404 || response.status === 410) return "gone";
+      if (response.status === 429 || response.status >= 500) return "retry";
+      if (!response.ok) return "unknown";
+      if (!redirected) return "present";
+      const landed = segments(target.pathname);
+      return landed.length < sourceSegments.length && !landed.includes(slug) ? "gone" : "unknown";
+    }
+    return "unknown";
+  } catch {
+    return "retry";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * A read-only JSON query, for the few builder sites whose own pages load
  * their listings with a POST search (Drees). Same guards as a GET: official
  * host only, no credentials, no redirect off the host, one retry on a server

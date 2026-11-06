@@ -294,6 +294,32 @@ describe("official refresh: holds", () => {
     }
   });
 
+  it("takes a community off the site when the builder now redirects its page up to a metro listing (Nov 6: Lennar Greensfield 307 -> /texas/san-antonio); a sideways redirect never does", async () => {
+    mocks.loadOfficialDeals.mockResolvedValueOnce(snapshot({ homes: [{ sourceUrl: home("8301-a") }] }));
+    await refreshOfficialDeals({ communityId, now: T0 });
+    const answers: Array<() => Response> = [];
+    const fetcher = vi.fn(async () => (answers.shift() ?? (() => new Response("metro page", { status: 200 })))());
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      mocks.loadOfficialDeals.mockResolvedValue(snapshot({ catalogOk: false, holdReasons: ["expected_community_container_not_found"] }));
+      await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + DAY) });
+      expect(fetcher).not.toHaveBeenCalled();
+      // A day on, it redirects sideways to another community-level page: kept.
+      answers.push(() => new Response(null, { status: 307, headers: { location: "/new-homes/texas/greater-san-antonio/southeast-san-antonio/fixture-gardens-2" } }), () => new Response("other", { status: 200 }));
+      await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 2 * DAY) });
+      expect(db.rows(dealCommunities)[0].active).toBe(true);
+      expect(db.rows(dealHomes)[0].status).toBe("available");
+      // Then it redirects up to the metro listing: off the site, its homes sold, one digest line.
+      answers.push(() => new Response(null, { status: 307, headers: { location: "/texas/san-antonio" } }), () => new Response("metro", { status: 200 }));
+      const results = await refreshOfficialDeals({ communityId, now: new Date(T0.getTime() + 3 * DAY) });
+      expect(results).toEqual([{ communityId, reelCode: "vg1", ok: false, reason: "community_removed" }]);
+      expect(db.rows(dealCommunities)[0].active).toBe(false);
+      expect(db.rows(dealHomes)[0].status).toBe("sold");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("tells the admin in the hold e-mail when a builder's site refuses the reader, so the community is switched to Manual", async () => {
     mocks.loadOfficialDeals.mockResolvedValue(snapshot({ catalogOk: false, holdReasons: ["source_access_refused"] }));
     expect(await refreshOfficialDeals({ communityId, now: T0 })).toEqual([{ communityId, reelCode: "vg1", ok: false, reason: "source_access_refused" }]);

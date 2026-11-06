@@ -4,7 +4,7 @@ import { getDb } from "./db";
 import { resolveDistrict, zipInAddress } from "../shared/dealsSchools";
 import { ZIP_DISTRICTS } from "../shared/dealsZipDistricts";
 import { chicagoClock, chicagoDay, chicagoEndOfDay, getDealSettings, hashSecret } from "./dealsService";
-import { builderScrubConfig, getDocument, MAX_DETAIL_LIMIT, hasBuilderReader, htmlToText, loadOfficialDeals, mentionsTriggeringTerm, normalizeIncentiveText, publicTextResidue, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher, type PrivatePlanOrHome } from "./dealsAdapters";
+import { builderScrubConfig, getDocument, MAX_DETAIL_LIMIT, probeCommunityGone, hasBuilderReader, htmlToText, loadOfficialDeals, mentionsTriggeringTerm, normalizeIncentiveText, publicTextResidue, toPublicSafeText, type BuilderId, type CommunitySourceConfig, type DealAdapterResult, type DealHoldReason, type PromotionalRateFacts, type HtmlFetcher, type PrivatePlanOrHome } from "./dealsAdapters";
 export { builderScrubConfig };
 import { dealScrubTerms, emptyDealScrubConfig, mergeDealScrubConfig, normalizedDealSourceKey, normalizedText, scrubPrivateNames, type DealScrubConfig } from "../shared/deals";
 import { applyScrubExclusions, parseStoredScrubList, serializeStoredScrubList } from "./dealsScrub";
@@ -667,20 +667,25 @@ export function leaseRenewingFetcher(heartbeat: (() => Promise<void>) | undefine
 /** How long a community's page must have kept failing before a "not found" answer takes it off the site. */
 export const COMMUNITY_GONE_AFTER_MS = 20 * 60 * 60_000;
 
+/** Hold reasons a taken-down community page shows up as: a failed fetch (404), or a builder redirect that lands the
+ *  reader on a broader listing page, which then reads as a missing community container (Lennar, Nov 2026). */
+const COMMUNITY_GONE_REASONS = new Set(["community_fetch_failed", "expected_community_container_not_found"]);
+
 /**
- * A builder that sells out a community takes its page down (Sitterle's Kinder Gale 65's, October 2026). When the page
- * has failed on every read for most of a day and a fresh read now answers 404 or 410, the community comes off the site:
- * it is turned off and its official available homes are marked sold, with one digest line. A timeout, a server error, a
- * refusal or a redirect never retires anything; an admin can turn the community back on.
+ * A builder that sells out a community takes its page down (Sitterle's Kinder Gale 65's, October 2026) or redirects it
+ * up to its metro listing (Lennar's Greensfield, Landon Ridge and Silos, November 2026). When the page has failed the
+ * same way on every read for most of a day and a fresh probe now says gone (404/410, or a redirect up to a shallower
+ * page that no longer names the community), the community comes off the site: it is turned off and its official
+ * available homes are marked sold, with one digest line. A timeout, a server error, a refusal, a redirect off the host
+ * or sideways, or a page that still answers never retires anything; an admin can turn the community back on.
  */
 export async function retireIfCommunityGone(community: CommunityRow, reason: string, now: Date, summaries: CommunityChangeSummary[], fetcher: HtmlFetcher = fetch): Promise<boolean> {
   const stored = community.catalogHoldReason?.replace(/^dismissed:/, "") ?? null;
-  if (reason !== "community_fetch_failed" || stored !== reason || !community.catalogHoldSeenAt) return false;
+  if (!COMMUNITY_GONE_REASONS.has(reason) || stored !== reason || !community.catalogHoldSeenAt) return false;
   if (now.getTime() - community.catalogHoldSeenAt.getTime() < COMMUNITY_GONE_AFTER_MS) return false;
   let host: string;
   try { host = new URL(community.sourceUrl).host; } catch { return false; }
-  const page = await getDocument(community.sourceUrl, fetcher, "text/html,application/xhtml+xml", host);
-  if (page.ok || (page.status !== 404 && page.status !== 410)) return false;
+  if (await probeCommunityGone(community.sourceUrl, fetcher, host) !== "gone") return false;
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const available = await db.select().from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.origin, "official"), eq(dealHomes.status, "available")));

@@ -219,6 +219,8 @@ export class PhotoProcessingError extends Error {
 export type PhotoProcessingErrorCode =
   | "unapproved_source"
   | "source_unavailable"
+  /** The source answered 404/410: the builder rotated or removed the link (Pulte's picturepark share links, M/I's DAM ids). Never retried. */
+  | "source_gone"
   | "invalid_image"
   | "image_too_large"
   | "invalid_crop"
@@ -402,7 +404,9 @@ export async function downloadDealPhoto(raw: string, fetcher: typeof fetch = fet
     }
     if (!response.ok || !response.headers.get("content-type")?.toLowerCase().startsWith("image/") || !response.body) {
       await response.body?.cancel();
-      throw new PhotoProcessingError("source_unavailable");
+      // Nov 6: a dead link (Pulte rotates its picturepark share links, M/I its DAM ids every sync) is gone for good;
+      // retrying it five times and again on every boot cost ~30 min of downloads per boot on a 512 MB host.
+      throw new PhotoProcessingError(response.status === 404 || response.status === 410 ? "source_gone" : "source_unavailable");
     }
     if (Number(response.headers.get("content-length")) > MAX_DOWNLOAD_BYTES) {
       await response.body.cancel();
@@ -1025,7 +1029,7 @@ export function dealPhotoLeaseWhere(photoId: number, attempts: number, token: st
 
 async function recordPhotoFailure(db: PhotoDb, photoId: number, attempt: number, lease: ReturnType<typeof dealPhotoLeaseWhere>, code: PhotoProcessingErrorCode, original?: { originalStorageKey: string; originalVersion: string }) {
   const timeout = code === "processing_timeout";
-  const retry = attempt < (timeout ? MAX_TIMEOUT_ATTEMPTS : MAX_PROCESSING_ATTEMPTS) && code !== "unapproved_source" && code !== "invalid_crop";
+  const retry = attempt < (timeout ? MAX_TIMEOUT_ATTEMPTS : MAX_PROCESSING_ATTEMPTS) && code !== "unapproved_source" && code !== "invalid_crop" && code !== "source_gone";
   const next = retryAt(attempt);
   await db.update(dealPhotos).set({
     ...(original ?? {}),
@@ -1397,7 +1401,7 @@ const activeDrains = new Set<ActiveDrain>();
 let drainRerunRequested = false;
 let failedRowsRecovered = false;
 /** Failures that no code change can fix are left alone by the boot-time recovery. */
-const PERMANENT_FAILURE_CODES: PhotoProcessingErrorCode[] = ["unapproved_source", "invalid_crop", "invalid_image", "image_too_large", "image_too_small", "processing_abandoned", "processing_timeout"];
+const PERMANENT_FAILURE_CODES: PhotoProcessingErrorCode[] = ["unapproved_source", "invalid_crop", "invalid_image", "image_too_large", "image_too_small", "processing_abandoned", "processing_timeout", "source_gone"];
 
 const emptyDrainResult = (): DealPhotoDrainResult => ({ processed: 0, hidden: 0, awaitingRegion: 0, retried: 0, failed: 0, skipped: 0 });
 

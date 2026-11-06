@@ -367,3 +367,16 @@ describe("Sanity images are fetched resized (Davidson's 3840 px PNGs ran past th
     expect(seen).toEqual([`${raw}?w=2400&fm=jpg&q=88&fit=max`]);
   });
 });
+
+describe("dead links are failed for good (Nov 6: Pulte rotates picturepark share links, M/I its DAM ids, every sync)", () => {
+  it("fails a 404/410 as source_gone and a 503 as source_unavailable", async () => {
+    const { downloadDealPhoto } = await import("./dealsPhotos");
+    const code = async (status: number) => {
+      const fetcher = (async () => new Response("no", { status })) as typeof fetch;
+      try { await downloadDealPhoto("https://pultegroup.cdn.picturepark.com/v/0biNEivd/", fetcher); return "ok"; } catch (error) { return (error as Error).message; }
+    };
+    expect(await code(404)).toBe("source_gone");
+    expect(await code(410)).toBe("source_gone");
+    expect(await code(503)).toBe("source_unavailable");
+  });
+});

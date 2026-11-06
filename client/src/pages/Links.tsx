@@ -223,19 +223,8 @@ export default function Links() {
           })()}
         </div>
 
-        {/* Oct 30, 2026 (ChatGPT's review, Peter: yes): sellers and landlords get their own two doors. */}
-        <div data-links-owner-shortcuts className="mt-4 w-full rounded-[10px] border border-border bg-secondary/50 px-4 py-3.5">
-          <p className="font-serif text-[1.15rem] text-foreground">Selling or renting out a property?</p>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <Link href="/valuation" className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[8px] border border-gold/60 bg-card px-2 text-center font-serif text-[1rem] leading-tight text-foreground hover:border-gold hover:text-gold">
-              Review My Home&rsquo;s Value
-            </Link>
-            <Link href="/lease" onClick={logLeaseClick} className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[8px] border border-gold/60 bg-card px-2 text-center font-serif text-[1rem] leading-tight text-foreground hover:border-gold hover:text-gold">
-              Plan My Rental Listing
-            </Link>
-          </div>
-        </div>
-
+        {/* Nov 6, 2026 (Peter): the separate home-value / rental-listing shortcut block came off — it repeated
+            the form below, where people enter first name and number and pick what they want. */}
         {/* Direct lead capture — an additive shortcut BELOW the buttons.
             Nothing above is gated on it. */}
         <div

@@ -1,3 +1,4 @@
+import { normalizedDealSourceKey } from "../shared/deals";
 import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
@@ -67,6 +68,10 @@ describe("Wild Oak Homes reader", () => {
     expect(parsed.homes.some((home) => /sales center|model/i.test(home.privateAddress ?? ""))).toBe(false);
     expect(parsed.plans.map((plan) => [plan.privatePlanName, plan.price])).toEqual([["Lavaca", 532_645], ["Blackjack", 521_450], ["Elm", 554_000], ["Trinity", 578_700], ["Sabine", 566_423], ["Angelina", 597_343], ["Brazos", 631_273], ["Leona", 664_146], ["Medina", 675_104], ["Comal", 694_563], ["San Jacinto", 787_241]]);
     expect(parsed.plans[0]!.gallery![0]!.caption).toBe("Representative image");
+    // Nov 6: the same plan links from every community with only ?community= differing, which the source key drops, so
+    // Heritage Woods' and Medina Trails' copies of a plan kept overwriting each other (the other's sweep then "sold" them).
+    expect(parsed.plans[0]!.sourceUrl).toBe("https://wildoakhomes.com/property/lavaca/community/heritage-woods/");
+    expect(normalizedDealSourceKey(parsed.plans[0]!.sourceUrl)).not.toBe(normalizedDealSourceKey("https://wildoakhomes.com/property/lavaca/?community=medina-trails"));
     for (const item of [...parsed.homes, ...parsed.plans]) for (const image of item.gallery ?? []) expect(image.sourceUrl.startsWith("https://wildoakhomes.com/wp-content/uploads/")).toBe(true);
   });
 

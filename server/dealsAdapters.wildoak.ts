@@ -94,6 +94,15 @@ function specValue(specs: Array<[string, string]>, label: RegExp): number | null
 }
 
 /** Every `article.wo-hc` card on the page, homes and plans apart; null when the page has no cards at all. */
+/** Plan links are shared across communities (`/property/<plan>/?community=<slug>`); the key must not be. */
+export function wildOakPlanSourceUrl(link: URL, community: URL): string {
+  const slug = link.searchParams.get("community") || community.pathname.replace(/\/+$/, "").split("/").pop() || "community";
+  const out = new URL(link.toString());
+  out.search = "";
+  out.pathname = `${out.pathname.replace(/\/+$/, "")}/community/${slug}/`;
+  return out.toString();
+}
+
 export function parseWildOakCommunity(html: string, pageUrl: string): WildOakPage | null {
   const community = asUrl(pageUrl);
   const root = parseHtmlElements(html);
@@ -136,8 +145,11 @@ export function parseWildOakCommunity(html: string, pageUrl: string): WildOakPag
     const price = priceText && /^(?:from\s+)?\$[\d,]{5,}$/i.test(priceText) ? money(priceText) : null;
     if (status.kind === "plan") {
       if (!planName || !link) continue;
+      // The same plan is offered in every Wild Oak community and its link differs only by ?community=<slug>, which the
+      // source key drops: give each community's copy its own path so one community's sync never steals (and the
+      // other's absence sweep never "sells") the other's plans.
       plans.push({
-        sourceUrl: link.toString(), privateName: planName, privatePlanName: planName, status: null,
+        sourceUrl: wildOakPlanSourceUrl(link, community), privateName: planName, privatePlanName: planName, status: null,
         price: price && price > 0 ? price : null, bedrooms: beds, bathrooms: baths, squareFeet: sqft, garage: null, stories: null, readyNow: false,
         gallery: gallery.map((image) => ({ ...image, caption: "Representative image" })),
       });

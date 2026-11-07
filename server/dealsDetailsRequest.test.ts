@@ -110,6 +110,14 @@ describe("details request: the page", async () => {
     expect(typeof DetailsRequestSheet).toBe("function");
   });
 
+  it("promises only that an agent will reach out: no home details by text, no timing (Peter, Nov 7)", async () => {
+    const { DETAILS_COPY } = await import("../client/src/components/deals/DetailsRequestSheet");
+    expect(DETAILS_COPY.intro).toBe("An agent will reach out and go over some options with you.");
+    expect(DETAILS_COPY.doneBody).toBe("An agent will reach out and go over some options with you.");
+    const shown = Object.values(DETAILS_COPY).map((v) => (typeof v === "function" ? v("Maria") : v)).join(" ");
+    expect(shown).not.toMatch(/minutes|address|community|shortly|text you/i);
+  });
+
   it("opens from every public 'Get this home's details' with the home attached; an agent's client link still verifies", () => {
     const page = read("client/src/components/deals/PublicDealsPage.tsx");
     expect(page.match(/onTour\(\{ key: community\.key, area: community\.area, price: home\.price/g)?.length).toBe(2);

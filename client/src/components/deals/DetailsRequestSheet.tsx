@@ -26,7 +26,7 @@ export type DetailsContext = {
 export const DETAILS_COPY = {
   eyebrow: "Builder Deals",
   heading: "Get this home's details",
-  intro: "An agent will text you the address, builder and community, usually within 30 minutes.",
+  intro: "An agent will reach out and go over some options with you.",
   name: "Full name",
   phone: "Mobile number",
   email: "Email",
@@ -35,7 +35,7 @@ export const DETAILS_COPY = {
   submit: "Send me the details",
   sending: "Sending…",
   done: (first: string) => `Got it${first ? `, ${first}` : ""}!`,
-  doneBody: "An agent will text you this home's address and details shortly.",
+  doneBody: "An agent will reach out and go over some options with you.",
   back: "Back to the homes",
 } as const;
 

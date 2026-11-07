@@ -32,11 +32,18 @@ export const BRAND_IMG = {
   lease: "/brand/lease.webp",
   valuation: "/brand/valuation.webp",
   linksFront: "/brand/links-front.webp",
+  /** Nov 7, 2026: Peter's approved I-35 service-area map, the banner above the /links buttons (2172×724). */
+  linksMap: "/brand/links-service-map.webp",
 } as const;
 
+/** The map's natural size, so the banner keeps its exact proportions and never crops a landmark or city name. */
+export const LINKS_MAP_WIDTH = 2172;
+export const LINKS_MAP_HEIGHT = 724;
+
 /**
- * Nov 1, 2026 (Peter: the /links photo "populates after like 5 seconds"): the same photo at phone sizes (52 KB and 72 KB
- * instead of 167 KB). index.html preloads the same set with the page's HTML, so keep the two in step.
+ * Nov 1, 2026 (Peter: the /links photo "populates after like 5 seconds"): the /links banner at phone sizes, and
+ * index.html preloads the same set with the page's HTML, so keep the two in step. Nov 7: the banner is now the map
+ * (50 KB / 114 KB / 307 KB), with 1240w covering a 620px slot on a 2x screen so the lettering stays sharp.
  */
-export const LINKS_FRONT_SRCSET = "/brand/links-front-800.webp 800w, /brand/links-front-1050.webp 1050w, /brand/links-front.webp 1526w";
-export const LINKS_FRONT_SIZES = "(min-width: 680px) 620px, calc(100vw - 2.5rem)";
+export const LINKS_MAP_SRCSET = "/brand/links-service-map-800.webp 800w, /brand/links-service-map-1240.webp 1240w, /brand/links-service-map.webp 2172w";
+export const LINKS_MAP_SIZES = "(min-width: 680px) 620px, calc(100vw - 2.5rem)";

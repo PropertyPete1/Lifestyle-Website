@@ -199,9 +199,10 @@ describe("promise chip — stops sharing the buttons' visual vocabulary", () => 
   });
 
   it("puts real air between the chip and the first button", () => {
-    // Oct 30 white skin: the photo strip sits between the chip and the stack, so the chip never groups with it.
-    expect(LINKS.indexOf("onClick={jumpToCapture}")).toBeLessThan(LINKS.indexOf("BRAND_IMG.linksFront"));
-    expect(LINKS.indexOf("BRAND_IMG.linksFront")).toBeLessThan(LINKS.indexOf("isLinkVisible(l.url)"));
+    // Oct 30 white skin: the banner (the photo strip; the service-area map since Nov 7) sits between the chip and the
+    // stack, so the chip never groups with it.
+    expect(LINKS.indexOf("onClick={jumpToCapture}")).toBeLessThan(LINKS.indexOf("BRAND_IMG.linksMap"));
+    expect(LINKS.indexOf("BRAND_IMG.linksMap")).toBeLessThan(LINKS.indexOf("isLinkVisible(l.url)"));
   });
 
   it("stays above the fold — no new markup between the header and the chip", () => {

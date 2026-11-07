@@ -16,7 +16,7 @@ import NowHiringBanner from "@/components/NowHiringBanner";
 import LeadForm from "@/components/LeadForm";
 import GuideTrail from "@/components/GuideTrail";
 import { ResponseBadge } from "@/components/TrustSignals";
-import { BRAND_IMG, LINKS_FRONT_SIZES, LINKS_FRONT_SRCSET } from "@/lib/assets";
+import { BRAND_IMG, LINKS_MAP_HEIGHT, LINKS_MAP_SIZES, LINKS_MAP_SRCSET, LINKS_MAP_WIDTH } from "@/lib/assets";
 
 /** Matches the .form-flash keyframe duration in index.css, plus a little slack. */
 const FLASH_MS = 1800;
@@ -166,8 +166,8 @@ export default function Links() {
         {/* The trail this tap draws — fixed, pointer-events-none, zero layout. */}
         <GuideTrail runId={trailRun} fromRef={promiseRef} toRef={captureRef} />
 
-        {/* A shallow photo strip (illustrative, from Peter's approved mockup). */}
-        <img src={BRAND_IMG.linksFront} srcSet={LINKS_FRONT_SRCSET} sizes={LINKS_FRONT_SIZES} alt="Limestone Hill Country home with a covered front porch" fetchPriority="high" decoding="async" className="mt-5 aspect-[3.3/1] w-full rounded-[10px] bg-[#ece6dc] object-cover" />
+        {/* Nov 7, 2026: Peter's approved I-35 service-area map, shown whole at its own proportions (no crop). */}
+        <img src={BRAND_IMG.linksMap} srcSet={LINKS_MAP_SRCSET} sizes={LINKS_MAP_SIZES} width={LINKS_MAP_WIDTH} height={LINKS_MAP_HEIGHT} alt="Our Texas service areas along I-35: San Antonio, New Braunfels, San Marcos, Austin, Waco, Dallas and Fort Worth." fetchPriority="high" decoding="async" className="mt-5 aspect-[2172/724] h-auto w-full rounded-[10px] bg-[#ece6dc] object-contain" />
 
         {/* Links */}
         <div className="w-full mt-4 space-y-3">

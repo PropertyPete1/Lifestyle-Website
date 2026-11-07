@@ -17,7 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- Nov 1, 2026 (Peter: the /links photo showed about 5 s after the page): a page's top photo starts loading with
-         this HTML instead of after the app's JavaScript. Keep in step with LINKS_FRONT_SRCSET / Home's hero sources. -->
+         this HTML instead of after the app's JavaScript. Keep in step with LINKS_MAP_SRCSET / Home's hero sources. -->
     <script>
       (function () {
         var path = location.pathname.replace(/\/+$/, "") || "/";
@@ -25,8 +25,8 @@
         link.rel = "preload";
         link.as = "image";
         if (path === "/links") {
-          link.href = "/brand/links-front-1050.webp";
-          link.setAttribute("imagesrcset", "/brand/links-front-800.webp 800w, /brand/links-front-1050.webp 1050w, /brand/links-front.webp 1526w");
+          link.href = "/brand/links-service-map-1240.webp";
+          link.setAttribute("imagesrcset", "/brand/links-service-map-800.webp 800w, /brand/links-service-map-1240.webp 1240w, /brand/links-service-map.webp 2172w");
           link.setAttribute("imagesizes", "(min-width: 680px) 620px, calc(100vw - 2.5rem)");
         } else if (path === "/") {
           link.href = window.matchMedia && window.matchMedia("(min-width: 1024px)").matches ? "/brand/hero-living-desktop.webp" : "/brand/hero-living-mobile.webp";

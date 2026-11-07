@@ -5,7 +5,7 @@ import LeadForm from "@/components/LeadForm";
 import LightHero from "@/components/LightHero";
 import { trpc } from "@/lib/trpc";
 import { useNcClickTracking } from "@/hooks/usePageTracking";
-import { SITE, FEATURES } from "@shared/site";
+import { FEATURES, newConstructionUrlFor } from "@shared/site";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowRight } from "lucide-react";
 
@@ -110,8 +110,9 @@ export default function NeighborhoodDetail() {
               </div>
             )}
           </div>
+          {/* Nov 7, 2026: the Austin page opens the deals on the Austin area (newConstructionUrlFor). */}
           <a
-            href={SITE.newConstructionUrl}
+            href={newConstructionUrlFor(hood.slug)}
             onClick={logNcClick}
             className="mt-10 inline-flex items-center gap-3 bg-gold text-primary-foreground px-8 py-4 uppercase tracking-[0.2em] text-xs font-medium hover:bg-gold/90 transition-colors reveal">
             Browse New Construction Deals <ArrowRight className="h-4 w-4" />

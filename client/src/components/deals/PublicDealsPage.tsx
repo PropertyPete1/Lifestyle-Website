@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { Heart, Menu, SlidersHorizontal, X } from "lucide-react";
 import type { PaymentAssumptions } from "@shared/dealsFeatured";
 import { SITE } from "@shared/site";
-import { BROWSE_SORTS, EMPTY_FILTERS, PAYMENT_SORT, activeFilterCount, homePasses, landingMatches, newThisWeekKnown, sortLandingCommunities, storiesKnown, type BrowseFilters, type LandingHomeFacts } from "@/lib/dealsBrowse";
+import { BROWSE_SORTS, EMPTY_FILTERS, PAYMENT_SORT, activeFilterCount, homePasses, landingMatches, marketFilters, newThisWeekKnown, pickedMarket, sortLandingCommunities, storiesKnown, type BrowseFilters, type LandingHomeFacts } from "@/lib/dealsBrowse";
 import { BrowseBar, BROWSE_COPY } from "./BrowseBar";
 import { BUYER_CARD_COPY, BuyerHomeCard, LockedDetails } from "./BuyerHomeCard";
 import { ComingSoonSection, type ComingSoonItem } from "./ComingSoon";
@@ -11,7 +11,7 @@ import { FeaturedStrip, featuredForSearch, featuredPreview, type FeaturedDealsDa
 import { DealsLoader } from "./DealsLoader";
 import type { DetailsContext } from "./DetailsRequestSheet";
 import { HOME_LIST_COPY, ProtectedGallery } from "./GatedCatalog";
-import { LandingBrowse, type LandingCommunity, type UseCommunityHomes } from "./LandingBrowse";
+import { LandingBrowse, REGION_VIEW, type LandingCommunity, type UseCommunityHomes } from "./LandingBrowse";
 import { PublicHomeList, byPayment, publicHomeEntries, publicSaveId, type PublicHomeEntry } from "./PublicHomeList";
 import { DealsFooter, formatChicagoDate } from "./shared";
 
@@ -24,6 +24,8 @@ import { DealsFooter, formatChicagoDate } from "./shared";
 export const PUBLIC_PAGE_COPY = {
   heading: "New construction deals",
   intro: "This week's best new-build deals in San Antonio. Hand-picked by Property Pete.",
+  /** Nov 7, 2026: the same line while the list is on the Austin area (opened from the Austin page or an Austin City Finder match). */
+  introAustin: "This week's best new-build deals in the Austin area. Hand-picked by Property Pete.",
   homes: "Homes",
   map: "Map",
   filters: "Filters",
@@ -128,11 +130,23 @@ export type PublicDealsPageProps = {
   onTour: (home?: DetailsContext) => void;
   /** Oct 31, 2026: the homes are still on their way; the branded loader stands in for the list and map until they arrive. */
   loading?: boolean;
+  /** Nov 7, 2026: the page was opened on Austin (?market=austin): the list starts on the whole Austin area and the map on Austin. */
+  market?: "Austin" | null;
 };
 
-export function PublicDealsPage({ communities: all, useHomes, featured, comingSoon, eyebrow, intro = PUBLIC_PAGE_COPY.intro, openKey, onTour, loading = false }: PublicDealsPageProps) {
+/** Nov 7, 2026: where the map opens for a page opened on Austin, the map's own Austin quick jump. */
+const AUSTIN_MAP_VIEW = REGION_VIEW.jumps.find((spot) => spot.label === "Austin") ?? null;
+
+export function PublicDealsPage({ communities: all, useHomes, featured, comingSoon, eyebrow, intro = PUBLIC_PAGE_COPY.intro, openKey, onTour, loading = false, market = null }: PublicDealsPageProps) {
   // Oct 30, 2026 (ChatGPT's test: back from the Privacy Policy, the saved-only view was gone): the filters last for the visit.
-  const [filters, setFiltersState] = useState<BrowseFilters>(() => { try { const kept = JSON.parse(window.sessionStorage.getItem(FILTERS_KEY) ?? "null") as Partial<BrowseFilters> | null; return kept && typeof kept === "object" ? { ...EMPTY_FILTERS, ...kept } : EMPTY_FILTERS; } catch { return EMPTY_FILTERS; } });
+  // Nov 7, 2026: a page opened on Austin starts on the whole Austin area instead (filters kept from earlier in the visit,
+  // such as a San Antonio area or the saved-only view, would hide Austin), and keeps that for the rest of the visit.
+  const [filters, setFiltersState] = useState<BrowseFilters>(() => {
+    if (market) { const opened = marketFilters(market); try { window.sessionStorage.setItem(FILTERS_KEY, JSON.stringify(opened)); } catch { /* kept for this page only */ } return opened; }
+    try { const kept = JSON.parse(window.sessionStorage.getItem(FILTERS_KEY) ?? "null") as Partial<BrowseFilters> | null; return kept && typeof kept === "object" ? { ...EMPTY_FILTERS, ...kept } : EMPTY_FILTERS; } catch { return EMPTY_FILTERS; }
+  });
+  // The map opens on Austin only for a page opened on Austin (picking Austin later moves the list, not the map, as before).
+  const [mapOpenOn] = useState(() => (market === "Austin" ? AUSTIN_MAP_VIEW : null));
   const setFilters = (next: BrowseFilters | ((current: BrowseFilters) => BrowseFilters)) => setFiltersState((current) => {
     const value = typeof next === "function" ? next(current) : next;
     try { window.sessionStorage.setItem(FILTERS_KEY, JSON.stringify(value)); } catch { /* kept for this page only */ }
@@ -176,7 +190,7 @@ export function PublicDealsPage({ communities: all, useHomes, featured, comingSo
       <div className="mx-auto max-w-[1600px]">
         {eyebrow && <p className="eyebrow text-gold" data-deals-landing-agent="true">{eyebrow}</p>}
         <h1 className={`${eyebrow ? "mt-2" : ""} font-serif text-[2.3rem] font-semibold leading-[1.05] tracking-tight text-foreground sm:text-5xl`}>{PUBLIC_PAGE_COPY.heading}</h1>
-        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{intro}{updatedAt ? ` Updated ${formatChicagoDate(updatedAt)}.` : ""}</p>
+        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{intro === PUBLIC_PAGE_COPY.intro && pickedMarket(filters.area) === "Austin" ? PUBLIC_PAGE_COPY.introAustin : intro}{updatedAt ? ` Updated ${formatChicagoDate(updatedAt)}.` : ""}</p>
         {all.length > 0 && <div className="mt-5 flex min-w-0 items-center justify-between gap-3" data-deals-controls="true">
           <div role="group" aria-label="Show homes or the map" className="inline-flex rounded-full border border-border bg-card p-1 lg:hidden">
             <button type="button" aria-pressed={!mapOpen} data-deals-view="homes" onClick={() => setMapOpen(false)} className={segment(!mapOpen)}>{PUBLIC_PAGE_COPY.homes}</button>
@@ -195,7 +209,7 @@ export function PublicDealsPage({ communities: all, useHomes, featured, comingSo
           onAreaChange={(keys) => setAreaKeys(keys ? new Set(keys) : null)}
           areaStatus={listView === "homes" ? (keys) => { const inArea = new Set(keys); return `Showing ${HOME_LIST_COPY.count(homeEntries.filter((entry) => inArea.has(entry.key)).length)} in this part of town`; } : undefined}
           renderList={listView === "homes" ? (context) => <PublicHomeList entries={homeEntries} context={context} useHomes={useHomes} assumptions={assumptions} onTour={(entry) => onTour({ key: entry.key, area: entry.community.area, price: entry.home.price, beds: entry.home.beds, sqft: entry.home.sqft, kind: entry.home.kind })} saved={saved} onToggleSave={toggleSave} /> : undefined}
-          communities={mapCommunities} filters={filters} useHomes={useHomes} onUnlock={() => onTour()} lookup={all} openKey={openKey}
+          communities={mapCommunities} filters={filters} useHomes={useHomes} onUnlock={() => onTour()} lookup={all} openKey={openKey} mapOpenOn={mapOpenOn}
           sheet={{ locked: <LockedDetails />,
             // Oct 30, 2026 (ChatGPT's test: a home opened onto its community, not its photos): the opened home leads the sheet.
             focusHero: (home, community) => <div className="mx-auto max-w-3xl p-4 pt-14 sm:p-6 sm:pt-14"><BuyerHomeCard home={home} area={community.area} incentive={community.incentive ?? null} assumptions={assumptions} tourLabel={BUYER_CARD_COPY.details} gallery={<ProtectedGallery photos={home.photos} />} onTour={() => onTour({ key: community.key, area: community.area, price: home.price, beds: home.beds, sqft: home.sqft, kind: home.kind })} /></div>,

@@ -223,7 +223,7 @@ export function keysInView(items: ReadonlyArray<{ key: string; pin?: { x: number
   }).map((item) => item.key);
 }
 
-export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, className = "", onSearchArea, shape = null, onShape }: {
+export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, className = "", onSearchArea, shape = null, onShape, openOn = null }: {
   items: ReadonlyArray<{ key: string; pin?: { x: number; y: number } | null; fromPriceLabel?: string | null; homesAvailable?: number }>;
   activeKey: string | null;
   onHover: (key: string | null) => void;
@@ -236,6 +236,8 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
   /** Oct 30, 2026 (Peter: draw around the area): the buyer's drawn area in picture points, and where a new one goes. */
   shape?: readonly Pt[] | null;
   onShape?: (shape: Pt[] | null) => void;
+  /** Nov 7, 2026: the opening view when the page opened on a market other than San Antonio (the Austin quick jump); null = San Antonio. */
+  openOn?: { x: number; y: number; span: number } | null;
 }) {
   const [failed, setFailed] = useState(false);
   /** Drawing: "drawing" while the buyer traces, "preview" once a shape is closed and waits for "Use this area". */
@@ -292,8 +294,9 @@ export function RegionMap({ items, activeKey, onHover, onSelect, selectedId, cla
   const settle = () => {
     const now = measure();
     if (!now) return;
-    // A phone's narrow box opens closer in on San Antonio, so its markers spread out instead of piling up.
-    const home = now.w < 560 ? { ...REGION_VIEW.home, span: REGION_VIEW.home.span * 0.62 } : REGION_VIEW.home;
+    // A phone's narrow box opens closer in on San Antonio, so its markers spread out instead of piling up. A page opened
+    // on Austin (Nov 7, 2026) opens on the Austin quick jump's view, at every width.
+    const home = openOn ?? (now.w < 560 ? { ...REGION_VIEW.home, span: REGION_VIEW.home.span * 0.62 } : REGION_VIEW.home);
     setView((current) => !current || !touched.current ? goTo(home, now.w, now.h) : clamp(current, now.w, now.h));
   };
   useEffect(() => {
@@ -800,8 +803,10 @@ export type LandingActions = { openHome: (key: string, focus?: SheetFocus) => bo
 /** What a caller's own list (the unlocked list's flat home list) gets: the communities in view and how to open one. */
 export type BrowseListContext = { keys: ReadonlySet<string>; open: (key: string, focus?: SheetFocus) => void; hover: (key: string | null) => void; activeKey: string | null };
 
-export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6", mapSide = "right", areaStatus, onAreaChange, phoneMap = "top", searchArea = false, phoneMapOpen, onPhoneMapOpenChange }: {
+export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, lookup, openKey, sheet, onOpenCommunity, below, renderList, floatingMapBottom = "bottom-6", mapSide = "right", areaStatus, onAreaChange, phoneMap = "top", searchArea = false, phoneMapOpen, onPhoneMapOpenChange, mapOpenOn = null }: {
   communities: readonly LandingCommunity[]; onUnlock?: () => void; useHomes: UseCommunityHomes;
+  /** Nov 7, 2026: where the map opens when the page opened on Austin (RegionMap's openOn); null = San Antonio, as before. */
+  mapOpenOn?: { x: number; y: number; span: number } | null;
   /** The sheet's pieces for an unlocked list (see SheetOptions). */
   sheet?: SheetOptions;
   /** Called with the community's key each time its sheet opens (the unlocked list logs the view). */
@@ -920,7 +925,7 @@ export function LandingBrowse({ communities, onUnlock, useHomes, top, filters, l
   };
   const clearArea = () => { setSelected(null); setShape(null); };
   const areaText = shape && drawnKeys && drawnKeys.length === 0 ? DRAW_COPY.none : areaStatus ? areaStatus(matching.map((item) => item.key)) : LANDING_COPY.areaFilter(matching.length);
-  const mapProps = { items: keyed, activeKey, onHover: setActiveKey, onSelect: selectMarker, selectedId: area?.id ?? null, onSearchArea: searchArea ? searchThisArea : undefined, shape, onShape: searchArea ? applyShape : undefined };
+  const mapProps = { items: keyed, activeKey, onHover: setActiveKey, onSelect: selectMarker, selectedId: area?.id ?? null, onSearchArea: searchArea ? searchThisArea : undefined, shape, onShape: searchArea ? applyShape : undefined, openOn: mapOpenOn };
   const map = <RegionMap {...mapProps} className="h-[65vh] w-full" />;
   return <>
     <div className={`mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6 ${mapSide === "left" ? "mt-3 gap-4 lg:grid-cols-[minmax(360px,44%)_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,1fr)_minmax(360px,42%)]"}`}>

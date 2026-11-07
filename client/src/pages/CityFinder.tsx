@@ -5,7 +5,7 @@ import AIStatusSequence from "@/components/AIStatusSequence";
 import RevealText from "@/components/RevealText";
 import { useActivity } from "@/hooks/useActivity";
 import { useCityFinderGenerateTracking, useNcClickTracking } from "@/hooks/usePageTracking";
-import { SITE, FEATURES } from "@shared/site";
+import { FEATURES, newConstructionUrlFor } from "@shared/site";
 import { selectCityImage } from "@shared/cityImagery";
 import { IMG } from "@/lib/assets";
 import { cn } from "@/lib/utils";
@@ -328,8 +328,9 @@ function CityMatchResults({
                   className="text-cta inline-flex items-center gap-2">
                   Explore {c.name} <ArrowRight className="h-3.5 w-3.5" />
                 </Link>
+                {/* Nov 7, 2026: an Austin match opens the deals on the Austin area (newConstructionUrlFor). */}
                 <a
-                  href={SITE.newConstructionUrl}
+                  href={newConstructionUrlFor(c.name)}
                   onClick={logNcClick}
                   className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.15em] text-muted-foreground hover:text-gold transition-colors">
                   Browse New Construction Deals <ArrowRight className="h-3 w-3" />

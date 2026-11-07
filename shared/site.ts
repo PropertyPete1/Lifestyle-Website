@@ -75,6 +75,15 @@ export const SITE = {
 } as const;
 
 /**
+ * Nov 7, 2026 (Peter): the Austin city page and an Austin City Finder match open the deals on the Austin area, not on
+ * the San Antonio default. Takes a city name or page slug; every other city keeps SITE.newConstructionUrl.
+ */
+export const DEALS_AUSTIN_URL = `${SITE.newConstructionUrl}?market=austin`;
+export function newConstructionUrlFor(city: string | null | undefined): string {
+  return city?.trim().toLowerCase() === "austin" ? DEALS_AUSTIN_URL : SITE.newConstructionUrl;
+}
+
+/**
  * ADMIN ALLOWLIST — the ONLY accounts permitted to hold the admin role.
  * Both sign in with Google via Manus OAuth (no separate password).
  * Any other account is auto-demoted to "user" on every sign-in and

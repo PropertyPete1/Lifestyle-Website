@@ -117,6 +117,25 @@ export function areaGroups(items: ReadonlyArray<{ area: string }>): Array<{ mark
   }).filter((group) => group.choices.length > 0);
 }
 
+/**
+ * Nov 7, 2026 (Peter, "fix whatever is not supposed to happen"): the Austin page and an Austin City Finder match open the
+ * deals with ?market=austin. Only Austin is recognised; no value, or any other, keeps the page's San Antonio default.
+ */
+export function dealsMarketFromSearch(search: string): "Austin" | null {
+  return new URLSearchParams(search).get("market")?.trim().toLowerCase() === "austin" ? "Austin" : null;
+}
+
+/** The filters a page opened on a market starts with: the whole market and nothing else (filters kept from earlier in the visit are dropped). */
+export function marketFilters(market: "Austin"): BrowseFilters {
+  return { ...EMPTY_FILTERS, area: `${MARKET_AREA_PREFIX}${market}` };
+}
+
+/** The market the area filter is in: the picked market, an area's own market, or null when no area is picked. */
+export function pickedMarket(picked: string): "San Antonio" | "Austin" | null {
+  if (!picked) return null;
+  return picked.startsWith(MARKET_AREA_PREFIX) ? (picked.slice(MARKET_AREA_PREFIX.length) === "Austin" ? "Austin" : "San Antonio") : areaMarketName(picked);
+}
+
 /** True when the community is in the picked area, or in the picked market when the whole market was picked. */
 export function areaMatches(area: string, picked: string): boolean {
   if (!picked) return true;

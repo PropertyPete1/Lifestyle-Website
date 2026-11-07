@@ -20,7 +20,7 @@ import { ComingSoonSection } from "@/components/deals/ComingSoon";
 import { DealsFooter, formatChicagoDate, useInstagramEmbeds } from "@/components/deals/shared";
 import { BrowseBar, BROWSE_COPY } from "@/components/deals/BrowseBar";
 import { LandingBrowse, type PublicHome, type UseCommunityHomes } from "@/components/deals/LandingBrowse";
-import { BROWSE_PAGE, BROWSE_SORTS, EMPTY_FILTERS, landingMatches, newThisWeekKnown, sortLandingCommunities, storiesKnown, type BrowseFilters } from "@/lib/dealsBrowse";
+import { BROWSE_PAGE, BROWSE_SORTS, EMPTY_FILTERS, dealsMarketFromSearch, landingMatches, newThisWeekKnown, sortLandingCommunities, storiesKnown, type BrowseFilters } from "@/lib/dealsBrowse";
 
 const sourceLabel = "This week's best new-build deals in San Antonio.";
 
@@ -68,6 +68,10 @@ function Landing() {
   useEffect(() => { if (realtorRedirect) window.location.replace(realtorRedirect); }, [realtorRedirect]);
   // The reel that brought the visitor (?src=) puts its community first.
   const [src] = useState(() => new URLSearchParams(window.location.search).get("src")?.trim().slice(0, 40) || undefined);
+  // Nov 7, 2026: the Austin page and an Austin City Finder match open the list on the Austin area (?market=austin). The
+  // parameter is read once, then taken off the address, so coming back to /deals later keeps the visitor's own filters.
+  const [market] = useState(() => dealsMarketFromSearch(window.location.search));
+  useEffect(() => { if (!market) return; const url = new URL(window.location.href); url.searchParams.delete("market"); window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`); }, [market]);
   // A shared community link (?k=<key>, Oct 26, 2026; ?c= is an agent's client link): that community's sheet opens on arrival.
   const [sharedKey] = useState(() => { const key = new URLSearchParams(window.location.search).get("k")?.trim().toLowerCase() ?? ""; return /^[a-f0-9]{12}$/.test(key) ? key : null; });
   const catalog = trpc.deals.publicCatalog.useQuery(src ? { src } : undefined);
@@ -116,7 +120,7 @@ function Landing() {
   if (clientToken && !backToGate && (state.isLoading || opensDirectly)) return <OpeningClientList token={clientToken} submit={opensDirectly} agentName={shared?.agentName ?? null} />;
   // Oct 30, 2026 (design F): the page itself is presentational (PublicDealsPage); this keeps the session, links and gate.
   return <>
-    <PublicDealsPage loading={catalog.isLoading} communities={catalog.data ?? []} useHomes={useLandingHomes} featured={featured.data as FeaturedDealsData | undefined} comingSoon={comingSoon.data} eyebrow={eyebrow} intro={intro} openKey={sharedKey} onTour={askForDetails} />
+    <PublicDealsPage loading={catalog.isLoading} communities={catalog.data ?? []} useHomes={useLandingHomes} featured={featured.data as FeaturedDealsData | undefined} comingSoon={comingSoon.data} eyebrow={eyebrow} intro={intro} openKey={sharedKey} onTour={askForDetails} market={market} />
     {details !== undefined && <DetailsRequestSheet context={details} agentSlug={agentPageSlug} onClose={() => setDetails(undefined)} />}
     {askToConnect && shared && linkToken ? <ConnectSheet agentName={shared.agentName} token={linkToken} /> : gateOpen && !hasSession && !deadKeptToken && <GateSheet key={`${linkToken ?? "reel"}:${lapsedReelBuyer ? "lapsed" : "open"}`} state={state.data} clientToken={linkToken} lapsed={lapsedReelBuyer} teamSignIn={teamSignIn} onSiteLogin={() => startLogin({ returnTo: "/deals/team" })} onClose={() => setGateOpen(false)} />}
   </>;

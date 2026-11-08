@@ -178,7 +178,8 @@ export function checkSuppliedCommunity(builder: string, stored: Pick<StoredSuppl
     if (home.price !== null && !(Number.isInteger(home.price) && inRange(home.price, SUPPLIED_PRICE_MIN, SUPPLIED_PRICE_MAX))) bad("supplied_import_out_of_bounds", `price ${home.price} is outside ${SUPPLIED_PRICE_MIN.toLocaleString("en-US")}-${SUPPLIED_PRICE_MAX.toLocaleString("en-US")}`);
     if (home.beds != null && !(Number.isInteger(home.beds) && inRange(home.beds, SUPPLIED_ROOMS_MIN, SUPPLIED_ROOMS_MAX))) bad("supplied_import_out_of_bounds", `beds ${home.beds} is outside 1-10`);
     if (home.baths != null && !(Number.isInteger(home.baths * 2) && inRange(home.baths, SUPPLIED_ROOMS_MIN, SUPPLIED_ROOMS_MAX))) bad("supplied_import_out_of_bounds", `baths ${home.baths} is outside 1-10 in steps of 0.5`);
-    if (home.garage != null && !(Number.isInteger(home.garage) && inRange(home.garage, 0, 6))) bad("supplied_import_out_of_bounds", `garage ${home.garage} is outside 0-6`);
+    // Nov 8, 2026: builders list half-car garages ("2.5-Car Garage", Legend's Timber Creek); kept exact, never rounded.
+    if (home.garage != null && !(Number.isInteger(home.garage * 2) && inRange(home.garage, 0, 6))) bad("supplied_import_out_of_bounds", `garage ${home.garage} is outside 0-6 in steps of 0.5`);
     if (home.sqft != null && !(Number.isInteger(home.sqft) && inRange(home.sqft, SUPPLIED_SQFT_MIN, SUPPLIED_SQFT_MAX))) bad("supplied_import_out_of_bounds", `sqft ${home.sqft} is outside ${SUPPLIED_SQFT_MIN}-${SUPPLIED_SQFT_MAX.toLocaleString("en-US")}`);
     const moveIn = readMoveIn(home.moveIn, now);
     const status = statusOf(home, moveIn, now);

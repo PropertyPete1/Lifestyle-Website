@@ -305,6 +305,11 @@ describe("supplied import through the normal sync", () => {
       [{ baths: 2.25 }, "baths 2.25 is outside 1-10 in steps of 0.5"],
       [{ baths: 0.5 }, "baths 0.5 is outside 1-10 in steps of 0.5"],
       [{ baths: 10.5 }, "baths 10.5 is outside 1-10 in steps of 0.5"],
+      [{ garage: 2.25 }, "garage 2.25 is outside 0-6 in steps of 0.5"],
+      [{ garage: 2.4999 }, "garage 2.4999 is outside 0-6 in steps of 0.5"],
+      [{ garage: 6.5 }, "garage 6.5 is outside 0-6 in steps of 0.5"],
+      [{ garage: 7 }, "garage 7 is outside 0-6 in steps of 0.5"],
+      [{ garage: -0.5 }, "garage -0.5 is outside 0-6 in steps of 0.5"],
       [{ sqft: 399 }, "sqft 399 is outside 400-15,000"],
       [{ sqft: 15_001 }, "sqft 15001 is outside 400-15,000"],
     ];
@@ -319,6 +324,19 @@ describe("supplied import through the normal sync", () => {
     // The edges themselves are inside.
     const edge = checkSuppliedCommunity(BUILDER, { capturedAt: new Date(), community: community([home(101, { price: 50_000, beds: 1, baths: 1, sqft: 400 }), home(102, { price: 5_000_000, beds: 10, baths: 10, sqft: 15_000 }), home(103, { price: null, beds: null, baths: null, sqft: null })]) }, new Date());
     expect(edge.reasons).toEqual([]);
+  });
+
+  it("a half-car garage (2.5, as Legend lists it) is a real figure: the community publishes and 2.5 is stored exactly", async () => {
+    // Nov 8, 2026: Swenson Heights, Timber Creek and Cinco Lakes were held over eight "2.5-Car Garage" homes.
+    await generateSuppliedImportKey(BUILDER);
+    const url = `${C1}-garage`;
+    const id = seedCommunity({ privateName: "Half-car garage", sourceUrl: url, scrubList: "{}" });
+    const homes = [home(101, { garage: 2.5 }, url), home(102, { garage: 3 }, url), home(103, { garage: 0.5 }, url), home(104, { garage: 6 }, url)];
+    const { response } = await importNow(payload([community(homes, { communityUrl: url })], hoursAgo(1)));
+    expect(response.communities[0]!.status).not.toBe("held");
+    expect(response.communities[0]!.problems ?? []).toEqual([]);
+    expect(homesOf(id).map((row) => row.garage).sort()).toEqual(["0.5", "2.5", "3", "6"]);
+    expect(checkSuppliedCommunity(BUILDER, { capturedAt: new Date(), community: community([home(101, { garage: 2.5 }), home(102, { garage: 0 })]) }, new Date()).reasons).toEqual([]);
   });
 
   it("homes off the builder's site, without a street address or with unreadable move-in wording hold the community", async () => {

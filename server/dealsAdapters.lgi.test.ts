@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LgiHomesAdapter, lgiComponentProps, lgiPhotoHostPath, lgiListingEntries, lgiRecord, lgiSelling, parseLgiCommunity } from "./dealsAdapters.lgi";
+import { LgiHomesAdapter, lgiComponentProps, lgiPhotoHostPath, lgiListingEntries, lgiPlanForSale, lgiRecord, lgiSelling, parseLgiCommunity } from "./dealsAdapters.lgi";
 import { parseNextData } from "./dealsAdapters.davidson";
 import { DEAL_ADAPTERS, loadOfficialDeals, type CommunitySourceConfig } from "./dealsAdapters";
 
@@ -154,5 +154,20 @@ describe("LGI Homes reader: a community", () => {
     expect(read("https://mss-p-099.sitecorecontenthub.cloud/api/public/content/90bfa3e4054845bdb760013dd9942ddf")).toEqual([]);
     expect(lgiPhotoHostPath(new URL("https://edge.sitecorecloud.io/lgihomesinc3717/media/x.jpg"))).toBe(true);
     expect(lgiPhotoHostPath(new URL("https://edge.sitecorecloud.io/someone-else/media/x.jpg"))).toBe(false);
+  });
+});
+
+describe("LGI Homes reader: floor plan ad labels (Nov 15, 2026)", () => {
+  it("publishes a plan labelled Move-in Ready or Last Chance, and never one that is Sold Out, Inactive or labelled with a word it does not know", () => {
+    for (const label of [null, "Active", "active", "Move-in Ready", "Move-In Ready", "Last Chance", "Reduced Pricing!", "Immediate Move-in", "Now Selling"]) expect(lgiPlanForSale(label)).toBe(true);
+    for (const label of ["Sold Out", "sold out", "Inactive", "Coming Soon", "Not Available", "Reserved", "Model Only", ""]) expect(lgiPlanForSale(label)).toBe(false);
+    // The live shape on Nov 15: one plan move-in ready, one on its last homes, one sold out with no price.
+    const plans = [
+      plan({ name: "Antone", price: 346_900, beds: 3, baths: 2.5, garage: 2, sqft: 1_519, status: "Move-in Ready" }),
+      { ...plan({ name: "Bowie", price: 0, beds: 3, baths: 2, garage: 2, sqft: 1_403, status: "Sold Out" }), listPrice: v(null), floorPlanLeasePrice: v(null) },
+      plan({ name: "Burnet", price: 356_900, beds: 3, baths: 2.5, garage: 2, sqft: 1_864, status: "Last Chance" }),
+    ];
+    const parsed = parseLgiCommunity(communityPage({ plans, status: "Now Selling" }), COMMUNITY)!;
+    expect(parsed.plans.map((entry) => [entry.privatePlanName, entry.price])).toEqual([["Antone", 346_900], ["Burnet", 356_900]]);
   });
 });

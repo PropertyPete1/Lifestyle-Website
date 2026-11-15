@@ -104,6 +104,12 @@ export function lgiSelling(saleStatus: string | null): boolean {
   return !/sold\s*out|coming\s+soon|closed|not\s+selling|future/i.test(saleStatus ?? "");
 }
 
+/** A floor plan's ad label that means it can be bought: none at all, "Active", or one of LGI's selling callouts. */
+export function lgiPlanForSale(adStatus: string | null): boolean {
+  const label = (adStatus ?? "active").replace(/\s+/g, " ").trim();
+  return /^(?:active|now\s+selling|move[- ]?in\s+ready|immediate\s+move[- ]?in|quick\s+move[- ]?in|last\s+chance|final\s+opportunit(?:y|ies)|reduced\s+pric(?:e|ing)|price\s+reduced|new(?:\s+plan)?)!?$/i.test(label);
+}
+
 /** The community on the page; null when the page has no community route or no floor-plan component. */
 export function parseLgiCommunity(html: string, pageUrl: string): LgiPage | null {
   const community = asUrl(pageUrl);
@@ -138,7 +144,10 @@ export function parseLgiCommunity(html: string, pageUrl: string): LgiPage | null
     if (!planName || !page || !sameOfficialHost(page, host)) continue;
     // The plan's page sits under this community's path; another community's plan is never this one's.
     if (!comparablePath(page.pathname).startsWith(base)) { foreignPlan = true; continue; }
-    if (!/^active$/i.test(keyOf(plan.adStatus) ?? "active")) continue;
+    // Nov 15, 2026 (Whisper Valley showed no plans): a plan for sale is not always labelled "Active". LGI also
+    // labels one "Move-in Ready", "Last Chance" or "Reduced Pricing!"; those are for sale. "Sold Out", "Inactive"
+    // and any wording not on this list are not published.
+    if (!lgiPlanForSale(keyOf(plan.adStatus))) continue;
     const price = num(field(plan.listPrice));
     const previous = num(field(plan.previousListPrice));
     // A plan priced only for lease is not for sale.

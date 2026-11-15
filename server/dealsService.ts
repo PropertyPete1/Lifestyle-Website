@@ -1134,6 +1134,11 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
   const readMs = Date.now() - startedAt;
   const reads: CatalogReads = { communitiesMs, homesMs, photosMs: Date.now() - photosStartedAt, homeRows: allHomes.length, photoRows: photoRows.length };
   for (const community of communities) {
+    // Nov 15, 2026 (Peter: "hide them"): a community with no home or plan to show is left off the list. 72 of 798
+    // showed nothing: 46 were a builder's main page or a second web address beside the entry that holds its homes
+    // (Coventry "Ladera" beside "Ladera 50'", DRB's /overview pages), the rest had no inventory. It returns on the next
+    // build once it has a home; the row itself is untouched (sync, holds and the admin still see it).
+    if (!(shownHomes.get(community.id) ?? []).length) continue;
     const scrubNames = communityScrubConfig(community);
     const scrub = (value: string) => full ? value : scrubPrivateNames(value, scrubNames);
     const incentive = incentives.get(community.id);

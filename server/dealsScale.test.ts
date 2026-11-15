@@ -69,6 +69,22 @@ describe("catalog reads at the scale of every community", () => {
     expect(new Set(covers).size).toBe(120);
   });
 
+  it("leaves a community with nothing to show off the private list, and brings it back once it has a home (Nov 15)", async () => {
+    seedCommunities(2);
+    const emptyId = db.seed(dealCommunities, {
+      builder: "Chesmar", privateName: "Empty Place", sourceUrl: "https://www.chesmar.com/empty/", privateAddress: "9 Main St, San Antonio, TX 78263",
+      publicLabel: "Area 9 | New Homes", areaLabel: "Area 9", amenities: "[]", reelCode: "r9", scrubList: "{}", active: true, paused: false, manualMode: false,
+    });
+    // A sold home is not a home to show.
+    db.seed(dealHomes, { communityId: emptyId, sourceKey: "k-empty-sold", sourceUrl: "https://www.chesmar.com/empty/h0/", kind: "quick_move_in", status: "sold", origin: "official", price: 310_000 });
+    const before = await buildGatedCatalog({ view: "gated" });
+    expect(before.map((item) => item.entry.label)).toEqual(["Area 0 | New Homes", "Area 1 | New Homes"]);
+    expect((await buildGatedCatalog({ view: "full", builderPages: true })).some((item) => item.id === emptyId)).toBe(false);
+    db.seed(dealHomes, { communityId: emptyId, sourceKey: "k-empty-new", sourceUrl: "https://www.chesmar.com/empty/h1/", kind: "quick_move_in", status: "available", origin: "official", price: 320_000 });
+    const after = await buildGatedCatalog({ view: "gated" });
+    expect(after.map((item) => item.entry.label)).toEqual(["Area 0 | New Homes", "Area 1 | New Homes", "Area 9 | New Homes"]);
+  });
+
   it("puts the community from the visitor's reel first on the landing page and on their private list", async () => {
     seedCommunities(5);
     const pub = await publicDealsCatalog("R3");

@@ -163,17 +163,22 @@ describe.skipIf(!process.env.DATABASE_URL)("getAnalyticsSummary (live DB)", () =
       await db.logPageEvent({ kind: "view", path: marker, visitorId: vid, source: "test-src", utmMedium: "test-med", utmCampaign: "test-camp" });
       await db.logPageEvent({ kind: "nc_click", path: marker, visitorId: vid, source: "test-src" });
       const summary = await db.getAnalyticsSummary(1);
+      // Nov 15, 2026: the summary keeps the day's top 50 pages, top 50 sources and top 20 click paths. With real
+      // traffic the two synthetic views can fall below that cut (the test failed on the live database once the site
+      // had more than 50 pages with two views in a day). A row that is listed must carry the exact counts; a row
+      // that is missing is accepted only when the list is full and every listed row has at least as many.
+      const belowCut = <T>(list: T[], limit: number, count: (item: T) => number, mine: number) => list.length >= limit && list.every((item) => count(item) >= mine);
       const row = summary.perPage.find((p) => p.path === marker);
-      expect(row?.views).toBe(2);
-      expect(row?.uniques).toBe(1);
+      if (row) { expect(row.views).toBe(2); expect(row.uniques).toBe(1); }
+      else expect(belowCut(summary.perPage, 50, (p) => p.views, 2)).toBe(true);
       expect(summary.totals.views).toBeGreaterThanOrEqual(2);
       expect(summary.totals.ncClicks).toBeGreaterThanOrEqual(1);
       const src = summary.sources.find((s) => s.source === "test-src");
-      expect(src?.views).toBe(2);
-      expect(src?.medium).toBe("test-med");
-      expect(src?.campaign).toBe("test-camp");
+      if (src) { expect(src.views).toBe(2); expect(src.medium).toBe("test-med"); expect(src.campaign).toBe("test-camp"); }
+      else expect(belowCut(summary.sources, 50, (s) => s.views, 2)).toBe(true);
       const nc = summary.ncByPath.find((p) => p.path === marker);
-      expect(nc?.clicks).toBe(1);
+      if (nc) expect(nc.clicks).toBe(1);
+      else expect(belowCut(summary.ncByPath, 20, (p) => p.clicks, 1)).toBe(true);
     } finally {
       const conn = await db.getDb();
       if (conn) {

@@ -145,7 +145,9 @@ function cardFacts(html: string, root: HtmlElement, path: string, otherHomePaths
  * sold words and "Model". Any other wording, or none, gives no status, so the
  * sync holds the run instead of publishing a home that may not be for sale.
  */
-export function homefinitiStatus(cardStatus: string | null): { status: string | null; readyNow: boolean } {
+const READY_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+
+export function homefinitiStatus(cardStatus: string | null, now: Date = new Date()): { status: string | null; readyNow: boolean; moveInDate?: string } {
   const label = (cardStatus ?? "").replace(/\s+/g, " ").trim();
   if (!label) return { status: null, readyNow: false };
   if (/sold|under\s+contract|pending/i.test(label)) return { status: "Sold", readyNow: false };
@@ -153,6 +155,27 @@ export function homefinitiStatus(cardStatus: string | null): { status: string | 
   // "Ready For You" is First America's card word for a finished home (October 2026), the other card word being "Under Construction".
   if (/^(?:move[- ]?in\s+ready|ready\s+now|ready\s+for\s+you|available\s+now|completed?|quick\s+move[- ]?in)!?$/i.test(label)) return { status: "Quick Move-In (Move-In Ready)", readyNow: true };
   if (/^under\s+construction!?$/i.test(label)) return { status: "Quick Move-In (Under Construction)", readyNow: false };
+  // Nov 11, 2026 (First America, twelve communities held): a home under construction now says when it will be done,
+  // "Ready in November" / "Ready in February", with no year. The month is this year's when it has not passed, next
+  // year's otherwise; a month that passed within the last two is a stale estimate (for sale, no date). A year on the
+  // card is taken as written.
+  const when = /^ready\s+in\s+([A-Za-z]{3,9})\.?(?:\s+(20\d{2}))?!?$/i.exec(label);
+  if (when) {
+    const month = READY_MONTHS.findIndex((name) => name === when[1]!.toLowerCase() || name.slice(0, 3) === when[1]!.toLowerCase());
+    if (month < 0) return { status: null, readyNow: false };
+    const thisMonth = now.getUTCMonth();
+    const thisYear = now.getUTCFullYear();
+    const monthName = `${READY_MONTHS[month]![0]!.toUpperCase()}${READY_MONTHS[month]!.slice(1)}`;
+    if (when[2]) {
+      const year = Number(when[2]);
+      if (year < thisYear || (year === thisYear && month < thisMonth)) return { status: "Quick Move-In (Under Construction)", readyNow: false };
+      return { status: `Quick Move-In (${monthName} ${year})`, readyNow: false, moveInDate: `${monthName} ${year}` };
+    }
+    const monthsAgo = (thisMonth - month + 12) % 12;
+    if (monthsAgo === 1 || monthsAgo === 2) return { status: "Quick Move-In (Under Construction)", readyNow: false };
+    const year = month >= thisMonth ? thisYear : thisYear + 1;
+    return { status: `Quick Move-In (${monthName} ${year})`, readyNow: false, moveInDate: `${monthName} ${year}` };
+  }
   return { status: null, readyNow: false };
 }
 
@@ -178,7 +201,7 @@ export class HomefinitiAdapter implements DealAdapter {
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const children = homefinitiCollections(page.text, community, this.host);
     let read: HomefinitiPageRead;
-    if (!children) read = readHomefinitiPage(page.text, community, this.host);
+    if (!children) read = readHomefinitiPage(page.text, community, this.host, now());
     else {
       // A parent page over collections (Coventry's Garden Grove: "Garden Grove 40'" and "Garden Grove 50'", October 2026) lists
       // its homes under the collections' paths and no plans: each collection's own page is read as part of the community.
@@ -192,7 +215,7 @@ export class HomefinitiAdapter implements DealAdapter {
         const childPage = await getDocument(child.url, fetcher, "text/html,application/xhtml+xml", this.host);
         if (!childPage.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(childPage, "community_fetch_failed")]);
         privateSnapshot.pages.push(sourcePage("community", child.url, null));
-        const childRead = readHomefinitiPage(childPage.text, new URL(child.url), this.host);
+        const childRead = readHomefinitiPage(childPage.text, new URL(child.url), this.host, now());
         if ("hold" in childRead) return failedResult(config, fetchedAt, privateSnapshot, [childRead.hold]);
         // The parent counts each collection's homes ("10 Homes"): fewer on the collection's page is a partial list.
         if (child.homes !== null && childRead.homes.length < child.homes) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
@@ -310,7 +333,7 @@ function parseCardHomes(html: string, root: HtmlElement, community: URL): Map<st
 }
 
 /** One community page of the platform: its homes (records, and cards the records corroborate) and plans, or the hold. */
-function readHomefinitiPage(html: string, community: URL, host: string): HomefinitiPageRead {
+function readHomefinitiPage(html: string, community: URL, host: string, now: Date = new Date()): HomefinitiPageRead {
   const records = parseHomefinitiRecords(html, host);
   // Without the community's own record this is not one of the platform's community pages.
   if (!records.community) return { hold: "expected_community_container_not_found" };
@@ -384,10 +407,10 @@ function readHomefinitiPage(html: string, community: URL, host: string): Homefin
     const { kind: _kind, ...home } = record;
     const card = cardFacts(html, root, new URL(home.sourceUrl).pathname, homePaths);
     // A home listed without a card, or with a status word the reader does not know, is not published on a guess: the run is held.
-    const status = homefinitiStatus(card.status);
+    const status = homefinitiStatus(card.status, now);
     if (!status.status) return { hold: "unlabelled_home_status" };
     out.push({
-      ...home, status: status.status, readyNow: status.readyNow,
+      ...home, status: status.status, readyNow: status.readyNow, ...(status.moveInDate ? { moveInDate: status.moveInDate } : {}),
       previousPrice: card.previousPrice && home.price && card.previousPrice > home.price ? card.previousPrice : null,
       priceDrop: card.previousPrice && home.price && card.previousPrice > home.price ? card.previousPrice - home.price : null,
     });

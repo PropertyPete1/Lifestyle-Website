@@ -116,6 +116,18 @@ describe("Homefiniti reader: records", () => {
     expect(homefinitiStatus("Model Home")).toEqual({ status: "Model Home", readyNow: false });
     // Wording the reader does not know, or none, is no status: the run is held rather than published as available.
     expect(homefinitiStatus(null)).toEqual({ status: null, readyNow: false });
+    // Nov 11, 2026: First America's cards now say when a home under construction will be done, with no year.
+    const mid = new Date("2026-11-15T12:00:00Z");
+    expect(homefinitiStatus("Ready in November", mid)).toEqual({ status: "Quick Move-In (November 2026)", readyNow: false, moveInDate: "November 2026" });
+    expect(homefinitiStatus("Ready in February", mid)).toEqual({ status: "Quick Move-In (February 2027)", readyNow: false, moveInDate: "February 2027" });
+    expect(homefinitiStatus("Ready in Dec", mid)).toEqual({ status: "Quick Move-In (December 2026)", readyNow: false, moveInDate: "December 2026" });
+    expect(homefinitiStatus("Ready in March 2027", mid)).toEqual({ status: "Quick Move-In (March 2027)", readyNow: false, moveInDate: "March 2027" });
+    // A month that has just passed is a stale estimate: still for sale, no date.
+    expect(homefinitiStatus("Ready in October", mid)).toEqual({ status: "Quick Move-In (Under Construction)", readyNow: false });
+    expect(homefinitiStatus("Ready in June 2026", mid)).toEqual({ status: "Quick Move-In (Under Construction)", readyNow: false });
+    // Not a month: no status, the run is held.
+    expect(homefinitiStatus("Ready in Spring", mid)).toEqual({ status: null, readyNow: false });
+    expect(homefinitiStatus("Ready in 2027", mid)).toEqual({ status: null, readyNow: false });
     for (const word of ["Coming Soon", "Reserved", "Not Available", "Hold", "Off Market", "Unreleased", ""]) expect(homefinitiStatus(word)).toEqual({ status: null, readyNow: false });
     const market = `<a href="/new-homes/tx/san-antonio/available-homes/">All</a><a href="/new-homes/tx/cibolo/buffalo-fixture/">Buffalo</a><a href="/new-homes/tx/cibolo/buffalo-fixture/?x=1">Buffalo again</a><a href="/new-homes/tx/new-braunfels/build-on-your-lot-2/">BOYL</a><a href="https://www.coventryhomes.com/new-homes/tx/schertz/homestead-65/">Homestead 65</a><a href="https://evil.example/new-homes/tx/a/b/">x</a><a href="/new-homes/tx/san-antonio/">Market</a>`;
     expect(homefinitiMarketLinks(market, "www.coventryhomes.com")).toEqual(["https://www.coventryhomes.com/new-homes/tx/cibolo/buffalo-fixture/", "https://www.coventryhomes.com/new-homes/tx/schertz/homestead-65/"]);

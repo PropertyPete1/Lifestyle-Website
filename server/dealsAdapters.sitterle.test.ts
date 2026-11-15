@@ -137,3 +137,57 @@ describe("Sitterle reader: a community", () => {
     expect(DEAL_ADAPTERS["Sitterle Homes"].builder).toBe("Sitterle Homes");
   });
 });
+
+/**
+ * The redesigned community page (live from Nov 13, 2026, "community-detail"):
+ * the address in `p.community-detail__address` with no ZIP, no directions
+ * link, a feature list that links a place nearby on Google Maps, and a sold
+ * home that keeps its card under a "Sold" flag with no completion line.
+ * Names and addresses are invented.
+ */
+const REDESIGN = `${HOST}/communities/fixture-cove/`;
+const redesignedPage = (input: { flag?: string } = {}) => `<!DOCTYPE html><html><head><title>Fixture Cove | Sitterle Homes</title></head><body class="sitterle-community-detail-public-preview">
+<section class="sitterle-detail community-detail"><div class="community-detail__copy"><h1>• Fixture Cove •</h1>
+<p class="community-detail__address">215 Fixture Hersee Drive, Bastrop, TX, USA</p>
+<div class="community-detail__contact-line"><p>512-555-0100</p></div></div></section>
+<section id="comm--filters-section" class="community-detail__results"><div hidden id="community-market">austin</div><div hidden id="community-name">Fixture Cove</div>
+<div id="comm--filters-content"><div class="comm--listings-container"><div id="comm--empty-message" style="display:none;"></div>
+<div class="comm--listing-container inventory"><div class="comm--listing-thumbnail-container"><a href="${HOST}/listings/184-fixture-hersee-summerhill-fixture-cove/" target="_blank"><img src="${HOST}/wp-content/uploads/2025/09/184.jpg" class="comm--listing-thumbnail" alt=""></a></div><div class="listing--info-container"><a href="${HOST}/listings/184-fixture-hersee-summerhill-fixture-cove/" class="result--title">184 Fixture Hersee Drive</a><div><p>in Fixture Cove</p><p>Price: <strong>$559,000</strong></p><hr class="result--hr"><p>Plan: <strong>Summerhill</strong></p><p>Estimated Completion: <span class="comm--custom-note">Available Now</span></p><hr class="result--hr"><div class="mini-stats-container"><p><strong>3</strong><br>Beds</p><p><strong>3</strong><br>Baths</p><p><strong>2</strong><br>Car Garage</p><p><strong>2,499</strong><br>Sq. Ft.</p></div></div></div></div>
+<div class="comm--listing-container inventory"><div class="comm--listing-thumbnail-container"><div class="status-${input.flag ?? "Sold"}"><p>${input.flag ?? "Sold"}</p></div><a href="${HOST}/listings/150-fixture-hersee-frisco-fixture-cove/" target="_blank"><img src="${HOST}/wp-content/uploads/2025/09/150.jpg" class="comm--listing-thumbnail" alt=""></a></div><div class="listing--info-container"><a href="${HOST}/listings/150-fixture-hersee-frisco-fixture-cove/" class="result--title">150 Fixture Hersee Drive</a><div><p>in Fixture Cove</p><p>Price: <strong>$530,000</strong></p><hr class="result--hr"><p>Plan: <strong>Frisco</strong></p><hr class="result--hr"><div class="mini-stats-container"><p><strong>4</strong><br>Beds</p><p><strong>3</strong><br>Baths</p><p><strong>3</strong><br>Car Garage</p><p><strong>2,364</strong><br>Sq. Ft.</p></div></div></div></div>
+<div class="comm--listing-container plan"><div class="comm--listing-thumbnail-container"><a href="${HOST}/plans/castlehill-fixture-cove/" target="_blank"><img src="${HOST}/wp-content/uploads/2022/09/castlehill.jpg" class="comm--listing-thumbnail" alt=""></a></div><div class="listing--info-container"><a href="${HOST}/plans/castlehill-fixture-cove/" class="result--title">Castlehill Plan</a><div><p>in Fixture Cove</p><p>Price: <strong>$439,000</strong></p><hr class="result--hr"><p>From <strong>1,806</strong> Sq. Ft.</p><hr class="result--hr"><div class="mini-stats-container"><p><strong>3</strong><br>Beds</p><p><strong>2</strong><br>Baths</p><p><strong>2</strong><br>Car Garage</p><p><strong>1</strong><br>Stories</p></div></div></div></div>
+</div></div></section>
+<section class="community-detail__features"><ul><li>25 Minutes to <a href="https://www.google.com/maps/place/Fixture+Plant/@30.2210721,-97.6187016,15z/data=!4m5" target="_blank">Fixture Plant</a></li></ul></section>
+</body></html>`;
+
+describe("Sitterle reader: the November 2026 redesign", () => {
+  const redesignConfig: CommunitySourceConfig = { builder: "Sitterle Homes", sourceUrl: REDESIGN, privateCommunityName: "Fixture Cove", scrubList: ["Fixture Cove", "Fixture Hersee", "Fixture Plant"] };
+  const LATER = new Date("2026-11-15T12:00:00Z");
+
+  it("reads the address from the new block, and never takes a nearby place's map link for the community's pin", () => {
+    expect(sitterleRecord(redesignedPage())).toEqual({ name: "Fixture Cove", street: "215 Fixture Hersee Drive", city: "Bastrop", zip: null, phone: null, priceFrom: null, geo: null });
+    // The October layout still reads its own block and its directions pin.
+    expect(sitterleRecord(communityPage())?.geo).toEqual({ lat: 29.5371268, lng: -98.7423396 });
+  });
+
+  it("reads a home under a Sold flag as sold, and the home beside it as available", () => {
+    const parsed = parseSitterleCommunity(redesignedPage(), REDESIGN, LATER)!;
+    expect(parsed.cardCount).toBe(2);
+    expect(parsed.homes.map((home) => [home.privateAddress, home.status, home.price, home.readyNow])).toEqual([
+      ["184 Fixture Hersee Drive, Bastrop, TX", "Quick Move-In (Move-In Ready)", 559_000, true],
+      ["150 Fixture Hersee Drive, Bastrop, TX", "Sold", 530_000, false],
+    ]);
+    expect(parsed.plans).toHaveLength(1);
+  });
+
+  it("publishes the redesigned page without a hold; a flag that is not a sale word still holds the run", async () => {
+    const page = vi.fn(async () => new Response(redesignedPage(), { status: 200, headers: { "content-type": "text/html" } }));
+    const result = await loadOfficialDeals(redesignConfig, { fetcher: page, now: () => LATER });
+    expect(result.holdReasons).toEqual([]);
+    expect(result.private.homes.map((home) => home.status)).toEqual(["Quick Move-In (Move-In Ready)", "Sold"]);
+    const json = JSON.stringify(result.public);
+    for (const secret of ["Fixture", "sitterlehomes", "Sitterle", "512-555"]) expect(json).not.toContain(secret);
+    // "Reserved" is not a sale word and the card has no completion line: no status, so the sync holds the run.
+    const reserved = parseSitterleCommunity(redesignedPage({ flag: "Reserved" }), REDESIGN, LATER)!;
+    expect(reserved.homes.map((home) => home.status)).toEqual(["Quick Move-In (Move-In Ready)", null]);
+  });
+});

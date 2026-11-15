@@ -15,8 +15,10 @@ import {
  * 2026"), and mini-stats (Beds, Baths, Car Garage, Sq. Ft.; plans say "From
  * 1,852 Sq. Ft." and "Stories"). The community's name sits in
  * `#community-name`, its sales address in `.comm-page-address` ("10103
- * Zimmer, San Antonio, TX 78254, U.S.A."), its coordinates in a Google Maps
- * directions link ("…/@29.5371268,-98.7423396,18z"). The communities page
+ * Zimmer, San Antonio, TX 78254, U.S.A.") or, since the November 2026
+ * redesign, `p.community-detail__address` ("215 William Hersee Drive, Bastrop,
+ * TX, USA"), its coordinates in a Google Maps directions link
+ * ("…/@29.5371268,-98.7423396,18z") when the page has one. The communities page
  * lists every community of the three Texas markets as `.single-result-container`
  * cards with the city line, so discovery reads each page in the area for its
  * address and pin. Photos sit on the official host. Read-only, plain GET,
@@ -76,11 +78,17 @@ export function sitterleRecord(html: string): SitterleCommunityRecord | null {
   const all = descendants(root);
   const nameBlock = all.find((element) => element.attributes.id === "community-name");
   const name = nameBlock ? normalize(htmlToText(html.slice(nameBlock.contentStart, nameBlock.contentEnd))) : null;
-  const addressBlock = all.find((element) => elementClass(element, "comm-page-address"));
+  // Nov 13, 2026: the redesigned page ("community-detail") keeps the address in `p.community-detail__address`
+  // ("215 William Hersee Drive, Bastrop, TX, USA", no ZIP); the October layout's `.comm-page-address` is still read.
+  const legacyAddress = all.find((element) => elementClass(element, "comm-page-address"));
+  const addressBlock = legacyAddress ?? all.find((element) => elementClass(element, "community-detail__address"));
   const line = addressBlock ? normalize(htmlToText(html.slice(addressBlock.contentStart, addressBlock.contentEnd))) : "";
   if (!name || !addressBlock) return null;
   const parts = /^(.*?),\s*([A-Za-z .'-]+),\s*TX(?:\s+(\d{5}))?/.exec(line);
-  const pin = /google\.com\/maps\/dir\/\/[^"'\s]*?@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/.exec(html) ?? /google\.com\/maps\/[^"'\s]*?@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/.exec(html);
+  // The pin is the community's own directions link. Any other Google Maps link is trusted only on the October layout:
+  // the redesigned page has no directions link, and its feature list links to places nearby (The Colony- Pine Cove
+  // links the Tesla plant), which must never be read as the community's pin.
+  const pin = /google\.com\/maps\/dir\/\/[^"'\s]*?@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/.exec(html) ?? (legacyAddress ? /google\.com\/maps\/[^"'\s]*?@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/.exec(html) : null);
   return {
     name,
     street: parts && /\d/.test(parts[1]!) ? parts[1]!.trim() : null,
@@ -157,7 +165,12 @@ export function parseSitterleCommunity(html: string, pageUrl: string, now: Date 
     // A card saying "in <another community>" is not this community's inventory.
     if (record && inCommunity && normalize(inCommunity).toLowerCase() !== record.name.toLowerCase()) foreignHome = true;
     const note = inner.find((element) => elementClass(element, "comm--custom-note"));
-    const status = sitterleStatus(note ? normalize(elementText(note, html)) : field(/^Est(?:imated)?\.?\s*Completion:\s*(.+)$/i), now);
+    // Nov 6, 2026: a sold home keeps its card, with a flag over the photo (`<div class="status-Sold"><p>Sold</p></div>`)
+    // and no completion line. Only a sale word on the flag is read; any other flag leaves the completion line to decide.
+    const flag = inner.find((element) => (element.attributes.class ?? "").split(/\s+/).some((token) => /^status-/i.test(token)));
+    const flagText = flag ? normalize(elementText(flag, html)) : null;
+    const soldFlag = flagText && /\bsold\b|under\s+contract/i.test(flagText) ? flagText : null;
+    const status = sitterleStatus(soldFlag ?? (note ? normalize(elementText(note, html)) : field(/^Est(?:imated)?\.?\s*Completion:\s*(.+)$/i)), now);
     const readable = Boolean(titleText && link && current);
     const cityLine = record?.city ? `${record.city}, ${record.zip ? `TX ${record.zip}` : "TX"}` : null;
     homes.push({

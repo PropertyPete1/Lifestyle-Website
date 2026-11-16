@@ -33,6 +33,8 @@ describe("details request: the form's rules", () => {
     expect(publicHomeLine(undefined)).toBeNull();
     const note = detailsRequestNote({ publicLine: "3 beds · $329,990", privateLine: "Home: 123 Oak St in Sienna Lakes by Chesmar", notes: "Need a big yard", agentName: "Tiffany Proske", sourceCode: "agent-page", consentAt: new Date("2026-10-31T15:00:00Z"), ip: "1.2.3.4", isTest: false });
     expect(note).toContain("asked for this home's details (no text code)");
+    expect(note).toContain("Call them and do the normal buyer consultation by phone.");
+    expect(note).not.toMatch(/Text them/i);
     expect(note).toContain("Card they tapped: 3 beds · $329,990");
     expect(note).toContain("Home: 123 Oak St in Sienna Lakes by Chesmar");
     expect(note).toContain("Their notes: Need a big yard");

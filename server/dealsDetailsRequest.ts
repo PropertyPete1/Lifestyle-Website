@@ -75,7 +75,8 @@ export async function privateHomeLine(home: DetailsHome | undefined, lookupCommu
 /** The note on the FUB event: what they asked for, which home, their notes, where they came from, and the consent record. */
 export function detailsRequestNote(input: { publicLine: string | null; privateLine: string | null; notes?: string | null; agentName?: string | null; sourceCode: string; consentAt: Date; ip: string; isTest: boolean }): string {
   return [
-    "Builder Deals: asked for this home's details (no text code). Text them the address, builder and community.",
+    // Nov 16, 2026 (Peter): never tell the agent to text the home's information over. This is a lead to convert with the normal buyer consultation by phone.
+    "Builder Deals: asked for this home's details (no text code). Call them and do the normal buyer consultation by phone.",
     input.publicLine ? `Card they tapped: ${input.publicLine}` : "Card they tapped: not specified (ask which home)",
     input.privateLine ?? undefined,
     input.notes?.trim() ? `Their notes: ${input.notes.trim()}` : undefined,

@@ -1457,7 +1457,7 @@ export async function createPendingVerification(input: { req: Request; res: Resp
       // Oct 25 (Peter): an agent's browser is kept off for good, like the agent; other screening reasons cool down in a day.
       await blockDealAccess({ deviceHash, reason: `${eligibility.blockedBy ?? "realtor screening"} device cooldown`, expiresAt: isRealtorBlockReason(eligibility.blockedBy) ? null : new Date(Date.now() + 24 * 60 * 60_000) });
     }
-    await logDealEvent({ kind: "blocked", sourceCode, deviceHash, ip, detail: eligibility.blockedBy ?? "screening" });
+    await logDealEvent({ kind: "blocked", sourceCode, deviceHash, ip, phone: normalized.e164, detail: eligibility.blockedBy ?? "screening" });
     // A buyer an admin turned off is told access is paused (no agent wording, no recruiting).
     if (eligibility.blockedBy === "blocklist" && isAdminTurnOffReason(eligibility.blockReason)) return { ok: false as const, kind: "paused" as const };
     // An agent the screening (or an earlier answer) caught is sent to recruiting too; an agent's own client never is.

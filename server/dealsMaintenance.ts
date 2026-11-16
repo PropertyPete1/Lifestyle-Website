@@ -1,5 +1,6 @@
-import { and, desc, eq, gte, isNull, lte, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, lt, or, sql } from "drizzle-orm";
 import {
+  dealBlocklist,
   dealCommunities,
   dealEmailLogs,
   dealEvents,
@@ -29,7 +30,7 @@ export function photoDrainLine(lastDrain: Pick<LastPhotoDrain, "at" | "processed
   const cost = lastDrain.msPerPhoto ? `; about ${lastDrain.msPerPhoto} ms per photo${stages ? ` (busy ms per photo: ${stages})` : ""}` : "";
   return `last drain processed ${lastDrain.processed}${lastDrain.hidden ? ` (+${lastDrain.hidden} hidden)` : ""}${lastDrain.partial ? ", answered early" : ""}${lastDrain.coalesced ? ", another drain was running" : ""} ${minutes} min ago${cost}`;
 }
-import { PRIVACY_RESIDUE_EVENT_KIND, catalogBuildsSinceStart, getDealSettings, privacyResidueCommunityId, privacyResidueSinceStart, type CatalogBuildStat } from "./dealsService";
+import { PRIVACY_RESIDUE_EVENT_KIND, catalogBuildsSinceStart, getDealSettings, isRealtorBlockReason, privacyResidueCommunityId, privacyResidueSinceStart, type CatalogBuildStat } from "./dealsService";
 import { hasBuilderReader } from "./dealsAdapters";
 import { heldReasonsOf } from "../shared/dealsHeldIncentive";
 
@@ -225,7 +226,32 @@ async function upsertFubTeamIdentity(
   if (existing) await db.update(dealTeamAllowlist).set(values).where(eq(dealTeamAllowlist.id, existing.id));
   else await db.insert(dealTeamAllowlist).values(values);
   await makeMatchingLeadsTeam(db, { phoneE164, email });
+  await clearAgentBlocksForTeamIdentity(db, phoneE164, email).catch(() => undefined);
   return true;
+}
+
+/**
+ * Nov 16, 2026 (Peter: a new agent tried the builder link before she was on the team list, and every later visit sent
+ * her to the recruiting page). Joining the team lifts the "this is an agent" blocks the screening wrote: the rows on
+ * her number or e-mail, and the rows on the browsers she tried from. A browser is hers when an event carries her
+ * number with it, or when its block was written in the same minute as her number's block.
+ * Only agent blocks go: a block an admin placed, or a buyer's "working with an agent" answer, stays.
+ */
+export async function clearAgentBlocksForTeamIdentity(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, phoneE164: string | null, email: string | null): Promise<number> {
+  const mine = [phoneE164 ? eq(dealBlocklist.phoneE164, phoneE164) : undefined, email ? eq(dealBlocklist.email, email.toLowerCase()) : undefined].filter(Boolean) as any[];
+  if (!mine.length) return 0;
+  const own = (await db.select().from(dealBlocklist).where(or(...mine))).filter((row) => isRealtorBlockReason(row.reason));
+  const devices = new Set<string>();
+  if (phoneE164) for (const event of await db.select({ deviceHash: dealEvents.deviceHash }).from(dealEvents).where(eq(dealEvents.phoneE164, phoneE164))) if (event.deviceHash) devices.add(event.deviceHash);
+  if (!own.length && !devices.size) return 0;
+  const ids = new Set<number>(own.map((row) => row.id));
+  const deviceRows = (await db.select().from(dealBlocklist).where(isNull(dealBlocklist.phoneE164))).filter((row) => row.deviceHash && !row.email && isRealtorBlockReason(row.reason));
+  for (const row of deviceRows) {
+    const paired = own.some((block) => block.createdAt && row.createdAt && Math.abs(new Date(block.createdAt).getTime() - new Date(row.createdAt).getTime()) <= 60_000);
+    if (devices.has(row.deviceHash!) || paired) ids.add(row.id);
+  }
+  if (ids.size) await db.delete(dealBlocklist).where(inArray(dealBlocklist.id, Array.from(ids)));
+  return ids.size;
 }
 
 /** An aborted mirror changes nothing and tells the alert recipients why. */

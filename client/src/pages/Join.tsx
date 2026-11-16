@@ -77,8 +77,8 @@ function builderDealsArrival(): { fromDeals: boolean; phone: string; name: strin
 
 export default function Join() {
   const [arrival] = useState(builderDealsArrival);
-  // Straight to the number box for an agent sent from Builder Deals.
-  useEffect(() => { if (arrival.fromDeals) window.setTimeout(() => document.querySelector("[data-join-from-deals]")?.scrollIntoView({ block: "start" }), 300); }, [arrival.fromDeals]);
+  // Nov 16, 2026 (Peter: "make sure the recruiter page starts at the top so it says the headline"): an agent sent
+  // from Builder Deals lands on the headline like everyone else (it used to jump straight to the number box).
   return (
     <PageShell stickyCta stickyCtaLabel="Text Me the Offer" stickyCtaHref="#apply">
       {/* Oct 30, 2026 (Peter: "fix the black part on the recruiting page"): the white-skin hero, text beside a bright

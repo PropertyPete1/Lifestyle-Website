@@ -1124,6 +1124,9 @@ export const dealsRouter = router({
       const value = (input.kind === "phone" ? identity.phoneE164 : identity.email)!;
       await db.insert(dealDoNotAutoImport).values({ value, kind: input.kind }).onDuplicateKeyUpdate({ set: { value, kind: input.kind } }); return { ok: true as const };
     }),
+    // Nov 16, 2026 (Peter: "do it now and add the agents that are new"): the nightly FUB team mirror, run on demand
+    // from Admin, so a new agent can sign in the day they are added to FUB. Same function, same safeguards.
+    syncTeamNow: adminProcedure.mutation(async () => (await import("./dealsMaintenance")).syncTeamAllowlistFromFub()),
     addTeam: adminProcedure.input(z.object({ name: z.string().trim().max(190).optional(), phoneE164: z.string().max(60).optional(), email: z.string().trim().max(320).optional(), source: z.enum(["fub", "manual", "test"]).default("manual") })).mutation(async ({ input }) => {
       const db = await getDb(); if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
       const identity = normalizeAdminDealIdentity(input);

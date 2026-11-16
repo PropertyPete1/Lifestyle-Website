@@ -107,6 +107,7 @@ vi.mock("./dealsPhotosAdmin", () => {
 vi.mock("./dealsMaintenance", () => ({
   builderDealsHealthCheck: (...args: unknown[]) => mocks.builderDealsHealthCheck(...args),
   builderDealsMondayReport: (...args: unknown[]) => mocks.builderDealsMondayReport(...args),
+  syncTeamAllowlistFromFub: async () => ({ ok: true, usersFetched: 14, activeUsers: 13, upserted: 14, skipped: 0, deactivated: 0, orphanedTeamLeads: 0 }),
 }));
 
 import { dealsRouter } from "./dealsRouter";
@@ -779,6 +780,13 @@ describe("admin: team phone entry", () => {
     expect(await admin().teamNeedsPhone()).toEqual([]);
     await expect(admin().addTeamPhone({ id, phoneE164: "not a phone" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(admin().addTeamPhone({ id: 999, phoneE164: "210-555-0124" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
+
+describe("admin.syncTeamNow (Nov 16)", () => {
+  it("runs the FUB team mirror on demand for an admin and for nobody else", async () => {
+    expect(await admin().syncTeamNow()).toMatchObject({ ok: true, activeUsers: 13, upserted: 14 });
+    await expect(dealsRouter.createCaller(makeCtx("user")).admin.syncTeamNow()).rejects.toMatchObject({ code: expect.stringMatching(/FORBIDDEN|UNAUTHORIZED/) });
   });
 });
 

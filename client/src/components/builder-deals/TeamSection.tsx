@@ -51,6 +51,10 @@ export function TeamSection({ settings }: { settings: Settings | undefined }) {
   // Team changes also move matching leads to or from team status, so the leads table refreshes with the allowlist.
   const refresh = () => { void utils.deals.admin.identityList.invalidate(); void utils.deals.admin.teamNeedsPhone.invalidate(); void utils.deals.admin.leads.invalidate(); void utils.deals.admin.overview.invalidate(); };
   const addTeam = trpc.deals.admin.addTeam.useMutation({ onSuccess: () => { refresh(); setForm(EMPTY_TEAM); toast.success("Team member added. Any block or known-agent record for them was cleared."); }, onError: (error) => toast.error(error.message || "Could not add the team member") });
+  const syncNow = trpc.deals.admin.syncTeamNow.useMutation({
+    onSuccess: (result) => { refresh(); if (result.ok) toast.success(`Synced from Follow Up Boss: ${result.activeUsers} active users, ${result.upserted} sign-ins saved, ${result.deactivated} turned off.`); else toast.error(`The sync changed nothing (${result.reason.replace(/_/g, " ")}).`); },
+    onError: (error) => toast.error(error.message || "Could not sync from Follow Up Boss"),
+  });
   const removeTeam = trpc.deals.admin.removeTeam.useMutation({
     onSuccess: (result) => { refresh(); setToRemove(null); toast.success(`Removed. ${result.revoked} team preview link${result.revoked === 1 ? "" : "s"} revoked; they are back under the normal checks.${result.mirrorWarning ? ` ${result.mirrorWarning}` : ""}`); },
     onError: (error) => toast.error(error.message || "Could not remove the team member"),
@@ -81,6 +85,7 @@ export function TeamSection({ settings }: { settings: Settings | undefined }) {
           <Button type="button" className={`${TAP} ${GOLD_BUTTON} w-full sm:w-auto`} disabled={addTeam.isPending} onClick={submit}>{addTeam.isPending ? "Adding..." : "Add team member"}</Button>
         </div>
         <div className="space-y-3 border border-border p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs text-muted-foreground">New agent added to Follow Up Boss today? Pull the list now instead of waiting for tonight.</p><Button type="button" variant="outline" className={TAP} disabled={syncNow.isPending} onClick={() => syncNow.mutate()}>{syncNow.isPending ? "Syncing..." : "Sync from Follow Up Boss now"}</Button></div>
           <p className="font-medium">FUB users with no mobile number</p>
           <p className="text-[11px] leading-relaxed text-muted-foreground">Without a number an agent falls through to the realtor checks and is blocked by their own old recruiting record. Enter it here; the number is stored as a manual row the nightly mirror never touches.</p>
           {needsPhone.isError && <Warning>Could not load the list: {needsPhone.error.message}</Warning>}

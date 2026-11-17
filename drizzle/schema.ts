@@ -844,6 +844,12 @@ export const aptClientLists = mysqlTable("apt_client_lists", {
   clientId: int("client_id").notNull(),
   propertyIds: text("property_ids").notNull(), // JSON number array, in the locator's order
   note: varchar("note", { length: 500 }),
+  /** JSON {propertyId: "why I picked this for you"}, written by the locator. */
+  pickNotes: text("pick_notes"),
+  /** JSON number array: the communities the client tapped "I like this one" on. */
+  liked: text("liked"),
+  /** The first time the client opened the link. */
+  openedAt: timestamp("opened_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("idx_apt_client_lists_client").on(t.clientId)]);
 

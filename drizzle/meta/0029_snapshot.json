@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "1bd4789f-5465-4e26-a820-65acc412e164",
+  "id": "a8f054c9-b1eb-42b3-9a7c-6ebd6ceb3ea6",
   "prevId": "14c30b06-3ddc-444a-a410-29031c927a76",
   "tables": {
     "apt_client_lists": {
@@ -45,6 +45,27 @@
         "note": {
           "name": "note",
           "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pick_notes": {
+          "name": "pick_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "liked": {
+          "name": "liked",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "opened_at": {
+          "name": "opened_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

@@ -249,16 +249,19 @@ export async function markLeasePaid(agentTeamId: number, input: { leaseId: numbe
 /** A locator's own book: clients, guest cards, leases and the money at each stage. */
 export async function locatorBook(agentTeamId: number) {
   const db = await requireDb();
-  const [clients, cards, leases, properties] = await Promise.all([
+  const [clients, cards, leases, properties, lists] = await Promise.all([
     db.select().from(aptClients).where(eq(aptClients.agentTeamId, agentTeamId)),
     db.select().from(aptGuestCards).where(eq(aptGuestCards.agentTeamId, agentTeamId)),
     db.select().from(aptLeases).where(eq(aptLeases.agentTeamId, agentTeamId)),
     db.select({ id: aptProperties.id, name: aptProperties.name }).from(aptProperties),
+    db.select().from(aptClientLists).where(eq(aptClientLists.agentTeamId, agentTeamId)),
   ]);
   const nameOf = (id: number) => properties.find((property) => property.id === id)?.name ?? "Unknown property";
   const sum = (rows: readonly LeaseRow[], pick: (row: LeaseRow) => number | null) => rows.reduce((total, row) => total + (pick(row) ?? 0), 0);
   return {
     clients: clients.map((client) => ({ id: client.id, ...toClient(client), notes: client.notes })),
+    /** Lists sent to clients, newest first: whether they opened it and what they liked. */
+    sentLists: lists.slice().sort((a, b) => b.id - a.id).map((list) => ({ id: list.id, clientId: list.clientId, token: list.token, count: parseIds(list.propertyIds).length, opened: Boolean(list.openedAt), liked: parseIds(list.liked).map((id) => ({ propertyId: id, property: nameOf(id) })) })),
     guestCards: cards.map((card) => ({ id: card.id, clientId: card.clientId, propertyId: card.propertyId, property: nameOf(card.propertyId), method: card.method, visitOn: card.visitOn, sentOn: card.sentOn, confirmedOn: card.confirmedOn })),
     leases: leases.map((lease) => ({ id: lease.id, clientId: lease.clientId, propertyId: lease.propertyId, property: nameOf(lease.propertyId), status: lease.status, ...leaseFacts(lease), expectedAmount: lease.expectedAmount, verifiedAmount: lease.verifiedAmount, invoiceNumber: lease.invoiceNumber ?? (lease.status === "invoiced" || lease.status === "paid" ? aptInvoiceNumber(lease.id, lease.leaseStartOn) : null), dueOn: lease.dueOn, paidOn: lease.paidOn, paidAmount: lease.paidAmount })),
     money: {
@@ -284,19 +287,41 @@ export async function confirmCommission(agentTeamId: number, input: { propertyId
 }
 
 /** Saves the communities a locator picked for a client and returns the link token and the message to send with it. */
-export async function createClientList(agentTeamId: number, input: { clientId: number; propertyIds: number[]; note?: string | null; baseUrl: string }): Promise<{ token: string; url: string; message: AptLetter }> {
+export async function createClientList(agentTeamId: number, input: { clientId: number; propertyIds: number[]; note?: string | null; pickNotes?: Record<string, string>; baseUrl: string }): Promise<{ token: string; url: string; message: AptLetter }> {
   const db = await requireDb();
   const client = await ownClient(agentTeamId, input.clientId);
   const ids = Array.from(new Set(input.propertyIds));
   const known = new Set((await loadApartments()).filter((property) => property.active).map((property) => property.id));
   if (!ids.length || ids.some((id) => !known.has(id))) throw new AptError("bad_input", "Pick at least one community that is on file.");
   const token = randomBytes(24).toString("hex");
-  await db.insert(aptClientLists).values({ token, agentTeamId, clientId: input.clientId, propertyIds: JSON.stringify(ids), note: input.note?.trim() || null });
+  await db.insert(aptClientLists).values({ token, agentTeamId, clientId: input.clientId, propertyIds: JSON.stringify(ids), note: input.note?.trim() || null, pickNotes: JSON.stringify(Object.fromEntries(ids.flatMap((id) => { const text = input.pickNotes?.[String(id)]?.trim(); return text ? [[String(id), text.slice(0, 400)]] : []; }))) });
   const url = `${input.baseUrl.replace(/\/$/, "")}/apartments/list/${token}`;
   return { token, url, message: clientOptionsMessage({ client: toClient(client), agent: await locatorFor(agentTeamId), brokerage: APT_BROKERAGE, count: ids.length, url }) };
 }
 
-export type ClientListView = { clientFirstName: string; agent: { name: string; phone: string | null; email: string | null }; brokerage: string; referralLine: string; note: string | null; options: ClientOption[] };
+const parseIds = (value: string | null): number[] => { try { const parsed = JSON.parse(value ?? "[]") as unknown; return Array.isArray(parsed) ? parsed.filter((id): id is number => typeof id === "number") : []; } catch { return []; } };
+const parseRecord = (value: string | null): Record<string, string> => { try { const parsed = JSON.parse(value ?? "{}") as unknown; return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === "string")) : {}; } catch { return {}; } };
+
+/**
+ * The client taps "I like this one" (or takes it back) on their list. `position` is the community's place in the
+ * list as the client sees it, so the link never needs a property id. The locator sees the likes in their book.
+ */
+export async function likeClientOption(token: string, position: number, liked: boolean, today: string): Promise<{ liked: boolean } | null> {
+  const view = await clientListByToken(token, today);
+  if (!view) return null;
+  const db = await requireDb();
+  const list = (await db.select().from(aptClientLists).where(eq(aptClientLists.token, token)).limit(1))[0]!;
+  const all = await loadApartments();
+  const shown = parseIds(list.propertyIds).filter((id) => all.some((property) => property.id === id && property.active));
+  const id = shown[position];
+  if (id === undefined) throw new AptError("bad_input", "That apartment is not on this list.");
+  const next = new Set(parseIds(list.liked));
+  if (liked) next.add(id); else next.delete(id);
+  await db.update(aptClientLists).set({ liked: JSON.stringify(Array.from(next)) }).where(eq(aptClientLists.id, list.id));
+  return { liked };
+}
+
+export type ClientListView = { clientFirstName: string; agent: { name: string; phone: string | null; email: string | null }; brokerage: string; referralLine: string; note: string | null; options: Array<ClientOption & { /** The locator's "why I picked this for you". */ why: string | null; liked: boolean }> };
 
 /** What the client's link opens. Unknown token: null. A community since switched off drops out of the list. */
 export async function clientListByToken(token: string, today: string): Promise<ClientListView | null> {
@@ -307,9 +332,11 @@ export async function clientListByToken(token: string, today: string): Promise<C
   const client = (await db.select().from(aptClients).where(eq(aptClients.id, list.clientId)).limit(1))[0];
   const agent = await locatorFor(list.agentTeamId).catch(() => null);
   if (!client || !agent) return null;
-  let ids: number[] = [];
-  try { ids = (JSON.parse(list.propertyIds) as unknown[]).filter((id): id is number => typeof id === "number"); } catch { ids = []; }
+  const ids = parseIds(list.propertyIds);
   const all = await loadApartments();
-  const options = ids.map((id) => all.find((property) => property.id === id && property.active)).filter((property): property is AptProperty => Boolean(property)).map((property) => clientOption(property, today));
+  const why = parseRecord(list.pickNotes);
+  const liked = new Set(parseIds(list.liked));
+  const options = ids.map((id) => all.find((property) => property.id === id && property.active)).filter((property): property is AptProperty => Boolean(property)).map((property) => ({ ...clientOption(property, today), why: why[String(property.id)] ?? null, liked: liked.has(property.id) }));
+  if (!list.openedAt) await db.update(aptClientLists).set({ openedAt: new Date() }).where(eq(aptClientLists.id, list.id));
   return { clientFirstName: client.name.trim().split(/\s+/)[0] ?? "", agent: { name: agent.name, phone: agent.phone, email: agent.email }, brokerage: APT_BROKERAGE.name, referralLine: referralLine(agent, APT_BROKERAGE), note: list.note, options };
 }

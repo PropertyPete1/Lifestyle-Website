@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 
 import { publicResults } from "../shared/apartments";
-import { addAptClient, clientListByToken, confirmCommission, createClientList, draftGuestCard, draftInvoice, draftLeaseVerification, importApartments, loadApartments, locatorBook, markGuestCard, markLeasePaid, markVerificationSent, recordVerification, reportLease, type AptPropertyInput } from "./apartmentsStore";
+import { addAptClient, clientListByToken, likeClientOption, confirmCommission, createClientList, draftGuestCard, draftInvoice, draftLeaseVerification, importApartments, loadApartments, locatorBook, markGuestCard, markLeasePaid, markVerificationSent, recordVerification, reportLease, type AptPropertyInput } from "./apartmentsStore";
 
 const TODAY = "2026-11-17";
 const flats: AptPropertyInput = {
@@ -119,6 +119,17 @@ describe("sending a client their options, and keeping pay current", () => {
     expect(view!.options[0]).toMatchObject({ secondChance: true, incomeRestricted: true });
     expect(view!.referralLine).toContain("Sample Locator, Lifestyle Design Realty");
     expect(JSON.stringify(view)).not.toMatch(/Percent|flatFee|commission|leasing@/i);
+    // The client likes the second one; the locator sees it, with the list marked opened. Their own note rides along.
+    expect((await locatorBook(pete)).sentLists[0]).toMatchObject({ count: 2, opened: true, liked: [] });
+    await likeClientOption(sent.token, 1, true, TODAY);
+    expect((await clientListByToken(sent.token, TODAY))!.options.map((option) => option.liked)).toEqual([false, true]);
+    expect((await locatorBook(pete)).sentLists[0]!.liked).toEqual([{ propertyId: a, property: "Fixture Flats" }]);
+    await likeClientOption(sent.token, 1, false, TODAY);
+    expect((await locatorBook(pete)).sentLists[0]!.liked).toEqual([]);
+    await expect(likeClientOption(sent.token, 7, true, TODAY)).rejects.toThrow(/not on this list/);
+    expect(await likeClientOption("0".repeat(48), 0, true, TODAY)).toBeNull();
+    const noted = await createClientList(pete, { clientId, propertyIds: [a], pickNotes: { [String(a)]: "  Closest to your work  ", "9999": "ignored" }, baseUrl: "https://site.example" });
+    expect((await clientListByToken(noted.token, TODAY))!.options[0]).toMatchObject({ name: "Fixture Flats", why: "Closest to your work" });
     expect(await clientListByToken("0".repeat(48), TODAY)).toBeNull();
     expect(await clientListByToken("not-a-token", TODAY)).toBeNull();
   });

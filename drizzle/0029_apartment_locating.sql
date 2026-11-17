@@ -5,6 +5,9 @@ CREATE TABLE `apt_client_lists` (
 	`client_id` int NOT NULL,
 	`property_ids` text NOT NULL,
 	`note` varchar(500),
+	`pick_notes` text,
+	`liked` text,
+	`opened_at` timestamp,
 	`created_at` timestamp NOT NULL DEFAULT (now()),
 	CONSTRAINT `apt_client_lists_id` PRIMARY KEY(`id`),
 	CONSTRAINT `apt_client_lists_token_unique` UNIQUE(`token`)

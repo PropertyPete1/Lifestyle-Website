@@ -3,7 +3,7 @@ import { z } from "zod";
 import { locatorResults, publicResults, type AptSearch } from "../shared/apartments";
 import { adminProcedure, publicProcedure, router } from "./_core/trpc";
 import {
-  addAptClient, AptError, clientListByToken, confirmCommission, createClientList, draftGuestCard, draftInvoice, draftLeaseVerification, importApartments, loadApartments, locatorBook, locatorFor, markGuestCard, markLeasePaid, markVerificationSent, recordVerification, reportLease,
+  addAptClient, AptError, clientListByToken, likeClientOption, confirmCommission, createClientList, draftGuestCard, draftInvoice, draftLeaseVerification, importApartments, loadApartments, locatorBook, locatorFor, markGuestCard, markLeasePaid, markVerificationSent, recordVerification, reportLease,
 } from "./apartmentsStore";
 
 /**
@@ -120,6 +120,9 @@ export const apartmentsRouter = router({
   /** A client's options from their locator's link: names and contacts of the picked communities, never what they pay. */
   list: publicProcedure.input(z.object({ token: z.string().regex(/^[a-f0-9]{48}$/) })).query(async ({ input }) => clientListByToken(input.token, chicagoToday())),
 
+  /** The client taps "I like this one" on their list (or takes it back). */
+  like: publicProcedure.input(z.object({ token: z.string().regex(/^[a-f0-9]{48}$/), position: z.number().int().min(0).max(24), liked: z.boolean() })).mutation(async ({ input }) => guarded(() => likeClientOption(input.token, input.position, input.liked, chicagoToday()))),
+
   locator: router({
     me: locatorProcedure.query(async ({ ctx }) => guarded(() => locatorFor(ctx.agentTeamId))),
     /** Everything, best-paying first. */
@@ -132,7 +135,7 @@ export const apartmentsRouter = router({
     markGuestCard: locatorProcedure.input(z.object({ id, sent: z.boolean().optional(), confirmed: z.boolean().optional() }))
       .mutation(async ({ ctx, input }) => guarded(async () => { await markGuestCard(ctx.agentTeamId, { id: input.id, ...(input.sent ? { sentOn: chicagoToday() } : {}), ...(input.confirmed ? { confirmedOn: chicagoToday() } : {}) }); return { ok: true as const }; })),
     /** Saves the picked communities for a client and returns the link and the message to send. */
-    sendOptions: locatorProcedure.input(z.object({ clientId: id, propertyIds: z.array(id).min(1).max(25), note: optionalText(500) }))
+    sendOptions: locatorProcedure.input(z.object({ clientId: id, propertyIds: z.array(id).min(1).max(25), note: optionalText(500), pickNotes: z.record(z.string().regex(/^\d+$/), z.string().trim().max(400)).optional() }))
       .mutation(async ({ ctx, input }) => guarded(() => createClientList(ctx.agentTeamId, { ...input, baseUrl: siteOrigin(ctx.req) }))),
     /** What a property pays, as just confirmed by this locator (stamped with today's date). */
     confirmCommission: locatorProcedure.input(z.object({ propertyId: id, sendPercent: z.number().int().min(0).max(300).nullable().optional(), escortPercent: z.number().int().min(0).max(300).nullable().optional(), flatFee: dollars.nullable().optional(), bonusAmount: dollars.nullable().optional(), bonusNote: optionalText(255), bonusExpiresOn: day.nullable().optional(), commissionNote: optionalText(500) }))

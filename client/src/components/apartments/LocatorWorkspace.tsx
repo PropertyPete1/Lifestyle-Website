@@ -136,7 +136,7 @@ export function LocatorWorkspace() {
                     <a href={mapsHref(`${property.name}, ${property.address}`)} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-start gap-1.5 text-sm text-gold underline underline-offset-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0" />{property.address}</a></div>
                   <div className="shrink-0 text-right" data-apt-pay="true"><span className="block text-[11px] text-muted-foreground">pays up to</span><span className="font-serif text-3xl text-gold">{pays > 0 ? aptMoney(pays) : "?"}</span>{pays > 0 && <span className="block max-w-[11rem] text-[11px] leading-tight text-muted-foreground">{payMath(property, plans)}</span>}</div>
                 </div>
-                <p className="mt-2 text-sm font-medium">{rates || "No commission on file"}{property.minLeaseMonths ? ` · ${property.minLeaseMonths}-month lease` : ""}</p>
+                <p className="mt-2 text-sm font-medium">{rates || "No pay on file: check Smart Apartment Data, then tap Update pay"}{property.minLeaseMonths ? ` · ${property.minLeaseMonths}-month lease` : ""}</p>
                 <p className={`mt-1 text-xs ${stale ? "text-destructive" : "text-muted-foreground"}`}>{age == null ? "Pay never confirmed: confirm before you quote it" : stale ? `Pay last confirmed ${age} days ago: confirm it again` : `Pay confirmed ${age === 0 ? "today" : `${age} day${age === 1 ? "" : "s"} ago`}`}{property.registrationRequired ? " · Register the client before the visit" : ""}</p>
                 {property.commissionNote && <p className="mt-1 text-xs text-muted-foreground">{property.commissionNote}</p>}
                 <div className="mt-3"><AptBadges item={{ secondChance: accepts(property.brokenLease) || accepts(property.eviction) || accepts(property.felony), acceptsBrokenLease: accepts(property.brokenLease), acceptsEviction: accepts(property.eviction), acceptsFelony: accepts(property.felony), incomeRestricted: property.incomeRestricted, incomeMultiple: property.incomeMultiple }} /></div>
@@ -178,6 +178,14 @@ export function LocatorWorkspace() {
         </li>;
       })}</ul>
 
+      <h2 className="mt-8 font-serif text-2xl">Lists you sent</h2>
+      {(book.data?.sentLists.length ?? 0) === 0 && <p className="mt-2 text-sm text-muted-foreground">Nothing sent yet. Pick communities on the search and tap "Send to a client".</p>}
+      <ul className="mt-3 space-y-2">{book.data?.sentLists.map((list) => <li key={list.id} className={`border bg-card p-3 text-sm ${list.liked.length ? "border-gold" : "border-border"}`} data-apt-sent-list={list.liked.length}>
+        <div className="flex flex-wrap items-center justify-between gap-3"><span>{clients.find((entry) => entry.id === list.clientId)?.name ?? "Client"}: {list.count} apartment{list.count === 1 ? "" : "s"}</span><span className={list.opened ? "text-gold" : "text-muted-foreground"}>{list.opened ? "Opened" : "Not opened yet"}</span></div>
+        {list.liked.length > 0 && <p className="mt-1 font-medium">Liked: {list.liked.map((entry) => entry.property).join(", ")}</p>}
+        <a href={`/apartments/list/${list.token}`} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-gold underline underline-offset-2">Open their list</a>
+      </li>)}</ul>
+
       <h2 className="mt-8 font-serif text-2xl">Guest cards</h2>
       {(book.data?.guestCards.length ?? 0) === 0 && <p className="mt-2 text-sm text-muted-foreground">No guest cards yet. Register a client from "Guest card" on a community before they visit.</p>}
       <ul className="mt-3 space-y-2">{book.data?.guestCards.map((card) => <li key={card.id} className="flex flex-wrap items-center justify-between gap-3 border border-border bg-card p-3 text-sm">
@@ -207,10 +215,12 @@ export function LocatorWorkspace() {
       <Button type="submit" disabled={guestCard.isPending} className={`w-full ${GOLD_BUTTON}`}>Write the guest card</Button>
     </form>}</Sheet>}
 
-    {sheet?.kind === "send" && <Sheet title={`Send ${picks.length} apartment${picks.length === 1 ? "" : "s"} to a client`} onClose={() => setSheet(null)}>{clients.length === 0 ? noClients : <form className="space-y-3" onSubmit={(event) => { const data = form(event); const client = clients.find((entry) => entry.id === Number(text(data, "clientId"))); sendOptions.mutate({ clientId: Number(text(data, "clientId")), propertyIds: picks, note: text(data, "note") || null }, { onSuccess: (made) => { setPicks([]); setSheet({ kind: "letter", title: `Options for ${client?.name ?? "your client"}`, letter: made.message, sms: { phone: client?.phone ?? null } }); } }); }}>
+    {sheet?.kind === "send" && <Sheet title={`Send ${picks.length} apartment${picks.length === 1 ? "" : "s"} to a client`} onClose={() => setSheet(null)}>{clients.length === 0 ? noClients : <form className="space-y-3" onSubmit={(event) => { const data = form(event); const client = clients.find((entry) => entry.id === Number(text(data, "clientId"))); sendOptions.mutate({ clientId: Number(text(data, "clientId")), propertyIds: picks, note: text(data, "note") || null, pickNotes: Object.fromEntries(picks.flatMap((id) => { const why = text(data, `why-${id}`); return why ? [[String(id), why]] : []; })) }, { onSuccess: (made) => { setPicks([]); setSheet({ kind: "letter", title: `Options for ${client?.name ?? "your client"}`, letter: made.message, sms: { phone: client?.phone ?? null } }); } }); }}>
       <p className="text-sm text-muted-foreground">Your client gets one link with the names, addresses, rents and specials, and the line telling them to name you as their locator. It never shows what a community pays.</p>
       {clientSelect()}
       <textarea name="note" maxLength={500} placeholder="A note shown at the top of their list (optional)" className="min-h-20 w-full border border-border bg-card p-3 text-sm" />
+      <p className="text-xs uppercase tracking-widest text-muted-foreground">Why you picked each one (optional, shown to the client)</p>
+      {picks.map((id) => <label key={id} className="block text-sm">{items.find((item) => item.property.id === id)?.property.name ?? `Community ${id}`}<Input name={`why-${id}`} maxLength={400} placeholder="Closest to your work, and the special covers your first month" className={`${FIELD} mt-1`} /></label>)}
       <Button type="submit" disabled={sendOptions.isPending} className={`w-full ${GOLD_BUTTON}`}>Make the link</Button>
     </form>}</Sheet>}
 

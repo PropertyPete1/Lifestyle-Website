@@ -1,10 +1,10 @@
 import express, { type Request, type RequestHandler, type Response } from "express";
-import { eq } from "drizzle-orm";
-import { dealCommunities } from "../drizzle/schema";
+import { eq, inArray } from "drizzle-orm";
+import { dealCommunities, dealHomes } from "../drizzle/schema";
 import { getDb } from "./db";
 import { officialHostFor } from "./dealsAdapters";
-import { checkSuppliedCommunity, officialSuppliedUrl, suppliedImportSchema, suppliedUrlKey, SUPPLIED_IMPORT_FUTURE_SKEW_MS, type SuppliedImport } from "./dealsAdapters.supplied";
-import { authenticateSuppliedImportKey, latestSuppliedImport, recordSuppliedImportCall, storeSuppliedImport } from "./dealsSuppliedStore";
+import { checkSuppliedCommunity, officialSuppliedUrl, suppliedCommunitySchema, suppliedEnvelopeSchema, suppliedForSaleCount, suppliedUrlKey, SUPPLIED_IMPORT_FUTURE_SKEW_MS, SUPPLIED_ZERO_CONFIRM_GAP_MS, type SuppliedCommunity, type SuppliedImport } from "./dealsAdapters.supplied";
+import { authenticateSuppliedImportKey, latestSuppliedImport, recordSuppliedImportCall, recordSuppliedImportFailures, storeSuppliedImport, suppliedSourceFor, type SuppliedImportFailure } from "./dealsSuppliedStore";
 import { refreshSuppliedCommunities, type RefreshResult } from "./dealsSync";
 
 /**
@@ -57,65 +57,109 @@ export function suppliedImportBodyLimit(): RequestHandler {
 }
 
 export type SuppliedCommunityOutcome = {
+  /** The community's page as sent; "" when the entry had no readable link (see `index`). */
   communityUrl: string;
+  /** The entry's position in the payload's `communities` list. */
+  index: number;
   /** published: live from this import; held: stored, the community holds (last good data stays); skipped: stored, the community is paused, manual or archived; rejected: not stored; stored_not_processed: stored, not refreshed (builder busy). */
   status: "published" | "held" | "skipped" | "rejected" | "stored_not_processed";
   reasons: string[];
   problems: string[];
   homesForSale: number;
   homesSold: number;
-  homesShownCount: number;
+  homesShownCount: number | null;
   /** The community's incentive hold after this import, if any (the offer is judged by the same rules as a read). */
   incentiveHold: string | null;
+  /** True when reading this community's page again and sending it alone can fix it (an unread or partial entry, a busy builder). False when it published or needs a person. */
+  retry: boolean;
+  /** What is on the site for this community after this call, read back from the database: null when the page is not a known community. */
+  live: { homesAvailable: number; lastPublishedAt: string | null } | null;
 };
 
 export type SuppliedImportResponse = { ok: boolean; builder: string; capturedAt: string; communities: SuppliedCommunityOutcome[] };
 
+/** A community entry of a payload that did not pass the schema: never stored, reported back by position. */
+export type UnreadSuppliedCommunity = { index: number; communityUrl: string | null; problems: string[] };
+
+const RETRY_HOLDS = new Set(["supplied_import_incomplete", "supplied_import_out_of_bounds", "supplied_import_invalid_home", "supplied_import_duplicate_home"]);
+
 /**
- * Stores each community of a validated payload and refreshes them through the
- * sync, awaited. Unknown communities and pages off the builder's site are
- * reported and never created; an import older than the stored one is refused
- * (no rolling back); a community absent from the payload is not touched.
+ * Stores each valid community of a payload and refreshes them through the sync, awaited. Each community stands on
+ * its own: one that could not be read (`unread`), is unknown, off the builder's site or older than the stored import
+ * is reported and leaves the others, and its own last good listings, untouched. A community absent from the payload
+ * is not touched. The same capture sent again is not stored twice. Every community that was not published is written
+ * to the failure trail with its reason, and the response says what is live after the call.
  */
-export async function processSuppliedImport(builder: string, payload: SuppliedImport, options: { now?: Date; leaseWaitMs?: number; pollMs?: number } = {}): Promise<{ processed: boolean; response: SuppliedImportResponse }> {
+export async function processSuppliedImport(builder: string, payload: SuppliedImport, options: { now?: Date; leaseWaitMs?: number; pollMs?: number; unread?: readonly UnreadSuppliedCommunity[]; indexes?: readonly number[] } = {}): Promise<{ processed: boolean; response: SuppliedImportResponse }> {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
   const now = options.now ?? new Date();
   const capturedAt = new Date(payload.capturedAt);
   const rows = await db.select().from(dealCommunities).where(eq(dealCommunities.builder, builder));
   const byKey = new Map(rows.map((row) => [suppliedUrlKey(row.sourceUrl), row]));
+  const known = (value: string | null) => { const url = value ? officialSuppliedUrl(builder, value) : null; return url ? byKey.get(suppliedUrlKey(url.toString())) ?? null : null; };
   const outcomes: SuppliedCommunityOutcome[] = [];
+  const ids = new Map<SuppliedCommunityOutcome, number>();
   const stored: Array<{ outcome: SuppliedCommunityOutcome; communityId: number }> = [];
-  for (const community of payload.communities) {
+  for (const entry of options.unread ?? []) {
+    const outcome: SuppliedCommunityOutcome = { communityUrl: entry.communityUrl ?? "", index: entry.index, status: "rejected", reasons: ["invalid_payload"], problems: [...entry.problems], homesForSale: 0, homesSold: 0, homesShownCount: null, incentiveHold: null, retry: true, live: null };
+    outcomes.push(outcome);
+    const row = known(entry.communityUrl);
+    if (row) ids.set(outcome, row.id);
+  }
+  for (let position = 0; position < payload.communities.length; position++) {
+    const community = payload.communities[position]!;
     const forSale = community.homes.filter((home) => home.status !== "sold").length;
-    const outcome: SuppliedCommunityOutcome = { communityUrl: community.communityUrl, status: "rejected", reasons: [], problems: [], homesForSale: forSale, homesSold: community.homes.length - forSale, homesShownCount: community.homesShownCount, incentiveHold: null };
+    const outcome: SuppliedCommunityOutcome = { communityUrl: community.communityUrl, index: options.indexes?.[position] ?? position, status: "rejected", reasons: [], problems: [], homesForSale: forSale, homesSold: community.homes.length - forSale, homesShownCount: community.homesShownCount, incentiveHold: null, retry: false, live: null };
     outcomes.push(outcome);
     const url = officialSuppliedUrl(builder, community.communityUrl);
     if (!url) { outcome.reasons.push("unofficial_url"); outcome.problems.push(`communityUrl is not an https page on ${officialHostFor(builder) ?? "the builder's site"}`); continue; }
     const row = byKey.get(suppliedUrlKey(url.toString()));
     if (!row) { outcome.reasons.push("unknown_community"); outcome.problems.push("no community with this page is set up in Admin; it was not created"); continue; }
+    ids.set(outcome, row.id);
     const latest = await latestSuppliedImport(row.id);
     if (latest && latest.capturedAt.getTime() > capturedAt.getTime()) { outcome.reasons.push("older_than_stored"); outcome.problems.push(`a newer import (captured ${latest.capturedAt.toISOString()}) is already stored`); continue; }
     // The rules the refresh applies, reported to the agent now (the refresh itself is the authority).
     outcome.problems.push(...checkSuppliedCommunity(builder, { capturedAt, community }, now).problems);
     await storeSuppliedImport({ communityId: row.id, builder, capturedAt, receivedAt: now, community: { ...community, communityUrl: row.sourceUrl } });
     outcome.status = "stored_not_processed";
+    outcome.retry = true;
     stored.push({ outcome, communityId: row.id });
   }
+  outcomes.sort((a, b) => a.index - b.index);
   const refreshed = await refreshSuppliedCommunities(builder, stored.map((entry) => entry.communityId), { now, leaseWaitMs: options.leaseWaitMs, pollMs: options.pollMs });
+  const after = ids.size ? await db.select().from(dealCommunities).where(eq(dealCommunities.builder, builder)) : [];
   if (refreshed.processed) {
-    const after = stored.length ? await db.select().from(dealCommunities).where(eq(dealCommunities.builder, builder)) : [];
     for (const { outcome, communityId } of stored) {
       const result: RefreshResult | undefined = refreshed.results.find((entry) => entry.communityId === communityId);
       const row = after.find((entry) => entry.id === communityId);
       outcome.incentiveHold = row?.incentiveHoldReason ?? null;
+      outcome.retry = false;
       if (!result) { outcome.status = "skipped"; outcome.reasons.push("community_not_found"); continue; }
       if (result.skipped) { outcome.status = "skipped"; outcome.reasons.push(result.skipped); outcome.problems.push(result.skipped === "manual_mode" ? "the community is in Manual mode in Admin; switch it back to automatic to use imports" : `the community is ${result.skipped.replace(/_/g, " ")} in Admin`); continue; }
       if (result.ok) { outcome.status = "published"; continue; }
       outcome.status = "held";
       outcome.reasons.push(...(result.reason ?? "").split(",").map((part) => part.trim()).filter(Boolean));
+      // "No homes for sale" from a complete page is not a fault to retry: it waits for a second, separate visit to agree.
+      const source = await suppliedSourceFor(builder, communityId);
+      const unconfirmedZero = source?.latest && !outcome.problems.length && suppliedForSaleCount(source.latest.community) === 0;
+      if (unconfirmedZero) outcome.problems.push(`no homes for sale: taken only when a second visit at least ${SUPPLIED_ZERO_CONFIRM_GAP_MS / 3_600_000} hours later also finds none (tomorrow's run confirms it); the listings stay as they were until then`);
+      else outcome.retry = outcome.reasons.some((reason) => RETRY_HOLDS.has(reason));
     }
   }
+  // What actually landed, read back: the homes for sale on the site and the last publish time of each known community.
+  const liveIds = Array.from(new Set(ids.values()));
+  const counts = new Map<number, number>();
+  if (liveIds.length) for (const home of await db.select({ communityId: dealHomes.communityId, status: dealHomes.status }).from(dealHomes).where(inArray(dealHomes.communityId, liveIds))) if (home.status === "available") counts.set(home.communityId, (counts.get(home.communityId) ?? 0) + 1);
+  const failures: SuppliedImportFailure[] = [];
+  for (const outcome of outcomes) {
+    const id = ids.get(outcome);
+    if (id === undefined) continue;
+    const row = after.find((entry) => entry.id === id);
+    outcome.live = { homesAvailable: counts.get(id) ?? 0, lastPublishedAt: row?.lastSuccessfulSyncAt?.toISOString() ?? null };
+    if (outcome.status !== "published" && outcome.status !== "skipped") failures.push({ communityId: id, status: outcome.status, reasons: outcome.reasons.length ? outcome.reasons : [outcome.status], capturedAt: capturedAt.toISOString() });
+  }
+  await recordSuppliedImportFailures(failures, now);
   return { processed: refreshed.processed, response: { ok: refreshed.processed && outcomes.every((outcome) => outcome.status === "published"), builder, capturedAt: capturedAt.toISOString(), communities: outcomes } };
 }
 
@@ -163,18 +207,37 @@ async function handleSuppliedImport(req: Request, res: Response, options: { leas
     const body = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
     let json: unknown;
     try { json = JSON.parse(body); } catch { return res.status(400).json({ ok: false, error: "invalid_json" }); }
-    const parsed = suppliedImportSchema.safeParse(json);
-    if (!parsed.success) {
+    const issueLines = (issues: readonly { path: PropertyKey[]; message: string }[], prefix = "") => issues.slice(0, 50).map((issue) => ({ path: `${prefix}${issue.path.map(String).join(".")}`, message: issue.message }));
+    const envelope = suppliedEnvelopeSchema.safeParse(json);
+    if (!envelope.success) {
       // Paths and messages only, never the submitted values.
-      return res.status(400).json({ ok: false, error: "invalid_payload", issues: parsed.error.issues.slice(0, 50).map((issue) => ({ path: issue.path.join("."), message: issue.message })) });
+      return res.status(400).json({ ok: false, error: "invalid_payload", issues: issueLines(envelope.error.issues) });
     }
-    const payload = parsed.data;
-    if (payload.builder !== builder) return res.status(403).json({ ok: false, error: "builder_does_not_match_key" });
-    const capturedAt = new Date(payload.capturedAt);
+    if (envelope.data.builder !== builder) return res.status(403).json({ ok: false, error: "builder_does_not_match_key" });
+    const capturedAt = new Date(envelope.data.capturedAt);
     if (capturedAt.getTime() - now.getTime() > SUPPLIED_IMPORT_FUTURE_SKEW_MS) return res.status(400).json({ ok: false, error: "captured_at_in_future" });
-    const keys = payload.communities.map((community) => suppliedUrlKey(community.communityUrl));
+    // Each community is judged on its own: one the agent could not read never costs the others their update.
+    const valid: SuppliedCommunity[] = [];
+    const indexes: number[] = [];
+    const unread: UnreadSuppliedCommunity[] = [];
+    const issues: Array<{ path: string; message: string }> = [];
+    envelope.data.communities.forEach((entry, index) => {
+      const parsed = suppliedCommunitySchema.safeParse(entry);
+      if (parsed.success) { valid.push(parsed.data); indexes.push(index); return; }
+      const lines = issueLines(parsed.error.issues, `communities.${index}.`).map((line) => ({ ...line, path: line.path.replace(/\.$/, "") }));
+      issues.push(...lines);
+      const link = (entry as { communityUrl?: unknown } | null)?.communityUrl;
+      unread.push({ index, communityUrl: typeof link === "string" && link.trim() && link.length <= 2048 ? link.trim() : null, problems: lines.slice(0, 20).map((line) => `${line.path}: ${line.message}`) });
+    });
+    const keys = [...valid.map((community) => community.communityUrl), ...unread.flatMap((entry) => entry.communityUrl ? [entry.communityUrl] : [])].map((link) => suppliedUrlKey(link));
     if (new Set(keys).size !== keys.length) return res.status(400).json({ ok: false, error: "duplicate_community" });
-    const { processed, response } = await processSuppliedImport(builder, payload, { now, leaseWaitMs: options.leaseWaitMs, pollMs: options.pollMs });
+    const payload: SuppliedImport = { builder: envelope.data.builder, capturedAt: envelope.data.capturedAt, communities: valid };
+    const { processed, response } = await processSuppliedImport(builder, payload, { now, leaseWaitMs: options.leaseWaitMs, pollMs: options.pollMs, unread, indexes });
+    // Nothing in the payload could be read: the old answer (400 with the paths), now with each community's line and its failure on record.
+    if (!valid.length) {
+      console.info(`[deals-import] ${unread.length} communities: none readable`);
+      return res.status(400).json({ ok: false, error: "invalid_payload", issues: issues.slice(0, 50), communities: response.communities });
+    }
     const count = (status: SuppliedCommunityOutcome["status"]) => response.communities.filter((community) => community.status === status).length;
     // Counts only: no key, builder text, link or address reaches the log.
     console.info(`[deals-import] ${response.communities.length} communities: ${count("published")} published, ${count("held")} held, ${count("skipped")} skipped, ${count("rejected")} rejected${processed ? "" : ", not processed (builder busy)"}`);

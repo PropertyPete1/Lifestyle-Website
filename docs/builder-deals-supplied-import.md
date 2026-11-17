@@ -42,6 +42,47 @@ re-reads the stored import each day, so an agent that stops posting is noticed:
 after 36 hours the community holds `supplied_import_stale` and the last good
 data stays as it was.
 
+## Daily reliability (Nov 17, 2026)
+
+Legend's import failed two days running: one call answered 400 for the whole
+payload because three communities had null counts, so the seven communities the
+agent had read were discarded with them, and nobody was told. Since then:
+
+- **Each community stands on its own.** Only the outside of the payload
+  (`builder`, `capturedAt`, the list) is judged as a whole. Each community entry
+  is then judged alone: the ones that pass are stored and refreshed; one that
+  does not (null count, missing list, wrong type) is `rejected` with
+  `invalid_payload` and the paths of its problems, and costs the others nothing.
+  Only a payload where **no** community could be read answers 400.
+- **Last good listings stay.** A rejected or held community keeps the listings
+  and the stored import it had. Nothing is marked sold on a failed read.
+- **Zero is not missing.** Missing data (null `homesShownCount`, no `homes`
+  list) is never read as "no homes". A complete page with no homes for sale is
+  taken only when a second visit **at least 6 hours later** also finds none, so
+  a retry minutes after a list failed to load cannot confirm itself.
+- **Replay is safe.** The same capture sent again (same `capturedAt`) replaces
+  itself instead of being stored twice; sent word for word it changes nothing.
+  An older capture never rolls a community back.
+- **What landed is read back.** Each community in the response carries `live`
+  (homes for sale on the site and the last publish time, read from the database
+  after the call) and `retry`.
+- **Failures are on record.** Every community a call did not publish is written
+  to `deal_events` (`supplied_import_failed`: community id, status, reasons,
+  capture time; no home, address or key). Admin, Supplied imports shows each
+  community's homes for sale, last publish and last failure.
+- **A bad morning is flagged the same morning.** The 7:00 AM health check
+  e-mails the alert recipients (internal only) one line per builder when a
+  community had no import in 26 hours (missed run), sent an import that could
+  not be published, or could not be read and was not sent again. Community ids
+  and counts only.
+
+**What this depends on.** The app cannot read Legend itself (403) and does not
+try to. The daily read is the owner's browser agent's scheduled run; the app
+only receives. If that run does not happen (the agent's schedule is off, its
+browser cannot open the pages, the key was regenerated), nothing arrives: the
+listings stay as they were, the 7 AM check flags it that morning, and after 36
+hours each community holds `supplied_import_stale`.
+
 ## Endpoint
 
 ```
@@ -110,7 +151,9 @@ listing the page no longer shows.
 | Rule | Outcome |
 | --- | --- |
 | Key missing, wrong or revoked | 401, nothing stored |
-| JSON invalid, unknown field, wrong type | 400 with the paths of the problems (never the values) |
+| JSON invalid; unknown field or wrong type outside the communities (`builder`, `capturedAt`, the list itself) | 400 with the paths of the problems (never the values) |
+| One community entry invalid (null count, missing list, unknown field, wrong type) | that community `rejected`, `invalid_payload`, `retry: true`; the others are processed |
+| Every community entry invalid | 400 `invalid_payload` with the paths and each community's line; nothing stored |
 | `builder` differs from the key's builder | 403 |
 | `capturedAt` more than 10 minutes in the future | 400 `captured_at_in_future` |
 | The same community twice in one payload | 400 `duplicate_community` |
@@ -121,7 +164,7 @@ listing the page no longer shows.
 | `capturedAt` more than 36 hours before the refresh | hold `supplied_import_stale` |
 | Price outside 50,000 to 5,000,000 (or not whole dollars), beds outside 1 to 10 (or not whole), baths outside 1 to 10 or not in steps of 0.5, sqft outside 400 to 15,000, garage outside 0 to 6 (or not whole) | hold `supplied_import_out_of_bounds` |
 | Home link off the builder's site, the community page itself, or a link not under this community's page (a "nearby homes" card from another community), address without a house number and street, unreadable `moveIn`, an under-construction home "ready now", a photo off the builder's hosts | hold `supplied_import_invalid_home` |
-| No homes for sale, unless the previous import (captured earlier) also had none: a list that failed to load must not sweep every home to sold | hold `supplied_import_incomplete` (a sold-out community publishes on its second empty import) |
+| No homes for sale, unless the previous import (captured at least 6 hours earlier) also had none: a list that failed to load must not sweep every home to sold | hold `supplied_import_incomplete` (a sold-out community publishes on its second empty import) |
 | Two homes with the same link or the same street address | hold `supplied_import_duplicate_home` |
 | Community not in the payload | untouched (no sold marking) |
 | Offer that cannot be published (no APR, private text left, ...) | homes publish; the offer is held for "Accept this update", exactly as for a read |
@@ -146,6 +189,11 @@ import is stored; post again). Body:
   ]
 }
 ```
+
+`index` is the entry's position in the payload. `retry` is true when reading
+that community's page again and sending it alone can fix it. `live` is what is
+on the site for that community after the call (`homesAvailable`,
+`lastPublishedAt`), or null for a page that is not a known community.
 
 `status` is `published`, `held` (stored; the community holds), `skipped`
 (stored; the community is paused, archived or in Manual mode in Admin),
@@ -227,4 +275,11 @@ hold after this import, if any (it needs an admin's review, not a new import).
 > Do not invent or estimate any value: leave an optional field out (or null)
 > rather than guess. Read the response: report any community whose `status` is
 > not `published`, with its `reasons` and `problems`. On 503, wait two minutes
-> and send the same body again. Never send more than a few calls an hour.
+> and send the same body again. If a page will not load or you cannot read its
+> count, **leave that community out** of the payload rather than sending nulls.
+> After the first POST, for each community that was left out or came back with
+> `retry: true`: open its page again, read it again, and send a new POST with
+> only those communities and a new `capturedAt`. Do this at most **twice**, ten
+> minutes apart, then stop and report which communities still failed and why.
+> Never retry a community with `retry: false`. Never send more than six calls in
+> a run.

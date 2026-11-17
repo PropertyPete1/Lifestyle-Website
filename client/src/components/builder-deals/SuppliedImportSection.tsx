@@ -72,6 +72,8 @@ export function SuppliedImportSection() {
                       <span className={community.lastCapturedAt ? "text-muted-foreground" : "text-destructive"}>{community.lastCapturedAt ? `Last import captured ${displayDate(community.lastCapturedAt)}` : "No import yet"}</span>
                     </div>
                     <button type="button" className="mt-1 block max-w-full break-all text-left text-muted-foreground underline-offset-2 hover:underline" onClick={() => copy(community.sourceUrl)}>{community.sourceUrl}</button>
+                    <p className="mt-1 text-muted-foreground" data-supplied-live>{community.homesAvailable} home{community.homesAvailable === 1 ? "" : "s"} for sale on the site. {community.lastPublishedAt ? `Last published ${displayDate(community.lastPublishedAt)}.` : "Never published from an import."}</p>
+                    {community.lastFailure && <p className="mt-1 text-destructive" data-supplied-failure>Last import failed {displayDate(community.lastFailure.at)}: {community.lastFailure.reasons.join(", ").replace(/_/g, " ") || community.lastFailure.status.replace(/_/g, " ")}. The listings above are the last good ones.</p>}
                     {community.catalogHoldReason && !community.catalogHoldReason.startsWith("dismissed:") && <p className="mt-1 text-destructive">Hold: {community.catalogHoldReason}</p>}
                   </li>
                 ))}

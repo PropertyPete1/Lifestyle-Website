@@ -46,6 +46,7 @@ export function heldIncentiveCountsAsShowingLine(row: { holdReason: string | nul
   return !row.confirmedAt || row.confirmedAt.getTime() > now.getTime() - lapseDays * 86_400_000;
 }
 import { activeCatalogHold } from "./dealsSync";
+import { suppliedImportHealth } from "./dealsSuppliedStore";
 import { fubHeaders } from "./fub";
 
 export { syncKnownAgentsFromFub } from "./dealsKnownAgents";
@@ -721,6 +722,9 @@ export async function builderDealsHealthCheck(now = new Date(), options: HealthC
   else {
     if (operational.trecImport.state === "attention") attention.push(operational.trecImport.completedAt ? `TREC file is ${hoursLabel(operational.trecImport.ageHours)} old (limit ${thresholds.trecImportHours}h).` : "No TREC import has completed yet.");
     if (operational.sourceUpdates.staleCommunities > 0) attention.push(`Last builder update is over ${thresholds.communityUpdateHours / 24} days old for ${operational.sourceUpdates.staleCommunities} of ${operational.sourceUpdates.activeCommunities} active communities (oldest ${hoursLabel(operational.sourceUpdates.oldestAgeHours)}).`);
+    // A builder that takes imports depends on the owner's browser agent posting once a day: a missed or unpublishable
+    // run is e-mailed the same morning (Nov 17, 2026: two failed days went unnoticed). Internal recipients only.
+    for (const entry of await suppliedImportHealth(now).catch(() => [])) urgentPush(entry.line);
     if (operational.sourceUpdates.heldCommunities > 0) attention.push(`${operational.sourceUpdates.heldCommunities} community update${operational.sourceUpdates.heldCommunities === 1 ? " is" : "s are"} held, which does not count as on schedule.`);
     const drainError = operational.photos.drainError ? operational.photos.drainError.replaceAll("_", " ") : null;
     if (operational.photos.drainStalledMinutes !== null) attention.push(`Photo processing is stuck: no photo moved in ${operational.photos.drainStalledMinutes} minutes while ${operational.photos.pending - operational.photos.awaitingRegion} are queued${drainError ? ` (last run: ${drainError})` : ""}.`);

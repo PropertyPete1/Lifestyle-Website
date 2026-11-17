@@ -1,6 +1,6 @@
 {
   "date": "2026-11-16",
-  "generated_at": "2026-11-16T15:01:15Z",
+  "generated_at": "2026-11-17T01:40:05Z",
   "timezone": "America/Chicago",
   "days": {},
   "unavailable": [
@@ -10,7 +10,7 @@
     },
     {
       "metric": "page_views, unique_visitors, top_pages, lead_submissions (today 2026-11-16)",
-      "reason": "query failed: ER_UNKNOWN_ERROR: Access denied. Please check your user name and password. See https://docs.pingcap.com/tidbcloud/select-cluster-tier#user-name-prefix (in Failed query: select SUM(`kind` = 'view'), COUNT(DISTINCT CASE WHEN `kind` = 'view' AND `visitorId` <> '' THEN `visitorI)"
+      "reason": "query failed: ER_UNKNOWN_ERROR: Access denied. Please check your user name and password. See https://docs.pingcap.com/tidbcloud/select-cluster-tier#user-name-prefix (in Failed query: select `path`, COUNT(*), COUNT(DISTINCT CASE WHEN `visitorId` <> '' THEN `visitorId` END) from `page_event)"
     },
     {
       "metric": "page_views, unique_visitors, top_pages, lead_submissions (yesterday 2026-11-15)",

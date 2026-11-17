@@ -15,6 +15,15 @@ export function teamInitials(name: string): string {
 export default function TeamPhoto({ photo, name, className }: { photo: string | null | undefined; name: string; className: string; fallbackClassName?: string }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => { setFailed(false); }, [photo]);
+  // Nov 16, 2026 (Peter: "keep Tanya's full body, her original is good"): a photo stored with "#full" is shown whole,
+  // never cropped to the card's shape and never stretched; a soft, blurred copy of it fills the rest of the card.
+  if (photo && !failed && /#full$/.test(photo)) {
+    const src = photo.replace(/#full$/, "");
+    return <>
+      <img src={src} alt="" aria-hidden="true" data-team-photo-backdrop="true" className="pointer-events-none absolute inset-0 h-full w-full scale-125 object-cover blur-xl brightness-[0.85]" />
+      <img src={src} alt={name} data-team-photo-full="true" className={`relative ${className.replace(/\bobject-cover\b/, "object-contain")}`} onError={() => setFailed(true)} />
+    </>;
+  }
   if (photo && !failed) return <img src={photo} alt={name} className={className} onError={() => setFailed(true)} />;
   return <span data-team-photo-fallback="true" role="img" aria-label={name} className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-card to-secondary">
     <span aria-hidden="true" className="pointer-events-none absolute inset-3 border border-gold/25" />

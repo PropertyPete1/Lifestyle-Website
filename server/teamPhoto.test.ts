@@ -28,6 +28,17 @@ describe("team cards", () => {
     expect(html).not.toContain("data-team-photo-fallback");
   });
 
+  it("shows a photo stored with #full whole: contained, never cropped or stretched, over a blurred copy of itself (Nov 16)", () => {
+    const html = renderToStaticMarkup(React.createElement(TeamPhoto, { photo: "/team/tanya-torres.webp#full", name: "Tanya Torres", className: "h-full w-full object-cover" }));
+    expect(html).toContain('data-team-photo-full="true"');
+    expect(html).toContain('data-team-photo-backdrop="true"');
+    expect(html).toMatch(/alt="Tanya Torres"[^>]*class="relative h-full w-full object-contain"|class="relative h-full w-full object-contain"[^>]*alt="Tanya Torres"/);
+    expect(html.match(/src="\/team\/tanya-torres\.webp"/g)).toHaveLength(2);
+    expect(html).not.toContain("#full");
+    // An ordinary headshot is unchanged.
+    expect(renderToStaticMarkup(React.createElement(TeamPhoto, { photo: "/team/laila.webp", name: "Laila Maria", className: "h-full w-full object-cover" }))).not.toContain("object-contain");
+  });
+
   it("frames the card on both team grids and drops 'Designated Broker' on /join", () => {
     const home = readFileSync(join(__dirname, "../client/src/pages/Home.tsx"), "utf-8");
     expect(home).toContain('<div className="relative flex aspect-[3/4] items-center justify-center overflow-hidden bg-secondary">');

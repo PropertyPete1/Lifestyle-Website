@@ -269,11 +269,20 @@ function standaloneCommunity(cache: Cache, community: URL): Json | null {
   });
   if (!entry) return null;
   const row = obj(entry[1])!;
-  return { name: row.name, city: row.city, url: row.url, communities: [{ __ref: entry[0] }], consultants: row.consultants, customPrice: row.customPrice, latitude: row.latitude, longitude: row.longitude };
+  return { name: row.name, city: row.city, url: row.url, communities: [{ __ref: entry[0] }], consultants: row.consultants, customPrice: row.customPrice, status: row.status, latitude: row.latitude, longitude: row.longitude };
 }
 
 /** The masterplan on the page (a standalone community counts as one of a single collection); null when the page's data carries neither. */
 const COMING_SOON = /^\s*coming\s+soon\s*$/i;
+
+/**
+ * Nov 17, 2026 (Waters Edge, held three weeks as a changed page): a community not yet selling carries the status
+ * COMING_SOON with no price wording at all ("Coming to Seguin, TX", price range 0 to 0). The status says it as plainly
+ * as a price that reads "Coming soon".
+ */
+function isComingSoon(row: Json): boolean {
+  return COMING_SOON.test(str(row.customPrice) ?? "") || /^coming[_\s]soon$/i.test(str(row.status) ?? "");
+}
 
 export function parseLennarCommunity(html: string, pageUrl: string): LennarPage | null {
   const community = asUrl(pageUrl);
@@ -349,7 +358,7 @@ export function parseLennarCommunity(html: string, pageUrl: string): LennarPage 
     seenHomes.add(pagePath(link));
     homes.push(homeOf(cache, home, link, city, record.zip, null));
   }
-  return { record, foreignPage, collections: collections.length, homes, foreignHome, homesAvailable: lennarHomesAvailable(html), comingSoon: COMING_SOON.test(str(mpc.customPrice) ?? ""), collectionsComingSoon: collections.length > 0 && collections.every((row) => COMING_SOON.test(str(row.customPrice) ?? "")), plans, foreignPlan };
+  return { record, foreignPage, collections: collections.length, homes, foreignHome, homesAvailable: lennarHomesAvailable(html), comingSoon: isComingSoon(mpc), collectionsComingSoon: collections.length > 0 && collections.every(isComingSoon), plans, foreignPlan };
 }
 
 /** The community's record from its page, for discovery; null when the page is not a community page. */

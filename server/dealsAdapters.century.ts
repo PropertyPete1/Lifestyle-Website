@@ -219,11 +219,15 @@ export class CenturyAdapter implements DealAdapter {
     if (!root || !centuryBusinessRecord(page.text)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     const cards = parseCenturyCards(page.text, root, community.toString(), now());
     // Without the ProductGroup the available-homes block is the inventory; a page with neither is not one the reader knows.
-    if (!records && !cards.hasAvailableSection) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // Nov 17, 2026 (Pinnacle at Cottonwood Creek, held two days): the page's only homes sit in "ALREADY TAKEN" (the
+    // former model, pending), with no available block and no ProductGroup. That is the builder saying nothing is for
+    // sale now, not a page the reader cannot read: the community is read with no homes, so a pending home stops showing.
+    const onlyTaken = !records && !cards.hasAvailableSection && cards.takenPaths.length > 0 && cards.availableCardCount === 0;
+    if (!records && !cards.hasAvailableSection && !onlyTaken) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     const homesRead = records ? records.homes : cards.available;
     // Without the ProductGroup nothing but the cards proves the inventory: an available block with no card the reader
     // can find (renamed card markup, cards rendered in the browser) is not read as a sold-out community.
-    if (!records && cards.available.length === 0) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    if (!records && cards.available.length === 0 && !onlyTaken) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (homesRead.length > CENTURY_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     // A variant of another community on the host (a nearby-homes block) is never this community's inventory.
     const base = community.pathname.replace(/\/+$/, "").toLowerCase();

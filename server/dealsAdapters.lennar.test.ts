@@ -237,6 +237,19 @@ describe("Lennar reader: adapter", () => {
     expect((await loadOfficialDeals(config, { fetcher: html(standalone(`${PATH}-two`)), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
   });
 
+  it("reads a standalone community whose status is COMING_SOON as coming soon, not as a changed page (Waters Edge, Nov 17)", async () => {
+    const cache = cacheOf({ homes: [], plans: [], collections: [COLLECTIONS[0]!] });
+    delete cache["MpcType:m_5000"];
+    cache.ROOT_QUERY = { __typename: "Query" };
+    cache["CommunityType:c_1"] = { ...(cache["CommunityType:c_1"] as object), name: "Fixture Edge", url: PATH, mpc: null, status: "COMING_SOON", customPrice: null, soAddress: null, address: "Fixture Dr & Highway 46", priceRange: [0, 0], city: { __ref: "CityType:ct_64_san antonio" }, latitude: 29.66, longitude: -98.04 };
+    const page = (data: unknown) => `<!DOCTYPE html><html><body><h1>Coming to Seguin, TX</h1><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script></body></html>`;
+    const data = { props: { pageProps: { pageType: "COMMUNITY", divisionNumber: "SANLEN", variables: { comnum: "40279", mpcid: 0 }, initialApolloState: cache } } };
+    expect((await loadOfficialDeals(config, { fetcher: html(page(data)), now: () => NOW })).holdReasons).toEqual(["community_coming_soon"]);
+    // The same page with the status ACTIVE and nothing listed is still a page the reader does not know.
+    cache["CommunityType:c_1"] = { ...(cache["CommunityType:c_1"] as object), status: "ACTIVE" };
+    expect((await loadOfficialDeals(config, { fetcher: html(page(data)), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+  });
+
   it("reads a home whose street carries a short tag (the Welcome Home Center, \"(WHC)\") at its street", async () => {
     const tagged = HOMES.map((home, index) => index === 0 ? { ...home, street: "8707 Fixture Crest (WHC)" } : home);
     const result = await loadOfficialDeals(config, { fetcher: html(communityPage({ homes: tagged })), now: () => NOW });

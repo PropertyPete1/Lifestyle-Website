@@ -90,6 +90,21 @@ describe("Century Communities reader: records", () => {
     for (const secret of ["Fixture", "78222", "centurycommunities", "Century", "Easton", "15177"]) expect(json).not.toContain(secret);
   });
 
+  it("reads a community whose only homes are in ALREADY TAKEN as having nothing for sale, not as a broken page (Nov 17)", async () => {
+    const takenOnly = `<!DOCTYPE html><html><head><title>Fixture Grove</title>
+${ld({ "@context": "https://schema.org", "@type": "HomeAndConstructionBusiness", "@id": `${COMMUNITY}#community`, name: "Fixture Grove", url: COMMUNITY, address: { "@type": "PostalAddress", streetAddress: "9106 Fixture Rdg", addressLocality: "San Antonio", addressRegion: "TX", postalCode: "78222" } })}
+</head><body><main><h1>Fixture Grove</h1>
+<section class="quick-move-in-commerce-container"><h2>ALREADY TAKEN</h2><p>Homes are selling fast!</p><div class="quick-move-in-card">${card(HOMES[1]!)}</div></section>
+</main></body></html>`;
+    const page = (body: string) => vi.fn(async () => new Response(body, { status: 200, headers: { "content-type": "text/html" } }));
+    const result = await loadOfficialDeals(config, { fetcher: page(takenOnly), now: () => NOW });
+    expect(result.holdReasons).toEqual([]);
+    expect(result.catalogOk).toBe(true);
+    expect(result.private.homes).toEqual([]);
+    // With no taken card either, the page proves nothing and is still held.
+    expect((await loadOfficialDeals(config, { fetcher: page(takenOnly.replace(/<div class="quick-move-in-card">[\s\S]*?<\/section>/, "</section>")), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+  });
+
   it("holds the run when the page is not a community page, when cards outnumber records, when a card has no completion, when the site is not Century's, or when it cannot be read", async () => {
     const reshaped = vi.fn(async () => new Response("<html><body>new layout</body></html>", { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: reshaped })).holdReasons).toEqual(["expected_community_container_not_found"]);

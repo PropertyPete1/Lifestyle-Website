@@ -2447,6 +2447,24 @@ function miCommunityGuid(html: string): string | null {
   return null;
 }
 
+/**
+ * The page's own address when M/I moved the community to another area: same host, same depth, same last segment (the
+ * community's name), a different area segment. Anything else (another community, another depth, another site) is not a move.
+ */
+export function miMovedCommunity(html: string, configured: URL): URL | null {
+  const root = parseHtmlElements(html);
+  const link = root ? descendants(root).find((element) => element.tag === "link" && (element.attributes.rel ?? "").toLowerCase() === "canonical" && element.attributes.href) : null;
+  const canonical = link ? asUrl(new URL(decodeHtmlEntities(link.attributes.href!), configured).toString()) : null;
+  if (!canonical || canonical.protocol !== "https:" || !sameOfficialHost(canonical, MI_HOST)) return null;
+  const mine = configured.pathname.replace(/\/+$/, "").toLowerCase().split("/");
+  const theirs = canonical.pathname.replace(/\/+$/, "").toLowerCase().split("/");
+  if (mine.length !== theirs.length || mine.length < 4 || mine.at(-1) !== theirs.at(-1) || mine.join("/") === theirs.join("/")) return null;
+  // Only the area segment (the one before the community) may differ.
+  if (mine.slice(0, -2).join("/") !== theirs.slice(0, -2).join("/")) return null;
+  canonical.search = ""; canonical.hash = "";
+  return canonical;
+}
+
 function miProductUrl(product: Record<string, unknown>, community: URL, type: "homes" | "plans" | "models"): URL | null {
   if (!(type === "plans" ? schemaType(product, "ProductModel") || schemaType(product, "Product") : schemaType(product, "Product"))) return null;
   if (typeof product.url !== "string") return null;
@@ -2638,7 +2656,7 @@ class MiHomesAdapter implements DealAdapter {
     const configuredCommunity = asUrl(config.sourceUrl);
     if (!configuredCommunity) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_source_url"]);
     if (!sameOfficialHost(configuredCommunity, MI_HOST)) return failedResult(config, fetchedAt, privateSnapshot, ["unsupported_official_host"]);
-    const community = configuredCommunity;
+    let community = configuredCommunity;
     const fetcher = options.fetcher ?? fetch;
     const communityPage = await getDocument(community.toString(), fetcher, "text/html,application/xhtml+xml", MI_HOST);
     if (!communityPage.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(communityPage, "community_fetch_failed")]);
@@ -2647,6 +2665,11 @@ class MiHomesAdapter implements DealAdapter {
       return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     }
 
+    // Nov 17, 2026 (Sandy Oaks Estates, held a week): M/I moved the community under another area
+    // (/south-san-antonio/sandy-oaks-estates -> /elmendorf/sandy-oaks-estates). The old address still serves the page,
+    // but every home and plan is now linked under the new one, so none matched and the run was held. The page names
+    // its own address (rel=canonical); when that is the same community under another area, it is the one read.
+    community = miMovedCommunity(communityPage.text, configuredCommunity) ?? configuredCommunity;
     privateSnapshot.communityFacts = parseCommunityFacts(communityPage.text);
     const discovered = discoverMiCommunityUrls(communityPage.text, community);
     const guid = miCommunityGuid(communityPage.text);

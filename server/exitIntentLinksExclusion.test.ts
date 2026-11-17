@@ -67,7 +67,7 @@ describe("exit-intent /links exclusion", () => {
   });
 
   it("keeps the exclusion scope explicit for private conversion funnels", () => {
-    expect(EXIT_INTENT_EXCLUDED_PATHS).toEqual(["/links", "/deals"]);
+    expect(EXIT_INTENT_EXCLUDED_PATHS).toEqual(["/links", "/deals", "/apartments"]);
     expect(isExitIntentExcluded("/deals/mine")).toBe(true);
   });
 });

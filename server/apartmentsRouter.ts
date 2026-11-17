@@ -113,6 +113,9 @@ export const apartmentsRouter = router({
   /** Renters: areas, rents, specials and what is accepted. Nothing that names a property or what it pays. */
   search: publicProcedure.input(searchInput).query(async ({ input }) => publicResults(await loadApartments(), input as AptSearch, chicagoToday())),
 
+  /** The cities with something to show, for the search box. */
+  cities: publicProcedure.query(async () => Array.from(new Set((await loadApartments()).filter((property) => property.active).map((property) => property.city))).sort()),
+
   /** A client's options from their locator's link: names and contacts of the picked communities, never what they pay. */
   list: publicProcedure.input(z.object({ token: z.string().regex(/^[a-f0-9]{48}$/) })).query(async ({ input }) => clientListByToken(input.token, chicagoToday())),
 

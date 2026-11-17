@@ -714,3 +714,122 @@ export const dealSuppliedImportCalls = mysqlTable("deal_supplied_import_calls", 
   builder: varchar("builder", { length: 80 }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("idx_deal_supplied_import_calls").on(t.builder, t.createdAt)]);
+
+/**
+ * APARTMENT LOCATING (shared/apartments.ts). Private: names, addresses, contacts and what a property pays a locator.
+ * A renter never receives a row of these; see publicApartment.
+ */
+export const aptProperties = mysqlTable("apt_properties", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Stable key of where the row came from ("manual:<slug>", "import:<source>:<id>"), so a re-import updates instead of duplicating. */
+  sourceKey: varchar("source_key", { length: 255 }).notNull().unique(),
+  name: varchar("name", { length: 190 }).notNull(),
+  managementCompany: varchar("management_company", { length: 190 }),
+  address: varchar("address", { length: 255 }).notNull(),
+  city: varchar("city", { length: 120 }).notNull(),
+  zip: varchar("zip", { length: 10 }),
+  areaLabel: varchar("area_label", { length: 120 }).notNull(),
+  lat: varchar("lat", { length: 32 }),
+  lng: varchar("lng", { length: 32 }),
+  phone: varchar("phone", { length: 40 }),
+  leasingEmail: varchar("leasing_email", { length: 320 }),
+  website: text("website"),
+  yearBuilt: int("year_built"),
+  unitCount: int("unit_count"),
+  /** Percent of one month's rent: 100 = one full month. */
+  sendPercent: int("send_percent"),
+  escortPercent: int("escort_percent"),
+  flatFee: int("flat_fee"),
+  minLeaseMonths: int("min_lease_months"),
+  bonusAmount: int("bonus_amount"),
+  bonusNote: varchar("bonus_note", { length: 255 }),
+  bonusExpiresOn: varchar("bonus_expires_on", { length: 10 }),
+  commissionNote: text("commission_note"),
+  commissionVerifiedOn: varchar("commission_verified_on", { length: 10 }),
+  registrationRequired: boolean("registration_required").default(true).notNull(),
+  invoiceEmail: varchar("invoice_email", { length: 320 }),
+  specialText: text("special_text"),
+  specialExpiresOn: varchar("special_expires_on", { length: 10 }),
+  brokenLease: mysqlEnum("broken_lease", ["yes", "no", "case_by_case", "unknown"]).default("unknown").notNull(),
+  eviction: mysqlEnum("eviction", ["yes", "no", "case_by_case", "unknown"]).default("unknown").notNull(),
+  felony: mysqlEnum("felony", ["yes", "no", "case_by_case", "unknown"]).default("unknown").notNull(),
+  misdemeanor: mysqlEnum("misdemeanor", ["yes", "no", "case_by_case", "unknown"]).default("unknown").notNull(),
+  minCreditScore: int("min_credit_score"),
+  /** Income required as tenths of the rent multiple (30 = three times the rent). */
+  incomeMultipleTenths: int("income_multiple_tenths"),
+  petPolicy: varchar("pet_policy", { length: 255 }),
+  amenities: text("amenities"), // JSON string array
+  active: boolean("active").default(true).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_apt_properties_city").on(t.city, t.active)]);
+
+export const aptFloorplans = mysqlTable("apt_floorplans", {
+  id: int("id").autoincrement().primaryKey(),
+  propertyId: int("property_id").notNull(),
+  name: varchar("name", { length: 120 }),
+  /** 0 is a studio. */
+  beds: int("beds").notNull(),
+  /** Tenths: 15 = one and a half baths. */
+  bathsTenths: int("baths_tenths"),
+  sqft: int("sqft"),
+  rentMin: int("rent_min"),
+  rentMax: int("rent_max"),
+  availableCount: int("available_count"),
+  availableOn: varchar("available_on", { length: 10 }),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+}, (t) => [index("idx_apt_floorplans_property").on(t.propertyId)]);
+
+/** A locator's renter. `agentTeamId` is the locator's row in deal_team_allowlist (the same sign-in as Builder Deals). */
+export const aptClients = mysqlTable("apt_clients", {
+  id: int("id").autoincrement().primaryKey(),
+  agentTeamId: int("agent_team_id").notNull(),
+  name: varchar("name", { length: 190 }).notNull(),
+  phone: varchar("phone", { length: 40 }),
+  email: varchar("email", { length: 320 }),
+  moveDate: varchar("move_date", { length: 10 }),
+  beds: int("beds"),
+  budgetMax: int("budget_max"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_apt_clients_agent").on(t.agentTeamId)]);
+
+/** One registration of a client with a property. Unique per client and property: a resend updates it. */
+export const aptGuestCards = mysqlTable("apt_guest_cards", {
+  id: int("id").autoincrement().primaryKey(),
+  clientId: int("client_id").notNull(),
+  propertyId: int("property_id").notNull(),
+  agentTeamId: int("agent_team_id").notNull(),
+  method: mysqlEnum("method", ["send", "escort"]).notNull(),
+  visitOn: varchar("visit_on", { length: 10 }),
+  /** The day the locator says they sent it (the app drafts; the locator sends from their own e-mail). */
+  sentOn: varchar("sent_on", { length: 10 }),
+  /** The day the property confirmed the registration. */
+  confirmedOn: varchar("confirmed_on", { length: 10 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [uniqueIndex("idx_apt_guest_card").on(t.clientId, t.propertyId), index("idx_apt_guest_card_agent").on(t.agentTeamId)]);
+
+export const aptLeases = mysqlTable("apt_leases", {
+  id: int("id").autoincrement().primaryKey(),
+  clientId: int("client_id").notNull(),
+  propertyId: int("property_id").notNull(),
+  agentTeamId: int("agent_team_id").notNull(),
+  unit: varchar("unit", { length: 40 }),
+  rent: int("rent").notNull(),
+  termMonths: int("term_months").notNull(),
+  leaseStartOn: varchar("lease_start_on", { length: 10 }).notNull(),
+  leaseSignedOn: varchar("lease_signed_on", { length: 10 }).notNull(),
+  method: mysqlEnum("method", ["send", "escort"]).notNull(),
+  /** Our estimate when the lease was reported; the invoice uses verifiedAmount, never this. */
+  expectedAmount: int("expected_amount").notNull(),
+  status: mysqlEnum("status", ["reported", "verification_sent", "verified", "invoiced", "paid"]).default("reported").notNull(),
+  verificationSentOn: varchar("verification_sent_on", { length: 10 }),
+  verifiedOn: varchar("verified_on", { length: 10 }),
+  verifiedAmount: int("verified_amount"),
+  invoiceNumber: varchar("invoice_number", { length: 40 }),
+  invoicedOn: varchar("invoiced_on", { length: 10 }),
+  dueOn: varchar("due_on", { length: 10 }),
+  paidOn: varchar("paid_on", { length: 10 }),
+  paidAmount: int("paid_amount"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [uniqueIndex("idx_apt_lease_client_property").on(t.clientId, t.propertyId), index("idx_apt_lease_agent_status").on(t.agentTeamId, t.status)]);

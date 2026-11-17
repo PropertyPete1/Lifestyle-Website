@@ -204,6 +204,13 @@
       "when": 1794936257022,
       "tag": "0028_photo_exterior_score",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1794943292723,
+      "tag": "0029_apartment_locating",
+      "breakpoints": true
     }
   ]
 }

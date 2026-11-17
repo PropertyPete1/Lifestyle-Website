@@ -25,6 +25,7 @@ import { generateCityNarrative, fallbackNarrative, CITY_DATA } from "./cityNarra
 import { isAdminEmail } from "@shared/site";
 import { ENV } from "./_core/env";
 import { dealsRouter } from "./dealsRouter";
+import { apartmentsRouter } from "./apartmentsRouter";
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   // Defense in depth: DB role must be admin AND the account must be on the
@@ -96,6 +97,8 @@ export const appRouter = router({
   system: systemRouter,
   /** Private Builder Deals gate. Public and gated responses are explicitly fenced in dealsRouter. */
   deals: dealsRouter,
+  /** Apartment locating (Nov 17, 2026): public renter search, the locators' tools, admin import. Not linked from the site until Peter says so. */
+  apartments: apartmentsRouter,
 
   /** Convince Your Partner — AI dream-scene pitches, cached per shareable slug. */
   partnerPitch: router({

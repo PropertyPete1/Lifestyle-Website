@@ -139,6 +139,32 @@ export function gmailComposeHref(input: { clientName: string; agentName: string;
   return `https://mail.google.com/mail/u/${account}/?view=cm&fs=1&tf=1&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
+/**
+ * Nov 17, 2026 (Peter: "it routes to Google email, which is what we want, but not from the browser, just route it to
+ * the app. We already have the app"): on a phone, Email it opens the Gmail app with the same subject and message.
+ * iPhone and iPad: Gmail's own link. Android: a mail link, which the phone hands to its mail app (Gmail). A computer
+ * has no Gmail app, so it keeps the Gmail draft in the browser. Returns null when the browser draft is the right one.
+ */
+export function emailAppHref(webHref: string, userAgent: string, touchPoints = 0): string | null {
+  const iphone = /iPhone|iPad|iPod/i.test(userAgent) || (/Macintosh/i.test(userAgent) && touchPoints > 1);
+  const android = /Android/i.test(userAgent);
+  if (!iphone && !android) return null;
+  let subject = "", body = "";
+  try { const query = new URL(webHref).searchParams; subject = query.get("su") ?? ""; body = query.get("body") ?? ""; } catch { return null; }
+  const parts = `subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  return iphone ? `googlegmail://co?${parts}` : `mailto:?${parts}`;
+}
+
+/** Opens the Gmail app on a phone; when the app does not take over (not installed), the browser draft opens as before. */
+export function openEmail(event: { preventDefault(): void }, webHref: string) {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return;
+  const app = emailAppHref(webHref, navigator.userAgent, navigator.maxTouchPoints);
+  if (!app) return;
+  event.preventDefault();
+  window.location.href = app;
+  if (app.startsWith("googlegmail:")) window.setTimeout(() => { if (document.visibilityState === "visible") window.location.href = webHref; }, 1500);
+}
+
 /** iOS wants "sms:number&body=", Android "sms:number?body="; "?&body=" is read by both. */
 export function smsHref(body: string, phoneDigits?: string | null) {
   const digits = phoneDigits?.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "") ?? "";
@@ -315,7 +341,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
           {created.clientPhoneDigits
             ? <button type="button" data-deals-text-it="true" onClick={() => openText({ id: created.id, clientName: created.clientName ?? "", clientPhoneDigits: created.clientPhoneDigits }, createdMessage)} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground"><MessageSquareText className="h-4 w-4" /> Text it</button>
             : <a href={smsHref(createdMessage, null)} className="inline-flex min-h-11 items-center gap-2 bg-gold px-4 text-sm text-primary-foreground"><MessageSquareText className="h-4 w-4" /> Text it</a>}
-          <a href={gmailComposeHref({ clientName: created.clientName ?? "", agentName, url: createdUrl, pickCount: created.pickCount, listCount: linkShare?.count, listSummary: linkShare?.summary, agentEmail: workspace?.agent.email })} target="_blank" rel="noreferrer" data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>
+          <a href={gmailComposeHref({ clientName: created.clientName ?? "", agentName, url: createdUrl, pickCount: created.pickCount, listCount: linkShare?.count, listSummary: linkShare?.summary, agentEmail: workspace?.agent.email })} target="_blank" rel="noreferrer" onClick={(event) => openEmail(event, event.currentTarget.href)} data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>
           <Button type="button" variant="outline" onClick={() => onCopy(createdUrl)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === createdUrl ? AGENT_COPY.copied : "Copy link"}</Button>
         </div>
       </div>}
@@ -351,7 +377,7 @@ export function AgentTools({ workspace, loading, error, created, creating, creat
             {client.clientPhoneDigits
               ? <button type="button" data-deals-text-it="true" onClick={() => openText(client, clientMessage({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length }))} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> {client.lastTextedAt ? "Text it again" : "Text it"}</button>
               : <a href={smsHref(clientMessage({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length }), null)} className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><MessageSquareText className="h-4 w-4" /> Text it</a>}
-            <a href={gmailComposeHref({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length, agentEmail: workspace?.agent.email })} target="_blank" rel="noreferrer" data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>
+            <a href={gmailComposeHref({ clientName: client.clientName, agentName, url, pickCount: client.picks?.length, agentEmail: workspace?.agent.email })} target="_blank" rel="noreferrer" onClick={(event) => openEmail(event, event.currentTarget.href)} data-deals-email-it="true" className="inline-flex min-h-11 items-center gap-2 border border-border px-4 text-sm hover:border-gold hover:text-gold"><Mail className="h-4 w-4" /> Email it</a>
             <Button type="button" variant="outline" onClick={() => onCopy(url)} className="min-h-11"><Copy className="mr-2 h-4 w-4" />{copiedUrl === url ? AGENT_COPY.copied : "Copy link"}</Button>
           </div>}
         </article>;

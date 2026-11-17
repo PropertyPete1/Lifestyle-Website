@@ -1,7 +1,7 @@
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { clientLinkTokenInUrl, forgetClientLinkToken, initialGateState, keepClientLinkToken, readGateParams, rememberClientLinkToken, stripTransientGateParams, type GateDealsState } from "../client/src/lib/dealsGate";
 import { countdownLabel } from "../client/src/lib/dealsMine";
 import type { GateSheetViewProps } from "../client/src/components/deals/GateSheet";
@@ -15,12 +15,16 @@ import type { GatedCatalogProps, GatedCommunity, GatedLead } from "../client/src
 (globalThis as { React?: typeof React }).React = React;
 const { GateSheetView } = await import("../client/src/components/deals/GateSheet");
 const { GatedCatalog } = await import("../client/src/components/deals/GatedCatalog");
-const { AgentTools, clientMessage, clientStatus, confirmAndRemove, confirmAndRevoke, linkRemovable, smsHref, absoluteLink, gmailComposeHref } = await import("../client/src/components/deals/AgentTools");
+const { AgentTools, clientMessage, clientStatus, confirmAndRemove, confirmAndRevoke, linkRemovable, smsHref, absoluteLink, gmailComposeHref, emailAppHref } = await import("../client/src/components/deals/AgentTools");
 const { clientLinkState } = await import("../client/src/components/builder-deals/ClientLinksSection");
 const { createElement } = React;
 const decode = (value: string) => value.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
 
 const NOW = Date.UTC(2026, 9, 19, 12, 0, 0);
+// Nov 17, 2026: the page reads the real clock, and the fixtures' 29-day links ran out today, so two tests began to
+// fail on their own. The clock is held at the fixtures' day; only Date is faked, timers run as usual.
+beforeAll(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(NOW); });
+afterAll(() => { vi.useRealTimers(); });
 const TOKEN = "Abc123_-".repeat(4);
 
 describe("the gate for an agent's client", () => {
@@ -197,6 +201,19 @@ describe("agent tools on /deals/team", () => {
     const onlyAssigned = decode(renderToStaticMarkup(createElement(AgentTools, { workspace: { ...workspace, clients: [], assigned }, defaultClientsOpen: false, onCreate: noop, onRevoke: noop, onCopy: noop })));
     expect(onlyAssigned).toContain("Your clients (1)");
     expect(renderTools()).not.toContain("Assigned to you");
+  });
+
+  it("opens the Gmail app on a phone and keeps the browser draft on a computer (Nov 17)", () => {
+    const web = gmailComposeHref({ clientName: "Maria", agentName: "Tiffany Agent", url: "https://lifestyledesignrealty.com/deals?c=x", agentEmail: "tiffany@lifestyledesignrealty.com" });
+    const iphone = emailAppHref(web, "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1")!;
+    expect(iphone.startsWith("googlegmail://co?subject=")).toBe(true);
+    expect(decodeURIComponent(iphone)).toContain("https://lifestyledesignrealty.com/deals?c=x");
+    expect(decodeURIComponent(iphone)).toContain("Your private list of new-build deals");
+    // An iPad reports itself as a Mac; its touch screen gives it away.
+    expect(emailAppHref(web, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15", 5)).toMatch(/^googlegmail:/);
+    expect(emailAppHref(web, "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36")).toMatch(/^mailto:\?subject=/);
+    expect(emailAppHref(web, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130.0 Safari/537.36", 0)).toBeNull();
+    expect(emailAppHref("not a url", "iPhone")).toBeNull();
   });
 
   it("Email it opens Gmail in the agent's Lifestyle account (Oct 28, Peter: confirm Google with their Lifestyle Gmail)", () => {

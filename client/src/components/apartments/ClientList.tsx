@@ -34,7 +34,6 @@ export function ClientList({ token }: { token: string }) {
         {agent.phone && <a href={`tel:${agent.phone}`} className="inline-flex min-h-11 items-center gap-2 border border-gold px-4 text-gold"><Phone className="h-4 w-4" />Call {agent.name.split(" ")[0]}</a>}
         {agent.phone && <a href={`sms:${agent.phone}`} className="inline-flex min-h-11 items-center border border-gold px-4 text-gold">Text {agent.name.split(" ")[0]}</a>}
       </div>
-      {points.length > 0 && <AptMap points={points} activeId={active} onPick={(id) => { setActive(id); document.querySelector(`[data-apt-option="${id}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }} className="mt-6 h-72 w-full" />}
       {options.length === 0 && <p className="mt-8 text-sm text-muted-foreground">These apartments are no longer available. {agent.name} can send you new ones.</p>}
       <ol className="mt-6 grid gap-6 md:grid-cols-2">
         {options.map((option, index) => <li key={index} data-apt-option={index} onMouseEnter={() => setActive(String(index))} className={`min-w-0 border bg-card ${active === String(index) ? "border-gold" : "border-border"}`}>
@@ -55,6 +54,7 @@ export function ClientList({ token }: { token: string }) {
           </div>
         </li>)}
       </ol>
+      {points.length > 0 && <AptMap points={points} activeId={active} onPick={(id) => { setActive(id); document.querySelector(`[data-apt-option="${id}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }} className="mt-8 h-72 w-full" />}
       {options.length > 0 && <div className="mt-6 border-2 border-gold bg-gold/10 p-4" data-apt-referral="true"><p className="font-semibold">If you tour or apply on your own</p><p className="mt-1 text-sm">{referralLine} That is how {first} can keep helping you for free.</p></div>}
     </section>
     <footer className="deals-chrome border-t border-border/60 bg-background px-5 py-8 text-center text-xs text-muted-foreground"><p>{brokerage}. Rents, specials and availability change daily; your locator confirms them before a tour. Approval is always the community's decision. Equal Housing Opportunity.</p></footer>

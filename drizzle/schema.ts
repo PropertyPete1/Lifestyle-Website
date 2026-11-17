@@ -400,6 +400,11 @@ export const dealPhotos = mysqlTable(
     processedAt: timestamp("processed_at"),
     ocrMatches: text("ocr_matches"),
     bottomCrop: int("bottom_crop").default(0).notNull(),
+    /**
+     * Nov 17, 2026: how much the processed photo looks like the outside of a house, in thousandths (see
+     * dealsPhotoExterior). Null: not measured yet. -1: could not be read. A home's first photo at 250 or more is its cover.
+     */
+    exteriorScore: int("exterior_score"),
     sortOrder: int("sort_order").default(0).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),

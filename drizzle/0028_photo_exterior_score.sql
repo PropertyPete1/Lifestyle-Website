@@ -1,0 +1,1 @@
+ALTER TABLE `deal_photos` ADD `exterior_score` int;

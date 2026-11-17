@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { dealPhotos } from "../drizzle/schema";
 import { getDb } from "./db";
 import { storageReadPrivate } from "./storage";
@@ -72,10 +72,23 @@ const SCORE_CACHE_MAX = 20_000;
 
 export function resetExteriorScores() { scores.clear(); }
 
-type PhotoRow = { id: number; homeId: number | null; processedStorageKey: string | null; processedVersion: string | null };
+type PhotoRow = { id: number; homeId: number | null; processedStorageKey: string | null; processedVersion: string | null; exteriorScore?: number | null };
 type Reader = (key: string) => Promise<Buffer>;
 
+/**
+ * Nov 17, 2026 (Peter: "why are some photos of the kitchen that should be the front of the house?"): the score is kept
+ * on the photo's row, in thousandths, so every list (not only Best Deals) leads with the outside and a restart forgets
+ * nothing. Null is "not measured"; -1 is "could not be read".
+ */
+export const EXTERIOR_UNREADABLE = -1;
+export function storedExteriorScore(value: number | null | undefined): number | undefined {
+  return value === null || value === undefined ? undefined : value < 0 ? 0 : value / 1000;
+}
+export function exteriorScoreToStore(score: number): number { return Math.max(0, Math.min(2000, Math.round(score * 1000))); }
+
 async function scoreOf(row: PhotoRow, read: Reader): Promise<number | null> {
+  const stored = storedExteriorScore(row.exteriorScore);
+  if (stored !== undefined) return stored;
   if (!row.processedStorageKey || !row.processedVersion) return null;
   const known = scores.get(row.processedVersion);
   if (known !== undefined) return known;
@@ -114,9 +127,9 @@ const defaultReader: Reader = async (key) => (await storageReadPrivate(key)).dat
  * shot first, the same one firstExteriorPhoto picks. Only scores already measured count; nothing is read here, so a
  * page of homes costs nothing extra. Homes never measured keep their gallery order.
  */
-export function exteriorFirst<T extends { processedVersion: string | null }>(rows: readonly T[]): T[] {
+export function exteriorFirst<T extends { processedVersion: string | null; exteriorScore?: number | null }>(rows: readonly T[]): T[] {
   const index = rows.slice(0, EXTERIOR_PHOTOS_PER_HOME).findIndex((row) => {
-    const score = row.processedVersion ? scores.get(row.processedVersion) : undefined;
+    const score = storedExteriorScore(row.exteriorScore) ?? (row.processedVersion ? scores.get(row.processedVersion) : undefined);
     return score !== undefined && score >= EXTERIOR_MIN_SCORE;
   });
   if (index <= 0) return rows.slice();
@@ -133,7 +146,7 @@ export async function exteriorCovers(homeIds: readonly number[], read: Reader = 
   if (!ids.length) return out;
   const db = await getDb();
   if (!db) return out;
-  const rows = await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId, processedStorageKey: dealPhotos.processedStorageKey, processedVersion: dealPhotos.processedVersion })
+  const rows = await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId, processedStorageKey: dealPhotos.processedStorageKey, processedVersion: dealPhotos.processedVersion, exteriorScore: dealPhotos.exteriorScore })
     .from(dealPhotos)
     .where(and(inArray(dealPhotos.homeId, ids), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false)))
     .orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id));
@@ -147,4 +160,46 @@ export async function exteriorCovers(homeIds: readonly number[], read: Reader = 
     await Promise.all(ids.slice(index, index + 4).map(async (homeId) => { out.set(homeId, await firstExteriorPhoto(byHome.get(homeId) ?? [], read)); }));
   }
   return out;
+}
+
+/** Photos the backfill looks at per call, and how long it may run. */
+export const EXTERIOR_BACKFILL_BATCH = 60;
+export const EXTERIOR_BACKFILL_MS = 6_000;
+
+/**
+ * Measures photos taken in before the score was kept. Only homes for sale; in each home, its shown photos in gallery
+ * order, stopping at the first outside shot (the later ones never decide the cover). Runs for a few seconds at the end
+ * of each photo-queue call, so the existing homes are covered within hours and it then finds nothing to do.
+ */
+export async function backfillExteriorScores(options: { read?: Reader; budgetMs?: number; batch?: number; now?: () => number } = {}): Promise<{ scored: number; unreadable: number; remainingBatch: number }> {
+  const read = options.read ?? defaultReader;
+  const now = options.now ?? Date.now;
+  const deadline = now() + (options.budgetMs ?? EXTERIOR_BACKFILL_MS);
+  const db = await getDb();
+  if (!db) return { scored: 0, unreadable: 0, remainingBatch: 0 };
+  const threshold = exteriorScoreToStore(EXTERIOR_MIN_SCORE);
+  const result = await db.execute(sql`
+    SELECT p.id AS id, p.home_id AS homeId, p.processed_storage_key AS processedStorageKey, p.processed_version AS processedVersion
+    FROM deal_photos p
+    WHERE p.processing_state = 'processed' AND p.exterior_score IS NULL AND p.automatic_hidden = 0 AND p.admin_hidden = 0
+      AND p.sort_order < ${EXTERIOR_PHOTOS_PER_HOME} AND p.processed_storage_key IS NOT NULL
+      AND EXISTS (SELECT 1 FROM deal_homes h WHERE h.id = p.home_id AND h.status = 'available')
+      AND NOT EXISTS (SELECT 1 FROM deal_photos q WHERE q.home_id = p.home_id AND q.exterior_score >= ${threshold} AND q.automatic_hidden = 0 AND q.admin_hidden = 0 AND q.processing_state = 'processed')
+    ORDER BY p.home_id, p.sort_order, p.id
+    LIMIT ${options.batch ?? EXTERIOR_BACKFILL_BATCH}`);
+  const raw = (Array.isArray(result) && Array.isArray(result[0]) ? result[0] : result) as unknown as PhotoRow[];
+  const rows = Array.isArray(raw) ? raw : [];
+  const settled = new Set<number>();
+  let scored = 0, unreadable = 0, done = 0;
+  for (const row of rows) {
+    if (now() >= deadline) break;
+    done++;
+    if (row.homeId !== null && settled.has(row.homeId)) continue;
+    let value: number;
+    try { value = exteriorScoreToStore(await exteriorScore(await read(row.processedStorageKey!))); scored++; }
+    catch { value = EXTERIOR_UNREADABLE; unreadable++; }
+    await db.update(dealPhotos).set({ exteriorScore: value }).where(and(eq(dealPhotos.id, row.id), eq(dealPhotos.processedVersion, row.processedVersion ?? "")));
+    if (value >= threshold && row.homeId !== null) settled.add(row.homeId);
+  }
+  return { scored, unreadable, remainingBatch: rows.length - done };
 }

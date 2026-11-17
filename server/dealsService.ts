@@ -956,7 +956,7 @@ async function readPublicCommunityHomes(communityId: number, key: string): Promi
   const { publicPhotoUrl } = await import("./dealsPhotoToken");
   const homes = selectDealCatalogHomes(await db.select().from(dealHomes).where(and(eq(dealHomes.communityId, community.id), eq(dealHomes.status, "available"))).orderBy(asc(dealHomes.price), asc(dealHomes.id)));
   const photoRows = homes.length
-    ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId, processedVersion: dealPhotos.processedVersion }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, homes.map((home) => home.id)), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
+    ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId, processedVersion: dealPhotos.processedVersion, exteriorScore: dealPhotos.exteriorScore }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, homes.map((home) => home.id)), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
     : [];
   const photosBy = groupBy(photoRows, (photo) => photo.homeId);
   const result = homes.map((home, index) => {
@@ -1128,7 +1128,7 @@ async function buildGatedCatalogTimed(view: DealsCatalogView, startedAt: number)
   const homesMs = Date.now() - homesStartedAt;
   const photosStartedAt = Date.now();
   const photoRows = shownHomeIds.length
-    ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId, processedVersion: dealPhotos.processedVersion }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, shownHomeIds), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
+    ? await db.select({ id: dealPhotos.id, homeId: dealPhotos.homeId, processedVersion: dealPhotos.processedVersion, exteriorScore: dealPhotos.exteriorScore }).from(dealPhotos).where(and(inArray(dealPhotos.homeId, shownHomeIds), eq(dealPhotos.processingState, "processed"), eq(dealPhotos.automaticHidden, false), eq(dealPhotos.adminHidden, false))).orderBy(asc(dealPhotos.sortOrder), asc(dealPhotos.id))
     : [];
   const photosBy = groupBy(photoRows, (photo) => photo.homeId);
   const readMs = Date.now() - startedAt;

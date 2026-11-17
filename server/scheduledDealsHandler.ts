@@ -228,7 +228,12 @@ async function handleScheduledDealsCall(req: Request, res: Response, job: string
     // are still in flight); answerWithin is a second guard. Not a once-per-day job, so it is not
     // recorded in deal_job_runs; each call records the photo drain status the health check reads.
     // The catalog runs on the odd minutes, so the two never share a call slot.
-    if (job === "photos") return res.json({ ok: true, result: await answerWithin(runScheduledDealPhotoDrain(), () => ({ partial: true, detail: "answered before the drain finished" })) });
+    // Nov 17, 2026: the call also spends up to 6 s measuring older photos for their outside score (see
+    // backfillExteriorScores). It runs beside the drain, never after it, so the 24 s answer is not pushed later.
+    if (job === "photos") {
+      void import("./dealsPhotoExterior").then((m) => m.backfillExteriorScores()).catch(() => null);
+      return res.json({ ok: true, result: await answerWithin(runScheduledDealPhotoDrain(), () => ({ partial: true, detail: "answered before the drain finished" })) });
+    }
     // 1:30 AM Chicago: one FUB activity note per lead for the previous day's views and tour requests.
     if (job === "activity") return res.json({ ok: true, result: await answerLate(whenDue(dueAt(1, 30), "builder-deals-activity-note", () => enqueueDailyActivityNote())) });
     if (job === "alerts") {

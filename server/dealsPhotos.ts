@@ -1228,7 +1228,10 @@ async function processClaimedDealPhoto(db: PhotoDb, row: ClaimedRow, attempt: nu
     const finalMaster = master;
     const [processedStored, originalStorageKey] = await timed(ctx, "store", () => Promise.all([putPrivateObject(dealPhotoMasterKey(photoId, version), finalMaster.data), originalUpload]));
     const hidden = matches.length > 0;
+    // Nov 17, 2026: how much the finished photo looks like the outside of the house, kept so the home's cover is its front.
+    const outside = await import("./dealsPhotoExterior").then(async (m) => m.exteriorScoreToStore(await m.exteriorScore(finalMaster.data))).catch(() => null);
     const written = await timed(ctx, "store", async () => db.update(dealPhotos).set({
+      exteriorScore: outside,
       // sourceHash remains the source-URL dedupe key used by dealsSync. The
       // deterministic bytes are represented by originalVersion/version keys.
       originalStorageKey,

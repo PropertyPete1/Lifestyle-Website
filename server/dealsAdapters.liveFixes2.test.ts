@@ -275,8 +275,11 @@ describe("Coventry Homes: Garden Grove is a parent page over two collections (Oc
   it("reads both collections' pages as the community: 10 + 8 homes and 6 + 7 plans, Hawkwell Lane from its card (every other card agrees with its record)", async () => {
     const { fetcher, requested } = siteFetcher(site());
     const result = await loadOfficialDeals(config, { fetcher, now: () => NOW });
-    expect(result.holdReasons).toEqual([]);
-    expect(requested).toEqual([COMMUNITY, FORTY, FIFTY]);
+    // Nov 16, 2026: the page's banner ("Interest Rates Starting at 3.99% (5.899% APR)*") is now read; its sales-event page is
+    // not part of this capture, so the offer alone is held and the homes are read as before.
+    expect(result.holdReasons).toEqual(["incentive_fetch_failed"]);
+    expect(result.catalogOk).toBe(true);
+    expect(requested).toEqual([COMMUNITY, FORTY, FIFTY, "https://www.coventryhomes.com/sales-event/"]);
     expect(result.private.homes.map((home) => [home.privateName, home.privatePlanName, home.status, home.price, home.previousPrice ?? null, home.bedrooms, home.bathrooms, home.squareFeet])).toEqual([
       ["4917 Kestis Lane", null, "Quick Move-In (Under Construction)", 259_990, 273_090, 4, 2, 1_557],
       ["8448 Frostwood Heights", "Gray", "Quick Move-In (Under Construction)", 271_940, null, 3, 2, 1_433],
@@ -306,7 +309,7 @@ describe("Coventry Homes: Garden Grove is a parent page over two collections (Oc
     // Each collection configured on its own reads the same homes.
     for (const [url, count] of [[FORTY, 10], [FIFTY, 8]] as const) {
       const alone = await loadOfficialDeals({ ...config, sourceUrl: url }, { fetcher: siteFetcher(site()).fetcher, now: () => NOW });
-      expect([alone.holdReasons, alone.private.homes.length]).toEqual([[], count]);
+      expect([alone.holdReasons, alone.catalogOk, alone.private.homes.length]).toEqual([["incentive_fetch_failed"], true, count]);
     }
   });
 

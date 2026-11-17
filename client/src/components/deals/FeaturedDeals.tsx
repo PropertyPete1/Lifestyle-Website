@@ -61,18 +61,28 @@ function DealRow({ deal, rank, locked, onSelect, tags = [] }: { deal: FeaturedDe
   const action = locked ? FEATURED_COPY.unlock : FEATURED_COPY.see;
   return <li className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
     <button type="button" onClick={() => onSelect?.(deal)} className="block w-full min-w-0 text-left" data-deals-featured={deal.reason} aria-label={`${action}: ${deal.label}, ${money.format(deal.estMonthly)} a month estimated`}>
-      {deal.photo && <span className="relative block aspect-[4/3] w-full min-w-0 overflow-hidden bg-secondary"><PhotoBackdrop src={deal.photo} /><RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className={WHOLE_PHOTO_IMG} /></span>}
-      <span className="flex w-full min-w-0 items-start gap-4 p-4">
-        {rank !== undefined && <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-gold/50 font-serif text-lg text-gold">{rank}</span>}
-        <span className="min-w-0 flex-1">
-          {tags.length > 0 && <span className="mb-2 flex flex-wrap gap-1.5">{tags.map((tag) => <span key={tag} data-deals-featured-tag={tag} className="rounded-full bg-gold px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-widest text-primary-foreground">{tag}</span>)}</span>}
-          <span className="block text-3xl font-semibold leading-none text-foreground">{money.format(deal.estMonthly)}<span className="ml-1 text-xs font-normal uppercase tracking-widest text-muted-foreground">{FEATURED_COPY.perMonth}</span></span>
-          <span className="mt-2 block break-words text-base leading-snug text-foreground">{deal.label}</span>
-          {deal.detail && <span className="mt-1 block break-words text-sm text-foreground/80" data-deals-featured-detail="true">{deal.detail}</span>}
-          <span className="mt-1 block text-sm text-muted-foreground">{homeLine(deal)}</span>
-          <span className="mt-1 block text-xs text-muted-foreground">{rateLine(deal)}{deal.acres ? ` · ${Number(deal.acres.toFixed(2))} acre lot` : ""}</span>
-          <span className="mt-3 inline-flex min-h-11 items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-gold">{locked && <LockKeyhole className="h-3.5 w-3.5" />}{action}{!locked && <ArrowRight className="h-3.5 w-3.5" />}</span>
+      {/* Nov 16, 2026 (Peter: "the description looks sloppy, why does it go down so much"): the rank sat in its own
+          column and squeezed the text into a narrow strip that wrapped line after line. The rank and the tags now sit
+          on the photo, the text has the card's full width, and each line is one line: payment, rate, home, place. */}
+      {deal.photo && <span className="relative block aspect-[4/3] w-full min-w-0 overflow-hidden bg-secondary"><PhotoBackdrop src={deal.photo} /><RetryImage src={deal.photo} alt="" loading="lazy" decoding="async" draggable={false} onContextMenu={(event) => event.preventDefault()} data-deals-featured-photo="true" className={WHOLE_PHOTO_IMG} />
+        <span className="pointer-events-none absolute left-2 top-2 flex flex-wrap items-center gap-1.5">
+          {rank !== undefined && <span data-deals-featured-rank={rank} className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-background/95 px-2 font-serif text-sm font-semibold text-gold shadow">#{rank}</span>}
+          {tags.map((tag) => <span key={tag} data-deals-featured-tag={tag} className="rounded-full bg-gold px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest text-primary-foreground shadow">{tag}</span>)}
         </span>
+      </span>}
+      <span className="block w-full min-w-0 p-4">
+        {!deal.photo && (rank !== undefined || tags.length > 0) && <span className="mb-2 flex flex-wrap items-center gap-1.5">
+          {rank !== undefined && <span data-deals-featured-rank={rank} className="inline-flex h-7 min-w-7 items-center justify-center rounded-full border border-gold/50 px-2 font-serif text-sm font-semibold text-gold">#{rank}</span>}
+          {tags.map((tag) => <span key={tag} data-deals-featured-tag={tag} className="rounded-full bg-gold px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-widest text-primary-foreground">{tag}</span>)}
+        </span>}
+        <span className="flex min-w-0 items-baseline gap-1.5 whitespace-nowrap"><span className="text-3xl font-semibold leading-none text-foreground">{money.format(deal.estMonthly)}</span><span className="text-xs font-normal uppercase tracking-widest text-muted-foreground">{FEATURED_COPY.perMonth}</span></span>
+        {/* The rate is the deal: it reads right under the payment, not as fine print at the bottom. */}
+        <span className="mt-1.5 block text-sm font-medium leading-snug text-foreground" data-deals-featured-rate="true">{rateLine(deal)}{deal.acres ? ` · ${Number(deal.acres.toFixed(2))} acre lot` : ""}</span>
+        <span className="mt-2 block truncate text-sm text-foreground">{homeLine(deal)}</span>
+        {deal.detail
+          ? <span className="mt-1 block text-sm leading-snug text-foreground/80" data-deals-featured-detail="true">{deal.detail.split(" · ").map((part, index) => <span key={index} className={`block truncate ${index === 0 ? "font-medium text-foreground" : ""}`}>{part}</span>)}<span className="block truncate text-xs text-muted-foreground">{deal.area}</span></span>
+          : <span className="mt-1 block text-sm leading-snug text-muted-foreground [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden break-words">{deal.label}</span>}
+        <span className="mt-2 inline-flex min-h-11 items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-gold">{locked && <LockKeyhole className="h-3.5 w-3.5" />}{action}{!locked && <ArrowRight className="h-3.5 w-3.5" />}</span>
       </span>
     </button>
   </li>;

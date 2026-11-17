@@ -2016,7 +2016,7 @@ export function builderScrubConfig(builder: string): DealScrubConfig {
   if (builder === "Highland Homes") { config.builder.push("Highland Homes", "Highland"); config.lender.push("Highland HomeLoans", "Highland Home Loans"); }
   if (builder === "Davidson Homes") { config.builder.push("Davidson Homes", "Davidson"); config.lender.push("NorthStar Mortgage Advisors", "NorthStar Mortgage", "NorthStar"); }
   if (builder === "First America Homes") { config.builder.push("First America Homes", "First America"); }
-  if (builder === "Coventry Homes") { config.builder.push("Coventry Homes", "Coventry", "DFH Coventry", "Dream Finders Homes", "Dream Finders"); }
+  if (builder === "Coventry Homes") { config.builder.push("Coventry Homes", "Coventry", "DFH Coventry", "Dream Finders Homes", "Dream Finders"); config.lender.push("Jet HomeLoans, LP", "Jet HomeLoans", "Jet Home Loans", "Jet"); }
   if (builder === "Pulte" || builder === "Centex" || builder === "Del Webb") { config.builder.push("PulteGroup", "Pulte Homes", "Pulte", "Centex Homes", "Centex", "Del Webb"); config.lender.push("Pulte Mortgage LLC", "Pulte Mortgage"); }
   // D.R. Horton's product lines name the builder as surely as the builder does.
   if (builder === "D.R. Horton") { config.builder.push("D.R. Horton", "DR Horton", "D. R. Horton", "Horton", "Express Series", "Express Homes", "Emerald Homes", "Freedom Homes", "Tradition Series"); config.lender.push("DHI Mortgage", "DHI Title", "DHI"); }

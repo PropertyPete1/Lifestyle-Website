@@ -1,6 +1,6 @@
 import {
-  HOMEFINITI_HOSTS, asUrl, cardAroundLink, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, sameOfficialHost, sourcePage, successfulResult,
-  type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome,
+  HOMEFINITI_HOSTS, asUrl, cardAroundLink, comparablePath, decodeHtmlEntities, descendants, elementClass, elementText, emptyPrivate, failedResult, fetchFailureHold, getDocument, makePublicSnapshot, parseCommunityFacts, parseHtmlElements, parsePromotionalRate, sameOfficialHost, sourcePage, successfulResult,
+  type AdapterRunOptions, type CommunitySourceConfig, type DealAdapter, type DealAdapterResult, type DealHoldReason, type HtmlElement, type HtmlFetcher, type PrivateGalleryImage, type PrivatePlanOrHome, type PromotionalRateFacts,
   storiesFrom,
 } from "./dealsAdapters";
 
@@ -230,9 +230,154 @@ export class HomefinitiAdapter implements DealAdapter {
     privateSnapshot.communityFacts = read.facts;
     for (const home of read.homes) { privateSnapshot.homes.push(home); privateSnapshot.pages.push(sourcePage("home", home.sourceUrl, home.privateName)); }
     for (const plan of read.plans) privateSnapshot.plans.push(plan);
-    // The platform's promotions are site-wide banners ("Interest Rates Starting at 3.99%") whose terms are not published with them; none is read as a community incentive.
-    return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config));
+    // Nov 16, 2026 (Peter: "we need to be able to read every banner as that is the headline info per community"): the
+    // page's banner is the builder's current headline offer; its terms are on the sales-event page it links to.
+    const offerHolds = await readBannerOffer(page.text, read.homes, community, this.host, fetcher, privateSnapshot);
+    return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config, offerHolds));
   }
+}
+
+/** The page-top banner: its headline ("Interest Rates Starting at 2.99% (5.959% APR)*") and the sales-event page it links to. */
+export function homefinitiBanner(html: string, host: string): { headline: string; eventUrl: string | null } | null {
+  const root = parseHtmlElements(html);
+  const banner = root ? descendants(root).find((element) => elementClass(element, "promo-nav")) : null;
+  if (!banner) return null;
+  const inner = descendants(banner);
+  const headlineElement = inner.find((element) => element.tag === "p") ?? inner.find((element) => element.tag === "span");
+  const headline = headlineElement ? elementText(headlineElement, html).replace(/\s+/g, " ").trim() : "";
+  if (!headline) return null;
+  const link = inner.find((element) => element.tag === "a" && /\/sales-event(?:-listing)?\/?$/i.test(element.attributes.href ?? ""));
+  const url = link ? asUrl(new URL(link.attributes.href!, `https://${host}`).toString()) : null;
+  return { headline, eventUrl: url && sameOfficialHost(url, host) ? url.toString() : null };
+}
+
+/** The market pages a sales-event hub links to ("/san-antonio/sales-event-listing/"), official host only. */
+export function homefinitiEventMarkets(html: string, host: string): string[] {
+  const out = new Set<string>();
+  for (const match of Array.from(html.matchAll(/href=["']([^"']*\/sales-event-listing\/?)["']/gi))) {
+    const url = asUrl(new URL(decodeHtmlEntities(match[1]!), `https://${host}`).toString());
+    if (url && sameOfficialHost(url, host)) { url.search = ""; url.hash = ""; out.add(url.toString()); }
+  }
+  return Array.from(out);
+}
+
+/**
+ * One market's sales-event page: the homes it lists (the offer is for "select homesites": these are them) and its
+ * terms, from the first footnote on. What precedes the first footnote is the lender's licensing block (name, NMLS id,
+ * street address, phone), which is not offer text.
+ */
+export function readHomefinitiEventPage(html: string, host: string): { terms: string; homePaths: Set<string> } | null {
+  const root = parseHtmlElements(html);
+  if (!root) return null;
+  const all = descendants(root);
+  const disclaimer = all.find((element) => elementClass(element, "sales-event-disclaimer"));
+  if (!disclaimer) return null;
+  const full = elementText(disclaimer, html).replace(/\s+/g, " ").trim();
+  const footnote = full.search(/\*(?=\s*[A-Za-z0-9])/);
+  const terms = footnote > 0 ? full.slice(footnote) : full;
+  const homePaths = new Set<string>();
+  for (const card of all.filter((element) => element.tag === "article" && elementClass(element, "card-spec"))) {
+    for (const link of descendants(card)) {
+      if (link.tag !== "a" || !link.attributes.href) continue;
+      const url = asUrl(new URL(link.attributes.href, `https://${host}`).toString());
+      if (url && sameOfficialHost(url, host) && /^\/new-homes\//i.test(url.pathname)) homePaths.add(pathKey(url));
+    }
+  }
+  return terms ? { terms, homePaths } : null;
+}
+
+const MONTHS = "(?:January|February|March|April|May|June|July|August|September|October|November|December)";
+
+/**
+ * The offer's facts. The general reader holds a 2/1 buydown (which rate lasts is not its call), but this platform's
+ * footnote states the whole schedule in one fixed form: "Year 1 (0-12 months) rate at 2.99%, APR of 5.959% …; Year 2
+ * (13-24 months) rate at 3.99%, APR …; Years 3-30 (25-360 months) rate at 4.99%, APR …", the loan ("an FHA 30-year
+ * agreement (360 months) fixed rate loan … at 96.5% LTV") and the last closing date. When every part is there and
+ * agrees (rates rising, one APR above the last rate, the headline's rate and APR the same as year 1's), the first
+ * year and the rate for years 3 on are the facts, and the payment is figured at that last rate. Anything else stays
+ * as the general reader left it, held.
+ */
+export function scheduledBuydownFacts(text: string): PromotionalRateFacts {
+  const base = parsePromotionalRate(text);
+  const flat = text.replace(/\s+/g, " ");
+  const figure = "(\\d+(?:\\.\\d+)?)%";
+  const step = (label: string) => `${label}\\s*\\([^)]{0,30}\\)\\s*rate\\s+at\\s+${figure},\\s*APR\\s+of\\s+${figure}`;
+  const schedule = new RegExp(`\\b${step("Year\\s*1")}[^;]{0,90};\\s*${step("Year\\s*2")}[^;]{0,90};\\s*${step("Years\\s*3\\s*-\\s*(\\d{2})")}`, "i").exec(flat);
+  if (!schedule) return base;
+  const [first, firstApr, second, secondApr, term, last, lastApr] = [1, 2, 3, 4, 5, 6, 7].map((index) => Number(schedule[index]));
+  const loan = /\b(FHA|VA|USDA|conventional)\s+(\d{2})-year\b[^.]{0,80}?\bfixed\s+rate\b/i.exec(flat);
+  const ltv = /\bat\s+(\d{2,3}(?:\.\d+)?)%\s+LTV\b/i.exec(flat);
+  const closes = new RegExp(`\\bloans?\\s+closed\\s+on\\s+or\\s+before\\s+(${MONTHS}\\s+\\d{1,2},\\s+\\d{4})`, "i").exec(flat);
+  const closingDeadline = closes ? parsePromotionalRate(`Must close on or before ${closes[1]}.`).closingDeadline : null;
+  const down = ltv ? Math.round((100 - Number(ltv[1])) * 1000) / 1000 : null;
+  const agrees = first! < second! && second! < last! && last! - first! <= 3 && firstApr === secondApr && secondApr === lastApr && lastApr! > last!
+    && base.promotionalRatePercent === first && base.aprPercent === lastApr && loan !== null && Number(loan[2]) === term && down !== null && down >= 0 && down < 50
+    && Boolean(closingDeadline?.isoDate);
+  if (!agrees) return base;
+  const resolved = new Set<DealHoldReason>(["missing_repayment_term", "missing_down_payment", "missing_follow_on_rate", "missing_follow_on_period"]);
+  const holdReasons = base.holdReasons.filter((reason) => !resolved.has(reason));
+  return {
+    ...base,
+    rateKind: "promotional",
+    promotionalPeriod: "Year 1",
+    followOnRatePercent: last!,
+    followOnPeriod: `Years 3-${term}`,
+    loanType: loan![1]!.toUpperCase() === "CONVENTIONAL" ? "Conventional" : loan![1]!.toUpperCase(),
+    repaymentTermYears: term!,
+    downPaymentPercent: down,
+    closingDeadline,
+    holdReasons,
+    publishable: holdReasons.length === 0,
+  };
+}
+
+type EventPages = Array<{ url: string; terms: string; homePaths: Set<string> }>;
+/** One read of the brand's sales-event pages serves every community synced in the next few minutes (72 communities, 5 pages). */
+const EVENT_CACHE_MS = 15 * 60_000;
+const eventCache = new WeakMap<object, Map<string, { at: number; pages: Promise<EventPages | null> }>>();
+
+async function loadEventPages(eventUrl: string, host: string, fetcher: HtmlFetcher): Promise<EventPages | null> {
+  const accept = "text/html,application/xhtml+xml";
+  const first = await getDocument(eventUrl, fetcher, accept, host);
+  if (!first.ok) return null;
+  // The banner links to the hub ("/sales-event/"), which links to each market's page; a market page is read as is.
+  const own = readHomefinitiEventPage(first.text, host);
+  const pages: EventPages = own && own.homePaths.size ? [{ url: eventUrl, ...own }] : [];
+  for (const url of homefinitiEventMarkets(first.text, host).filter((url) => url !== eventUrl).slice(0, 8)) {
+    const market = await getDocument(url, fetcher, accept, host);
+    const read = market.ok ? readHomefinitiEventPage(market.text, host) : null;
+    if (read) pages.push({ url, ...read });
+  }
+  return pages.length ? pages : null;
+}
+
+/**
+ * Reads the banner's offer for this community. The offer is the banner's headline plus the terms of the market page
+ * that lists one of this community's homes; a community with no home on any market's list has no offer here.
+ */
+async function readBannerOffer(pageHtml: string, homes: readonly PrivatePlanOrHome[], community: URL, host: string, fetcher: HtmlFetcher, privateSnapshot: ReturnType<typeof emptyPrivate>): Promise<DealHoldReason[]> {
+  const banner = homefinitiBanner(pageHtml, host);
+  // No banner: the builder shows no offer now. A banner with no sales-event page is not read (its terms are not published).
+  if (!banner) { privateSnapshot.offerRead = true; return []; }
+  if (!banner.eventUrl) return [];
+  let perFetcher = eventCache.get(fetcher);
+  if (!perFetcher) { perFetcher = new Map(); eventCache.set(fetcher, perFetcher); }
+  let cached = perFetcher.get(banner.eventUrl);
+  if (!cached || Date.now() - cached.at > EVENT_CACHE_MS) {
+    cached = { at: Date.now(), pages: loadEventPages(banner.eventUrl, host, fetcher).catch(() => null) };
+    perFetcher.set(banner.eventUrl, cached);
+  }
+  const pages = await cached.pages;
+  if (!pages) { perFetcher.delete(banner.eventUrl); return ["incentive_fetch_failed"]; }
+  const mine = homes.map((home) => pathKey(new URL(home.sourceUrl)));
+  const page = pages.find((candidate) => mine.some((path) => candidate.homePaths.has(path)));
+  privateSnapshot.offerRead = true;
+  if (!page) return [];
+  const text = `${banner.headline} ${page.terms}`;
+  privateSnapshot.pages.push(sourcePage("incentive", page.url, banner.headline));
+  privateSnapshot.incentive = { sourceUrl: page.url, text, facts: scheduledBuydownFacts(text) };
+  void community;
+  return [];
 }
 
 const pathKey = (url: URL) => comparablePath(url.pathname.replace(/\/+$/, ""));

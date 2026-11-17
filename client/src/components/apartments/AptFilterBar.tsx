@@ -17,7 +17,7 @@ export function AptFilterBar({ filters, onChange, cities, locator = false }: { f
         <HeartHandshake className="mt-0.5 h-6 w-6 shrink-0 text-gold" aria-hidden="true" />
         <div className="min-w-0">
           <h2 id="apt-second-chance" className="font-serif text-xl leading-tight">{locator ? "Second-chance clients" : "Need a second chance? We have places for you."}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{locator ? "Turn on what the client needs. Only communities that said yes or case by case are shown." : "Broken lease, eviction, something on your record, or a tight budget. Tap what applies and we only show apartments that work with it."}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{locator ? "Turn on what the client needs. Only communities that said yes or case by case are shown." : "Broken lease, eviction, something on your record, or a tight budget. Tap what applies and we only show apartments that consider it. Your locator confirms the details before you apply."}</p>
         </div>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
@@ -54,10 +54,10 @@ export function AptFilterBar({ filters, onChange, cities, locator = false }: { f
 
 /** The badges that tell a renter (or a locator) what a community works with. Second chance comes first and is filled. */
 export function AptBadges({ item }: { item: { secondChance: boolean; acceptsBrokenLease: boolean; acceptsEviction: boolean; acceptsFelony: boolean; incomeRestricted: boolean; incomeMultiple: number | null } }) {
-  const tags = [item.acceptsBrokenLease && "Broken lease OK", item.acceptsEviction && "Eviction OK", item.acceptsFelony && "Background considered", item.incomeRestricted && "Income-based rent", item.incomeMultiple != null && `Income ${item.incomeMultiple}x rent`].filter((tag): tag is string => Boolean(tag));
+  const tags = [item.acceptsBrokenLease && "Broken lease considered", item.acceptsEviction && "Eviction considered", item.acceptsFelony && "Background considered", item.incomeRestricted && "Income-based rent", item.incomeMultiple != null && `Need income of ${item.incomeMultiple}x the rent`].filter((tag): tag is string => Boolean(tag));
   if (!item.secondChance && !tags.length) return null;
   return <div className="flex flex-wrap gap-1.5" data-apt-badges="true">
     {item.secondChance && <span className="bg-gold px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary-foreground">Second chance</span>}
-    {tags.map((tag) => <span key={tag} className="border border-gold/60 px-2 py-1 text-[11px] text-foreground">{tag}</span>)}
+    {tags.map((tag) => <span key={tag} className="border border-gold/60 px-2 py-1 text-xs text-foreground">{tag}</span>)}
   </div>;
 }

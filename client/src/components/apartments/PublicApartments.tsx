@@ -116,7 +116,7 @@ export function PublicApartments() {
 
     <footer className="deals-chrome border-t border-border/60 bg-background px-5 py-8 text-center text-xs text-muted-foreground">
       <p>Lifestyle Design Realty. Apartment locating is free to renters; our fee is paid by the community you lease from.</p>
-      <p className="mt-2">Rents, specials and availability change daily and are confirmed by your locator before a tour. Approval is always the community's decision. Equal Housing Opportunity.</p>
+      <p className="mt-2">Rents, specials and availability change daily and are confirmed by your locator before a tour. "Considered" means the community reviews that situation case by case; conditions such as time passed, money owed or a larger deposit can apply, and approval is always the community's decision. Equal Housing Opportunity.</p>
       <p className="mt-2"><Link href="/privacy" className="underline underline-offset-2">Privacy</Link> · <Link href="/terms" className="underline underline-offset-2">Terms</Link> · <Link href="/apartments/team" className="underline underline-offset-2">Locator sign-in</Link></p>
     </footer>
   </main>;

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { APT_COMMISSION_STALE_DAYS } from "@shared/apartments";
-import { aptMoney, bedsLabel, EMPTY_APT_FILTERS, mapsHref, openLetter, rentRange, searchInput, smsHref, type AptFilters, type Letter } from "@/lib/apartments";
+import { aptMoney, bedsLabel, EMPTY_APT_FILTERS, mapsHref, openLetter, rentRange, searchInput, shortDay, smsHref, type AptFilters, type Letter } from "@/lib/apartments";
 import { AptBadges, AptFilterBar } from "./AptFilterBar";
 import { AptGallery } from "./AptGallery";
 import { AptMap } from "./AptMap";
@@ -23,6 +23,14 @@ const LINE_BUTTON = "inline-flex min-h-11 items-center justify-center gap-1.5 bo
 const accepts = (value: string) => value === "yes" || value === "case_by_case";
 const todayIso = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const daysSince = (day: string | null) => day ? Math.floor((Date.parse(`${todayIso()}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / 86_400_000) : null;
+
+/** How "pays up to" was reached, in the locator's words: the best rate on the dearest matching floor plan, plus a live bonus. */
+function payMath(property: { escortPercent: number | null; sendPercent: number | null; flatFee: number | null; bonusAmount: number | null }, plans: Array<{ rentMin: number | null }>): string {
+  const rent = Math.max(0, ...plans.map((plan) => plan.rentMin ?? 0));
+  const percent = property.escortPercent ?? property.sendPercent;
+  const base = percent != null && rent ? `${property.escortPercent != null ? "escort" : "send"} ${percent}% of ${aptMoney(rent)}` : property.flatFee != null ? `flat ${aptMoney(property.flatFee)}` : "";
+  return [base, property.bonusAmount ? `${aptMoney(property.bonusAmount)} bonus` : ""].filter(Boolean).join(" + ");
+}
 
 function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return <div className="fixed inset-0 z-[95] flex items-end bg-black/70 p-3 sm:items-center sm:justify-center" data-apt-sheet="true"><section role="dialog" aria-modal="true" aria-label={title} className="deals-light max-h-[92vh] w-full max-w-xl overflow-y-auto border border-border bg-background p-5 text-foreground">
@@ -126,7 +134,7 @@ export function LocatorWorkspace() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0"><p className="text-xs uppercase tracking-widest text-muted-foreground">{property.areaLabel}{property.managementCompany ? ` · ${property.managementCompany}` : ""}</p><h2 className="font-serif text-2xl leading-tight">{property.name}</h2>
                     <a href={mapsHref(`${property.name}, ${property.address}`)} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-start gap-1.5 text-sm text-gold underline underline-offset-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0" />{property.address}</a></div>
-                  <div className="shrink-0 text-right" data-apt-pay="true"><span className="block text-[11px] text-muted-foreground">pays up to</span><span className="font-serif text-3xl text-gold">{pays > 0 ? aptMoney(pays) : "?"}</span></div>
+                  <div className="shrink-0 text-right" data-apt-pay="true"><span className="block text-[11px] text-muted-foreground">pays up to</span><span className="font-serif text-3xl text-gold">{pays > 0 ? aptMoney(pays) : "?"}</span>{pays > 0 && <span className="block max-w-[11rem] text-[11px] leading-tight text-muted-foreground">{payMath(property, plans)}</span>}</div>
                 </div>
                 <p className="mt-2 text-sm font-medium">{rates || "No commission on file"}{property.minLeaseMonths ? ` · ${property.minLeaseMonths}-month lease` : ""}</p>
                 <p className={`mt-1 text-xs ${stale ? "text-destructive" : "text-muted-foreground"}`}>{age == null ? "Pay never confirmed: confirm before you quote it" : stale ? `Pay last confirmed ${age} days ago: confirm it again` : `Pay confirmed ${age === 0 ? "today" : `${age} day${age === 1 ? "" : "s"} ago`}`}{property.registrationRequired ? " · Register the client before the visit" : ""}</p>
@@ -134,7 +142,7 @@ export function LocatorWorkspace() {
                 <div className="mt-3"><AptBadges item={{ secondChance: accepts(property.brokenLease) || accepts(property.eviction) || accepts(property.felony), acceptsBrokenLease: accepts(property.brokenLease), acceptsEviction: accepts(property.eviction), acceptsFelony: accepts(property.felony), incomeRestricted: property.incomeRestricted, incomeMultiple: property.incomeMultiple }} /></div>
                 {property.minCreditScore != null && <p className="mt-2 text-xs text-muted-foreground">Minimum credit score {property.minCreditScore}</p>}
                 {property.specialText && <p className="mt-3 border-l-2 border-gold bg-gold/5 px-3 py-2 text-sm"><span className="font-semibold">Special: </span>{property.specialText}{property.specialExpiresOn ? ` (to ${property.specialExpiresOn})` : ""}</p>}
-                <ul className="mt-3 space-y-1 text-sm">{plans.slice(0, 5).map((plan) => <li key={plan.id} className="flex justify-between gap-3"><span>{plan.name ? `${plan.name}: ` : ""}{bedsLabel(plan.beds)}{plan.baths != null ? `, ${plan.baths} bath` : ""}{plan.sqft ? `, ${plan.sqft.toLocaleString("en-US")} sq ft` : ""}{plan.availableOn ? `, from ${plan.availableOn}` : ""}</span><span className="shrink-0 text-muted-foreground">{rentRange(plan.rentMin, plan.rentMax)}</span></li>)}</ul>
+                <ul className="mt-3 space-y-1 text-sm">{plans.slice(0, 5).map((plan) => <li key={plan.id} className="flex justify-between gap-3"><span>{plan.name ? `${plan.name}: ` : ""}{bedsLabel(plan.beds)}{plan.baths != null ? `, ${plan.baths} bath` : ""}{plan.sqft ? `, ${plan.sqft.toLocaleString("en-US")} sq ft` : ""}{plan.availableOn ? `, available ${shortDay(plan.availableOn)}` : ""}</span><span className="shrink-0 text-muted-foreground">{rentRange(plan.rentMin, plan.rentMax)}</span></li>)}</ul>
                 <div className="mt-4 flex clear-both flex-wrap gap-2">
                   <button type="button" aria-pressed={picked} onClick={() => setPicks(picked ? picks.filter((id) => id !== property.id) : [...picks, property.id])} className={`min-h-11 border px-3 text-sm ${picked ? "border-gold bg-gold text-primary-foreground" : "border-gold text-gold"}`}>{picked ? "Picked ✓" : "Pick for a client"}</button>
                   <button type="button" onClick={() => setSheet({ kind: "guest", propertyId: property.id, propertyName: property.name })} className={LINE_BUTTON}>Guest card</button>

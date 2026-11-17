@@ -37,6 +37,13 @@ export function smsHref(body: string, phone?: string | null, userAgent = typeof 
   return `sms:${digits}${/iPhone|iPad|iPod|Macintosh/i.test(userAgent) ? "&" : "?"}body=${encodeURIComponent(body)}`;
 }
 
+/** "Dec 1" (with the year only when it is not this year) from YYYY-MM-DD; the text unchanged when it is not a date. */
+export function shortDay(day: string | null | undefined, now = new Date()): string {
+  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return day ?? "";
+  const date = new Date(`${day}T12:00:00Z`);
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric", ...(date.getUTCFullYear() === now.getFullYear() ? {} : { year: "numeric" }) }).format(date);
+}
+
 export const mapsHref = (address: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
 
 /** The second-chance choices a renter (or a locator, for a client) can turn on. The order is the order on screen. */

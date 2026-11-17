@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
-import { aptClientLists, aptClients, aptFloorplans, aptGuestCards, aptLeases, aptProperties, dealTeamAllowlist } from "../drizzle/schema";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import { aptClientLists, aptClients, aptFloorplans, aptPhotos, aptGuestCards, aptLeases, aptProperties, dealTeamAllowlist } from "../drizzle/schema";
 import { SITE } from "../shared/site";
 import {
   aptInvoiceNumber, canAdvanceLease, clientOption, clientOptionsMessage, commissionFor, guestCardLetter, referralLine, invoiceLetter, leaseVerificationLetter,
@@ -26,6 +26,7 @@ export class AptError extends Error {
 
 type PropertyRow = typeof aptProperties.$inferSelect;
 type FloorplanRow = typeof aptFloorplans.$inferSelect;
+type PhotoRow = typeof aptPhotos.$inferSelect;
 
 const parseList = (value: string | null): string[] => {
   try { const parsed = JSON.parse(value ?? "[]") as unknown; return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === "string") : []; } catch { return []; }
@@ -35,13 +36,15 @@ const num = (value: string | null) => { const parsed = value == null || value.tr
 
 const toPlan = (row: FloorplanRow): AptFloorplan => ({ id: row.id, name: row.name, beds: row.beds, baths: row.bathsTenths == null ? null : row.bathsTenths / 10, sqft: row.sqft, rentMin: row.rentMin, rentMax: row.rentMax, availableCount: row.availableCount, availableOn: row.availableOn });
 
-function toProperty(row: PropertyRow, plans: readonly FloorplanRow[]): AptProperty {
+function toProperty(row: PropertyRow, plans: readonly FloorplanRow[], photos: readonly PhotoRow[]): AptProperty {
   return {
     id: row.id, name: row.name, managementCompany: row.managementCompany, address: row.address, city: row.city, zip: row.zip, lat: num(row.lat), lng: num(row.lng), areaLabel: row.areaLabel, phone: row.phone, leasingEmail: row.leasingEmail, website: row.website,
     yearBuilt: row.yearBuilt, unitCount: row.unitCount, sendPercent: row.sendPercent, escortPercent: row.escortPercent, flatFee: row.flatFee, minLeaseMonths: row.minLeaseMonths, bonusAmount: row.bonusAmount, bonusNote: row.bonusNote,
     bonusExpiresOn: row.bonusExpiresOn, commissionNote: row.commissionNote, commissionVerifiedOn: row.commissionVerifiedOn, registrationRequired: row.registrationRequired, invoiceEmail: row.invoiceEmail, specialText: row.specialText,
     specialExpiresOn: row.specialExpiresOn, brokenLease: row.brokenLease, eviction: row.eviction, felony: row.felony, misdemeanor: row.misdemeanor, minCreditScore: row.minCreditScore,
     incomeMultiple: row.incomeMultipleTenths == null ? null : row.incomeMultipleTenths / 10, incomeRestricted: row.incomeRestricted, petPolicy: row.petPolicy, amenities: parseList(row.amenities),
+    // A photo whose copy failed (dead link, not an image) is left out; one still waiting is shown from its source to the team only.
+    photos: photos.filter((photo) => photo.propertyId === row.id && !photo.failedReason).sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id).map((photo) => ({ url: photo.storedUrl ?? photo.sourceUrl, caption: photo.caption, stored: Boolean(photo.storedUrl) })),
     floorplans: plans.filter((plan) => plan.propertyId === row.id).map(toPlan), active: row.active,
   };
 }
@@ -51,14 +54,15 @@ export async function loadApartments(): Promise<AptProperty[]> {
   const db = await requireDb();
   const rows = await db.select().from(aptProperties);
   const plans = rows.length ? await db.select().from(aptFloorplans).where(inArray(aptFloorplans.propertyId, rows.map((row) => row.id))) : [];
-  return rows.map((row) => toProperty(row, plans));
+  const photos = rows.length ? await db.select().from(aptPhotos).where(inArray(aptPhotos.propertyId, rows.map((row) => row.id))).orderBy(asc(aptPhotos.sortOrder)) : [];
+  return rows.map((row) => toProperty(row, plans, photos));
 }
 
 async function loadApartment(id: number): Promise<AptProperty> {
   const db = await requireDb();
   const row = (await db.select().from(aptProperties).where(eq(aptProperties.id, id)).limit(1))[0];
   if (!row) throw new AptError("not_found", "That property is not on file.");
-  return toProperty(row, await db.select().from(aptFloorplans).where(eq(aptFloorplans.propertyId, id)));
+  return toProperty(row, await db.select().from(aptFloorplans).where(eq(aptFloorplans.propertyId, id)), await db.select().from(aptPhotos).where(eq(aptPhotos.propertyId, id)));
 }
 
 export type AptPropertyInput = {
@@ -67,6 +71,8 @@ export type AptPropertyInput = {
   bonusExpiresOn?: string | null; commissionNote?: string | null; commissionVerifiedOn?: string | null; registrationRequired?: boolean; invoiceEmail?: string | null; specialText?: string | null; specialExpiresOn?: string | null;
   brokenLease?: AptYesNo; eviction?: AptYesNo; felony?: AptYesNo; misdemeanor?: AptYesNo; minCreditScore?: number | null; incomeMultiple?: number | null; incomeRestricted?: boolean; lat?: number | null; lng?: number | null; petPolicy?: string | null; amenities?: string[]; active?: boolean;
   /** When given, replaces the property's floor plans; when omitted, they are left as they are. */
+  /** When given, becomes the property's photos in this order (the first is the cover). A photo already copied keeps its copy. */
+  photos?: Array<{ url: string; caption?: string | null }>;
   floorplans?: Array<{ name?: string | null; beds: number; baths?: number | null; sqft?: number | null; rentMin?: number | null; rentMax?: number | null; availableCount?: number | null; availableOn?: string | null }>;
 };
 
@@ -79,7 +85,7 @@ export async function importApartments(inputs: readonly AptPropertyInput[]): Pro
   let added = 0;
   let updated = 0;
   for (const input of inputs) {
-    const { floorplans, amenities, incomeMultiple, lat, lng, sourceKey, ...rest } = input;
+    const { floorplans, photos, amenities, incomeMultiple, lat, lng, sourceKey, ...rest } = input;
     const fields = Object.fromEntries(Object.entries({
       ...rest,
       ...(amenities !== undefined ? { amenities: JSON.stringify(amenities) } : {}),
@@ -97,6 +103,18 @@ export async function importApartments(inputs: readonly AptPropertyInput[]): Pro
       await db.insert(aptProperties).values({ sourceKey, ...fields } as typeof aptProperties.$inferInsert);
       id = (await db.select({ id: aptProperties.id }).from(aptProperties).where(eq(aptProperties.sourceKey, sourceKey)).limit(1))[0]!.id;
       added += 1;
+    }
+    if (photos) {
+      const existing = await db.select().from(aptPhotos).where(eq(aptPhotos.propertyId, id));
+      const wanted = Array.from(new Map(photos.map((photo) => [photo.url.trim(), photo])).values());
+      const gone = existing.filter((row) => !wanted.some((photo) => photo.url.trim() === row.sourceUrl)).map((row) => row.id);
+      if (gone.length) await db.delete(aptPhotos).where(inArray(aptPhotos.id, gone));
+      for (let sortOrder = 0; sortOrder < wanted.length; sortOrder++) {
+        const photo = wanted[sortOrder]!;
+        const kept = existing.find((row) => row.sourceUrl === photo.url.trim());
+        if (kept) await db.update(aptPhotos).set({ sortOrder, caption: photo.caption?.trim() || null }).where(eq(aptPhotos.id, kept.id));
+        else await db.insert(aptPhotos).values({ propertyId: id, sourceUrl: photo.url.trim(), caption: photo.caption?.trim() || null, sortOrder });
+      }
     }
     if (floorplans) {
       await db.delete(aptFloorplans).where(eq(aptFloorplans.propertyId, id));

@@ -4,6 +4,7 @@ import { MapPin, Phone } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { bedsLabel, mapsHref, rentRange } from "@/lib/apartments";
 import { AptBadges } from "./AptFilterBar";
+import { AptGallery } from "./AptGallery";
 import { AptMap } from "./AptMap";
 
 /**
@@ -33,8 +34,10 @@ export function ClientList({ token }: { token: string }) {
       </div>
       {points.length > 0 && <AptMap points={points} activeId={active} onPick={(id) => { setActive(id); document.querySelector(`[data-apt-option="${id}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }} className="mt-6 h-72 w-full" />}
       {options.length === 0 && <p className="mt-8 text-sm text-muted-foreground">These apartments are no longer available. {agent.name} can send you new ones.</p>}
-      <ol className="mt-6 grid gap-4 md:grid-cols-2">
-        {options.map((option, index) => <li key={index} data-apt-option={index} onMouseEnter={() => setActive(String(index))} className={`min-w-0 border bg-card p-4 ${active === String(index) ? "border-gold" : "border-border"}`}>
+      <ol className="mt-6 grid gap-6 md:grid-cols-2">
+        {options.map((option, index) => <li key={index} data-apt-option={index} onMouseEnter={() => setActive(String(index))} className={`min-w-0 border bg-card ${active === String(index) ? "border-gold" : "border-border"}`}>
+          <AptGallery photos={option.photos} label={option.name} strip />
+          <div className="p-4">
           <p className="text-xs uppercase tracking-widest text-muted-foreground">{index + 1} · {option.areaLabel}</p>
           <h2 className="mt-1 font-serif text-2xl leading-tight">{option.name}</h2>
           <a href={mapsHref(`${option.name}, ${option.address}`)} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-start gap-1.5 text-sm text-gold underline underline-offset-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0" />{option.address}</a>
@@ -44,7 +47,8 @@ export function ClientList({ token }: { token: string }) {
           {(option.amenities.length > 0 || option.petPolicy) && <p className="mt-3 text-xs text-muted-foreground">{[...option.amenities.slice(0, 8), option.petPolicy ? `Pets: ${option.petPolicy}` : ""].filter(Boolean).join(" · ")}</p>}
           <div className="mt-4 flex flex-wrap gap-2 text-sm">
             {option.phone && <a href={`tel:${option.phone}`} className="inline-flex min-h-11 items-center border border-border px-3">Call the office</a>}
-            {option.website && <a href={option.website} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center border border-border px-3">Photos and floor plans</a>}
+            {option.website && <a href={option.website} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center border border-border px-3">More on their website</a>}
+          </div>
           </div>
         </li>)}
       </ol>

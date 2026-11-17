@@ -8,6 +8,7 @@ import { trpc } from "@/lib/trpc";
 import { APT_COMMISSION_STALE_DAYS } from "@shared/apartments";
 import { aptMoney, bedsLabel, EMPTY_APT_FILTERS, mapsHref, openLetter, rentRange, searchInput, smsHref, type AptFilters, type Letter } from "@/lib/apartments";
 import { AptBadges, AptFilterBar } from "./AptFilterBar";
+import { AptGallery } from "./AptGallery";
 import { AptMap } from "./AptMap";
 
 /**
@@ -121,6 +122,7 @@ export function LocatorWorkspace() {
               const picked = picks.includes(property.id);
               const rates = [property.sendPercent != null && `send ${property.sendPercent}%`, property.escortPercent != null && `escort ${property.escortPercent}%`, property.flatFee != null && `flat ${aptMoney(property.flatFee)}`, property.bonusAmount ? `+${aptMoney(property.bonusAmount)} bonus${property.bonusExpiresOn ? ` to ${property.bonusExpiresOn}` : ""}` : ""].filter(Boolean).join(" · ");
               return <li key={property.id} onMouseEnter={() => setActive(String(property.id))} className={`min-w-0 border bg-card p-4 ${active === String(property.id) ? "border-gold" : "border-border"}`} data-apt-locator-card={property.id}>
+                {property.photos.length > 0 ? <AptGallery photos={property.photos} label={property.name} className="mb-4 sm:float-right sm:mb-2 sm:ml-4 sm:w-56" /> : <p className="mb-2 text-xs text-destructive">No photos on file yet: a list sent to a client will show this one without pictures.</p>}
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0"><p className="text-xs uppercase tracking-widest text-muted-foreground">{property.areaLabel}{property.managementCompany ? ` · ${property.managementCompany}` : ""}</p><h2 className="font-serif text-2xl leading-tight">{property.name}</h2>
                     <a href={mapsHref(`${property.name}, ${property.address}`)} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-start gap-1.5 text-sm text-gold underline underline-offset-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0" />{property.address}</a></div>
@@ -133,7 +135,7 @@ export function LocatorWorkspace() {
                 {property.minCreditScore != null && <p className="mt-2 text-xs text-muted-foreground">Minimum credit score {property.minCreditScore}</p>}
                 {property.specialText && <p className="mt-3 border-l-2 border-gold bg-gold/5 px-3 py-2 text-sm"><span className="font-semibold">Special: </span>{property.specialText}{property.specialExpiresOn ? ` (to ${property.specialExpiresOn})` : ""}</p>}
                 <ul className="mt-3 space-y-1 text-sm">{plans.slice(0, 5).map((plan) => <li key={plan.id} className="flex justify-between gap-3"><span>{plan.name ? `${plan.name}: ` : ""}{bedsLabel(plan.beds)}{plan.baths != null ? `, ${plan.baths} bath` : ""}{plan.sqft ? `, ${plan.sqft.toLocaleString("en-US")} sq ft` : ""}{plan.availableOn ? `, from ${plan.availableOn}` : ""}</span><span className="shrink-0 text-muted-foreground">{rentRange(plan.rentMin, plan.rentMax)}</span></li>)}</ul>
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-4 flex clear-both flex-wrap gap-2">
                   <button type="button" aria-pressed={picked} onClick={() => setPicks(picked ? picks.filter((id) => id !== property.id) : [...picks, property.id])} className={`min-h-11 border px-3 text-sm ${picked ? "border-gold bg-gold text-primary-foreground" : "border-gold text-gold"}`}>{picked ? "Picked ✓" : "Pick for a client"}</button>
                   <button type="button" onClick={() => setSheet({ kind: "guest", propertyId: property.id, propertyName: property.name })} className={LINE_BUTTON}>Guest card</button>
                   <button type="button" onClick={() => setSheet({ kind: "lease", propertyId: property.id, propertyName: property.name })} className={LINE_BUTTON}>Client leased</button>

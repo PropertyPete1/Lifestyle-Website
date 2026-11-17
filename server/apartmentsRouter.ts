@@ -106,6 +106,7 @@ const propertyInput = z.object({
   petPolicy: optionalText(255),
   amenities: z.array(z.string().trim().min(1).max(80)).max(60).optional(),
   active: z.boolean().optional(),
+  photos: z.array(z.object({ url: z.string().trim().url().max(2048).refine((value) => value.startsWith("https://"), "Photo links must be https"), caption: optionalText(190) })).max(120).optional(),
   floorplans: z.array(z.object({ name: optionalText(120), beds: z.number().int().min(0).max(6), baths: z.number().min(0.5).max(6).nullable().optional(), sqft: z.number().int().min(150).max(6000).nullable().optional(), rentMin: dollars.nullable().optional(), rentMax: dollars.nullable().optional(), availableCount: z.number().int().min(0).max(999).nullable().optional(), availableOn: day.nullable().optional() })).max(80).optional(),
 });
 
@@ -150,6 +151,13 @@ export const apartmentsRouter = router({
   admin: router({
     properties: adminProcedure.query(async () => loadApartments()),
     /** Adds or updates properties by sourceKey; a field left out keeps its stored value. */
-    importProperties: adminProcedure.input(z.object({ properties: z.array(propertyInput).min(1).max(500) })).mutation(async ({ input }) => importApartments(input.properties)),
+    importProperties: adminProcedure.input(z.object({ properties: z.array(propertyInput).min(1).max(500) })).mutation(async ({ input }) => {
+      const result = await importApartments(input.properties);
+      // Start copying the new photos now (a short budget); the rest are picked up by copyPhotos.
+      const photos = await (await import("./apartmentsPhotos")).cacheApartmentPhotos({ limit: 30, budgetMs: 20_000 }).catch(() => null);
+      return { ...result, photos };
+    }),
+    /** Copies photos that have no stored copy yet. Run again until `remaining` is 0. */
+    copyPhotos: adminProcedure.mutation(async () => (await import("./apartmentsPhotos")).cacheApartmentPhotos({ limit: 60, budgetMs: 45_000 })),
   }),
 });

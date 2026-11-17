@@ -15,7 +15,7 @@ const property = (id: number, over: Partial<AptProperty> = {}): AptProperty => (
   phone: "(210) 555-0100", leasingEmail: `leasing${id}@fixtureflats.example`, website: "https://www.fixtureflats.example/sa", yearBuilt: 2019, unitCount: 300,
   sendPercent: 50, escortPercent: 100, flatFee: null, minLeaseMonths: 12, bonusAmount: null, bonusNote: null, bonusExpiresOn: null, commissionNote: null, commissionVerifiedOn: "2026-11-10",
   registrationRequired: true, invoiceEmail: null, specialText: null, specialExpiresOn: null, brokenLease: "unknown", eviction: "no", felony: "no", misdemeanor: "unknown", minCreditScore: 600, incomeMultiple: 3, incomeRestricted: false,
-  petPolicy: "Two pets, 75 lb limit", amenities: ["Pool", "Garage parking"], floorplans: [plan(id * 10 + 1, 1, 1_200), plan(id * 10 + 2, 2, 1_600)], active: true, ...over,
+  petPolicy: "Two pets, 75 lb limit", amenities: ["Pool", "Garage parking"], photos: [], floorplans: [plan(id * 10 + 1, 1, 1_200), plan(id * 10 + 2, 2, 1_600)], active: true, ...over,
 });
 const agent: AptAgent = { name: "Sample Agent", phone: "(210) 555-0142", email: "agent@brokerage.example", licenseNumber: "0000000" };
 const brokerage: AptBrokerage = { name: "Lifestyle Design Realty", address: "1212 Chicon St Unit 101, Austin TX 78702", phone: "(210) 981-3830", email: "team@brokerage.example", licenseNumber: null };

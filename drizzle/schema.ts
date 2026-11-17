@@ -846,3 +846,20 @@ export const aptClientLists = mysqlTable("apt_client_lists", {
   note: varchar("note", { length: 500 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("idx_apt_client_lists_client").on(t.clientId)]);
+
+/**
+ * A community's photos, in the order they are shown. `sourceUrl` is where the photo was found (the community's own
+ * site); `storedUrl` is our own copy, made by the photo job, and the only link a renter is ever given (a source link
+ * would name the community).
+ */
+export const aptPhotos = mysqlTable("apt_photos", {
+  id: int("id").autoincrement().primaryKey(),
+  propertyId: int("property_id").notNull(),
+  sourceUrl: varchar("source_url", { length: 2048 }).notNull(),
+  storedUrl: text("stored_url"),
+  caption: varchar("caption", { length: 190 }),
+  sortOrder: int("sort_order").default(0).notNull(),
+  /** Why the copy could not be made (a dead link, not an image, too large); null while pending or once stored. */
+  failedReason: varchar("failed_reason", { length: 60 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_apt_photos_property").on(t.propertyId, t.sortOrder)]);

@@ -76,9 +76,13 @@ export type AptProperty = {
   incomeRestricted: boolean;
   petPolicy: string | null;
   amenities: string[];
+  /** In display order; the first is the cover. `stored` = our own copy exists (the only kind a renter is shown). */
+  photos: AptPhoto[];
   floorplans: AptFloorplan[];
   active: boolean;
 };
+
+export type AptPhoto = { url: string; caption: string | null; stored: boolean };
 
 export type AptSearch = {
   city?: string | null;
@@ -234,6 +238,8 @@ export type PublicApartment = {
   approx: { lat: number; lng: number } | null;
   petPolicy: string | null;
   amenities: string[];
+  /** Our own copies only, captions scrubbed: a link to the community's site would name it. */
+  photos: Array<{ url: string; caption: string | null }>;
 };
 
 /** Degrees per side of the square a renter's map point is snapped to (about 1.5 miles). */
@@ -280,6 +286,7 @@ export function publicApartment(property: AptProperty, search: AptSearch, today:
     approx: property.lat != null && property.lng != null ? { lat: (Math.floor(property.lat / AREA_CELL) + 0.5) * AREA_CELL, lng: (Math.floor(property.lng / AREA_CELL) + 0.5) * AREA_CELL } : null,
     petPolicy: property.petPolicy ? scrub(property.petPolicy) || null : null,
     amenities: property.amenities.map(scrub).filter(Boolean),
+    photos: property.photos.filter((photo) => photo.stored).map((photo) => ({ url: photo.url, caption: photo.caption ? scrub(photo.caption) || null : null })),
   };
 }
 
@@ -465,6 +472,7 @@ export type ClientOption = {
   incomeMultiple: number | null;
   petPolicy: string | null;
   amenities: string[];
+  photos: Array<{ url: string; caption: string | null }>;
   lat: number | null;
   lng: number | null;
 };
@@ -476,7 +484,7 @@ export function clientOption(property: AptProperty, today: string): ClientOption
     plans: property.floorplans.filter((plan) => plan.availableCount !== 0).map((plan) => ({ beds: plan.beds, baths: plan.baths, sqft: plan.sqft, rentMin: plan.rentMin, rentMax: plan.rentMax, availableOn: plan.availableOn })).sort((a, b) => a.beds - b.beds || (a.rentMin ?? 0) - (b.rentMin ?? 0)),
     special: specialLive ? property.specialText : null,
     secondChance: isSecondChance(property), acceptsBrokenLease: accepts(property.brokenLease), acceptsEviction: accepts(property.eviction), acceptsFelony: accepts(property.felony),
-    incomeRestricted: property.incomeRestricted, incomeMultiple: property.incomeMultiple, petPolicy: property.petPolicy, amenities: property.amenities, lat: property.lat, lng: property.lng,
+    incomeRestricted: property.incomeRestricted, incomeMultiple: property.incomeMultiple, petPolicy: property.petPolicy, amenities: property.amenities, photos: property.photos.map((photo) => ({ url: photo.url, caption: photo.caption })), lat: property.lat, lng: property.lng,
   };
 }
 

@@ -79,6 +79,18 @@ CREATE TABLE `apt_leases` (
 	CONSTRAINT `idx_apt_lease_client_property` UNIQUE(`client_id`,`property_id`)
 );
 --> statement-breakpoint
+CREATE TABLE `apt_photos` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`property_id` int NOT NULL,
+	`source_url` varchar(2048) NOT NULL,
+	`stored_url` text,
+	`caption` varchar(190),
+	`sort_order` int NOT NULL DEFAULT 0,
+	`failed_reason` varchar(60),
+	`created_at` timestamp NOT NULL DEFAULT (now()),
+	CONSTRAINT `apt_photos_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
 CREATE TABLE `apt_properties` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`source_key` varchar(255) NOT NULL,
@@ -129,4 +141,5 @@ CREATE INDEX `idx_apt_clients_agent` ON `apt_clients` (`agent_team_id`);--> stat
 CREATE INDEX `idx_apt_floorplans_property` ON `apt_floorplans` (`property_id`);--> statement-breakpoint
 CREATE INDEX `idx_apt_guest_card_agent` ON `apt_guest_cards` (`agent_team_id`);--> statement-breakpoint
 CREATE INDEX `idx_apt_lease_agent_status` ON `apt_leases` (`agent_team_id`,`status`);--> statement-breakpoint
+CREATE INDEX `idx_apt_photos_property` ON `apt_photos` (`property_id`,`sort_order`);--> statement-breakpoint
 CREATE INDEX `idx_apt_properties_city` ON `apt_properties` (`city`,`active`);

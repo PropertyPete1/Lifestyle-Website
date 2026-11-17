@@ -11,6 +11,7 @@ import { getVisitorId } from "@/lib/visitor";
 import { markLeadCaptured } from "@/lib/leadSession";
 import { aptMoney, bedsLabel, EMPTY_APT_FILTERS, needsSummary, rentRange, searchInput, type AptFilters } from "@/lib/apartments";
 import { AptBadges, AptFilterBar } from "./AptFilterBar";
+import { AptGallery } from "./AptGallery";
 import { AptMap } from "./AptMap";
 
 export const APT_SOURCE_TAG = "Website - Apartments";
@@ -84,7 +85,9 @@ export function PublicApartments() {
         <p className="mb-3 text-sm text-muted-foreground" aria-live="polite" data-apt-count="true">{results.isLoading ? "Finding apartments..." : items.length === 0 ? "" : `${items.length} apartment communit${items.length === 1 ? "y" : "ies"} match`}</p>
         {!results.isLoading && items.length === 0 && <div className="border border-border bg-card p-6" data-apt-empty="true"><h2 className="font-serif text-2xl">Nothing listed for that yet.</h2><p className="mt-2 text-sm text-muted-foreground">Our locators work with more communities than are shown here, including second-chance ones. Leave your number and we will text you what fits.</p><Button type="button" onClick={() => ask(null)} className="mt-4 min-h-11 rounded-none bg-gold text-primary-foreground hover:bg-gold/90">Text me what fits</Button></div>}
         <ul className="grid gap-4 sm:grid-cols-2">
-          {items.map((item) => <li key={item.ref} onMouseEnter={() => setActiveRef(item.ref)} onFocus={() => setActiveRef(item.ref)} className={`flex min-w-0 flex-col border bg-card p-4 transition-colors ${activeRef === item.ref ? "border-gold" : "border-border"}`} data-apt-card={item.ref}>
+          {items.map((item) => <li key={item.ref} onMouseEnter={() => setActiveRef(item.ref)} onFocus={() => setActiveRef(item.ref)} className={`flex min-w-0 flex-col border bg-card transition-colors ${activeRef === item.ref ? "border-gold" : "border-border"}`} data-apt-card={item.ref}>
+            <AptGallery photos={item.photos} label={`${item.areaLabel} apartment ${item.ref}`} />
+            <div className="flex min-w-0 flex-1 flex-col p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0"><p className="text-xs uppercase tracking-widest text-muted-foreground">{item.city}</p><h2 className="font-serif text-xl leading-tight">{item.areaLabel}</h2></div>
               <p className="shrink-0 text-right"><span className="block text-[11px] text-muted-foreground">from</span><span className="font-serif text-2xl text-gold">{item.rentFrom != null ? aptMoney(item.rentFrom) : "Call"}</span></p>
@@ -97,6 +100,7 @@ export function PublicApartments() {
             </ul>
             {(item.amenities.length > 0 || item.petPolicy) && <p className="mt-3 text-xs text-muted-foreground">{[...item.amenities.slice(0, 5), item.petPolicy ? `Pets: ${item.petPolicy}` : ""].filter(Boolean).join(" · ")}</p>}
             <div className="mt-auto pt-4"><Button type="button" onClick={() => ask(item.ref)} className="min-h-11 w-full rounded-none bg-gold text-primary-foreground hover:bg-gold/90">Get the name and tour times</Button><p className="mt-1 text-center text-[11px] text-muted-foreground">Apartment {item.ref}</p></div>
+            </div>
           </li>)}
         </ul>
       </div>

@@ -1,9 +1,10 @@
+import { randomBytes } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
-import { aptClients, aptFloorplans, aptGuestCards, aptLeases, aptProperties, dealTeamAllowlist } from "../drizzle/schema";
+import { aptClientLists, aptClients, aptFloorplans, aptGuestCards, aptLeases, aptProperties, dealTeamAllowlist } from "../drizzle/schema";
 import { SITE } from "../shared/site";
 import {
-  aptInvoiceNumber, canAdvanceLease, commissionFor, guestCardLetter, invoiceLetter, leaseVerificationLetter,
-  type AptAgent, type AptBrokerage, type AptClient, type AptFloorplan, type AptLeaseStatus, type AptLetter, type AptMethod, type AptProperty, type AptYesNo,
+  aptInvoiceNumber, canAdvanceLease, clientOption, clientOptionsMessage, commissionFor, guestCardLetter, referralLine, invoiceLetter, leaseVerificationLetter,
+  type AptAgent, type AptBrokerage, type AptClient, type AptFloorplan, type AptLeaseStatus, type AptLetter, type AptMethod, type AptProperty, type AptYesNo, type ClientOption,
 } from "../shared/apartments";
 import { getDb } from "./db";
 
@@ -30,15 +31,17 @@ const parseList = (value: string | null): string[] => {
   try { const parsed = JSON.parse(value ?? "[]") as unknown; return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === "string") : []; } catch { return []; }
 };
 
+const num = (value: string | null) => { const parsed = value == null || value.trim() === "" ? NaN : Number(value); return Number.isFinite(parsed) ? parsed : null; };
+
 const toPlan = (row: FloorplanRow): AptFloorplan => ({ id: row.id, name: row.name, beds: row.beds, baths: row.bathsTenths == null ? null : row.bathsTenths / 10, sqft: row.sqft, rentMin: row.rentMin, rentMax: row.rentMax, availableCount: row.availableCount, availableOn: row.availableOn });
 
 function toProperty(row: PropertyRow, plans: readonly FloorplanRow[]): AptProperty {
   return {
-    id: row.id, name: row.name, managementCompany: row.managementCompany, address: row.address, city: row.city, zip: row.zip, areaLabel: row.areaLabel, phone: row.phone, leasingEmail: row.leasingEmail, website: row.website,
+    id: row.id, name: row.name, managementCompany: row.managementCompany, address: row.address, city: row.city, zip: row.zip, lat: num(row.lat), lng: num(row.lng), areaLabel: row.areaLabel, phone: row.phone, leasingEmail: row.leasingEmail, website: row.website,
     yearBuilt: row.yearBuilt, unitCount: row.unitCount, sendPercent: row.sendPercent, escortPercent: row.escortPercent, flatFee: row.flatFee, minLeaseMonths: row.minLeaseMonths, bonusAmount: row.bonusAmount, bonusNote: row.bonusNote,
     bonusExpiresOn: row.bonusExpiresOn, commissionNote: row.commissionNote, commissionVerifiedOn: row.commissionVerifiedOn, registrationRequired: row.registrationRequired, invoiceEmail: row.invoiceEmail, specialText: row.specialText,
     specialExpiresOn: row.specialExpiresOn, brokenLease: row.brokenLease, eviction: row.eviction, felony: row.felony, misdemeanor: row.misdemeanor, minCreditScore: row.minCreditScore,
-    incomeMultiple: row.incomeMultipleTenths == null ? null : row.incomeMultipleTenths / 10, petPolicy: row.petPolicy, amenities: parseList(row.amenities),
+    incomeMultiple: row.incomeMultipleTenths == null ? null : row.incomeMultipleTenths / 10, incomeRestricted: row.incomeRestricted, petPolicy: row.petPolicy, amenities: parseList(row.amenities),
     floorplans: plans.filter((plan) => plan.propertyId === row.id).map(toPlan), active: row.active,
   };
 }
@@ -62,7 +65,7 @@ export type AptPropertyInput = {
   sourceKey: string; name: string; managementCompany?: string | null; address: string; city: string; zip?: string | null; areaLabel: string; phone?: string | null; leasingEmail?: string | null; website?: string | null;
   yearBuilt?: number | null; unitCount?: number | null; sendPercent?: number | null; escortPercent?: number | null; flatFee?: number | null; minLeaseMonths?: number | null; bonusAmount?: number | null; bonusNote?: string | null;
   bonusExpiresOn?: string | null; commissionNote?: string | null; commissionVerifiedOn?: string | null; registrationRequired?: boolean; invoiceEmail?: string | null; specialText?: string | null; specialExpiresOn?: string | null;
-  brokenLease?: AptYesNo; eviction?: AptYesNo; felony?: AptYesNo; misdemeanor?: AptYesNo; minCreditScore?: number | null; incomeMultiple?: number | null; petPolicy?: string | null; amenities?: string[]; active?: boolean;
+  brokenLease?: AptYesNo; eviction?: AptYesNo; felony?: AptYesNo; misdemeanor?: AptYesNo; minCreditScore?: number | null; incomeMultiple?: number | null; incomeRestricted?: boolean; lat?: number | null; lng?: number | null; petPolicy?: string | null; amenities?: string[]; active?: boolean;
   /** When given, replaces the property's floor plans; when omitted, they are left as they are. */
   floorplans?: Array<{ name?: string | null; beds: number; baths?: number | null; sqft?: number | null; rentMin?: number | null; rentMax?: number | null; availableCount?: number | null; availableOn?: string | null }>;
 };
@@ -76,10 +79,12 @@ export async function importApartments(inputs: readonly AptPropertyInput[]): Pro
   let added = 0;
   let updated = 0;
   for (const input of inputs) {
-    const { floorplans, amenities, incomeMultiple, sourceKey, ...rest } = input;
+    const { floorplans, amenities, incomeMultiple, lat, lng, sourceKey, ...rest } = input;
     const fields = Object.fromEntries(Object.entries({
       ...rest,
       ...(amenities !== undefined ? { amenities: JSON.stringify(amenities) } : {}),
+      ...(lat !== undefined ? { lat: lat == null ? null : String(lat) } : {}),
+      ...(lng !== undefined ? { lng: lng == null ? null : String(lng) } : {}),
       ...(incomeMultiple !== undefined ? { incomeMultipleTenths: incomeMultiple == null ? null : Math.round(incomeMultiple * 10) } : {}),
     }).filter(([, value]) => value !== undefined));
     const existing = (await db.select({ id: aptProperties.id }).from(aptProperties).where(eq(aptProperties.sourceKey, sourceKey)).limit(1))[0];
@@ -245,4 +250,48 @@ export async function locatorBook(agentTeamId: number) {
       paid: sum(leases.filter((lease) => lease.status === "paid"), (lease) => lease.paidAmount),
     },
   };
+}
+
+/**
+ * What a property pays, as a locator just confirmed it (a flyer, a call, the reply to a guest card). Any locator on
+ * the team may update it: the figure is stamped with today's date, which is what keeps it off the "confirm first" list.
+ */
+export async function confirmCommission(agentTeamId: number, input: { propertyId: number; sendPercent?: number | null; escortPercent?: number | null; flatFee?: number | null; bonusAmount?: number | null; bonusNote?: string | null; bonusExpiresOn?: string | null; commissionNote?: string | null; today: string }): Promise<void> {
+  const db = await requireDb();
+  const locator = await locatorFor(agentTeamId);
+  await loadApartment(input.propertyId);
+  const { propertyId, today, commissionNote, ...figures } = input;
+  const fields = Object.fromEntries(Object.entries(figures).filter(([, value]) => value !== undefined));
+  await db.update(aptProperties).set({ ...fields, commissionVerifiedOn: today, commissionNote: `${commissionNote?.trim() ? `${commissionNote.trim()} ` : ""}(confirmed ${today} by ${locator.name})` }).where(eq(aptProperties.id, propertyId));
+}
+
+/** Saves the communities a locator picked for a client and returns the link token and the message to send with it. */
+export async function createClientList(agentTeamId: number, input: { clientId: number; propertyIds: number[]; note?: string | null; baseUrl: string }): Promise<{ token: string; url: string; message: AptLetter }> {
+  const db = await requireDb();
+  const client = await ownClient(agentTeamId, input.clientId);
+  const ids = Array.from(new Set(input.propertyIds));
+  const known = new Set((await loadApartments()).filter((property) => property.active).map((property) => property.id));
+  if (!ids.length || ids.some((id) => !known.has(id))) throw new AptError("bad_input", "Pick at least one community that is on file.");
+  const token = randomBytes(24).toString("hex");
+  await db.insert(aptClientLists).values({ token, agentTeamId, clientId: input.clientId, propertyIds: JSON.stringify(ids), note: input.note?.trim() || null });
+  const url = `${input.baseUrl.replace(/\/$/, "")}/apartments/list/${token}`;
+  return { token, url, message: clientOptionsMessage({ client: toClient(client), agent: await locatorFor(agentTeamId), brokerage: APT_BROKERAGE, count: ids.length, url }) };
+}
+
+export type ClientListView = { clientFirstName: string; agent: { name: string; phone: string | null; email: string | null }; brokerage: string; referralLine: string; note: string | null; options: ClientOption[] };
+
+/** What the client's link opens. Unknown token: null. A community since switched off drops out of the list. */
+export async function clientListByToken(token: string, today: string): Promise<ClientListView | null> {
+  if (!/^[a-f0-9]{48}$/.test(token)) return null;
+  const db = await requireDb();
+  const list = (await db.select().from(aptClientLists).where(eq(aptClientLists.token, token)).limit(1))[0];
+  if (!list) return null;
+  const client = (await db.select().from(aptClients).where(eq(aptClients.id, list.clientId)).limit(1))[0];
+  const agent = await locatorFor(list.agentTeamId).catch(() => null);
+  if (!client || !agent) return null;
+  let ids: number[] = [];
+  try { ids = (JSON.parse(list.propertyIds) as unknown[]).filter((id): id is number => typeof id === "number"); } catch { ids = []; }
+  const all = await loadApartments();
+  const options = ids.map((id) => all.find((property) => property.id === id && property.active)).filter((property): property is AptProperty => Boolean(property)).map((property) => clientOption(property, today));
+  return { clientFirstName: client.name.trim().split(/\s+/)[0] ?? "", agent: { name: agent.name, phone: agent.phone, email: agent.email }, brokerage: APT_BROKERAGE.name, referralLine: referralLine(agent, APT_BROKERAGE), note: list.note, options };
 }

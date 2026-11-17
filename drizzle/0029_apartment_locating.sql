@@ -1,3 +1,15 @@
+CREATE TABLE `apt_client_lists` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`token` varchar(64) NOT NULL,
+	`agent_team_id` int NOT NULL,
+	`client_id` int NOT NULL,
+	`property_ids` text NOT NULL,
+	`note` varchar(500),
+	`created_at` timestamp NOT NULL DEFAULT (now()),
+	CONSTRAINT `apt_client_lists_id` PRIMARY KEY(`id`),
+	CONSTRAINT `apt_client_lists_token_unique` UNIQUE(`token`)
+);
+--> statement-breakpoint
 CREATE TABLE `apt_clients` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`agent_team_id` int NOT NULL,
@@ -102,6 +114,7 @@ CREATE TABLE `apt_properties` (
 	`misdemeanor` enum('yes','no','case_by_case','unknown') NOT NULL DEFAULT 'unknown',
 	`min_credit_score` int,
 	`income_multiple_tenths` int,
+	`income_restricted` boolean NOT NULL DEFAULT false,
 	`pet_policy` varchar(255),
 	`amenities` text,
 	`active` boolean NOT NULL DEFAULT true,
@@ -111,6 +124,7 @@ CREATE TABLE `apt_properties` (
 	CONSTRAINT `apt_properties_source_key_unique` UNIQUE(`source_key`)
 );
 --> statement-breakpoint
+CREATE INDEX `idx_apt_client_lists_client` ON `apt_client_lists` (`client_id`);--> statement-breakpoint
 CREATE INDEX `idx_apt_clients_agent` ON `apt_clients` (`agent_team_id`);--> statement-breakpoint
 CREATE INDEX `idx_apt_floorplans_property` ON `apt_floorplans` (`property_id`);--> statement-breakpoint
 CREATE INDEX `idx_apt_guest_card_agent` ON `apt_guest_cards` (`agent_team_id`);--> statement-breakpoint

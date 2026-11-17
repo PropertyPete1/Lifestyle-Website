@@ -37,6 +37,8 @@ export type AptProperty = {
   address: string;
   city: string;
   zip: string | null;
+  lat: number | null;
+  lng: number | null;
   /** Buyer-safe area wording ("North Central San Antonio"). */
   areaLabel: string;
   phone: string | null;
@@ -70,6 +72,8 @@ export type AptProperty = {
   minCreditScore: number | null;
   /** Income required as a multiple of rent (3 = three times the rent). */
   incomeMultiple: number | null;
+  /** An income-restricted (affordable, tax credit) community: rents are capped for households under an income limit. */
+  incomeRestricted: boolean;
   petPolicy: string | null;
   amenities: string[];
   floorplans: AptFloorplan[];
@@ -87,6 +91,10 @@ export type AptSearch = {
   needsBrokenLeaseOk?: boolean;
   needsEvictionOk?: boolean;
   needsFelonyOk?: boolean;
+  /** Income-restricted (affordable) communities only. */
+  needsIncomeRestricted?: boolean;
+  /** Any second-chance community: one that works with a broken lease, an eviction or a record. */
+  secondChanceOnly?: boolean;
   /** The renter's score: properties whose minimum is above it are left out. */
   creditScore?: number | null;
   /** Locator view only: only properties with a stated commission. */
@@ -101,6 +109,15 @@ const dayNumber = (day: string) => Math.floor(Date.parse(`${day}T00:00:00Z`) / 8
 const isDay = (value: string | null | undefined): value is string => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)));
 const money = (value: number) => `$${Math.round(value).toLocaleString("en-US")}`;
 const accepts = (value: AptYesNo) => value === "yes" || value === "case_by_case";
+
+/**
+ * SECOND CHANCE (Nov 17, 2026, Peter: "broken leases, evictions, all that stuff, we have places for them as well, so
+ * we can get all the leads"; it "should stand out"). A community is second chance when it says yes or case-by-case
+ * to a broken lease, an eviction or a felony. Unknown is never a yes: a renter is not sent somewhere on a guess.
+ */
+export function isSecondChance(property: Pick<AptProperty, "brokenLease" | "eviction" | "felony">): boolean {
+  return accepts(property.brokenLease) || accepts(property.eviction) || accepts(property.felony);
+}
 
 /** Floor plans of a property that fit the search (beds, rent ceiling, move date). */
 export function matchingFloorplans(property: AptProperty, search: AptSearch): AptFloorplan[] {
@@ -122,6 +139,8 @@ export function matchesSearch(property: AptProperty, search: AptSearch): boolean
   if (search.needsBrokenLeaseOk && !accepts(property.brokenLease)) return false;
   if (search.needsEvictionOk && !accepts(property.eviction)) return false;
   if (search.needsFelonyOk && !accepts(property.felony)) return false;
+  if (search.needsIncomeRestricted && !property.incomeRestricted) return false;
+  if (search.secondChanceOnly && !isSecondChance(property)) return false;
   if (search.creditScore != null && property.minCreditScore != null && property.minCreditScore > search.creditScore) return false;
   if (search.paysOnly && property.sendPercent == null && property.escortPercent == null && property.flatFee == null) return false;
   const filtersPlans = search.beds != null || search.maxRent != null || isDay(search.moveBy);
@@ -203,11 +222,22 @@ export type PublicApartment = {
   rentFrom: number | null;
   plans: Array<{ beds: number; baths: number | null; sqft: number | null; rentMin: number | null; rentMax: number | null; availableOn: string | null }>;
   special: string | null;
+  /** Works with a broken lease, an eviction or a record: the badge that stands out. */
+  secondChance: boolean;
   acceptsBrokenLease: boolean;
   acceptsEviction: boolean;
+  acceptsFelony: boolean;
+  incomeRestricted: boolean;
+  /** Income needed as a multiple of the rent, when the community states it. */
+  incomeMultiple: number | null;
+  /** The middle of a roughly 1.5-mile square the community sits in: enough for an area map, never its pin. */
+  approx: { lat: number; lng: number } | null;
   petPolicy: string | null;
   amenities: string[];
 };
+
+/** Degrees per side of the square a renter's map point is snapped to (about 1.5 miles). */
+const AREA_CELL = 0.02;
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -241,8 +271,13 @@ export function publicApartment(property: AptProperty, search: AptSearch, today:
     rentFrom: rents.length ? Math.min(...rents) : null,
     plans,
     special: specialLive ? scrub(property.specialText!) || null : null,
+    secondChance: isSecondChance(property),
     acceptsBrokenLease: accepts(property.brokenLease),
     acceptsEviction: accepts(property.eviction),
+    acceptsFelony: accepts(property.felony),
+    incomeRestricted: property.incomeRestricted,
+    incomeMultiple: property.incomeMultiple,
+    approx: property.lat != null && property.lng != null ? { lat: (Math.floor(property.lat / AREA_CELL) + 0.5) * AREA_CELL, lng: (Math.floor(property.lng / AREA_CELL) + 0.5) * AREA_CELL } : null,
     petPolicy: property.petPolicy ? scrub(property.petPolicy) || null : null,
     amenities: property.amenities.map(scrub).filter(Boolean),
   };
@@ -404,4 +439,68 @@ export function canAdvanceLease(from: AptLeaseStatus, to: AptLeaseStatus): boole
 /** Unpaid invoices by age, for the locator's "who owes us" list. */
 export function invoiceAgeDays(dueOn: string, today: string): number {
   return isDay(dueOn) && isDay(today) ? dayNumber(today) - dayNumber(dueOn) : 0;
+}
+
+/* ----------------------------------------------------------------------------------------------------------------
+ * The client's options. A locator picks communities and sends the client one link. The client sees the names and
+ * how to reach them (they came through us, as on an agent's Builder Deals link) and, on every one, the line that
+ * protects the referral: who to name as their locator. Never what the community pays.
+ * ------------------------------------------------------------------------------------------------------------- */
+
+export type ClientOption = {
+  name: string;
+  address: string;
+  city: string;
+  areaLabel: string;
+  phone: string | null;
+  website: string | null;
+  yearBuilt: number | null;
+  plans: PublicApartment["plans"];
+  special: string | null;
+  secondChance: boolean;
+  acceptsBrokenLease: boolean;
+  acceptsEviction: boolean;
+  acceptsFelony: boolean;
+  incomeRestricted: boolean;
+  incomeMultiple: number | null;
+  petPolicy: string | null;
+  amenities: string[];
+  lat: number | null;
+  lng: number | null;
+};
+
+export function clientOption(property: AptProperty, today: string): ClientOption {
+  const specialLive = property.specialText && (!isDay(property.specialExpiresOn) || dayNumber(property.specialExpiresOn) >= dayNumber(today));
+  return {
+    name: property.name, address: property.address, city: property.city, areaLabel: property.areaLabel, phone: property.phone, website: property.website, yearBuilt: property.yearBuilt,
+    plans: property.floorplans.filter((plan) => plan.availableCount !== 0).map((plan) => ({ beds: plan.beds, baths: plan.baths, sqft: plan.sqft, rentMin: plan.rentMin, rentMax: plan.rentMax, availableOn: plan.availableOn })).sort((a, b) => a.beds - b.beds || (a.rentMin ?? 0) - (b.rentMin ?? 0)),
+    special: specialLive ? property.specialText : null,
+    secondChance: isSecondChance(property), acceptsBrokenLease: accepts(property.brokenLease), acceptsEviction: accepts(property.eviction), acceptsFelony: accepts(property.felony),
+    incomeRestricted: property.incomeRestricted, incomeMultiple: property.incomeMultiple, petPolicy: property.petPolicy, amenities: property.amenities, lat: property.lat, lng: property.lng,
+  };
+}
+
+/** What the client must do so the locator is credited (and the client keeps a free service). */
+export function referralLine(agent: Pick<AptAgent, "name">, brokerage: Pick<AptBrokerage, "name">): string {
+  return `When you tour or apply, write "${agent.name}, ${brokerage.name}" as your locator or "how did you hear about us".`;
+}
+
+/** The message a locator sends with the client's link (text or e-mail). */
+export function clientOptionsMessage(input: { client: Pick<AptClient, "name">; agent: AptAgent; brokerage: AptBrokerage; count: number; url: string }): AptLetter {
+  const first = input.client.name.trim().split(/\s+/)[0] ?? "";
+  return {
+    to: null,
+    subject: `${input.count} apartment${input.count === 1 ? "" : "s"} I picked for you`,
+    body: lines([
+      `Hi ${first}, here ${input.count === 1 ? "is the apartment" : `are the ${input.count} apartments`} I picked for you, with rents, specials and how to reach each one:`,
+      input.url,
+      "",
+      referralLine(input.agent, input.brokerage),
+      "My help is free to you. Tell me which ones you like and I will set up the tours.",
+      "",
+      input.agent.name,
+      input.brokerage.name,
+      input.agent.phone,
+    ]),
+  };
 }

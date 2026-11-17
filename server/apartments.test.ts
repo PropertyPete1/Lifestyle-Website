@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  aptInvoiceNumber, canAdvanceLease, commissionFor, guestCardLetter, invoiceAgeDays, invoiceLetter, leaseVerificationLetter, locatorResults, matchesSearch, publicResults, scrubApartmentText,
+  aptInvoiceNumber, canAdvanceLease, clientOption, clientOptionsMessage, commissionFor, guestCardLetter, invoiceAgeDays, invoiceLetter, leaseVerificationLetter, locatorResults, matchesSearch, publicResults, scrubApartmentText,
   type AptAgent, type AptBrokerage, type AptClient, type AptFloorplan, type AptProperty,
 } from "../shared/apartments";
 
@@ -11,10 +11,10 @@ import {
 const TODAY = "2026-11-17";
 const plan = (id: number, beds: number, rentMin: number, over: Partial<AptFloorplan> = {}): AptFloorplan => ({ id, name: `A${id}`, beds, baths: beds ? beds : 1, sqft: 600 + beds * 250, rentMin, rentMax: rentMin + 150, availableCount: 2, availableOn: "2026-12-01", ...over });
 const property = (id: number, over: Partial<AptProperty> = {}): AptProperty => ({
-  id, name: `Fixture Flats ${id}`, managementCompany: "Sample Residential", address: `${id}00 Fixture Pkwy, San Antonio, TX 78216`, city: "San Antonio", zip: "78216", areaLabel: "North Central San Antonio",
+  id, name: `Fixture Flats ${id}`, managementCompany: "Sample Residential", address: `${id}00 Fixture Pkwy, San Antonio, TX 78216`, city: "San Antonio", zip: "78216", lat: 29.5512, lng: -98.4873, areaLabel: "North Central San Antonio",
   phone: "(210) 555-0100", leasingEmail: `leasing${id}@fixtureflats.example`, website: "https://www.fixtureflats.example/sa", yearBuilt: 2019, unitCount: 300,
   sendPercent: 50, escortPercent: 100, flatFee: null, minLeaseMonths: 12, bonusAmount: null, bonusNote: null, bonusExpiresOn: null, commissionNote: null, commissionVerifiedOn: "2026-11-10",
-  registrationRequired: true, invoiceEmail: null, specialText: null, specialExpiresOn: null, brokenLease: "unknown", eviction: "no", felony: "no", misdemeanor: "unknown", minCreditScore: 600, incomeMultiple: 3,
+  registrationRequired: true, invoiceEmail: null, specialText: null, specialExpiresOn: null, brokenLease: "unknown", eviction: "no", felony: "no", misdemeanor: "unknown", minCreditScore: 600, incomeMultiple: 3, incomeRestricted: false,
   petPolicy: "Two pets, 75 lb limit", amenities: ["Pool", "Garage parking"], floorplans: [plan(id * 10 + 1, 1, 1_200), plan(id * 10 + 2, 2, 1_600)], active: true, ...over,
 });
 const agent: AptAgent = { name: "Sample Agent", phone: "(210) 555-0142", email: "agent@brokerage.example", licenseNumber: "0000000" };
@@ -125,5 +125,42 @@ describe("the paperwork", () => {
     expect(canAdvanceLease("verified", "paid")).toBe(false);
     expect(canAdvanceLease("paid", "invoiced")).toBe(false);
     expect(invoiceAgeDays("2027-01-14", "2027-02-01")).toBe(18);
+  });
+});
+
+describe("second chance and the client's options", () => {
+  const places = [
+    property(1),
+    property(2, { brokenLease: "yes" }),
+    property(3, { eviction: "case_by_case", felony: "yes" }),
+    property(4, { incomeRestricted: true, incomeMultiple: 2.5 }),
+  ];
+
+  it("second-chance and income-restricted filters work for renters and locators, and unknown is never a yes", () => {
+    expect(publicResults(places, { secondChanceOnly: true }, TODAY)).toHaveLength(2);
+    expect(publicResults(places, { secondChanceOnly: true }, TODAY).every((entry) => entry.secondChance)).toBe(true);
+    expect(publicResults(places, { needsEvictionOk: true, needsFelonyOk: true }, TODAY)).toHaveLength(1);
+    expect(publicResults(places, { needsIncomeRestricted: true }, TODAY)).toEqual([expect.objectContaining({ incomeRestricted: true, incomeMultiple: 2.5, secondChance: false })]);
+    expect(locatorResults(places, { secondChanceOnly: true }, TODAY).map((entry) => entry.property.id)).toEqual([2, 3]);
+    expect(publicResults([property(1)], {}, TODAY)[0]).toMatchObject({ secondChance: false, acceptsBrokenLease: false, acceptsFelony: false });
+  });
+
+  it("a renter's map point is the middle of its square, never the property's own coordinates", () => {
+    const [entry] = publicResults([property(1)], {}, TODAY);
+    expect(entry!.approx!.lat).toBeCloseTo(29.55, 5);
+    expect(entry!.approx!.lng).toBeCloseTo(-98.49, 5);
+    expect(JSON.stringify(entry)).not.toMatch(/29\.5512|98\.4873/);
+    expect(publicResults([property(1, { lat: null, lng: null })], {}, TODAY)[0]!.approx).toBeNull();
+  });
+
+  it("the client's list names the community and how to reach it, tells them who to name, and never says what it pays", () => {
+    const option = clientOption(property(2, { brokenLease: "yes", specialText: "One month free", bonusAmount: 500, commissionNote: "pays fast" }), TODAY);
+    expect(option).toMatchObject({ name: "Fixture Flats 2", address: "200 Fixture Pkwy, San Antonio, TX 78216", phone: "(210) 555-0100", special: "One month free", secondChance: true });
+    expect(JSON.stringify(option)).not.toMatch(/Percent|flatFee|bonus|commission|pays fast|leasing2@|invoice/i);
+    const message = clientOptionsMessage({ client: { name: "Sample Renter" }, agent, brokerage, count: 3, url: "https://site.example/apartments/list/abc" });
+    expect(message.subject).toBe("3 apartments I picked for you");
+    expect(message.body).toContain("Hi Sample, here are the 3 apartments I picked for you");
+    expect(message.body).toContain('write "Sample Agent, Lifestyle Design Realty" as your locator');
+    expect(message.body).toContain("https://site.example/apartments/list/abc");
   });
 });

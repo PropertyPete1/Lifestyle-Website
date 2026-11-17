@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({ getDb: vi.fn() }));
 vi.mock("./db", () => ({ getDb: (...args: unknown[]) => mocks.getDb(...args) }));
 
 import { publicResults } from "../shared/apartments";
-import { addAptClient, draftGuestCard, draftInvoice, draftLeaseVerification, importApartments, loadApartments, locatorBook, markGuestCard, markLeasePaid, markVerificationSent, recordVerification, reportLease, type AptPropertyInput } from "./apartmentsStore";
+import { addAptClient, clientListByToken, confirmCommission, createClientList, draftGuestCard, draftInvoice, draftLeaseVerification, importApartments, loadApartments, locatorBook, markGuestCard, markLeasePaid, markVerificationSent, recordVerification, reportLease, type AptPropertyInput } from "./apartmentsStore";
 
 const TODAY = "2026-11-17";
 const flats: AptPropertyInput = {
@@ -99,5 +99,34 @@ describe("a locator's file, start to paid", () => {
     expect(book.leases[0]).toMatchObject({ property: "Fixture Flats", status: "paid", invoiceNumber: invoice.number });
     // The other locator's book is empty.
     expect(await locatorBook(other)).toMatchObject({ clients: [], guestCards: [], leases: [] });
+  });
+});
+
+describe("sending a client their options, and keeping pay current", () => {
+  it("one link opens the picked communities for the client: names and contacts, the referral line, no pay; a bad token opens nothing", async () => {
+    await importApartments([flats, { ...flats, sourceKey: "manual:fixture-lofts", name: "Fixture Lofts", eviction: "yes", incomeRestricted: true }]);
+    const [a, b] = (db.rows(aptProperties) as Array<{ id: number }>).map((row) => row.id) as [number, number];
+    const clientId = await addAptClient(pete, { name: "Sample Renter" });
+    await expect(createClientList(other, { clientId, propertyIds: [a], baseUrl: "https://site.example" })).rejects.toThrow(/not one of yours/);
+    await expect(createClientList(pete, { clientId, propertyIds: [a, 9_999], baseUrl: "https://site.example" })).rejects.toThrow(/on file/);
+    const sent = await createClientList(pete, { clientId, propertyIds: [b, a, b], note: "Start with the first one", baseUrl: "https://site.example/" });
+    expect(sent.url).toBe(`https://site.example/apartments/list/${sent.token}`);
+    expect(sent.message.body).toContain(sent.url);
+    expect(sent.message.subject).toBe("2 apartments I picked for you");
+    const view = await clientListByToken(sent.token, TODAY);
+    expect(view).toMatchObject({ clientFirstName: "Sample", agent: { name: "Sample Locator" }, note: "Start with the first one" });
+    expect(view!.options.map((option) => option.name)).toEqual(["Fixture Lofts", "Fixture Flats"]);
+    expect(view!.options[0]).toMatchObject({ secondChance: true, incomeRestricted: true });
+    expect(view!.referralLine).toContain("Sample Locator, Lifestyle Design Realty");
+    expect(JSON.stringify(view)).not.toMatch(/Percent|flatFee|commission|leasing@/i);
+    expect(await clientListByToken("0".repeat(48), TODAY)).toBeNull();
+    expect(await clientListByToken("not-a-token", TODAY)).toBeNull();
+  });
+
+  it("a locator's confirmation updates the pay and stamps the date and who confirmed it", async () => {
+    await importApartments([{ ...flats, commissionVerifiedOn: "2026-09-01" }]);
+    await confirmCommission(pete, { propertyId: propertyId(), escortPercent: 125, bonusAmount: 300, bonusExpiresOn: "2026-12-31", commissionNote: "From the November flyer", today: TODAY });
+    const [stored] = await loadApartments();
+    expect(stored).toMatchObject({ sendPercent: 50, escortPercent: 125, bonusAmount: 300, commissionVerifiedOn: TODAY, commissionNote: "From the November flyer (confirmed 2026-11-17 by Sample Locator)" });
   });
 });

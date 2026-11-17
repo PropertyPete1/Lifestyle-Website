@@ -3,7 +3,7 @@ import { z } from "zod";
 import { locatorResults, publicResults, type AptSearch } from "../shared/apartments";
 import { adminProcedure, publicProcedure, router } from "./_core/trpc";
 import {
-  addAptClient, AptError, draftGuestCard, draftInvoice, draftLeaseVerification, importApartments, loadApartments, locatorBook, locatorFor, markGuestCard, markLeasePaid, markVerificationSent, recordVerification, reportLease,
+  addAptClient, AptError, clientListByToken, confirmCommission, createClientList, draftGuestCard, draftInvoice, draftLeaseVerification, importApartments, loadApartments, locatorBook, locatorFor, markGuestCard, markLeasePaid, markVerificationSent, recordVerification, reportLease,
 } from "./apartmentsStore";
 
 /**
@@ -30,6 +30,8 @@ const searchInput = z.object({
   needsBrokenLeaseOk: z.boolean().optional(),
   needsEvictionOk: z.boolean().optional(),
   needsFelonyOk: z.boolean().optional(),
+  needsIncomeRestricted: z.boolean().optional(),
+  secondChanceOnly: z.boolean().optional(),
   creditScore: z.number().int().min(300).max(850).nullish(),
   paysOnly: z.boolean().optional(),
 }).default({});
@@ -46,6 +48,14 @@ async function locatorId(req: unknown): Promise<number> {
   const teamId = session?.lead.agentTeamId;
   if (!teamId) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sign in as a team member to use the locator tools." });
   return teamId;
+}
+
+/** The site's own address for links sent to clients: the request's host, https except on a local host. */
+function siteOrigin(req: unknown): string {
+  const headers = (req as { headers?: Record<string, string | string[] | undefined> }).headers ?? {};
+  const pick = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value)?.split(",")[0]?.trim();
+  const host = pick(headers["x-forwarded-host"]) ?? pick(headers.host) ?? "lifestyledesignrealty.com";
+  return `${/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) ? "http" : "https"}://${host}`;
 }
 
 async function guarded<T>(work: () => Promise<T>): Promise<T> {
@@ -89,6 +99,9 @@ const propertyInput = z.object({
   felony: yesNo.optional(),
   misdemeanor: yesNo.optional(),
   minCreditScore: z.number().int().min(300).max(850).nullable().optional(),
+  incomeRestricted: z.boolean().optional(),
+  lat: z.number().min(-90).max(90).nullable().optional(),
+  lng: z.number().min(-180).max(180).nullable().optional(),
   incomeMultiple: z.number().min(1).max(6).nullable().optional(),
   petPolicy: optionalText(255),
   amenities: z.array(z.string().trim().min(1).max(80)).max(60).optional(),
@@ -99,6 +112,9 @@ const propertyInput = z.object({
 export const apartmentsRouter = router({
   /** Renters: areas, rents, specials and what is accepted. Nothing that names a property or what it pays. */
   search: publicProcedure.input(searchInput).query(async ({ input }) => publicResults(await loadApartments(), input as AptSearch, chicagoToday())),
+
+  /** A client's options from their locator's link: names and contacts of the picked communities, never what they pay. */
+  list: publicProcedure.input(z.object({ token: z.string().regex(/^[a-f0-9]{48}$/) })).query(async ({ input }) => clientListByToken(input.token, chicagoToday())),
 
   locator: router({
     me: locatorProcedure.query(async ({ ctx }) => guarded(() => locatorFor(ctx.agentTeamId))),
@@ -111,6 +127,12 @@ export const apartmentsRouter = router({
       .mutation(async ({ ctx, input }) => guarded(() => draftGuestCard(ctx.agentTeamId, { ...input, today: chicagoToday() }))),
     markGuestCard: locatorProcedure.input(z.object({ id, sent: z.boolean().optional(), confirmed: z.boolean().optional() }))
       .mutation(async ({ ctx, input }) => guarded(async () => { await markGuestCard(ctx.agentTeamId, { id: input.id, ...(input.sent ? { sentOn: chicagoToday() } : {}), ...(input.confirmed ? { confirmedOn: chicagoToday() } : {}) }); return { ok: true as const }; })),
+    /** Saves the picked communities for a client and returns the link and the message to send. */
+    sendOptions: locatorProcedure.input(z.object({ clientId: id, propertyIds: z.array(id).min(1).max(25), note: optionalText(500) }))
+      .mutation(async ({ ctx, input }) => guarded(() => createClientList(ctx.agentTeamId, { ...input, baseUrl: siteOrigin(ctx.req) }))),
+    /** What a property pays, as just confirmed by this locator (stamped with today's date). */
+    confirmCommission: locatorProcedure.input(z.object({ propertyId: id, sendPercent: z.number().int().min(0).max(300).nullable().optional(), escortPercent: z.number().int().min(0).max(300).nullable().optional(), flatFee: dollars.nullable().optional(), bonusAmount: dollars.nullable().optional(), bonusNote: optionalText(255), bonusExpiresOn: day.nullable().optional(), commissionNote: optionalText(500) }))
+      .mutation(async ({ ctx, input }) => guarded(async () => { await confirmCommission(ctx.agentTeamId, { ...input, today: chicagoToday() }); return { ok: true as const }; })),
     reportLease: locatorProcedure.input(z.object({ clientId: id, propertyId: id, unit: optionalText(40), rent: z.number().int().min(300).max(30_000), termMonths: z.number().int().min(1).max(36), leaseStartOn: day, leaseSignedOn: day, method }))
       .mutation(async ({ ctx, input }) => guarded(() => reportLease(ctx.agentTeamId, { ...input, today: chicagoToday() }))),
     leaseVerification: locatorProcedure.input(z.object({ leaseId: id })).mutation(async ({ ctx, input }) => guarded(() => draftLeaseVerification(ctx.agentTeamId, input.leaseId, chicagoToday()))),

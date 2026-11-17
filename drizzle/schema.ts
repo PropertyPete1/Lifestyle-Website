@@ -757,6 +757,8 @@ export const aptProperties = mysqlTable("apt_properties", {
   minCreditScore: int("min_credit_score"),
   /** Income required as tenths of the rent multiple (30 = three times the rent). */
   incomeMultipleTenths: int("income_multiple_tenths"),
+  /** Income-restricted (affordable, tax credit) community. */
+  incomeRestricted: boolean("income_restricted").default(false).notNull(),
   petPolicy: varchar("pet_policy", { length: 255 }),
   amenities: text("amenities"), // JSON string array
   active: boolean("active").default(true).notNull(),
@@ -833,3 +835,14 @@ export const aptLeases = mysqlTable("apt_leases", {
   paidAmount: int("paid_amount"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [uniqueIndex("idx_apt_lease_client_property").on(t.clientId, t.propertyId), index("idx_apt_lease_agent_status").on(t.agentTeamId, t.status)]);
+
+/** The options a locator sent a client: one unguessable link that opens those communities (names and contacts, never pay). */
+export const aptClientLists = mysqlTable("apt_client_lists", {
+  id: int("id").autoincrement().primaryKey(),
+  token: varchar("token", { length: 64 }).notNull().unique(),
+  agentTeamId: int("agent_team_id").notNull(),
+  clientId: int("client_id").notNull(),
+  propertyIds: text("property_ids").notNull(), // JSON number array, in the locator's order
+  note: varchar("note", { length: 500 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_apt_client_lists_client").on(t.clientId)]);

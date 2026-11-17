@@ -1,9 +1,91 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "7fd4ab30-2b0e-463a-8fb7-81cf69274c4b",
+  "id": "c7c0565b-8c07-40e9-a2dc-b044e85d9a44",
   "prevId": "14c30b06-3ddc-444a-a410-29031c927a76",
   "tables": {
+    "apt_client_lists": {
+      "name": "apt_client_lists",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "token": {
+          "name": "token",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent_team_id": {
+          "name": "agent_team_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "property_ids": {
+          "name": "property_ids",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "note": {
+          "name": "note",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(now())"
+        }
+      },
+      "indexes": {
+        "idx_apt_client_lists_client": {
+          "name": "idx_apt_client_lists_client",
+          "columns": [
+            "client_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "apt_client_lists_id": {
+          "name": "apt_client_lists_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "apt_client_lists_token_unique": {
+          "name": "apt_client_lists_token_unique",
+          "columns": [
+            "token"
+          ]
+        }
+      },
+      "checkConstraint": {}
+    },
     "apt_clients": {
       "name": "apt_clients",
       "columns": {
@@ -729,6 +811,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "income_restricted": {
+          "name": "income_restricted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "pet_policy": {
           "name": "pet_policy",

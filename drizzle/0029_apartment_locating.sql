@@ -1,3 +1,13 @@
+CREATE TABLE `apt_api_keys` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`purpose` varchar(40) NOT NULL,
+	`key_hash` varchar(64) NOT NULL,
+	`last_used_at` timestamp,
+	`created_at` timestamp NOT NULL DEFAULT (now()),
+	CONSTRAINT `apt_api_keys_id` PRIMARY KEY(`id`),
+	CONSTRAINT `apt_api_keys_purpose_unique` UNIQUE(`purpose`)
+);
+--> statement-breakpoint
 CREATE TABLE `apt_client_lists` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`token` varchar(64) NOT NULL,

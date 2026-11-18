@@ -152,6 +152,11 @@ export const apartmentsRouter = router({
   }),
 
   admin: router({
+    /** The pay-update key: whether one exists and when it was last used (never the key itself). */
+    payKey: adminProcedure.query(async () => (await import("./apartmentsPayImport")).aptPayKeyStatus()),
+    /** Makes a new pay-update key, shown once; any earlier key stops working at once. */
+    newPayKey: adminProcedure.mutation(async () => { const { APT_PAY_PATH, generateAptPayKey } = await import("./apartmentsPayImport"); return { ...(await generateAptPayKey()), path: APT_PAY_PATH }; }),
+    revokePayKey: adminProcedure.mutation(async () => { await (await import("./apartmentsPayImport")).revokeAptPayKey(); return { ok: true as const }; }),
     properties: adminProcedure.query(async () => loadApartments()),
     /** Adds or updates properties by sourceKey; a field left out keeps its stored value. */
     importProperties: adminProcedure.input(z.object({ properties: z.array(propertyInput).min(1).max(500) })).mutation(async ({ input }) => {

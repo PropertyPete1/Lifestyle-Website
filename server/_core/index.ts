@@ -13,6 +13,7 @@ import { syncStatsHandler } from "../scheduledStatsHandler";
 import { ensureDealsCron, ensureStatsSyncCron } from "../registerCron";
 import { registerDealsRoutes } from "../dealsRoutes";
 import { scheduledDealsHandler } from "../scheduledDealsHandler";
+import { APT_PAY_PATH, aptPayHandler } from "../apartmentsPayImport";
 import { SUPPLIED_IMPORT_PATH, suppliedImportBodyLimit, suppliedImportHandler } from "../dealsSuppliedImport";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -63,6 +64,8 @@ async function startServer() {
   app.post("/api/scheduled/refreshDeals", scheduledDealsHandler);
   // The owner's browser agent posts what it saw on a builder's pages (docs/builder-deals-supplied-import.md).
   app.post(SUPPLIED_IMPORT_PATH, suppliedImportHandler);
+  // Apartment locating: keyed pay updates from outside (server/apartmentsPayImport.ts).
+  app.post(APT_PAY_PATH, aptPayHandler);
   // A person is waiting on every API call: the photo backlog holds its next photo meanwhile (see interactiveLoad).
   app.use("/api/trpc", (_req, _res, next) => { noteInteractiveRequest(); next(); });
   // tRPC API

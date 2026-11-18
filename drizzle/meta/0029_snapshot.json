@@ -1,9 +1,69 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "a8f054c9-b1eb-42b3-9a7c-6ebd6ceb3ea6",
+  "id": "e13fc47f-4ef4-49c6-beb2-4b7faf3f9d69",
   "prevId": "14c30b06-3ddc-444a-a410-29031c927a76",
   "tables": {
+    "apt_api_keys": {
+      "name": "apt_api_keys",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "purpose": {
+          "name": "purpose",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key_hash": {
+          "name": "key_hash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_used_at": {
+          "name": "last_used_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(now())"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "apt_api_keys_id": {
+          "name": "apt_api_keys_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "apt_api_keys_purpose_unique": {
+          "name": "apt_api_keys_purpose_unique",
+          "columns": [
+            "purpose"
+          ]
+        }
+      },
+      "checkConstraint": {}
+    },
     "apt_client_lists": {
       "name": "apt_client_lists",
       "columns": {

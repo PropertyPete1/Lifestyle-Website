@@ -869,3 +869,12 @@ export const aptPhotos = mysqlTable("apt_photos", {
   failedReason: varchar("failed_reason", { length: 60 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("idx_apt_photos_property").on(t.propertyId, t.sortOrder)]);
+
+/** Keys for the apartment site's keyed web addresses (server/apartmentsPayImport.ts). Only the hash is stored. */
+export const aptApiKeys = mysqlTable("apt_api_keys", {
+  id: int("id").autoincrement().primaryKey(),
+  purpose: varchar("purpose", { length: 40 }).notNull().unique(),
+  keyHash: varchar("key_hash", { length: 64 }).notNull(),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});

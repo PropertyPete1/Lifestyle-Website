@@ -194,6 +194,14 @@ export function parseCenturyCards(html: string, root: HtmlElement, pageUrl: stri
   return { hasAvailableSection: availableSections.length > 0, availableCardCount, available, takenPaths };
 }
 
+/**
+ * Nov 20, 2026: the same community then dropped its "ALREADY TAKEN" block and put "Now Sold Out!" in the photo
+ * gallery's flags (`.gallery_flags_icon`). A flag in exactly those words is the builder saying nothing is for sale.
+ */
+export function centurySoldOutFlag(root: HtmlElement, html: string): boolean {
+  return descendants(root).some((element) => elementClass(element, "gallery_flags_icon") && /^(?:now\s+)?sold\s+out!?$/i.test(elementText(element, html).replace(/\s+/g, " ").trim()));
+}
+
 /** "9122 OCOTILLO RDG" -> "9122 Ocotillo Rdg". */
 function titleCaseStreet(value: string): string {
   return value.toLowerCase().replace(/(^|[\s-])([a-z])/g, (_, lead: string, letter: string) => lead + letter.toUpperCase());
@@ -222,7 +230,7 @@ export class CenturyAdapter implements DealAdapter {
     // Nov 17, 2026 (Pinnacle at Cottonwood Creek, held two days): the page's only homes sit in "ALREADY TAKEN" (the
     // former model, pending), with no available block and no ProductGroup. That is the builder saying nothing is for
     // sale now, not a page the reader cannot read: the community is read with no homes, so a pending home stops showing.
-    const onlyTaken = !records && !cards.hasAvailableSection && cards.takenPaths.length > 0 && cards.availableCardCount === 0;
+    const onlyTaken = !records && !cards.hasAvailableSection && cards.availableCardCount === 0 && (cards.takenPaths.length > 0 || centurySoldOutFlag(root, page.text));
     if (!records && !cards.hasAvailableSection && !onlyTaken) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     const homesRead = records ? records.homes : cards.available;
     // Without the ProductGroup nothing but the cards proves the inventory: an available block with no card the reader

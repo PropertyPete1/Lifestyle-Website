@@ -123,6 +123,21 @@ export function ashtonRecordUrl(html: string, host: string): URL | null {
   return url && sameOfficialHost(url, host) ? url : null;
 }
 
+/**
+ * Nov 20, 2026: The Colony (Bastrop) sold out; its page kept the community record but dropped every property card and
+ * says "This community is sold out." That is this community with nothing for sale, not a changed page: true only when
+ * the page is the community's own (its record names this page), it says so in those words, and it has no card at all.
+ */
+export function ashtonSoldOut(html: string, pageUrl: string): boolean {
+  const community = asUrl(pageUrl);
+  const root = parseHtmlElements(html);
+  if (!community || !root) return false;
+  if (descendants(root).some((element) => elementClass(element, "js-property-card") || element.attributes["data-property-id"] !== undefined)) return false;
+  const own = ashtonRecordUrl(html, community.hostname);
+  if (!own || comparablePath(own.pathname.replace(/\/+$/, "")) !== comparablePath(community.pathname.replace(/\/+$/, ""))) return false;
+  return /this\s+community\s+is\s+sold\s+out/i.test(html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "));
+}
+
 /** Every property card on the page, homes and plans apart; null when the page has no card at all or no community record. */
 export function parseAshtonCommunity(html: string, pageUrl: string, now: Date = new Date()): AshtonPage | null {
   const community = asUrl(pageUrl);
@@ -244,7 +259,12 @@ export class AshtonWoodsAdapter implements DealAdapter {
     if (!page.ok) return failedResult(config, fetchedAt, privateSnapshot, [fetchFailureHold(page, "community_fetch_failed")]);
     privateSnapshot.pages.push(sourcePage("community", community.toString(), config.privateCommunityName));
     const parsed = parseAshtonCommunity(page.text, community.toString(), now());
-    // Without the business record or a single property card this is not a community page (a sold-out page shape is a live check).
+    // A sold-out community's own page (record, no cards, "This community is sold out."): nothing for sale.
+    if (!parsed && ashtonSoldOut(page.text, community.toString())) {
+      privateSnapshot.communityFacts = { ...parseCommunityFacts(page.text), fromPrice: null };
+      return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config));
+    }
+    // Without the business record or a single property card this is not a community page.
     if (!parsed) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The page must be this community's (a same-host redirect to another one is not).
     if (parsed.foreignPage) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);

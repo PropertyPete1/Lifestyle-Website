@@ -53,7 +53,16 @@ export const DRB_BRAND: NdgBrand = {
   },
   pageUrlFor: (row) => typeof row.name === "string" && row.name.trim() ? drbCommunityPageUrl(drbSlug(row.name)) : null,
   slug: drbSlug,
+  regionListingUrl: (url) => drbRegionListingUrl(url),
 };
+
+/** The community list of a community page's own region ("austin" → searchValue "Austin"). */
+export function drbRegionListingUrl(url: URL): string | null {
+  const path = drbCommunityPath(url);
+  if (!path) return null;
+  const searchValue = path.region.split("-").filter(Boolean).map((word) => word[0]!.toUpperCase() + word.slice(1)).join(" ");
+  return `https://${DRB_API_HOST}/api/v1/public-drb/community?searchField=communityRegion&searchValue=${encodeURIComponent(searchValue)}&state=${encodeURIComponent(path.state)}&region=${encodeURIComponent(path.region)}&page=1&limit=1000`;
+}
 
 /** The Austin region (24 communities on the API, October 25, 2026): the same brand, its own listing and page paths. */
 export const DRB_AUSTIN_REGION = { state: "texas", region: "austin", searchValue: "Austin" };

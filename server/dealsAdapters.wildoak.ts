@@ -31,7 +31,7 @@ const normalize = (value: string) => decodeHtmlEntities(value).replace(/\s+/g, "
 const money = (value: string | null): number | null => { const match = value ? /\$\s*([\d,]{5,})/.exec(value) : null; return match ? Number(match[1]!.replace(/,/g, "")) : null; };
 
 /**
- * The card badge decides the status: "Quick Move-In" is ready now; "Under Construction", "Coming Soon" and "Now
+ * The card badge decides the status: "Quick Move-In" (or "Move-in Ready Model", a model for sale) is ready now; "Under Construction", "Coming Soon" and "Now
  * Pre-Selling" are homes for sale with no date yet; "Under Contract" sells; "Model Home" is the sales center (not for
  * sale); "Floor Plan" is a plan. Any other badge, or none, gives no status (the run is held: a layout change).
  */
@@ -39,7 +39,8 @@ export function wildOakStatus(badge: string | null): { status: string | null; re
   const text = (badge ?? "").replace(/\s+/g, " ").trim().toLowerCase();
   if (text === "floor plan") return { status: null, readyNow: false, kind: "plan" };
   if (text === "model home") return { status: "Model Home", readyNow: false, kind: "model" };
-  if (text === "quick move-in" || text === "move-in ready") return { status: "Quick Move-In (Move-In Ready)", readyNow: true, kind: "home" };
+  // Nov 20, 2026: a finished model offered for sale is badged "Move-in Ready Model" (card kind qmi, a price, "Move-in ready").
+  if (text === "quick move-in" || text === "move-in ready" || text === "move-in ready model") return { status: "Quick Move-In (Move-In Ready)", readyNow: true, kind: "home" };
   // "New Home" (Medina Trails, Nov 5: a lot with a plan chosen, "Reserve early") is a home for sale that is not built yet.
   if (text === "under construction" || text === "coming soon" || text === "now pre-selling" || text === "now selling" || text === "new home") return { status: "Quick Move-In", readyNow: false, kind: "home" };
   if (/under\s+contract|sold|pending/.test(text)) return { status: "Sold", readyNow: false, kind: "home" };

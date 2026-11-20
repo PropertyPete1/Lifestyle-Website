@@ -57,6 +57,8 @@ export type NdgBrand = {
   pageUrlFor: (row: Record<string, unknown>) => string | null;
   /** The site's URL slug for a street or plan name. */
   slug: (value: string) => string;
+  /** The community list of the region a community page belongs to (it may differ from `listingUrl`'s market); omitted when the brand has one market. */
+  regionListingUrl?: (url: URL) => string | null;
 };
 export const ndgApiUrl = (brand: NdgBrand, path: string) => `https://${brand.apiHost}/api/v1/${path}`;
 
@@ -287,6 +289,22 @@ export function parseNdgOffer(body: string, now: Date): string | null | "unreada
   return current.find((text) => /\d+(?:\.\d+)?\s*%\s*(?:\(|\/|APR|interest|rate|fixed)/i.test(text)) ?? current[0]!;
 }
 
+/**
+ * Nov 20, 2026: DRB took Retreat at San Gabriel (Austin) off its site: the API answers "No community with such name"
+ * and the region's own list no longer has it. Both together mean the community is gone, which is nothing for sale,
+ * not a changed page. True only when the region list is readable, holds at least three communities (a real list, not
+ * an empty error), and none of its rows, coming soon included, has this community's slug.
+ */
+export function ndgCommunityRemoved(brand: NdgBrand, lookupBody: string, regionListBody: string, slug: string): boolean {
+  if (!/no\s+community\s+with\s+such\s+name/i.test(str(obj(parseJson(lookupBody))?.message) ?? "")) return false;
+  const data = obj(parseJson(regionListBody));
+  const items = data && Array.isArray(data.items) ? data.items : null;
+  if (!items || items.length < 3) return false;
+  const names = items.map((raw) => str(obj(raw)?.name)).filter((name): name is string => Boolean(name));
+  if (names.length < 3) return false;
+  return !names.some((name) => brand.slug(name) === slug.toLowerCase());
+}
+
 /** The market list's communities with their records; null when the body is not the list. Each entry's page is the one the brand names for the row. */
 export function ndgListingEntries(brand: NdgBrand, body: string, host: string): Array<{ url: string; record: NdgCommunityRecord | null }> | null {
   const data = obj(parseJson(body));
@@ -327,6 +345,14 @@ export class NdgAdapter implements DealAdapter {
     privateSnapshot.pages.push(sourcePage("community", communityPage, config.privateCommunityName));
     // The slug resolves to the community's id, as the page itself resolves it (HTTP 400 is "no such community"; 401/403 is the builder refusing the reader; anything else — a server error, a timeout, a 404 or 429 — is a failed read).
     const lookup = await getDocument(ndgApiUrl(brand, path.lookup), fetcher, "application/json", brand.apiHost);
+    // "No community with such name", and the region's own list without it: the builder took the community down.
+    if (!lookup.ok && lookup.status === 400 && !lookup.redirectedOffOfficialHost && brand.regionListingUrl) {
+      const regionList = brand.regionListingUrl(community);
+      const listed = regionList ? await getDocument(regionList, fetcher, "application/json", brand.apiHost) : null;
+      // The failed read keeps no body: ask once more for the API's own message (official API host, JSON only).
+      const message = listed?.ok ? await Promise.resolve(fetcher(ndgApiUrl(brand, path.lookup), { headers: { accept: "application/json" } } as RequestInit)).then((response) => response.status === 400 ? response.text() : "").catch(() => "") : "";
+      if (listed?.ok && ndgCommunityRemoved(brand, message, listed.text, path.slug)) return successfulResult(fetchedAt, privateSnapshot, makePublicSnapshot(privateSnapshot, config));
+    }
     if (!lookup.ok) return failedResult(config, fetchedAt, privateSnapshot, [lookup.status === 400 && !lookup.redirectedOffOfficialHost ? "expected_community_container_not_found" : fetchFailureHold(lookup, "community_fetch_failed")]);
     const id = num(obj(parseJson(lookup.text))?.id);
     if (id === null || !Number.isInteger(id) || id <= 0) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);

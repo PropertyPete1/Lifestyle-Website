@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DrbHomesAdapter, drbApiUrl, drbCommunityPath, drbListingEntries, drbListingUrl, drbSlug, drbStatus, parseDrbCommunity, parseDrbHomes, parseDrbOffer, parseDrbPlans } from "./dealsAdapters.drb";
+import { DRB_BRAND, DrbHomesAdapter, drbRegionListingUrl, drbApiUrl, drbCommunityPath, drbListingEntries, drbListingUrl, drbSlug, drbStatus, parseDrbCommunity, parseDrbHomes, parseDrbOffer, parseDrbPlans } from "./dealsAdapters.drb";
 import { DEAL_ADAPTERS, loadOfficialDeals, type CommunitySourceConfig } from "./dealsAdapters";
+import { ndgCommunityRemoved } from "./dealsAdapters.ndg";
 
 /**
  * Synthetic DRB Homes API bodies in the shape the live API served in October
@@ -220,5 +221,42 @@ describe("DRB Homes reader: a community", () => {
   it("is an adapter the registry knows", () => {
     expect(new DrbHomesAdapter().builder).toBe("DRB Homes");
     expect(DEAL_ADAPTERS["DRB Homes"].builder).toBe("DRB Homes");
+  });
+});
+
+describe("DRB Homes reader: a community the builder took down (Nov 20, 2026)", () => {
+  const AUSTIN = `${HOST}/drbhomes/find-your-home/communities/texas/austin/fixture-retreat`;
+  const austinConfig: CommunitySourceConfig = { builder: "DRB Homes", sourceUrl: AUSTIN, privateCommunityName: "Fixture Retreat", scrubList: ["Fixture Retreat"] };
+  const lookup = drbApiUrl("public/community/state/region/by-name?state=texas&region=austin&name=fixture-retreat");
+  const region = drbRegionListingUrl(new URL(AUSTIN))!;
+  const gone = JSON.stringify({ statusCode: 400, message: "No community with such name" });
+  const others = list([communityRow({ id: 1, name: "Fixture Oaks" }), communityRow({ id: 2, name: "Fixture Cove" }), communityRow({ id: 3, name: "Fixture Square" })]);
+  const serve = (pages: Record<string, { body: string; status?: number }>) => vi.fn(async (input: string) => {
+    const entry = pages[input];
+    return entry ? new Response(entry.body, { status: entry.status ?? 200, headers: { "content-type": "application/json" } }) : new Response("{}", { status: 404, headers: { "content-type": "application/json" } });
+  });
+
+  it("asks the page's own region for its list", () => {
+    expect(region).toBe("https://api.drbhomes.com/api/v1/public-drb/community?searchField=communityRegion&searchValue=Austin&state=texas&region=austin&page=1&limit=1000");
+    expect(drbRegionListingUrl(new URL(COMMUNITY))).toContain("searchValue=San%20Antonio&state=texas&region=san-antonio");
+  });
+
+  it("no such community, and the region's list without it, is nothing for sale", async () => {
+    const result = await loadOfficialDeals(austinConfig, { fetcher: serve({ [lookup]: { body: gone, status: 400 }, [region]: { body: others } }), now: () => NOW });
+    expect(result.holdReasons).toEqual([]);
+    expect(result.private.homes).toEqual([]);
+  });
+
+  it("still holds when the list still names it (a renamed slug), when the list cannot be read or is too short, or when the API says something else", async () => {
+    const listed = list([communityRow({ id: 1, name: "Fixture Oaks" }), communityRow({ id: 2, name: "Fixture Cove" }), communityRow({ id: 9, name: "Fixture Retreat", availability: "Coming Soon" })]);
+    for (const pages of [
+      { [lookup]: { body: gone, status: 400 }, [region]: { body: listed } },
+      { [lookup]: { body: gone, status: 400 } },
+      { [lookup]: { body: gone, status: 400 }, [region]: { body: list([communityRow({ id: 1, name: "Fixture Oaks" })]) } },
+      { [lookup]: { body: JSON.stringify({ statusCode: 400, message: "Bad request" }), status: 400 }, [region]: { body: others } },
+    ]) {
+      expect((await loadOfficialDeals(austinConfig, { fetcher: serve(pages), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    }
+    expect(ndgCommunityRemoved(DRB_BRAND, gone, "not json", "fixture-retreat")).toBe(false);
   });
 });

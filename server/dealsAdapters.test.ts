@@ -354,6 +354,41 @@ describe("deals adapters", () => {
     expect(JSON.stringify(result.public)).not.toContain("Secret Grove");
   });
 
+  it("skips a Chesmar plan whose page now serves the community page (a retired plan) and still reads the homes built on it (Nov 20)", async () => {
+    const communityUrl = "https://www.chesmar.com/texas/example/secret-grove/";
+    const livePlan = `${communityUrl}hidden-plan/`;
+    const retiredPlan = `${communityUrl}retired-plan/`;
+    const liveHome = `${livePlan}123456-0001/`;
+    const retiredHome = `${retiredPlan}123456-0002/`;
+    const communityPage = '<html><head><title>Secret Grove in Kyle, Texas | Chesmar Homes</title></head><body><h1>Secret Grove</h1><p>Starting From: $410,000</p><section id="floorplans"><div class="search-results-container">FloorPlans</div></section></body></html>';
+    const documents: Record<string, string> = {
+      [communityUrl]: communityPage,
+      "https://www.chesmar.com/sitemap.xml": `<urlset><url><loc>${livePlan}</loc></url><url><loc>${retiredPlan}</loc></url><url><loc>${liveHome}</loc></url><url><loc>${retiredHome}</loc></url></urlset>`,
+      [livePlan]: chesmarDetailPage("Hidden Plan", "Starting From $410,000 · 4 Beds · 3 Baths · 2,300 Sq. Ft."),
+      // The retired plan's URL now lands on the community page.
+      [retiredPlan]: communityPage,
+      [liveHome]: chesmarDetailPage("1234 Private Address", "Quick Move-In · $425,000 · 4 Beds · 3 Baths · 2,320 Sq. Ft."),
+      [retiredHome]: chesmarDetailPage("5678 Private Address", "Quick Move-In · $455,000 · 4 Beds · 3 Baths · 2,600 Sq. Ft."),
+      [chesmarIncentivesUrl]: chesmarIncentiveHtml,
+    };
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const body = documents[typeof input === "string" ? input : input.toString()];
+      return new Response(body ?? "not found", { status: body ? 200 : 404 });
+    });
+    const source: CommunitySourceConfig = { builder: "Chesmar", sourceUrl: communityUrl, privateCommunityName: "Secret Grove", scrubList: ["Secret Grove", "Hidden Plan", "1234 Private Address", "5678 Private Address"] };
+    const result = await loadOfficialDeals(source, { fetcher });
+    expect(result.holdReasons).toEqual([]);
+    expect(result.private.plans.map((plan) => plan.sourceUrl)).toEqual([livePlan]);
+    expect(result.private.homes.map((home) => home.sourceUrl).sort()).toEqual([liveHome, retiredHome].sort());
+    // A plan page that is neither a plan nor the community page is still a changed page.
+    const broken = await loadOfficialDeals(source, { fetcher: vi.fn(async (input: string | URL | Request) => {
+      const key = typeof input === "string" ? input : input.toString();
+      const body = key === retiredPlan ? "<html><head><title>Something else</title></head><body><h1>Oops</h1></body></html>" : documents[key];
+      return new Response(body ?? "not found", { status: body ? 200 : 404 });
+    }) });
+    expect(broken.holdReasons).toContain("expected_detail_container_not_found");
+  });
+
   it("discovers Chesmar plan and specific-home URLs only from official sitemaps and redacts their names", async () => {
     const communityUrl = "https://www.chesmar.com/texas/example/secret-grove/";
     const planUrl = `${communityUrl}hidden-plan/`;

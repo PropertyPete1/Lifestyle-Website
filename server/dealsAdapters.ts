@@ -1473,6 +1473,13 @@ function containsExpectedMiCommunityContainer(html: string): boolean {
   return hasElementId(html, "product-homes-list") || hasClassToken(html, "product-homes") || hasClassToken(html, "home-results");
 }
 
+/** A page's <title>, entities decoded and spaces collapsed; null without one. */
+export function pageTitle(html: string): string | null {
+  const raw = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1];
+  const title = raw ? decodeHtmlEntities(raw).replace(/\s+/g, " ").trim() : "";
+  return title || null;
+}
+
 function containsExpectedDetailContainer(html: string): boolean {
   const text = htmlToText(html);
   const hasHeading = /<h1\b/i.test(html);
@@ -2212,6 +2219,12 @@ async function fetchDiscoveredProperties(
   mode: "approved" | "probe" = "approved",
   /** Paths parsed strictly even in probe mode: a home's parent is a plan page by the site's URL grammar. */
   strictPaths: ReadonlySet<string> = new Set(),
+  /**
+   * The community page's own <title>. Nov 20, 2026 (Chesmar 6 Creeks 60's, held four days): a retired plan's page now
+   * redirects to the community page, while homes built on that plan still have their own pages. A plan URL that serves
+   * the community page itself is a retired plan, skipped, never a broken page.
+   */
+  communityTitle: string | null = null,
 ): Promise<{ holds: DealHoldReason[]; skipped: number }> {
   const results = await mapWithConcurrency(urls, 4, async (url) => {
     const strict = mode === "approved" || strictPaths.has(normalizePathname(new URL(url).pathname));
@@ -2221,6 +2234,7 @@ async function fetchDiscoveredProperties(
       return { hold, property: null, skipped: false };
     }
     if (kind === "plan" && !strict && !looksLikeChesmarPlanPage(page.text)) return { hold: null, property: null, skipped: true };
+    if (kind === "plan" && communityTitle && pageTitle(page.text) === communityTitle) return { hold: null, property: null, skipped: true };
     const property = containsExpectedDetailContainer(page.text) ? parsePrivateProperty(url, page.text) : null;
     // A plan or home record must contain at least one first-party property
     // fact; an arbitrary branded detail page is not a successful discovery.
@@ -2381,7 +2395,7 @@ class ChesmarAdapter implements DealAdapter {
     if (!distinctPlanUrls.length && !distinctHomeUrls.length) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (distinctPlanUrls.length + distinctHomeUrls.length > detailLimit(config)) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     const strictPlanPaths = new Set(Array.from(homeParents, (slug) => normalizePathname(`${new URL(planBase).pathname}${slug}/`)));
-    const planResults = await fetchDiscoveredProperties(distinctPlanUrls, "plan", fetcher, privateSnapshot, CHESMAR_HOST, mode, strictPlanPaths);
+    const planResults = await fetchDiscoveredProperties(distinctPlanUrls, "plan", fetcher, privateSnapshot, CHESMAR_HOST, mode, strictPlanPaths, pageTitle(page.text));
     const homeResults = await fetchDiscoveredProperties(distinctHomeUrls, "home", fetcher, privateSnapshot, CHESMAR_HOST, "approved");
     const detailHolds = [...planResults.holds, ...homeResults.holds];
     if (detailHolds.length > 0) return failedResult(config, fetchedAt, privateSnapshot, detailHolds);

@@ -32,6 +32,9 @@ describe("Wild Oak Homes reader", () => {
 
   it("reads the badge as the status", () => {
     expect(wildOakStatus("Quick Move-In")).toEqual({ status: "Quick Move-In (Move-In Ready)", readyNow: true, kind: "home" });
+    // Nov 20, 2026 (Mesquite Meadows): a finished model for sale.
+    expect(wildOakStatus("Move-in Ready Model")).toEqual({ status: "Quick Move-In (Move-In Ready)", readyNow: true, kind: "home" });
+    expect(wildOakStatus("Model Home")).toMatchObject({ kind: "model" });
     expect(wildOakStatus("Under Construction")).toEqual({ status: "Quick Move-In", readyNow: false, kind: "home" });
     expect(wildOakStatus("Coming Soon").status).toBe("Quick Move-In");
     expect(wildOakStatus("New Home").status).toBe("Quick Move-In");

@@ -155,3 +155,23 @@ describe("Ashton Woods reader: a community", () => {
     expect(DEAL_ADAPTERS["Ashton Woods"].builder).toBe("Ashton Woods");
   });
 });
+
+describe("Ashton Woods reader: a sold-out community (Nov 20, 2026)", () => {
+  const soldOut = (body: string, record = business) => `<html><head>${record}</head><body><div class="community-header"><span class="badge">SOLD OUT</span><h1>Fixture Hollow</h1></div>${body}<a href="/san-antonio">View Other Communities</a></body></html>`;
+  const serve = (html: string) => vi.fn(async () => new Response(html, { status: 200, headers: { "content-type": "text/html" } }));
+
+  it("its own page saying it is sold out, with no card, is nothing for sale (not a hold)", async () => {
+    const result = await loadOfficialDeals(config, { fetcher: serve(soldOut("<p>This community is sold out. Please browse our other new home communities.</p>")), now: () => NOW });
+    expect(result.holdReasons).toEqual([]);
+    expect(result.private.homes).toEqual([]);
+    expect(result.private.plans).toEqual([]);
+  });
+
+  it("still holds when the words are missing, when a card remains, or when the page is another community's", async () => {
+    expect((await loadOfficialDeals(config, { fetcher: serve(soldOut("<p>Coming back soon.</p>")) })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    expect((await loadOfficialDeals(config, { fetcher: serve(soldOut('<p>This community is sold out.</p><div data-property-id="1"></div>')) })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    const other = business.replace(`"url":"${COMMUNITY}"`, `"url":"${HOST}/san-antonio/other-hollow"`);
+    expect((await loadOfficialDeals(config, { fetcher: serve(soldOut("<p>This community is sold out.</p>", other)) })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    expect((await loadOfficialDeals(config, { fetcher: serve(soldOut("<p>This community is sold out.</p>", "")) })).holdReasons).toEqual(["expected_community_container_not_found"]);
+  });
+});

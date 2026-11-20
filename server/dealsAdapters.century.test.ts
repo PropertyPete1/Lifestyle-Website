@@ -105,6 +105,19 @@ ${ld({ "@context": "https://schema.org", "@type": "HomeAndConstructionBusiness",
     expect((await loadOfficialDeals(config, { fetcher: page(takenOnly.replace(/<div class="quick-move-in-card">[\s\S]*?<\/section>/, "</section>")), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
   });
 
+  it("reads a community whose gallery flag says Now Sold Out! (and nothing is listed) as having nothing for sale (Nov 20)", async () => {
+    const soldOut = (flag: string, extra = "") => `<!DOCTYPE html><html><head><title>Fixture Grove</title>
+${ld({ "@context": "https://schema.org", "@type": "HomeAndConstructionBusiness", "@id": `${COMMUNITY}#community`, name: "Fixture Grove", url: COMMUNITY, address: { "@type": "PostalAddress", streetAddress: "9106 Fixture Rdg", addressLocality: "San Antonio", addressRegion: "TX", postalCode: "78222" } })}
+</head><body><main><div class="gallery_flags"><span class="gallery_flags_icon custom-flag1-icon flag-dark-purple"> ${flag} </span><span class="gallery_flags_icon custom-flag2-icon"> Check out Fixture Run! </span></div><h1>Fixture Grove</h1>${extra}</main></body></html>`;
+    const page = (body: string) => vi.fn(async () => new Response(body, { status: 200, headers: { "content-type": "text/html" } }));
+    const result = await loadOfficialDeals(config, { fetcher: page(soldOut("Now Sold Out!")), now: () => NOW });
+    expect(result.holdReasons).toEqual([]);
+    expect(result.private.homes).toEqual([]);
+    // Any other flag wording, or an available block next to the flag, is not read as sold out.
+    expect((await loadOfficialDeals(config, { fetcher: page(soldOut("Final Opportunities!")), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    expect((await loadOfficialDeals(config, { fetcher: page(soldOut("Now Sold Out!", '<section class="quick-move-in-commerce-container"><h2>AVAILABLE HOMES</h2></section>')), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+  });
+
   it("holds the run when the page is not a community page, when cards outnumber records, when a card has no completion, when the site is not Century's, or when it cannot be read", async () => {
     const reshaped = vi.fn(async () => new Response("<html><body>new layout</body></html>", { status: 200, headers: { "content-type": "text/html" } }));
     expect((await loadOfficialDeals(config, { fetcher: reshaped })).holdReasons).toEqual(["expected_community_container_not_found"]);

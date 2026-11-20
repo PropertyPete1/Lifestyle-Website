@@ -92,6 +92,8 @@ export function viewHomesStatus(label: string | null, moveIn: string | null, now
   if (!text) return { status: null, readyNow: false, moveInDate: null };
   if (/\bsold\b|under\s+contract/i.test(text)) return { status: "Sold", readyNow: false, moveInDate: null };
   if (/^(?:ready\s+now|move[- ]?in\s+ready|available\s+now)\s*!?$/i.test(text)) return { status: "Quick Move-In (Move-In Ready)", readyNow: true, moveInDate: null };
+  // Only ever set from a home page titled "For Sale: ..." (viewHomesDescriptionStatus): for sale, timing not given.
+  if (/^for\s+sale$/i.test(text)) return { status: "Quick Move-In", readyNow: false, moveInDate: null };
   const estimated = /^est\.?(?:imated)?\s+completion\s*[-–:]?\s*([A-Za-z]+)\.?(?:\s+(\d{4}))?$/i.exec(text);
   if (!estimated) return { status: null, readyNow: false, moveInDate: null };
   const month = monthIndex(estimated[1]!);
@@ -111,6 +113,34 @@ export function viewHomesStatus(label: string | null, moveIn: string | null, now
   const name = `${MONTH_NAMES[effectiveMonth - 1]} ${year}`;
   return { status: `Quick Move-In (${name})`, readyNow: false, moveInDate: name };
 }
+
+/**
+ * Nov 20, 2026: View Homes began putting its offer ("4.99%*+ $10K Closing Costs!") in a home card's status badge, so the
+ * card no longer says whether the home is ready or still being built, and Talley Fields and Weltner Farms were held for
+ * an unlabelled home. A badge that carries an offer is not a status.
+ */
+export function isViewHomesOfferBadge(text: string | null): boolean {
+  const value = (text ?? "").trim();
+  return Boolean(value) && /%|\$|closing\s+costs?|\brates?\b|incentive|savings?|\boff\b/i.test(value) && !/ready|completion|\bsold\b|under\s+contract/i.test(value);
+}
+
+/**
+ * For such a home, its own page: a description line "Move-in ready ..." (the builder's wording) reads as Ready Now,
+ * "Est. Completion- October" as that estimate; failing those, a page titled "For Sale: <street>" is a home for sale
+ * whose timing the page does not give (Quick Move-In, no date). Anything else gives no status (held).
+ */
+export function viewHomesDescriptionStatus(html: string): string | null {
+  const tag = /<meta\s+[^>]*name=["']description["'][^>]*>/i.exec(html)?.[0] ?? /<meta\s+[^>]*content=["'][^"']*["'][^>]*name=["']description["'][^>]*>/i.exec(html)?.[0];
+  const content = tag ? decodeHtmlEntities(/content=["']([^"']*)["']/i.exec(tag)?.[1] ?? "").replace(/\s+/g, " ").trim() : "";
+  if (/^move[- ]?in[- ]ready\b/i.test(content) || /^ready\s+now\b/i.test(content)) return "Ready Now!";
+  const estimate = /^est\.?(?:imated)?\s+completion\s*[-–:]?\s*([A-Za-z]+\.?(?:\s+\d{4})?)/i.exec(content);
+  if (estimate) return `Est. Completion- ${estimate[1]!.trim()}`;
+  const title = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1];
+  return title && /^for\s+sale\s*:/i.test(decodeHtmlEntities(title).trim()) ? "For Sale" : null;
+}
+
+/** At most this many home pages are read per community for an offer badge (each is one more request). */
+const VIEWHOMES_MAX_BADGE_READS = 12;
 
 export type ViewHomesCommunityRecord = { name: string; street: string | null; city: string | null; zip: string | null; phone: string | null; priceFrom: number | null; geo: { lat: number; lng: number } | null };
 export type ViewHomesListedHome = { url: string; street: string | null; plan: string | null; statusText: string | null; moveIn: string | null; price: number | null; squareFeet: number | null; bedrooms: number | null; bathrooms: number | null; garage: number | null; photo: string | null };
@@ -557,7 +587,18 @@ export class ViewHomesAdapter implements DealAdapter {
       if (cardUrls.length !== listedUrls.length || !cardUrls.every((url) => listedUrls.includes(url))) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     }
     // November page: every card must carry a street, a price and a status, or the card layout changed.
-    const listedHomes = row.cardsOnly ? parsed.homes : row.homes;
+    let listedHomes = row.cardsOnly ? parsed.homes : row.homes;
+    // A card whose badge carries an offer instead of a status: its own page says whether it is ready (read, capped).
+    const offerCards = listedHomes.filter((home) => isViewHomesOfferBadge(home.statusText));
+    if (offerCards.length) {
+      if (offerCards.length > VIEWHOMES_MAX_BADGE_READS) return failedResult(config, fetchedAt, privateSnapshot, ["unlabelled_home_status"]);
+      const read = new Map<string, string | null>();
+      for (const home of offerCards) {
+        const homePage = await getDocument(home.url, fetcher, "text/html,application/xhtml+xml", VIEWHOMES_HOST);
+        read.set(home.url, homePage.ok ? viewHomesDescriptionStatus(homePage.text) : null);
+      }
+      listedHomes = listedHomes.map((home) => read.has(home.url) ? { ...home, statusText: read.get(home.url) ?? null } : home);
+    }
     if (row.cardsOnly && parsed.homes.some((home) => !home.street || home.price === null || !home.statusText)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (listedHomes.length > VIEWHOMES_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     const city = parsed.city ?? row.record.city;

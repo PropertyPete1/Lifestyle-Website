@@ -12,6 +12,10 @@ import {
  * has the offer's title, copy and fine print. Read-only, plain GET, official
  * host only. Everything here is private operational data.
  *
+ * November 2026: the site moved to the Next.js App Router; the same objects now
+ * arrive as component props in the RSC flight data (`self.__next_f`), read by
+ * parseFlightProps. The promotion's copy is under "body" there.
+ *
  * Page shapes (October 2026):
  * - community: /states/texas/san-antonio-market-area/<city>/<community>/   (about 900 KB)
  * - home:      .../<community>/available-homes/<address-slug>/
@@ -41,6 +45,101 @@ export function parseNextData(html: string): Json | null {
   const match = /<script\b[^>]*\bid="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/.exec(html);
   if (!match) return null;
   try { return obj(JSON.parse(match[1]!)); } catch { return null; }
+}
+
+/** A flight reference the reader could not resolve to text (another component, a lazy chunk, a deferred value). */
+export type FlightRef = { flightRef: string };
+export const isFlightRef = (value: unknown): value is FlightRef => Boolean(obj(value) && typeof (value as Json).flightRef === "string");
+
+/**
+ * The page's React Server Components flight data (Next.js App Router, which
+ * Davidson moved to in November 2026): the `self.__next_f.push([1, "…"])`
+ * strings joined, split into rows (`<id>:<json>\n`, or `<id>:T<hex bytes>,<text>`
+ * for long text). Returns every element's props object (`["$", type, key, props]`)
+ * with "$$" unescaped, text rows resolved and every other "$" reference left as
+ * a FlightRef, so a field the reader needs that points elsewhere reads as unknown,
+ * never as a guess. Null when the page carries no flight data.
+ */
+export function parseFlightProps(html: string): Json[] | null {
+  const pushes = Array.from(html.matchAll(/self\.__next_f\.push\((\[[\s\S]*?\])\)\s*<\/script>/g));
+  if (pushes.length === 0) return null;
+  let flight = "";
+  for (const push of pushes) {
+    try {
+      const entry = JSON.parse(push[1]!) as unknown;
+      if (Array.isArray(entry) && entry[0] === 1 && typeof entry[1] === "string") flight += entry[1];
+    } catch { return null; }
+  }
+  const rows = new Map<string, unknown>();
+  const texts = new Map<string, string>();
+  let pos = 0;
+  while (pos < flight.length) {
+    const colon = flight.indexOf(":", pos);
+    if (colon < 0) break;
+    const id = flight.slice(pos, colon);
+    if (!/^[0-9a-f]+$/i.test(id)) {
+      const next = flight.indexOf("\n", pos);
+      if (next < 0) break;
+      pos = next + 1;
+      continue;
+    }
+    const text = /^T([0-9a-f]+),/i.exec(flight.slice(colon + 1, colon + 20));
+    if (text) {
+      // Length is in UTF-8 bytes.
+      let bytes = parseInt(text[1]!, 16);
+      let end = colon + 1 + text[0].length;
+      const start = end;
+      while (bytes > 0 && end < flight.length) {
+        const code = flight.codePointAt(end)!;
+        bytes -= code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+        end += code >= 0x10000 ? 2 : 1;
+      }
+      texts.set(id, flight.slice(start, end));
+      pos = end;
+      continue;
+    }
+    const newline = flight.indexOf("\n", colon);
+    const body = flight.slice(colon + 1, newline < 0 ? flight.length : newline);
+    pos = newline < 0 ? flight.length : newline + 1;
+    if (/^[A-Z]/.test(body)) continue; // module, hint and error rows carry no page data
+    try { rows.set(id, JSON.parse(body)); } catch { /* a row the reader cannot parse is simply absent */ }
+  }
+  const resolve = (value: unknown, depth = 0): unknown => {
+    if (typeof value === "string") {
+      if (!value.startsWith("$")) return value;
+      if (value.startsWith("$$")) return value.slice(1);
+      if (value === "$undefined") return null;
+      const ref = /^\$([0-9a-f]+)$/i.exec(value);
+      if (ref && texts.has(ref[1]!)) return texts.get(ref[1]!)!;
+      return { flightRef: value } satisfies FlightRef;
+    }
+    if (Array.isArray(value)) return value.map((item) => resolve(item, depth + 1));
+    if (value && typeof value === "object") {
+      const out: Json = {};
+      for (const [key, item] of Object.entries(value as Json)) out[key] = resolve(item, depth + 1);
+      return out;
+    }
+    return value;
+  };
+  const props: Json[] = [];
+  const walk = (value: unknown, depth: number) => {
+    if (depth > 60 || !value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      if (value[0] === "$" && typeof value[1] === "string" && value.length === 4 && obj(value[3])) props.push(resolve(value[3]) as Json);
+      for (const item of value) walk(item, depth + 1);
+      return;
+    }
+    for (const item of Object.values(value as Json)) walk(item, depth + 1);
+  };
+  rows.forEach((row) => walk(row, 0));
+  return props;
+}
+
+/** The page data: Next.js `__NEXT_DATA__` pageProps, or else the first flight element props that `pick` accepts. */
+function davidsonPageProps(html: string, pick: (props: Json) => boolean): Json | null {
+  const legacy = obj(obj(parseNextData(html)?.props)?.pageProps);
+  if (legacy) return legacy;
+  return parseFlightProps(html)?.find(pick) ?? null;
 }
 
 /** Sanity's image CDN: "image-<hash>-<w>x<h>-<fmt>" under the project and dataset the page itself uses. */
@@ -99,8 +198,7 @@ export function davidsonStatus(status: string | null, overrideMls: string | null
 
 export function parseDavidsonCommunity(html: string, pageUrl: string, now: Date = new Date()): DavidsonPage | null {
   const url = asUrl(pageUrl);
-  const data = parseNextData(html);
-  const props = obj(obj(data?.props)?.pageProps);
+  const props = davidsonPageProps(html, (candidate) => Array.isArray(obj(candidate.community)?.availableHomes) && Array.isArray(obj(candidate.community)?.plans));
   const community = obj(props?.community);
   if (!url || !community || !Array.isArray(community.availableHomes) || !Array.isArray(community.plans)) return null;
   const project = sanityProject(html);
@@ -125,7 +223,9 @@ export function parseDavidsonCommunity(html: string, pageUrl: string, now: Date 
     const baths = (num(home.baths) ?? 0) + (num(home.halfBaths) ?? 0) * 0.5;
     const lot = str(home.lotId);
     // An entry the reader cannot name stays in the list without a status: the sync holds the run instead of sweeping the home to sold.
-    const readable = Boolean(street && slug);
+    // A field that points elsewhere in the flight data is unknown, so the home stays without a status (the run holds).
+    const pointsElsewhere = ["title", "slug", "status", "overrideMls", "price", "oldPrice", "estCompletionMonth", "lotId"].some((key) => isFlightRef(home[key]) || isFlightRef(obj(home[key])?.current));
+    const readable = Boolean(street && slug) && !pointsElsewhere;
     homes.push({
       sourceUrl: readable ? `${url.origin}${base}/available-homes/${slug}/` : `${url.origin}${base}/available-homes/unreadable-${homes.length}/`,
       privateName: street,
@@ -170,7 +270,7 @@ export function parseDavidsonCommunity(html: string, pageUrl: string, now: Date 
   return {
     community,
     facts: {
-      name: str(community.title), street: str(office?.streetAddress) ?? str(community.subStreet1), city, zip, phone: (str(community.phone) ?? "").replace(/[^\d+]/g, "") || null,
+      name: str(community.title), street: str(office?.streetAddress) ?? str(community.subStreet1), city, zip, phone: (str(community.phone) ?? (typeof community.phone === "number" ? String(community.phone) : "")).replace(/[^\d+]/g, "") || null,
       geo: lat !== null && lng !== null ? { lat, lng } : null, status: str(community.communityStatus),
       fromPrice: num(range?.lowestPrice), schoolDistrict: district,
       amenities: arr(community.features).map((feature) => str(feature) ?? str(obj(feature)?.title) ?? "").filter((feature) => feature.length >= 3 && feature.length <= 60).slice(0, 20),
@@ -190,11 +290,15 @@ function blocksText(blocks: unknown): string[] {
  * deadline. Null when the page carries no promotion.
  */
 export function parseDavidsonPromotion(html: string): { text: string; title: string | null; eventEnd: string | null; communities: string[]; hasRegions: boolean } | null {
-  const data = parseNextData(html);
-  const promo = obj(obj(obj(data?.props)?.pageProps)?.promo);
+  const legacy = obj(obj(parseNextData(html)?.props)?.pageProps);
+  // The App Router page passes the promotion itself as a component's props, with its copy under "body".
+  const promo = legacy ? obj(legacy.promo) : parseFlightProps(html)?.find((props) => typeof props.title === "string" && Array.isArray(props.finePrint) && (Array.isArray(props.body) || Array.isArray(props.content))) ?? null;
   if (!promo) return null;
+  // Copy that points elsewhere in the flight data cannot be read, so the offer is not read either.
+  const blocks = [...arr(promo.content ?? promo.body), ...arr(promo.finePrint)];
+  if (isFlightRef(promo.title) || blocks.some((block) => arr(obj(block)?.children).some((child) => isFlightRef(obj(child)?.text)))) return null;
   const title = str(promo.title);
-  const parts = [title, ...blocksText(promo.content), ...blocksText(promo.finePrint)].filter((part): part is string => Boolean(part));
+  const parts = [title, ...blocksText(promo.content ?? promo.body), ...blocksText(promo.finePrint)].filter((part): part is string => Boolean(part));
   // Links, phone numbers, the lender's NMLS id and form copy say nothing about the offer.
   const text = parts.join(" ")
     .replace(/\b(?:https?:\/\/|www\.)\S+/gi, " ")
@@ -264,8 +368,7 @@ async function promotion(path: string, fetcher: HtmlFetcher, now: number, snapsh
 
 /** The market page's community links (pageProps.communities[].uri), for discovery. */
 export function davidsonMarketLinks(html: string): string[] | null {
-  const data = parseNextData(html);
-  const communities = obj(obj(data?.props)?.pageProps)?.communities;
+  const communities = davidsonPageProps(html, (props) => Array.isArray(props.communities) && arr(props.communities).some((entry) => typeof obj(entry)?.uri === "string"))?.communities;
   if (!Array.isArray(communities)) return null;
   return communities.flatMap((entry) => { const uri = str(obj(entry)?.uri); return uri ? [uri] : []; });
 }

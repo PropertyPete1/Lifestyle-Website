@@ -49,6 +49,30 @@ describe("View Homes: an offer in the status badge", () => {
     expect(viewHomesDescriptionStatus(homePage("Move-in ready Azalea.", "For Sale: 1 Sample Way"))).toBe("Ready Now!");
   });
 
+  it("Nov 23: a description opening with the home's own street and saying home for sale reads as For Sale; a partial line holds", () => {
+    const line = "4521 Sample Bnd., Exampleville, TX 70000- New 2,040 sq. ft. home for sale in Other Meadows by View Homes with 4 bed.";
+    const plain = homePage(line, "4521 Sample Bend, Exampleville | View Homes | New Construction");
+    expect(viewHomesDescriptionStatus(plain, "4521 Sample Bend")).toBe("For Sale");
+    // Without the card's street to compare, another home's street, or no "for sale": nothing.
+    expect(viewHomesDescriptionStatus(plain)).toBeNull();
+    expect(viewHomesDescriptionStatus(plain, "4525 Sample Bend")).toBeNull();
+    expect(viewHomesDescriptionStatus(plain, "4521 Other Bend")).toBeNull();
+    expect(viewHomesDescriptionStatus(homePage("4521 Sample Bnd., Exampleville, TX 70000- New 2,040 sq. ft. home in Other Meadows."), "4521 Sample Bend")).toBeNull();
+    expect(viewHomesDescriptionStatus(homePage("New home for sale in Exampleville."), "4521 Sample Bend")).toBeNull();
+  });
+
+  it("a card whose page only says its own street is a home for sale publishes as a quick move-in with no date", async () => {
+    const page = offerPage();
+    const promoUrl = parseViewHomesCommunity(page, AUGUST)!.promoUrl!;
+    const street = parseViewHomesCommunity(page, AUGUST)!.homes[0]!.street!;
+    const number = /^\d+/.exec(street)![0];
+    const name = /^\d+\s+([A-Za-z]+)/.exec(street)![1];
+    const body = homePage(`${number} ${name} Ln., Exampleville, TX 70000- New home for sale in Other Meadows by View Homes.`);
+    const { fetcher } = siteFetcher({ [AUGUST]: page, [viewHomesListingUrl()]: fixture("region_texas_"), [promoUrl]: "<html><body>none</body></html>", [HOME]: body });
+    const result = await loadOfficialDeals({ builder: "View Homes", sourceUrl: AUGUST, privateCommunityName: "August Fields", scrubList: ["August Fields"] }, { fetcher, now: () => NOW });
+    expect(result.private.homes[0]).toMatchObject({ status: "Quick Move-In", readyNow: false, moveInDate: null });
+  });
+
   it("a card with an offer badge takes its status from its own page, and the community publishes", async () => {
     const page = offerPage();
     expect(parseViewHomesCommunity(page, AUGUST)!.homes[0]!.statusText).toBe(OFFER);

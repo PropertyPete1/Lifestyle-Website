@@ -129,14 +129,25 @@ export function isViewHomesOfferBadge(text: string | null): boolean {
  * "Est. Completion- October" as that estimate; failing those, a page titled "For Sale: <street>" is a home for sale
  * whose timing the page does not give (Quick Move-In, no date). Anything else gives no status (held).
  */
-export function viewHomesDescriptionStatus(html: string): string | null {
+export function viewHomesDescriptionStatus(html: string, street: string | null = null): string | null {
   const tag = /<meta\s+[^>]*name=["']description["'][^>]*>/i.exec(html)?.[0] ?? /<meta\s+[^>]*content=["'][^"']*["'][^>]*name=["']description["'][^>]*>/i.exec(html)?.[0];
   const content = tag ? decodeHtmlEntities(/content=["']([^"']*)["']/i.exec(tag)?.[1] ?? "").replace(/\s+/g, " ").trim() : "";
   if (/^move[- ]?in[- ]ready\b/i.test(content) || /^ready\s+now\b/i.test(content)) return "Ready Now!";
   const estimate = /^est\.?(?:imated)?\s+completion\s*[-–:]?\s*([A-Za-z]+\.?(?:\s+\d{4})?)/i.exec(content);
   if (estimate) return `Est. Completion- ${estimate[1]!.trim()}`;
   const title = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1];
-  return title && /^for\s+sale\s*:/i.test(decodeHtmlEntities(title).trim()) ? "For Sale" : null;
+  if (title && /^for\s+sale\s*:/i.test(decodeHtmlEntities(title).trim())) return "For Sale";
+  // Nov 23, 2026 (August Fields): a page with neither, whose description opens with this home's own street (house number and
+  // street name, "983 Sample Ln." for "983 Sample Lane") and says "home for sale", is for sale with no timing given. A line
+  // naming another street, or one that does not say for sale, gives nothing.
+  const own = streetKey(street);
+  return own && streetKey(content) === own && /\bhomes?\s+for\s+sale\b/i.test(content) ? "For Sale" : null;
+}
+
+/** "983 Sample Lane" and "983 Sample Ln., City" both key as "983 sample"; null without a leading house number and name. */
+function streetKey(text: string | null): string | null {
+  const match = /^(\d+)\s+([A-Za-z]+)/.exec((text ?? "").trim());
+  return match ? `${match[1]} ${match[2]!.toLowerCase()}` : null;
 }
 
 /** At most this many home pages are read per community for an offer badge (each is one more request). */
@@ -595,7 +606,7 @@ export class ViewHomesAdapter implements DealAdapter {
       const read = new Map<string, string | null>();
       for (const home of offerCards) {
         const homePage = await getDocument(home.url, fetcher, "text/html,application/xhtml+xml", VIEWHOMES_HOST);
-        read.set(home.url, homePage.ok ? viewHomesDescriptionStatus(homePage.text) : null);
+        read.set(home.url, homePage.ok ? viewHomesDescriptionStatus(homePage.text, home.street) : null);
       }
       listedHomes = listedHomes.map((home) => read.has(home.url) ? { ...home, statusText: read.get(home.url) ?? null } : home);
     }

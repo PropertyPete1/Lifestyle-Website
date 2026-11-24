@@ -250,6 +250,30 @@ describe("Lennar reader: adapter", () => {
     expect((await loadOfficialDeals(config, { fetcher: html(page(data)), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
   });
 
+  it("reads a COMING_SOON standalone community with released homes by its rendered homesite rows when the table is titled 'Coming soon to …' (Waters Edge, Nov 24); a partial table still holds", async () => {
+    const homes = HOMES.slice(0, 2).map((home) => ({ ...home, status: "UNDER_CONSTRUCTION", url: `${PATH}/rio/${home.lot}` }));
+    const plans = [{ ...PLANS[0]!, collection: "x", url: `${PATH}/rio` }];
+    const cache = cacheOf({ homes, plans, collections: [COLLECTIONS[0]!] });
+    delete cache["MpcType:m_5000"];
+    cache.ROOT_QUERY = { __typename: "Query" };
+    cache["CommunityType:c_1"] = { ...(cache["CommunityType:c_1"] as object), name: "Fixture Edge", url: PATH, mpc: null, status: "COMING_SOON", customPrice: null, soAddress: null, address: "Fixture Dr & Highway 46", city: { __ref: "CityType:ct_64_san antonio" }, latitude: 29.66, longitude: -98.04 };
+    const data = { props: { pageProps: { pageType: "COMMUNITY", divisionNumber: "SANLEN", variables: { comnum: "40279", mpcid: 0 }, initialApolloState: cache } } };
+    const rows = (lots: string[]) => lots.map((lot) => `<a href="${PATH}/rio/${lot}">View</a><a href="${PATH}/rio">Plan</a>`).join("");
+    const page = (heading: string, lots: string[]) => `<!DOCTYPE html><html><body><h1>Coming to Fixtureville, TX</h1>${heading}<div>${rows(lots)}</div><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script></body></html>`;
+    const both = homes.map((home) => home.lot);
+    const result = await loadOfficialDeals(config, { fetcher: html(page(`<h2 class="h3">Coming soon to Fixtureville, TX</h2>`, both)), now: () => NOW });
+    expect(result.holdReasons).toEqual([]);
+    expect(result.catalogOk).toBe(true);
+    expect(result.private.homes.map((home) => [home.privateName, home.status])).toEqual([["8707 Fixture Crest", "Quick Move-In (Under Construction)"], ["8711 Fixture Crest", "Quick Move-In (Under Construction)"]]);
+    // Only one of the two homes rendered: a partial table holds.
+    expect((await loadOfficialDeals(config, { fetcher: html(page(`<h2>Coming soon to Fixtureville, TX</h2>`, both.slice(0, 1))), now: () => NOW })).holdReasons).toEqual(["incomplete_inventory"]);
+    // Without the coming-soon table title (and no count heading) the page is still a changed page.
+    expect((await loadOfficialDeals(config, { fetcher: html(page("", both)), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+    // An ACTIVE community never reads its count from the rows.
+    cache["CommunityType:c_1"] = { ...(cache["CommunityType:c_1"] as object), status: "ACTIVE" };
+    expect((await loadOfficialDeals(config, { fetcher: html(page(`<h2>Coming soon to Fixtureville, TX</h2>`, both)), now: () => NOW })).holdReasons).toEqual(["expected_community_container_not_found"]);
+  });
+
   it("reads a home whose street carries a short tag (the Welcome Home Center, \"(WHC)\") at its street", async () => {
     const tagged = HOMES.map((home, index) => index === 0 ? { ...home, street: "8707 Fixture Crest (WHC)" } : home);
     const result = await loadOfficialDeals(config, { fetcher: html(communityPage({ homes: tagged })), now: () => NOW });

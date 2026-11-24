@@ -600,17 +600,21 @@ export class ViewHomesAdapter implements DealAdapter {
     // November page: every card must carry a street, a price and a status, or the card layout changed.
     let listedHomes = row.cardsOnly ? parsed.homes : row.homes;
     // A card whose badge carries an offer instead of a status: its own page says whether it is ready (read, capped).
-    const offerCards = listedHomes.filter((home) => isViewHomesOfferBadge(home.statusText));
+    // Nov 24, 2026 (August Fields): on the November page some cards carry no badge at all while others still do; such a
+    // card's own page is read the same way. A page whose cards all lack a badge has changed shape and is not read.
+    const someBadge = parsed.homes.some((home) => Boolean(home.statusText));
+    const offerCards = listedHomes.filter((home) => isViewHomesOfferBadge(home.statusText) || (row.cardsOnly && someBadge && !home.statusText));
+    const read = new Map<string, string | null>();
     if (offerCards.length) {
       if (offerCards.length > VIEWHOMES_MAX_BADGE_READS) return failedResult(config, fetchedAt, privateSnapshot, ["unlabelled_home_status"]);
-      const read = new Map<string, string | null>();
       for (const home of offerCards) {
         const homePage = await getDocument(home.url, fetcher, "text/html,application/xhtml+xml", VIEWHOMES_HOST);
         read.set(home.url, homePage.ok ? viewHomesDescriptionStatus(homePage.text, home.street) : null);
       }
       listedHomes = listedHomes.map((home) => read.has(home.url) ? { ...home, statusText: read.get(home.url) ?? null } : home);
     }
-    if (row.cardsOnly && parsed.homes.some((home) => !home.street || home.price === null || !home.statusText)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
+    // A badge-less card whose own page was read and said nothing stays unlabelled (held as unlabelled_home_status by the sync).
+    if (row.cardsOnly && parsed.homes.some((home) => !home.street || home.price === null || (!home.statusText && !read.has(home.url)))) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     if (listedHomes.length > VIEWHOMES_MAX_HOMES) return failedResult(config, fetchedAt, privateSnapshot, ["incomplete_inventory"]);
     const city = parsed.city ?? row.record.city;
     const zip = parsed.zip ?? row.record.zip;

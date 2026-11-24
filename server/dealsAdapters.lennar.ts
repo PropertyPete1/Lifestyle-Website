@@ -358,7 +358,27 @@ export function parseLennarCommunity(html: string, pageUrl: string): LennarPage 
     seenHomes.add(pagePath(link));
     homes.push(homeOf(cache, home, link, city, record.zip, null));
   }
-  return { record, foreignPage, collections: collections.length, homes, foreignHome, homesAvailable: lennarHomesAvailable(html), comingSoon: isComingSoon(mpc), collectionsComingSoon: collections.length > 0 && collections.every(isComingSoon), plans, foreignPlan };
+  const comingSoon = isComingSoon(mpc);
+  return { record, foreignPage, collections: collections.length, homes, foreignHome, homesAvailable: lennarHomesAvailable(html) ?? (comingSoon ? lennarComingSoonHomesites(html, community) : null), comingSoon, collectionsComingSoon: collections.length > 0 && collections.every(isComingSoon), plans, foreignPlan };
+}
+
+/**
+ * Nov 24, 2026 (Waters Edge, held four weeks): a COMING_SOON community that has released its first homes titles the homesite
+ * table "Coming soon to Seguin, TX" in place of the "3 homes available" count. Its count is then the rendered table's own rows:
+ * the distinct homesite links (`<page>/<plan>/<lot number>`) in the markup outside scripts. Without that heading: null (held).
+ */
+export function lennarComingSoonHomesites(html: string, community: URL): number | null {
+  const markup = html.replace(/<script\b[\s\S]*?<\/script>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
+  if (!/<h[1-6][^>]*>\s*Coming\s+soon\s+to\s+[^<]{2,60}<\/h[1-6]>/i.test(markup)) return null;
+  const base = pagePath(community);
+  const lots = new Set<string>();
+  for (const match of Array.from(markup.matchAll(/href="([^"]+)"/gi))) {
+    const url = linkOf(decodeHtmlEntities(match[1]!), community);
+    if (!url || !sameOfficialHost(url, community.hostname)) continue;
+    const path = pagePath(url);
+    if (path.startsWith(`${base}/`) && /^\/[^/]+\/\d{6,}$/.test(path.slice(base.length))) lots.add(path);
+  }
+  return lots.size;
 }
 
 /** The community's record from its page, for discovery; null when the page is not a community page. */

@@ -140,8 +140,11 @@ export function viewHomesDescriptionStatus(html: string, street: string | null =
   // Nov 23, 2026 (August Fields): a page with neither, whose description opens with this home's own street (house number and
   // street name, "983 Sample Ln." for "983 Sample Lane") and says "home for sale", is for sale with no timing given. A line
   // naming another street, or one that does not say for sale, gives nothing.
+  // Nov 25, 2026 (Weltner Farms): the description may open with the builder's lead-in "New Home by View Homes: " before the
+  // street and say "<street> is For Sale in ..." (once misspelt "s For Sale"); that is the same for-sale line.
   const own = streetKey(street);
-  return own && streetKey(content) === own && /\bhomes?\s+for\s+sale\b/i.test(content) ? "For Sale" : null;
+  const line = content.replace(/^new\s+homes?\s+by\s+view\s+homes\s*:\s*/i, "");
+  return own && streetKey(line) === own && /\b(?:homes?|i?s)\s+for\s+sale\b/i.test(line) ? "For Sale" : null;
 }
 
 /** "983 Sample Lane" and "983 Sample Ln., City" both key as "983 sample"; null without a leading house number and name. */

@@ -82,6 +82,27 @@ export const suppliedImportSchema = z.strictObject({
   communities: z.array(suppliedCommunitySchema).min(1).max(50),
 });
 
+/**
+ * The outside of a payload only: who it is from, when the pages were read, and a list of communities not yet judged.
+ * Nov 17, 2026: the route judged the whole payload at once, so one community the agent could not read (null counts)
+ * answered 400 for all ten and nothing was stored for two days. Each community is now judged on its own
+ * (suppliedCommunitySchema): the ones that pass are stored and refreshed, the others are reported back for a retry.
+ */
+export const suppliedEnvelopeSchema = z.strictObject({
+  builder: text(80),
+  capturedAt: z.string().datetime({ offset: true }),
+  communities: z.array(z.unknown()).min(1).max(50),
+});
+
+/**
+ * "No homes for sale" is taken only when an earlier capture said the same, and that capture must be a separate visit:
+ * at least this long before. A retry minutes after a list failed to load is the same failed visit, not a second opinion.
+ */
+export const SUPPLIED_ZERO_CONFIRM_GAP_MS = 6 * 60 * 60_000;
+
+/** For-sale homes of an import as the zero rule counts them (under-contract and sold homes are off the market). */
+export const suppliedForSaleCount = (community: SuppliedCommunity) => community.homes.filter((home) => home.status === "available" || home.status === "under_construction").length;
+
 export type SuppliedHome = z.infer<typeof suppliedHomeSchema>;
 export type SuppliedCommunity = z.infer<typeof suppliedCommunitySchema>;
 export type SuppliedImport = z.infer<typeof suppliedImportSchema>;
@@ -239,8 +260,8 @@ export function suppliedDealsSnapshot(config: CommunitySourceConfig, stored: Sto
   if (check.reasons.length) return failedResult(config, fetchedAt, privateSnapshot, check.reasons);
   // "No homes for sale" would sweep every home of the community to sold on the agent's word alone: it is taken only when
   // the import before it, captured earlier, said the same (two separate visits agree); otherwise the community holds.
-  const forSale = (item: StoredSuppliedImport) => item.community.homes.filter((home) => home.status === "available" || home.status === "under_construction").length;
-  if (forSale(stored) === 0 && !(previous && previous.capturedAt.getTime() < stored.capturedAt.getTime() && forSale(previous) === 0)) return failedResult(config, fetchedAt, privateSnapshot, ["supplied_import_incomplete"]);
+  const forSale = (item: StoredSuppliedImport) => suppliedForSaleCount(item.community);
+  if (forSale(stored) === 0 && !(previous && stored.capturedAt.getTime() - previous.capturedAt.getTime() >= SUPPLIED_ZERO_CONFIRM_GAP_MS && forSale(previous) === 0)) return failedResult(config, fetchedAt, privateSnapshot, ["supplied_import_incomplete"]);
   privateSnapshot.pages.push(sourcePage("community", config.sourceUrl, config.privateCommunityName));
   for (const home of check.homes) {
     privateSnapshot.homes.push(home);

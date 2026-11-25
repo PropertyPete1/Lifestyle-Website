@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { and, desc, eq, gt, inArray, lt } from "drizzle-orm";
-import { dealCommunities, dealSuppliedImportCalls, dealSuppliedImportKeys, dealSuppliedImports } from "../drizzle/schema";
+import { dealCommunities, dealEvents, dealHomes, dealSuppliedImportCalls, dealSuppliedImportKeys, dealSuppliedImports } from "../drizzle/schema";
 import { getDb } from "./db";
 import { hasBuilderReader, officialHostFor } from "./dealsAdapters";
 import { suppliedCommunitySchema, type StoredSuppliedImport, type SuppliedCommunity } from "./dealsAdapters.supplied";
@@ -105,13 +105,27 @@ export async function suppliedSourceFor(builder: string, communityId: number): P
   return { latest: rows[0] ? parseStored(rows[0]) : null, previous: rows[1] ? parseStored(rows[1]) : null };
 }
 
-/** Stores one community's import and keeps only the newest two for that community. */
-export async function storeSuppliedImport(input: { communityId: number; builder: string; capturedAt: Date; receivedAt: Date; community: SuppliedCommunity }): Promise<void> {
+/**
+ * Stores one community's import and keeps only the newest two for that community. A second import with the same
+ * capture time is the same visit sent again (a replay or a retry): it takes the first one's place instead of
+ * pushing the import before it out, so the "two separate visits agree" rule never compares a visit with itself.
+ */
+export async function storeSuppliedImport(input: { communityId: number; builder: string; capturedAt: Date; receivedAt: Date; community: SuppliedCommunity }): Promise<"stored" | "replaced" | "unchanged"> {
   const db = await requireDb();
-  await db.insert(dealSuppliedImports).values({ communityId: input.communityId, builder: input.builder, payload: JSON.stringify(input.community), capturedAt: input.capturedAt, receivedAt: input.receivedAt });
+  const payload = JSON.stringify(input.community);
+  const existing = await db.select().from(dealSuppliedImports).where(eq(dealSuppliedImports.communityId, input.communityId)).orderBy(desc(dealSuppliedImports.capturedAt), desc(dealSuppliedImports.id));
+  const same = existing.find((row) => row.capturedAt.getTime() === input.capturedAt.getTime());
+  if (same) {
+    // The same visit, word for word: nothing to store again; only the arrival time moves (it is what a later failure is compared with).
+    if (same.payload === payload) { await db.update(dealSuppliedImports).set({ receivedAt: input.receivedAt }).where(eq(dealSuppliedImports.id, same.id)); return "unchanged"; }
+    await db.update(dealSuppliedImports).set({ payload, receivedAt: input.receivedAt }).where(eq(dealSuppliedImports.id, same.id));
+    return "replaced";
+  }
+  await db.insert(dealSuppliedImports).values({ communityId: input.communityId, builder: input.builder, payload, capturedAt: input.capturedAt, receivedAt: input.receivedAt });
   const rows = await db.select({ id: dealSuppliedImports.id }).from(dealSuppliedImports).where(eq(dealSuppliedImports.communityId, input.communityId)).orderBy(desc(dealSuppliedImports.capturedAt), desc(dealSuppliedImports.id));
   const extra = rows.slice(KEEP_PER_COMMUNITY).map((row) => row.id);
   if (extra.length) await db.delete(dealSuppliedImports).where(inArray(dealSuppliedImports.id, extra));
+  return "stored";
 }
 
 /** Each community's latest import time, for Admin (no payload). */
@@ -136,34 +150,112 @@ export async function recordSuppliedImportCall(builder: string, now: Date): Prom
   return recent.length;
 }
 
+/** deal_events kind for a community an import call did not publish (rejected, held, not processed). No home, address or key is in it. */
+export const SUPPLIED_IMPORT_FAILED_EVENT = "supplied_import_failed";
+/** A community with no import captured in this long missed its daily run (the run is once a day; the 7 AM check follows it). */
+export const SUPPLIED_IMPORT_MISSED_MS = 26 * 60 * 60_000;
+const FAILURE_LOOKBACK_MS = 14 * 24 * 60 * 60_000;
+
+export type SuppliedImportFailure = { communityId: number; status: string; reasons: string[]; capturedAt: string };
+
+/** Records why a community was not published by an import call: the per-community failure trail Admin and the health check read. */
+export async function recordSuppliedImportFailures(failures: readonly SuppliedImportFailure[], now: Date): Promise<void> {
+  if (!failures.length) return;
+  const db = await requireDb();
+  for (const failure of failures) await db.insert(dealEvents).values({ kind: SUPPLIED_IMPORT_FAILED_EVENT, detail: JSON.stringify({ communityId: failure.communityId, status: failure.status, reasons: failure.reasons.slice(0, 8), capturedAt: failure.capturedAt }), createdAt: now });
+}
+
+/** Each community's most recent import failure in the last two weeks. */
+async function latestImportFailures(now: Date): Promise<Map<number, { at: Date; status: string; reasons: string[] }>> {
+  const db = await requireDb();
+  const rows = await db.select({ detail: dealEvents.detail, createdAt: dealEvents.createdAt }).from(dealEvents).where(and(eq(dealEvents.kind, SUPPLIED_IMPORT_FAILED_EVENT), gt(dealEvents.createdAt, new Date(now.getTime() - FAILURE_LOOKBACK_MS))));
+  const out = new Map<number, { at: Date; status: string; reasons: string[] }>();
+  for (const row of rows) {
+    try {
+      const detail = JSON.parse(row.detail ?? "") as Partial<SuppliedImportFailure>;
+      if (typeof detail.communityId !== "number") continue;
+      const known = out.get(detail.communityId);
+      if (!known || row.createdAt > known.at) out.set(detail.communityId, { at: row.createdAt, status: String(detail.status ?? ""), reasons: Array.isArray(detail.reasons) ? detail.reasons.map(String) : [] });
+    } catch { /* an unreadable row is not a failure record */ }
+  }
+  return out;
+}
+
 export type SuppliedImportOverview = Array<{
   builder: string;
   host: string | null;
   keyCreatedAt: Date;
-  communities: Array<{ id: number; privateName: string; sourceUrl: string; active: boolean; paused: boolean; manualMode: boolean; catalogHoldReason: string | null; lastCapturedAt: Date | null; lastReceivedAt: Date | null }>;
+  communities: Array<{
+    id: number; privateName: string; sourceUrl: string; active: boolean; paused: boolean; manualMode: boolean; catalogHoldReason: string | null; lastCapturedAt: Date | null; lastReceivedAt: Date | null;
+    /** The last time this community's listings were published from an import (or re-read from the stored one). */
+    lastPublishedAt: Date | null;
+    /** Homes for sale live on the site now. */
+    homesAvailable: number;
+    /** The latest import failure, while no import has been stored since it; null once a later import arrived. */
+    lastFailure: { at: Date; status: string; reasons: string[] } | null;
+  }>;
 }>;
 
-/** Admin only (private names and links): each builder that takes imports, with its communities and their latest import times. */
-export async function suppliedImportOverview(): Promise<SuppliedImportOverview> {
+/** Admin only (private names and links): each builder that takes imports, with its communities, their latest import times, what is live and the last failure. */
+export async function suppliedImportOverview(now = new Date()): Promise<SuppliedImportOverview> {
   const db = await requireDb();
   const keys = await listSuppliedImportKeys();
   if (!keys.length) return [];
   const communities = await db.select().from(dealCommunities).where(inArray(dealCommunities.builder, keys.map((key) => key.builder)));
-  const times = await latestImportTimes(communities.map((community) => community.id));
+  const ids = communities.map((community) => community.id);
+  const times = await latestImportTimes(ids);
+  const failures = await latestImportFailures(now);
+  const live = new Map<number, number>();
+  if (ids.length) for (const row of await db.select({ communityId: dealHomes.communityId, status: dealHomes.status }).from(dealHomes).where(inArray(dealHomes.communityId, ids))) if (row.status === "available") live.set(row.communityId, (live.get(row.communityId) ?? 0) + 1);
   return keys.sort((a, b) => a.builder.localeCompare(b.builder)).map((key) => ({
     builder: key.builder,
     host: officialHostFor(key.builder),
     keyCreatedAt: key.createdAt,
-    communities: communities.filter((community) => community.builder === key.builder).sort((a, b) => a.privateName.localeCompare(b.privateName)).map((community) => ({
-      id: community.id,
-      privateName: community.privateName,
-      sourceUrl: community.sourceUrl,
-      active: community.active,
-      paused: community.paused,
-      manualMode: community.manualMode,
-      catalogHoldReason: community.catalogHoldReason,
-      lastCapturedAt: times.get(community.id)?.capturedAt ?? null,
-      lastReceivedAt: times.get(community.id)?.receivedAt ?? null,
-    })),
+    communities: communities.filter((community) => community.builder === key.builder).sort((a, b) => a.privateName.localeCompare(b.privateName)).map((community) => {
+      const failure = failures.get(community.id) ?? null;
+      return {
+        id: community.id,
+        privateName: community.privateName,
+        sourceUrl: community.sourceUrl,
+        active: community.active,
+        paused: community.paused,
+        manualMode: community.manualMode,
+        catalogHoldReason: community.catalogHoldReason,
+        lastCapturedAt: times.get(community.id)?.capturedAt ?? null,
+        lastReceivedAt: times.get(community.id)?.receivedAt ?? null,
+        lastPublishedAt: community.lastSuccessfulSyncAt ?? null,
+        homesAvailable: live.get(community.id) ?? 0,
+        lastFailure: failure && (!times.get(community.id) || failure.at.getTime() >= times.get(community.id)!.receivedAt.getTime()) ? failure : null,
+      };
+    }),
   }));
+}
+
+export type SuppliedImportHealth = Array<{ builder: string; expected: number; missed: number[]; held: number[]; failed: number[]; lastCapturedAt: Date | null; line: string }>;
+
+/**
+ * The daily-run check for builders that take imports: a community that is on (active, not paused, not Manual) and has
+ * no import captured in the last 26 hours missed its run; one holding a supplied_import_* reason got an import that
+ * could not be published; one whose latest call was refused (an entry the agent could not read) and was not sent
+ * again failed. In every case its last good listings are still live. One line per builder with a problem,
+ * counts and community ids only (no names); empty when every community refreshed.
+ */
+export async function suppliedImportHealth(now = new Date()): Promise<SuppliedImportHealth> {
+  const overview = await suppliedImportOverview(now);
+  const out: SuppliedImportHealth = [];
+  for (const entry of overview) {
+    const expected = entry.communities.filter((community) => community.active && !community.paused && !community.manualMode);
+    const missed = expected.filter((community) => !community.lastCapturedAt || now.getTime() - community.lastCapturedAt.getTime() > SUPPLIED_IMPORT_MISSED_MS);
+    const held = expected.filter((community) => !missed.includes(community) && /(^|,)\s*supplied_import_/.test(community.catalogHoldReason?.replace(/^dismissed:/, "") ?? ""));
+    const failed = expected.filter((community) => !missed.includes(community) && !held.includes(community) && community.lastFailure);
+    if (!missed.length && !held.length && !failed.length) continue;
+    const captured = expected.map((community) => community.lastCapturedAt).filter((at): at is Date => Boolean(at)).sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+    const parts = [missed.length ? `${missed.length} had no import in the last ${SUPPLIED_IMPORT_MISSED_MS / 3_600_000} hours (community id${missed.length === 1 ? "" : "s"} ${missed.map((community) => community.id).join(", ")})` : "", held.length ? `${held.length} sent an import that could not be published (community id${held.length === 1 ? "" : "s"} ${held.map((community) => community.id).join(", ")})` : "",
+      failed.length ? `${failed.length} could not be read by the agent and ${failed.length === 1 ? "was" : "were"} not sent again (community id${failed.length === 1 ? "" : "s"} ${failed.map((community) => community.id).join(", ")})` : ""].filter(Boolean);
+    out.push({
+      builder: entry.builder, expected: expected.length, missed: missed.map((community) => community.id), held: held.map((community) => community.id), failed: failed.map((community) => community.id), lastCapturedAt: captured,
+      line: `${entry.builder} daily import: ${missed.length + held.length + failed.length} of ${expected.length} communities did not refresh: ${parts.join("; ")}. Their last good listings are still showing. Reasons are in Admin, Builder Deals, Supplied imports.`,
+    });
+  }
+  return out;
 }

@@ -563,6 +563,17 @@ async function promotion(url: string, fetcher: HtmlFetcher, now: number): Promis
   return { promo };
 }
 
+/**
+ * A hero badge that says the community is not selling yet: "Coming Soon", or (Nov 26, 2026) "Coming February 2027" with a
+ * real month and a four-digit year. "Coming", "Coming 2027" or a misspelt month is not read as coming soon (the page holds).
+ */
+export function isViewHomesComingSoonBadge(label: string | null): boolean {
+  const text = (label ?? "").replace(/\s+/g, " ").trim();
+  if (/^coming\s+soon!?$/i.test(text)) return true;
+  const dated = /^coming\s+([A-Za-z]+)\.?\s+(\d{4})!?$/i.exec(text);
+  return Boolean(dated && monthIndex(dated[1]!) !== null && Number(dated[2]) >= 2000 && Number(dated[2]) <= 2100);
+}
+
 export class ViewHomesAdapter implements DealAdapter {
   readonly builder = "View Homes" as const;
 
@@ -580,7 +591,8 @@ export class ViewHomesAdapter implements DealAdapter {
     const parsed = parseViewHomesCommunity(page.text, community.toString());
     // Without the hero heading and the homes-and-plans module this is not a community page, unless the hero says "Coming Soon":
     // a coming-soon page has no module at all (Ladera, Enclave 35 in October 2026), which the roster must corroborate below.
-    const comingSoonPage = Boolean(parsed && !parsed.hasModule && /^coming\s+soon!?$/i.test(parsed.heroStatus ?? ""));
+    // Nov 26, 2026: the badge now names the opening month ("Coming February 2027", Ladera; "Coming January 2027", Enclave 35).
+    const comingSoonPage = Boolean(parsed && !parsed.hasModule && isViewHomesComingSoonBadge(parsed.heroStatus));
     if (!parsed || (!parsed.hasModule && !comingSoonPage)) return failedResult(config, fetchedAt, privateSnapshot, ["expected_community_container_not_found"]);
     // The page must be this community's (a same-host redirect to another one is not), and so must its homes and plans.
     if (parsed.foreignPage || parsed.foreignHome || parsed.foreignPlan) return failedResult(config, fetchedAt, privateSnapshot, ["invalid_inventory_response"]);
